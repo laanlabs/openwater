@@ -22,6 +22,7 @@ struct SessionDetailView: View {
     @State private var foilingOnly = false
     @State private var isExporting = false
     @State private var isSharingToWeb = false
+    @State private var isSharingImage = false
     @State private var isMapFullScreen = false
     @State private var isPlayingBack = false
     @State private var isEditing = false
@@ -98,6 +99,8 @@ struct SessionDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Edit…", systemImage: "pencil") { isEditing = true }
+                    Button("Share Image…", systemImage: "photo") { isSharingImage = true }
+                        .disabled(session == nil)
                     Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }
                         .disabled(session == nil)
                     Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
@@ -109,6 +112,11 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isExporting) {
             ExportView(stored: stored)
+        }
+        .sheet(isPresented: $isSharingImage) {
+            if let session, let summary = session.summary {
+                ShareImageView(session: session, summary: summary, title: stored.displayTitle)
+            }
         }
         .sheet(isPresented: $isSharingToWeb) {
             if let session {

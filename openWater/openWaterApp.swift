@@ -10,6 +10,7 @@ struct openWaterApp: App {
     @State private var sync: PhoneSyncClient
     @State private var settings = AppSettings()
     @State private var recorder = PhoneRecorder()
+    @State private var countdown = RaceCountdown()
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -40,6 +41,7 @@ struct openWaterApp: App {
                 .environment(sync)
                 .environment(settings)
                 .environment(recorder)
+                .environment(countdown)
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
                     sync.activate()

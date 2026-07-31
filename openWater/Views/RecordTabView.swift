@@ -26,6 +26,7 @@ struct RecordTabView: View {
     @State private var showingDetails = false
     @State private var showingEndConfirmation = false
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+    @State private var showingCountdown = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +46,9 @@ struct RecordTabView: View {
                 recorder.prepare()
                 recorder.warmUpSensors()
                 recorder.allTimeBests = library.records.mapValues(\.speed)
+            }
+            .sheet(isPresented: $showingCountdown) {
+                CountdownView(onStart: start)
             }
             .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
                 Button("End & Save") { end() }
@@ -122,17 +126,33 @@ struct RecordTabView: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
-            Button {
-                start()
-            } label: {
-                Text("Start")
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+            HStack(spacing: 10) {
+                Button {
+                    start()
+                } label: {
+                    Text("Start")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.accentColor)
+                .disabled(!canStart)
+
+                // Racing starts on somebody else's gun, not on a tap. The
+                // countdown is beside Start rather than buried in a menu
+                // because on a start line there is no time to go looking.
+                Button {
+                    showingCountdown = true
+                } label: {
+                    Image(systemName: "flag.checkered")
+                        .font(.title3)
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 18)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Race start countdown")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.accentColor)
-            .disabled(!canStart)
 
             if recorder.location.authorization == .denied {
                 Text("openWater needs location access to record. Enable it in the Settings app.")

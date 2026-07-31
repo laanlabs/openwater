@@ -11,6 +11,14 @@ public struct Session: Sendable, Codable, Identifiable {
 
     public var track: Track
 
+    /// What the rider calls this session.
+    ///
+    /// Optional on purpose: most sessions never get one, and a required title
+    /// would be a chore at the exact moment somebody is cold and wants to stop
+    /// fiddling with their phone. When it is empty the UI falls back to the
+    /// spot, then to the sport.
+    public var title: String?
+
     /// Free-text notes.
     public var notes: String
 
@@ -22,6 +30,10 @@ public struct Session: Sendable, Codable, Identifiable {
     public var spotName: String?
 
     /// Wind for the session — estimated on import, overridable by the rider.
+    ///
+    /// Prefer `effectiveWind` when reading: the analysis carries its own copy,
+    /// and these two can disagree if a session was built without threading this
+    /// one through.
     public var wind: Wind?
 
     /// Local filenames of attached photos, relative to the session's media
@@ -44,12 +56,42 @@ public struct Session: Sendable, Codable, Identifiable {
 
     public var duration: TimeInterval { endDate.timeIntervalSince(startDate) }
 
+    /// The wind in force for this session.
+    ///
+    /// A session carries wind in two places — its own field, which is the
+    /// rider's input, and the analysis, which is what the numbers were actually
+    /// computed against. They should agree, but a session built without
+    /// threading the first one through will have it nil while the summary knows
+    /// perfectly well what the wind was. Reading through here means callers
+    /// cannot accidentally see "no wind" on a session that plainly has one.
+    public var effectiveWind: Wind? { wind ?? summary?.wind }
+
+    /// What to show as this session's name.
+    ///
+    /// Falls back through title → spot → sport, so there is always something
+    /// sensible to display and no screen has to invent its own rule.
+    public var displayTitle: String {
+        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { return title }
+        if let spotName, !spotName.trimmingCharacters(in: .whitespaces).isEmpty { return spotName }
+        return sport.displayName
+    }
+
+    /// A secondary line for the same places — the spot when a title is set,
+    /// otherwise the sport, and nothing when that would just repeat the title.
+    public var displaySubtitle: String? {
+        let name = displayTitle
+        if let spotName, !spotName.isEmpty, spotName != name { return spotName }
+        if sport.displayName != name { return sport.displayName }
+        return nil
+    }
+
     public init(
         id: UUID = UUID(),
         sport: Sport,
         startDate: Date,
         endDate: Date,
         track: Track,
+        title: String? = nil,
         notes: String = "",
         gearIDs: [UUID] = [],
         spotID: UUID? = nil,
@@ -67,6 +109,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.startDate = startDate
         self.endDate = endDate
         self.track = track
+        self.title = title
         self.notes = notes
         self.gearIDs = gearIDs
         self.spotID = spotID

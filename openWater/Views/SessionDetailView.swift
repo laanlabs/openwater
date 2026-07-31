@@ -22,6 +22,26 @@ struct SessionDetailView: View {
     @State private var isExporting = false
     @State private var isMapFullScreen = false
     @State private var isPlayingBack = false
+    @State private var isEditing = false
+
+    /// Decode the stored archive into a usable session.
+    ///
+    /// Decoding a multi-megabyte track blocks, so it happens off the main actor
+    /// — pushing this screen stays instant and the spinner covers the gap.
+    private func loadSession() async {
+        let data = stored.archiveData
+        session = await Task.detached {
+            try? SessionArchive.decode(data).upToDateSession()
+        }.value
+        applyScreenshotRouteIfNeeded()
+    }
+
+    /// Re-read after editing. A sport or wind change rewrites the whole
+    /// analysis, so the screen has to pick up the new numbers rather than keep
+    /// showing the ones it decoded on the way in.
+    private func reloadSession() {
+        Task { await loadSession() }
+    }
 
     /// Apply a screenshot route's segment and full-screen state. Inert unless
     /// the capture script passed `-openWaterScreen`.
@@ -59,20 +79,13 @@ struct SessionDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle(stored.sport.displayName)
+        .navigationTitle(stored.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            // Decoding a multi-megabyte track blocks; do it off the main actor
-            // so pushing this screen stays instant.
-            let data = stored.archiveData
-            session = await Task.detached {
-                try? SessionArchive.decode(data).upToDateSession()
-            }.value
-            applyScreenshotRouteIfNeeded()
-        }
+        .task { await loadSession() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button("Edit…", systemImage: "pencil") { isEditing = true }
                     Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
                     Toggle("Flying only", systemImage: "airplane", isOn: $foilingOnly)
                 } label: {
@@ -82,6 +95,9 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isExporting) {
             ExportView(stored: stored)
+        }
+        .sheet(isPresented: $isEditing, onDismiss: reloadSession) {
+            SessionEditView(stored: stored)
         }
         .fullScreenCover(isPresented: $isMapFullScreen) {
             if let session, let summary = session.summary {
@@ -133,14 +149,25 @@ struct SessionDetailView: View {
                 highlight: highlight,
                 showFalls: true,
                 showManeuvers: selectedRun != nil,
-                foilingOnly: foilingOnly
+                foilingOnly: foilingOnly,
+                style: settings.mapStyle
             )
             .frame(maxHeight: .infinity)
+            .overlay(alignment: .bottomLeading) {
+                SpeedLegend(
+                    maxSpeed: summary.maxSpeed,
+                    units: settings.units,
+                    onDark: settings.mapStyle.isDark
+                )
+                .padding(10)
+            }
             .overlay(alignment: .topTrailing) {
                 // Sharing the screen with the scrubber and the metric grid
                 // leaves the map about a third of the display, which is enough
                 // to orient by and not enough to read a track in.
                 VStack(spacing: 8) {
+                    MapStyleButton(selection: Bindable(settings).mapStyle)
+
                     Button {
                         isMapFullScreen = true
                     } label: {

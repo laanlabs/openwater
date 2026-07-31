@@ -71,6 +71,10 @@ final class AppSettings {
     /// Privacy defaults applied when sharing.
     var sharingPrivacy: PrivacySettings { didSet { persist() } }
 
+    /// Map style, shared by the session map, the full-screen map and replay so
+    /// a rider sets it once rather than per screen.
+    var mapStyle: MapStyleOption { didSet { persist() } }
+
     /// Sport pre-selected when recording, so a rider who does the same thing
     /// every session is one tap from starting.
     var lastSport: Sport { didSet { persist() } }
@@ -90,6 +94,7 @@ final class AppSettings {
         sharingPrivacy = defaults.data(forKey: "sharingPrivacy")
             .flatMap { try? JSONDecoder().decode(PrivacySettings.self, from: $0) }
             ?? .sharing
+        mapStyle = defaults.string(forKey: "mapStyle").flatMap(MapStyleOption.init(rawValue:)) ?? .standard
         lastSport = defaults.string(forKey: "lastSport").flatMap(Sport.init(rawValue:)) ?? .wingfoil
         autoPauseWhileRecording = defaults.bool(forKey: "autoPauseWhileRecording")
     }
@@ -107,6 +112,7 @@ final class AppSettings {
         defaults.set(units.distance.rawValue, forKey: "distanceUnit")
         defaults.set(customDistances, forKey: "customDistances")
         defaults.set(customDurations, forKey: "customDurations")
+        defaults.set(mapStyle.rawValue, forKey: "mapStyle")
         defaults.set(lastSport.rawValue, forKey: "lastSport")
         defaults.set(autoPauseWhileRecording, forKey: "autoPauseWhileRecording")
         if let data = try? JSONEncoder().encode(sharingPrivacy) {

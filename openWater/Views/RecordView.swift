@@ -17,8 +17,10 @@ struct RecordView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var sport: Sport = .wingfoil
+    @State private var title = ""
+    @State private var spot = ""
+    @State private var showingDetails = false
     @State private var showingEndConfirmation = false
-    @State private var savedSession: Session?
 
     var body: some View {
         NavigationStack {
@@ -60,54 +62,69 @@ struct RecordView: View {
     // MARK: - Setup
 
     private var setup: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // The sport is the most consequential choice on this screen,
+                    // so it gets the most room. It selects every detection
+                    // threshold — get it wrong and the flights, gybes and falls
+                    // are meaningless rather than merely approximate.
+                    SportPicker(selection: $sport)
 
-            Picker("Sport", selection: $sport) {
-                ForEach(orderedSports) { sport in
-                    Label(sport.displayName, systemImage: sport.symbolName).tag(sport)
+                    DisclosureGroup(isExpanded: $showingDetails) {
+                        VStack(spacing: 10) {
+                            TextField("Title (optional)", text: $title)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("Spot (optional)", text: $spot)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .padding(.top, 6)
+                    } label: {
+                        Label("Name this session", systemImage: "textformat")
+                            .font(.subheadline)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+
+            VStack(spacing: 12) {
+                gpsStatus
+
+                Button {
+                    settings.lastSport = sport
+                    recorder.autoPauseEnabled = settings.autoPauseWhileRecording
+                    recorder.title = title.trimmingCharacters(in: .whitespaces).isEmpty ? nil : title
+                    recorder.spotName = spot.trimmingCharacters(in: .whitespaces).isEmpty ? nil : spot
+                    recorder.start(sport: sport)
+                } label: {
+                    Label("Start \(sport.displayName)", systemImage: "record.circle")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(!canStart)
+
+                if recorder.location.authorization == .denied {
+                    Text("openWater needs location access to record. Enable it in the Settings app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                } else if !recorder.location.hasFix {
+                    // Starting before the receiver settles is the most common
+                    // way to ruin a session's numbers, so it is called out here
+                    // rather than discovered afterwards.
+                    Text("Waiting for a GPS fix. Starting now would leave the first minute of your track inaccurate.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
             }
-            .pickerStyle(.navigationLink)
             .padding(.horizontal)
-
-            gpsStatus
-
-            Spacer()
-
-            Button {
-                settings.lastSport = sport
-                recorder.autoPauseEnabled = settings.autoPauseWhileRecording
-                recorder.start(sport: sport)
-            } label: {
-                Label("Start", systemImage: "record.circle")
-                    .font(.title2.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
-            .disabled(!canStart)
-            .padding(.horizontal)
-
-            if recorder.location.authorization == .denied {
-                Text("openWater needs location access to record. Enable it in the Settings app.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            } else if !recorder.location.hasFix {
-                // Starting before the receiver settles is the single most common
-                // way to ruin a session's numbers, so it is called out rather
-                // than discovered afterwards.
-                Text("Waiting for a GPS fix. Starting now would leave the first minute of your track inaccurate.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-
-            Spacer(minLength: 20)
+            .padding(.bottom, 10)
+            .background(.bar)
         }
     }
 
@@ -116,12 +133,6 @@ struct RecordView: View {
         case .denied, .restricted: false
         default: true
         }
-    }
-
-    private var orderedSports: [Sport] {
-        [.wingfoil, .parawing, .downwindSUP, .prone,
-         .windfoil, .windsurf, .kitefoil, .kitesurf,
-         .sail, .sup, .kayak, .efoil, .tow, .other]
     }
 
     private var gpsStatus: some View {

@@ -35,6 +35,12 @@ public final class RecordingEngine {
     /// A previous session that was cut short and can still be recovered.
     public private(set) var recoverable: RecoverableSession?
 
+    /// Optional name and spot, set before starting. Both flow into the session
+    /// that `finish()` produces, so a rider who labels a session up front does
+    /// not have to go back and do it afterwards.
+    public var title: String?
+    public var spotName: String?
+
     /// Wind supplied by the rider, for the live angle display.
     public var wind: Wind? {
         didSet { analyzer?.setWind(wind) }
@@ -165,7 +171,9 @@ public final class RecordingEngine {
             points: points,
             wind: wind,
             deviceModel: deviceModel,
-            appVersion: appVersion
+            appVersion: appVersion,
+            title: title,
+            spotName: spotName
         )
 
         state = .idle
@@ -285,7 +293,9 @@ public final class RecordingEngine {
         wind: Wind?,
         deviceModel: String?,
         appVersion: String?,
-        endBattery: Double? = nil
+        endBattery: Double? = nil,
+        title: String? = nil,
+        spotName: String? = nil
     ) -> Session {
         let track = TrackBuilder(options: .forSport(sport)).build(from: points)
         let summary = SessionAnalyzer(
@@ -298,6 +308,8 @@ public final class RecordingEngine {
             startDate: startDate,
             endDate: endDate,
             track: track,
+            title: title,
+            spotName: spotName,
             wind: summary.wind,
             deviceModel: deviceModel,
             appVersion: appVersion,

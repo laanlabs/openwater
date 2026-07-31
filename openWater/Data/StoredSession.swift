@@ -56,6 +56,7 @@ final class StoredSession {
     var windConfidence: Double
     var qualityScore: Double
 
+    var title: String?
     var spotName: String?
     var notes: String
     var gearIDs: [UUID]
@@ -79,6 +80,7 @@ final class StoredSession {
         self.startDate = session.startDate
         self.endDate = session.endDate
         self.sportRaw = session.sport.rawValue
+        self.title = session.title
         self.spotName = session.spotName
         self.notes = session.notes
         self.gearIDs = session.gearIDs
@@ -120,6 +122,21 @@ final class StoredSession {
     var sport: Sport {
         get { Sport(rawValue: sportRaw) ?? .other }
         set { sportRaw = newValue.rawValue }
+    }
+
+    /// Mirrors `Session.displayTitle` so the list and the detail screen agree
+    /// without the list having to decode a multi-megabyte archive.
+    var displayTitle: String {
+        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { return title }
+        if let spotName, !spotName.trimmingCharacters(in: .whitespaces).isEmpty { return spotName }
+        return sport.displayName
+    }
+
+    var displaySubtitle: String? {
+        let name = displayTitle
+        if let spotName, !spotName.isEmpty, spotName != name { return spotName }
+        if sport.displayName != name { return sport.displayName }
+        return nil
     }
 
     /// Decode the full session. Costly for a big track — call it for a detail
@@ -167,6 +184,7 @@ final class StoredSession {
         windDirection = replacement.windDirection
         windConfidence = replacement.windConfidence
         qualityScore = replacement.qualityScore
+        title = replacement.title
         spotName = replacement.spotName
         notes = replacement.notes
         gearIDs = replacement.gearIDs

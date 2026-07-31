@@ -36,9 +36,21 @@ struct FullScreenMapView: View {
                 showFalls: showFalls,
                 showManeuvers: showManeuvers,
                 minimumSpeed: minimumSpeed,
-                foilingOnly: foilingOnly
+                foilingOnly: foilingOnly,
+                style: settings.mapStyle
             )
             .ignoresSafeArea()
+            .overlay(alignment: .bottomLeading) {
+                if showControls {
+                    SpeedLegend(
+                        maxSpeed: summary.maxSpeed,
+                        units: settings.units,
+                        onDark: settings.mapStyle.isDark
+                    )
+                    .padding(.leading, 16)
+                    .padding(.bottom, 150)
+                }
+            }
 
             VStack(spacing: 0) {
                 topBar
@@ -81,6 +93,8 @@ struct FullScreenMapView: View {
             }
 
             Spacer()
+
+            MapStyleButton(selection: Bindable(settings).mapStyle)
 
             Button {
                 isPlaying = true

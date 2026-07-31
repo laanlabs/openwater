@@ -97,7 +97,7 @@ struct SessionPlaybackView: View {
                 .annotationTitles(.hidden)
             }
         }
-        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+        .mapStyle(settings.mapStyle.mapStyle)
     }
 
     /// Segments entirely before the playhead, for the trail.
@@ -168,6 +168,8 @@ struct SessionPlaybackView: View {
             readout
 
             Spacer()
+
+            MapStyleButton(selection: Bindable(settings).mapStyle)
 
             Menu {
                 Toggle("Trail only", systemImage: "point.topleft.down.to.point.bottomright.curvepath", isOn: $trailOnly)

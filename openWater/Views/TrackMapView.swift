@@ -38,6 +38,10 @@ struct TrackMapView: View {
     /// Only draw stretches spent flying.
     var foilingOnly: Bool = false
 
+    /// Base map. Satellite is worth having on water, where the standard map is
+    /// a featureless blue field with nothing to orient by.
+    var style: MapStyleOption = .standard
+
     @State private var camera: MapCameraPosition = .automatic
 
     var body: some View {
@@ -45,7 +49,10 @@ struct TrackMapView: View {
             // Ghost layer first, so the highlighted content draws over it.
             if selectedRun != nil || highlight != nil || foilingOnly || minimumSpeed > 0 {
                 MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
-                    .stroke(.gray.opacity(0.22), lineWidth: 2)
+                    .stroke(
+                        style.isDark ? .white.opacity(0.28) : .gray.opacity(0.22),
+                        lineWidth: 2
+                    )
             }
 
             ForEach(visibleSegments) { segment in
@@ -93,7 +100,7 @@ struct TrackMapView: View {
                     .tint(.red)
             }
         }
-        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+        .mapStyle(style.mapStyle)
         .onChange(of: selectedRun) { _, _ in frameSelection() }
         .onAppear { frameSelection() }
     }
@@ -133,9 +140,15 @@ struct TrackMapView: View {
         case .riding:
             return AnyShapeStyle(speedColour(segment.averageSpeed).opacity(0.75))
         case .slow:
-            return AnyShapeStyle(Color.gray.opacity(0.55))
+            // Grey vanishes against imagery, so the muted states lift to white
+            // on a dark base map.
+            return AnyShapeStyle(style.isDark
+                ? Color.white.opacity(0.6)
+                : Color.gray.opacity(0.55))
         case .stopped:
-            return AnyShapeStyle(Color.gray.opacity(0.35))
+            return AnyShapeStyle(style.isDark
+                ? Color.white.opacity(0.4)
+                : Color.gray.opacity(0.35))
         case .fall:
             return AnyShapeStyle(Color.red.opacity(0.65))
         }
@@ -257,5 +270,102 @@ extension MKCoordinateRegion {
 extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - Map style
+
+/// Which base map to draw under the track.
+///
+/// Satellite matters more here than in most apps: on open water the standard
+/// map is a featureless blue field with nothing to orient by, while imagery
+/// shows the shoreline, sandbars and channels that explain why a session went
+/// the way it did.
+enum MapStyleOption: String, CaseIterable, Identifiable, Sendable {
+    case standard
+    case hybrid
+    case imagery
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .standard: "Map"
+        case .hybrid: "Hybrid"
+        case .imagery: "Satellite"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .standard: "map"
+        case .hybrid: "globe.americas"
+        case .imagery: "globe.americas.fill"
+        }
+    }
+
+    var mapStyle: MapStyle {
+        switch self {
+        case .standard: .standard(elevation: .flat, pointsOfInterest: .excludingAll)
+        case .hybrid: .hybrid(elevation: .flat, pointsOfInterest: .excludingAll)
+        case .imagery: .imagery(elevation: .flat)
+        }
+    }
+
+    /// Whether the base map is dark, so overlays can pick a readable contrast.
+    var isDark: Bool { self != .standard }
+}
+
+/// Cycles the base map, styled to sit over either a light or dark one.
+struct MapStyleButton: View {
+    @Binding var selection: MapStyleOption
+
+    var body: some View {
+        Menu {
+            Picker("Map style", selection: $selection) {
+                ForEach(MapStyleOption.allCases) { option in
+                    Label(option.displayName, systemImage: option.symbolName).tag(option)
+                }
+            }
+        } label: {
+            Image(systemName: "square.3.layers.3d")
+                .font(.subheadline)
+                .padding(9)
+                .background(.regularMaterial, in: Circle())
+        }
+        .accessibilityLabel("Map style")
+    }
+}
+
+/// The speed colour ramp, explained.
+///
+/// The track is coloured by speed and nothing on screen said so. A legend is
+/// the difference between a pretty gradient and a readable one — and because
+/// the ramp is scaled to each session rather than to an absolute range, the
+/// end labels carry the actual numbers.
+struct SpeedLegend: View {
+    let maxSpeed: Double
+    let units: UnitPreferences
+    var onDark: Bool = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(Format.speed(maxSpeed * 0.35, unit: units.speed, decimals: 0, includeSymbol: false))
+            LinearGradient(
+                colors: (0...8).map { i in
+                    Color(hue: 0.58 - 0.58 * (Double(i) / 8), saturation: 0.85, brightness: 0.95)
+                },
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 64, height: 6)
+            .clipShape(Capsule())
+            Text(Format.speed(maxSpeed, unit: units.speed, decimals: 0))
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(onDark ? .white : .primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: Capsule())
     }
 }

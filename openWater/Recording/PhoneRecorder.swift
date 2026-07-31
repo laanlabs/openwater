@@ -39,6 +39,17 @@ final class PhoneRecorder {
     var recordsHit: [LiveRecord] { engine.recordsHit }
     var recoverable: RecordingEngine.RecoverableSession? { engine.recoverable }
 
+    /// Optional name and spot set before starting, carried into the session.
+    var title: String? {
+        get { engine.title }
+        set { engine.title = newValue }
+    }
+
+    var spotName: String? {
+        get { engine.spotName }
+        set { engine.spotName = newValue }
+    }
+
     var wind: Wind? {
         get { engine.wind }
         set { engine.wind = newValue }

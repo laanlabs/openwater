@@ -35,6 +35,7 @@ struct SessionListView: View {
     @Environment(SessionLibrary.self) private var library
     @Environment(PhoneSyncClient.self) private var sync
     @Environment(AppSettings.self) private var settings
+    @Environment(PhoneRecorder.self) private var recorder
 
     @Query(sort: \StoredSession.startDate, order: .reverse)
     private var sessions: [StoredSession]
@@ -71,17 +72,35 @@ struct SessionListView: View {
                     EmptyLibraryView(isImporting: $isImporting, isRecording: $isRecording)
                 } else {
                     List {
-                        if availableSports.count > 1 {
-                            sportFilterBar
-                                .listRowInsets(EdgeInsets())
-                                .listRowBackground(Color.clear)
-                        }
-                        ForEach(filtered) { session in
-                            NavigationLink(value: session.id) {
-                                SessionRow(session: session)
+                        Section {
+                            StartSessionCard(
+                                sport: settings.lastSport,
+                                isRecording: recorder.state != .idle,
+                                elapsed: recorder.metrics.duration
+                            ) {
+                                isRecording = true
                             }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                         }
-                        .onDelete(perform: delete)
+
+                        Section {
+                            if availableSports.count > 1 {
+                                sportFilterBar
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            }
+                            ForEach(filtered) { session in
+                                NavigationLink(value: session.id) {
+                                    SessionRow(session: session)
+                                }
+                            }
+                            .onDelete(perform: delete)
+                        } header: {
+                            Text("\(sessions.count) session\(sessions.count == 1 ? "" : "s")")
+                        }
                     }
                     .listStyle(.plain)
                 }
@@ -98,14 +117,6 @@ struct SessionListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     watchStatus
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isRecording = true
-                    } label: {
-                        Label("Record", systemImage: "record.circle")
-                    }
-                    .tint(.red)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -260,9 +271,18 @@ struct SessionRow: View {
             HStack(spacing: 6) {
                 Image(systemName: session.sport.symbolName)
                     .foregroundStyle(.tint)
-                Text(session.sport.displayName)
-                    .font(.subheadline.weight(.medium))
-                Spacer()
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(session.displayTitle)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    if let subtitle = session.displaySubtitle {
+                        Text(subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 6)
                 Text(session.startDate.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -316,11 +336,6 @@ struct SessionRow: View {
                 }
             }
 
-            if let spot = session.spotName {
-                Text(spot)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
         .padding(.vertical, 4)
     }
@@ -415,5 +430,83 @@ struct EmptyLibraryView: View {
                 Button("Import a file") { isImporting = true }
             }
         }
+    }
+}
+
+// MARK: - Start card
+
+/// The primary action, sized for the situation it is actually used in.
+///
+/// Starting a session happens on a beach, in a wetsuit, with cold hands, often
+/// through a waterproof pouch — and frequently with the phone already half
+/// stowed. A toolbar glyph is the wrong control for that: it is small, it is at
+/// the top of the screen where a thumb cannot reach, and it gives no feedback
+/// through plastic.
+///
+/// So it is a full-width card at the top of the list, tall enough to hit
+/// without looking. When a session is already running it changes to show that
+/// and becomes the way back into it, because the second worst thing after
+/// failing to start a recording is not realising one is running.
+struct StartSessionCard: View {
+
+    let sport: Sport
+    let isRecording: Bool
+    let elapsed: TimeInterval
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.22))
+                        .frame(width: 62, height: 62)
+                    Image(systemName: isRecording ? "waveform" : "record.circle")
+                        .font(.system(size: 30, weight: .medium))
+                        .foregroundStyle(.white)
+                        .symbolEffect(.pulse, isActive: isRecording)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(isRecording ? "Recording" : "Start a session")
+                        .font(.title3.weight(.semibold))
+                    HStack(spacing: 6) {
+                        if isRecording {
+                            Text(Format.duration(elapsed))
+                                .monospacedDigit()
+                        } else {
+                            Image(systemName: sport.symbolName)
+                                .font(.caption)
+                            Text(sport.displayName)
+                        }
+                    }
+                    .font(.subheadline)
+                    .opacity(0.85)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.headline)
+                    .opacity(0.7)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(
+                    colors: isRecording
+                        ? [.red, .red.opacity(0.75)]
+                        : [.accentColor, .accentColor.opacity(0.78)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 18)
+            )
+            .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isRecording ? "Recording in progress. Open session." : "Start a \(sport.displayName) session")
     }
 }

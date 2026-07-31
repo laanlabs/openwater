@@ -86,14 +86,12 @@ struct LiveSessionScreen: View {
 
             Spacer(minLength: 0)
 
-            // A wide gap under the controls on purpose. End sits directly
-            // above the tab bar, and a wet thumb aiming for it should not be
-            // able to land on Settings instead. The tab bar itself stays —
-            // trapping somebody on one screen for a three-hour session to
-            // protect them from a recoverable mis-tap is the worse trade.
+            // A gap under the controls on purpose. End sits above the tab bar,
+            // and a wet thumb aiming for it should not be able to land on
+            // Settings instead.
             controls
                 .padding(.horizontal)
-                .padding(.bottom, 22)
+                .padding(.bottom, 10)
         }
     }
 

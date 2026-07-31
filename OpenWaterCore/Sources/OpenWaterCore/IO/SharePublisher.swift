@@ -6,7 +6,7 @@ import os
 /// Split out from the publisher so the bucket is stated in one place. Two URLs
 /// come out of a share and they are not the same thing: the *file* URL is where
 /// the JSON physically lives in Firebase Storage, and the *link* URL is the
-/// human-facing page on openwater.app that fetches it and draws the map. Only
+/// human-facing page on openwaterapp.com that fetches it and draws the map. Only
 /// the second one is ever shown to a rider.
 public struct ShareDestination: Hashable, Sendable {
 
@@ -28,7 +28,7 @@ public struct ShareDestination: Hashable, Sendable {
 
     public static let openWater = ShareDestination(
         bucket: "openwaterapp-2e0f7.firebasestorage.app",
-        site: URL(string: "https://openwater.app")!
+        site: URL(string: "https://openwaterapp.com")!
     )
 
     /// Object path within the bucket.

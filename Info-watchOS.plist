@@ -2,11 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- See openWater/Info.plist — Xcode will not generate this key. -->
+	<!--
+	  Two different keys, which is not obvious and which App Store validation
+	  is the first thing to tell you about:
+
+	  - watchOS takes its workout background mode in WKBackgroundModes.
+	    Putting "workout-processing" in UIBackgroundModes builds and runs
+	    perfectly well and is then rejected at upload as an invalid value.
+	  - CoreLocation still reads UIBackgroundModes for "location", on watchOS
+	    as on iOS, and raises the moment `allowsBackgroundLocationUpdates` is
+	    set without it.
+
+	  Both are needed: the workout session is what keeps the app alive with the
+	  wrist down, and the location mode is what keeps fixes arriving while it
+	  is.
+	-->
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
-		<string>workout-processing</string>
 	</array>
 </dict>
 </plist>

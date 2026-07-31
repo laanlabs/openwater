@@ -104,7 +104,7 @@ struct SharePublisherTests {
         // separator — otherwise the file lands at the bucket root and the rule
         // matching `shares/{code}` never fires.
         #expect(components.queryItems?.first { $0.name == "name" }?.value == "shares/abcDEF012345678901xyz-.json")
-        #expect(link.url.absoluteString == "https://openwater.app/s/abcDEF012345678901xyz-")
+        #expect(link.url.absoluteString == "https://openwaterapp.com/s/abcDEF012345678901xyz-")
     }
 
     @Test("The body is the snapshot, and nothing but the snapshot")

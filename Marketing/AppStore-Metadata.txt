@@ -326,7 +326,7 @@ Permission strings shipping in the build:
     SHARING A SESSION TO THE WEB
     Session detail → ••• → "Share a Link" uploads a reduced copy of that one
     session (track, speeds, splits) to Firebase Storage and returns a link at
-    openwater.app/s/<code>. It is the only feature that sends anything off the
+    openwaterapp.com/s/<code>. It is the only feature that sends anything off the
     device, it never happens automatically, and the screen states exactly what
     is and is not included before the upload. There is no account: the 22-
     character code in the link is what keeps a share unlisted.

@@ -17,6 +17,13 @@ import SwiftUI
 /// putting me where I am standing. A spinner saying "acquiring" answers neither.
 struct RecordTabView: View {
 
+    /// Whether this tab is the one on screen.
+    ///
+    /// The tab stays in the hierarchy when the rider looks at something else,
+    /// and a live `Map` that nobody can see still holds MapKit's renderer open.
+    /// The map is built only while the tab is actually visible.
+    var isActive: Bool = true
+
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(SessionLibrary.self) private var library
     @Environment(AppSettings.self) private var settings
@@ -90,23 +97,33 @@ struct RecordTabView: View {
     // MARK: - Before starting
 
     private var idle: some View {
-        ZStack(alignment: .bottom) {
-            Map(position: $camera) {
-                UserAnnotation()
+        Group {
+            if isActive {
+                Map(position: $camera) {
+                    UserAnnotation()
+                }
+                .mapStyle(settings.mapStyle.mapStyle)
+                .mapControls {
+                    MapUserLocationButton()
+                    MapCompass()
+                }
+            } else {
+                Color(.systemGroupedBackground)
             }
-            .mapStyle(settings.mapStyle.mapStyle)
-            .mapControls {
-                MapUserLocationButton()
-                MapCompass()
-            }
-            .ignoresSafeArea(edges: .bottom)
-
+        }
+        .ignoresSafeArea(edges: .bottom)
+        // An inset rather than a bottom-aligned overlay: the map runs under the
+        // controls, but the controls themselves stay above whatever the app
+        // puts below them — which is how Start stopped hiding behind the tab
+        // bar.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             controls
         }
     }
 
     private var controls: some View {
         VStack(spacing: 10) {
+            WatchPill()
             WeatherCard(coordinate: recorder.location.lastCoordinate, units: settings.units)
 
             HStack(spacing: 10) {

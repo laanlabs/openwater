@@ -53,20 +53,7 @@ struct SettingsView: View {
                 }
 
                 Section("Apple Watch") {
-                    LabeledContent("Paired", value: sync.isPaired ? "Yes" : "No")
-                    LabeledContent("App installed", value: sync.isWatchAppInstalled ? "Yes" : "No")
-                    LabeledContent("Reachable", value: sync.isReachable ? "Yes" : "No")
-                    if let last = sync.lastReceived {
-                        LabeledContent(
-                            "Last session received",
-                            value: last.formatted(date: .abbreviated, time: .shortened)
-                        )
-                    }
-                    if let error = sync.lastError {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
+                    WatchStatusView()
                 }
 
                 Section {

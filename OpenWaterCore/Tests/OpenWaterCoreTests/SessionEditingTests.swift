@@ -129,3 +129,63 @@ struct SessionEditingTests {
         #expect(s.displaySubtitle == "Napeague Harbor")
     }
 }
+
+@Suite("Flying threshold")
+struct FoilThresholdTests {
+
+    /// Steady 6 m/s — above a wingfoil's 4.5 m/s default takeoff, below 8.
+    private func session() -> Session {
+        let points = SyntheticTrack.constantSpeed(6, duration: 600)
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(track)
+        return Session(
+            sport: .wingfoil,
+            startDate: track.startDate ?? Date(),
+            endDate: track.endDate ?? Date(),
+            track: track,
+            summary: summary
+        )
+    }
+
+    @Test("Raising the threshold above the rider's speed takes them off the foil")
+    func raisingThresholdRemovesFlight() throws {
+        let original = session()
+        #expect(try #require(original.summary).foil.timeOnFoil > 0)
+
+        var edits = Session.Edits(session: original)
+        edits.foilTakeoffSpeed = 8
+        let edited = original.applying(edits)
+
+        #expect(edited.foilTakeoffSpeed == 8)
+        #expect(try #require(edited.summary).foil.timeOnFoil == 0,
+                "6 m/s should not count as flying once the bar is at 8")
+    }
+
+    @Test("Changing the threshold forces a re-analysis, changing nothing else does not")
+    func thresholdRequiresReanalysis() {
+        let original = session()
+
+        var raised = Session.Edits(session: original)
+        raised.foilTakeoffSpeed = 8
+        #expect(original.requiresReanalysis(for: raised))
+
+        var renamed = Session.Edits(session: original)
+        renamed.title = "Anywhere"
+        #expect(!original.requiresReanalysis(for: renamed))
+    }
+
+    @Test("Clearing the override returns to the sport default")
+    func clearingRestoresDefault() throws {
+        var edits = Session.Edits(session: session())
+        edits.foilTakeoffSpeed = 8
+        let raised = session().applying(edits)
+
+        var cleared = Session.Edits(session: raised)
+        cleared.foilTakeoffSpeed = nil
+        let restored = raised.applying(cleared)
+
+        #expect(restored.foilTakeoffSpeed == nil)
+        #expect(restored.effectiveFoilTakeoffSpeed == Sport.wingfoil.thresholds.foilTakeoffSpeed)
+        #expect(try #require(restored.summary).foil.timeOnFoil > 0)
+    }
+}

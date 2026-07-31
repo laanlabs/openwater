@@ -85,6 +85,7 @@ struct SessionEditView: View {
                 }
 
                 windSection
+                flyingSection
 
                 Section {
                     Picker("Purpose", selection: Binding(
@@ -217,6 +218,43 @@ struct SessionEditView: View {
             }
         }
     }
+
+    // MARK: - Flying
+
+    /// The speed this rider counts as flying.
+    ///
+    /// Offered per session rather than as one app-wide setting because it is a
+    /// property of the kit, not the discipline: a big front wing under a light
+    /// rider flies several knots below where a small one does, and "time on
+    /// foil" measured against somebody else's board is a number about openWater
+    /// rather than about the session.
+    @ViewBuilder
+    private var flyingSection: some View {
+        if edits.sport.isFoiling {
+            Section {
+                Picker("Flying above", selection: Binding(
+                    get: { edits.foilTakeoffSpeed ?? 0 },
+                    set: { edits.foilTakeoffSpeed = $0 == 0 ? nil : $0 }
+                )) {
+                    Text("Default for \(edits.sport.displayName) (\(Format.speed(edits.sport.thresholds.foilTakeoffSpeed, unit: settings.units.speed, decimals: 1)))")
+                        .tag(0.0)
+                    ForEach(Self.thresholdChoices, id: \.self) { speed in
+                        Text(Format.speed(speed, unit: settings.units.speed, decimals: 1))
+                            .tag(speed)
+                    }
+                }
+            } header: {
+                Text("Flying")
+            } footer: {
+                Text("Time on foil, distance on foil, the longest flight and the flight count are all measured from this. Changing it recalculates them.")
+            }
+        }
+    }
+
+    /// 4.0 to 8.5 m/s in half-metre steps — roughly 8 to 16.5 knots, which
+    /// covers every realistic takeoff from a big downwind board to a small
+    /// high-aspect wing.
+    private static let thresholdChoices: [Double] = stride(from: 4.0, through: 8.5, by: 0.5).map { $0 }
 
     // MARK: - Save
 

@@ -35,6 +35,10 @@ public struct Session: Sendable, Codable, Identifiable {
     /// which conditions actually suit them.
     public var feeling: Int?
 
+    /// Speed this rider counts as flying, m/s. `nil` uses the sport default.
+    /// See `SessionAnalyzer.Configuration.foilTakeoffSpeed`.
+    public var foilTakeoffSpeed: Double?
+
     /// Gear used, by identifier into the gear locker.
     public var gearIDs: [UUID]
 
@@ -98,6 +102,11 @@ public struct Session: Sendable, Codable, Identifiable {
     /// cannot accidentally see "no wind" on a session that plainly has one.
     public var effectiveWind: Wind? { wind ?? summary?.wind }
 
+    /// The flying threshold in force for this session.
+    public var effectiveFoilTakeoffSpeed: Double {
+        foilTakeoffSpeed ?? sport.thresholds.foilTakeoffSpeed
+    }
+
     /// What to show as this session's name.
     ///
     /// Falls back through title → spot → sport, so there is always something
@@ -138,6 +147,7 @@ public struct Session: Sendable, Codable, Identifiable {
         untrimmedPoints: [TrackPoint]? = nil,
         purpose: String? = nil,
         feeling: Int? = nil,
+        foilTakeoffSpeed: Double? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -160,6 +170,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.untrimmedPoints = untrimmedPoints
         self.purpose = purpose
         self.feeling = feeling
+        self.foilTakeoffSpeed = foilTakeoffSpeed
         self.summary = summary
     }
 }

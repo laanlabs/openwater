@@ -272,7 +272,7 @@ struct SessionDetailView: View {
                         falls: summary.fallSummary,
                         units: settings.units,
                         totalDistance: summary.distance,
-                        takeoffThreshold: session.sport.thresholds.foilTakeoffSpeed,
+                        takeoffThreshold: session.effectiveFoilTakeoffSpeed,
                         onChangeThreshold: { isEditing = true }
                     )
                 }

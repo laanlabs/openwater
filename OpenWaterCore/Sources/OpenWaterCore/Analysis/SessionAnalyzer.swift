@@ -18,16 +18,29 @@ public struct SessionAnalyzer: Sendable {
         /// Skip the expensive stages for a quick live-ish pass.
         public var quickMode: Bool
 
+        /// Speed at which this rider counts as flying, in m/s, overriding the
+        /// sport's default.
+        ///
+        /// Worth having per session rather than per app: the speed a foil flies
+        /// at depends on the board, the wing and the rider's weight far more
+        /// than on the discipline, and a 90 kg rider on a small front wing does
+        /// not take off where the default says they do. Without this, "time on
+        /// foil" is a number about openWater's assumptions rather than about
+        /// their session.
+        public var foilTakeoffSpeed: Double?
+
         public init(
             sport: Sport,
             categories: [SpeedCategory] = SpeedCategory.standard,
             wind: Wind? = nil,
-            quickMode: Bool = false
+            quickMode: Bool = false,
+            foilTakeoffSpeed: Double? = nil
         ) {
             self.sport = sport
             self.categories = categories
             self.wind = wind
             self.quickMode = quickMode
+            self.foilTakeoffSpeed = foilTakeoffSpeed
         }
     }
 
@@ -45,7 +58,10 @@ public struct SessionAnalyzer: Sendable {
 
     public func analyse(_ track: Track) -> SessionSummary {
         let sport = configuration.sport
-        let thresholds = sport.thresholds
+        var thresholds = sport.thresholds
+        if let override = configuration.foilTakeoffSpeed, override > 0, sport.isFoiling {
+            thresholds.foilTakeoffSpeed = override
+        }
 
         // --- Basics
         let movingTime = movingTime(of: track, above: thresholds.movingSpeed)
@@ -62,7 +78,11 @@ public struct SessionAnalyzer: Sendable {
 
         // --- Flights. Non-foiling sports return an empty list rather than a
         // pile of false positives.
-        let foilDetector = FoilDetector.forSport(sport)
+        var foilDetector = FoilDetector.forSport(sport)
+        // The detector carries its own copy of the thresholds, so an overridden
+        // takeoff speed has to reach it here too — otherwise the rest of the
+        // analysis honours the rider's setting and the flights ignore it.
+        foilDetector.thresholds = thresholds
         let flights = sport.isFoiling ? foilDetector.detect(in: track) : []
         let foilSummary = foilDetector.summarise(flights: flights, track: track, movingTime: movingTime)
 

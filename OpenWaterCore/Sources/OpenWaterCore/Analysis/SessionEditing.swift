@@ -24,6 +24,10 @@ extension Session {
         public var title: String?
         public var spotName: String?
         public var notes: String
+        /// Why the rider went out, free text.
+        public var purpose: String?
+        /// How it felt, 1-5. `nil` means not recorded.
+        public var feeling: Int?
         /// Wind direction the rider is asserting, in degrees the wind comes
         /// from. `nil` leaves whatever the estimator worked out.
         public var windDirection: Double?
@@ -35,6 +39,8 @@ extension Session {
             title: String? = nil,
             spotName: String? = nil,
             notes: String = "",
+            purpose: String? = nil,
+            feeling: Int? = nil,
             windDirection: Double? = nil,
             windSpeed: Double? = nil
         ) {
@@ -42,6 +48,8 @@ extension Session {
             self.title = title
             self.spotName = spotName
             self.notes = notes
+            self.purpose = purpose
+            self.feeling = feeling
             self.windDirection = windDirection
             self.windSpeed = windSpeed
         }
@@ -51,6 +59,8 @@ extension Session {
             self.title = session.title
             self.spotName = session.spotName
             self.notes = session.notes
+            self.purpose = session.purpose
+            self.feeling = session.feeling
             // Only pre-fill a direction the rider actually asserted. Showing an
             // estimate in an editable field turns it into a value they appear
             // to have entered, and the next save would promote a guess into a
@@ -80,6 +90,8 @@ extension Session {
         result.title = edits.title?.trimmedOrNil
         result.spotName = edits.spotName?.trimmedOrNil
         result.notes = edits.notes
+        result.purpose = edits.purpose?.trimmedOrNil
+        result.feeling = edits.feeling
 
         guard requiresReanalysis(for: edits) else { return result }
 

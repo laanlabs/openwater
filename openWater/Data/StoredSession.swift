@@ -72,6 +72,16 @@ final class StoredSession {
     var shareCode: String?
     var sharedAt: Date?
 
+    /// A heavily reduced copy of the track — latitude, longitude, speed,
+    /// latitude … — kept as a column so the session list can draw a map
+    /// preview.
+    ///
+    /// The alternative is decoding the archive per row, and a screen of ten
+    /// three-hour sessions is a hundred thousand fixes to decode while the
+    /// rider is scrolling. A couple of hundred points is more than a
+    /// thumbnail-sized map can resolve anyway.
+    var previewTrack: [Double] = []
+
     /// Bumped when the analysis engine changes, so stale rows can be found and
     /// recomputed rather than quietly showing numbers from an older algorithm.
     var analysisVersion: Int
@@ -126,6 +136,7 @@ final class StoredSession {
 
         self.shareCode = nil
         self.sharedAt = nil
+        self.previewTrack = StoredSession.previewTrack(for: session.track)
 
         self.archiveData = (try? SessionArchive(session: session).encoded()) ?? Data()
     }
@@ -204,6 +215,58 @@ final class StoredSession {
         photoNames = replacement.photoNames
         analysisVersion = replacement.analysisVersion
         archiveData = replacement.archiveData
+        previewTrack = replacement.previewTrack
+    }
+
+    // MARK: Map preview
+
+    /// Reduce a track to a few hundred `latitude, longitude, speed` triples for
+    /// the list thumbnail.
+    ///
+    /// Uniform sampling is right here, unlike the speed-aware reduction the web
+    /// share uses: a thumbnail is about the *shape* of the session, and keeping
+    /// only the fastest fix from each bucket would distort where the track
+    /// goes. The speed of each kept sample rides along so the preview can be
+    /// coloured the same way the full map is — the fast runs are what a rider
+    /// is looking for when they scan the list.
+    static func previewTrack(for track: Track, maximum: Int = 220) -> [Double] {
+        guard track.count > 1 else { return [] }
+        let step = max(1, Int(ceil(Double(track.count) / Double(maximum))))
+        var result: [Double] = []
+        result.reserveCapacity((track.count / step + 2) * 3)
+
+        func append(_ index: Int) {
+            let point = track.points[index]
+            guard point.hasValidPosition else { return }
+            result.append(point.latitude)
+            result.append(point.longitude)
+            result.append(track.speed[index])
+        }
+
+        var index = 0
+        while index < track.count {
+            append(index)
+            index += step
+        }
+        // Always close on the real last fix, so a trimmed session's preview
+        // ends where the session does.
+        append(track.count - 1)
+        return result
+    }
+
+    /// Fill in the preview for a session stored before previews existed.
+    ///
+    /// Decoding is the expensive part, so it happens once, off the main actor,
+    /// and only for rows that actually appear on screen.
+    func backfillPreviewTrack() async {
+        guard previewTrack.isEmpty, !isDeleted, modelContext != nil else { return }
+        let data = archiveData
+        let points = await Task.detached {
+            guard let session = try? SessionArchive.decode(data).session else { return [Double]() }
+            return StoredSession.previewTrack(for: session.track)
+        }.value
+        guard !points.isEmpty, !isDeleted, modelContext != nil else { return }
+        previewTrack = points
     }
 }
 

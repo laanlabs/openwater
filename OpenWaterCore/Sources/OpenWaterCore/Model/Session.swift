@@ -22,6 +22,19 @@ public struct Session: Sendable, Codable, Identifiable {
     /// Free-text notes.
     public var notes: String
 
+    /// Why the rider went out — "For fun", "Training", "Race". Free text with
+    /// suggestions rather than a fixed list, because the useful labels differ
+    /// by discipline and nobody's session fits somebody else's taxonomy.
+    public var purpose: String?
+
+    /// How it felt, 1 (rough) to 5 (great).
+    ///
+    /// Worth recording precisely because it is the one thing GPS cannot: two
+    /// sessions with identical numbers can be a breakthrough and a miserable
+    /// slog, and a season of these next to the speeds is how a rider notices
+    /// which conditions actually suit them.
+    public var feeling: Int?
+
     /// Gear used, by identifier into the gear locker.
     public var gearIDs: [UUID]
 
@@ -123,6 +136,8 @@ public struct Session: Sendable, Codable, Identifiable {
         endBattery: Double? = nil,
         trim: SessionTrim = .none,
         untrimmedPoints: [TrackPoint]? = nil,
+        purpose: String? = nil,
+        feeling: Int? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -143,6 +158,8 @@ public struct Session: Sendable, Codable, Identifiable {
         self.endBattery = endBattery
         self.trim = trim
         self.untrimmedPoints = untrimmedPoints
+        self.purpose = purpose
+        self.feeling = feeling
         self.summary = summary
     }
 }

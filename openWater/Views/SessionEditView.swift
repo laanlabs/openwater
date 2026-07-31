@@ -86,6 +86,42 @@ struct SessionEditView: View {
 
                 windSection
 
+                Section {
+                    Picker("Purpose", selection: Binding(
+                        get: { edits.purpose ?? "" },
+                        set: { edits.purpose = $0.isEmpty ? nil : $0 }
+                    )) {
+                        Text("Not set").tag("")
+                        ForEach(SessionPurpose.suggestions, id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+
+                    HStack {
+                        Text("Feeling")
+                        Spacer()
+                        // Faces rather than a 1–5 picker: this is the one field
+                        // in the app that is pure memory, and it should take a
+                        // single tap on the way back to the car.
+                        ForEach(Feeling.all, id: \.self) { value in
+                            Button {
+                                edits.feeling = edits.feeling == value ? nil : value
+                            } label: {
+                                Image(systemName: Feeling.symbol(for: value))
+                                    .font(.title3)
+                                    .foregroundStyle(edits.feeling == value
+                                                     ? Feeling.colour(for: value)
+                                                     : Color.secondary.opacity(0.45))
+                                    .padding(4)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Feeling.label(for: value))
+                        }
+                    }
+                } header: {
+                    Text("How it went")
+                }
+
                 Section("Notes") {
                     TextField("Gear, conditions, how it went…", text: $edits.notes, axis: .vertical)
                         .lineLimit(3...8)

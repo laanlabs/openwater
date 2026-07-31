@@ -44,6 +44,27 @@ public enum DistanceUnit: String, CaseIterable, Sendable, Codable {
     public static let metresPerNauticalMile: Double = 1852
     public static let metresPerStatuteMile: Double = 1609.344
     public static let metresPerFoot: Double = 0.3048
+
+    /// The unit a session-length distance is shown in. Deliberately the *large*
+    /// unit even when a short session would be formatted in metres — it labels
+    /// a column, and a column heading that changes per row is worse than one
+    /// that is occasionally approximate.
+    public var symbol: String {
+        switch self {
+        case .metric: "km"
+        case .nautical: "NM"
+        case .imperial: "mi"
+        }
+    }
+
+    /// Metres per display unit.
+    public var metresPerUnit: Double {
+        switch self {
+        case .metric: 1000
+        case .nautical: Self.metresPerNauticalMile
+        case .imperial: Self.metresPerStatuteMile
+        }
+    }
 }
 
 /// The user's display preferences. Purely presentational — never affects analysis.
@@ -73,6 +94,18 @@ public enum Format {
         let v = unit.convert(fromMetresPerSecond: metresPerSecond)
         let n = String(format: "%.\(decimals)f", v)
         return includeSymbol ? "\(n) \(unit.symbol)" : n
+    }
+
+    /// The distance in the unit's large denomination, unlabelled — for a column
+    /// that carries its own heading.
+    public static func distance(
+        _ metres: Double,
+        unit: DistanceUnit,
+        includeSymbol: Bool,
+        decimals: Int = 2
+    ) -> String {
+        guard !includeSymbol else { return distance(metres, unit: unit) }
+        return String(format: "%.\(decimals)f", metres / unit.metresPerUnit)
     }
 
     public static func distance(_ metres: Double, unit: DistanceUnit) -> String {

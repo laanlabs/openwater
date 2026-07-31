@@ -16,7 +16,7 @@ struct SessionDetailView: View {
     @Environment(AppSettings.self) private var settings
 
     @State private var session: Session?
-    @State private var view: Mode = .map
+    @State private var view: Mode = .summary
     @State private var selectedRun: Int?
     @State private var highlight: ClosedRange<TimeInterval>?
     @State private var foilingOnly = false
@@ -66,6 +66,7 @@ struct SessionDetailView: View {
     }
 
     enum Mode: String, CaseIterable, Identifiable {
+        case summary = "Summary"
         case map = "Map"
         case ribbon = "Runs"
         case charts = "Charts"
@@ -73,6 +74,7 @@ struct SessionDetailView: View {
         var id: String { rawValue }
         var symbol: String {
             switch self {
+            case .summary: "list.bullet.rectangle"
             case .map: "map"
             case .ribbon: "chart.bar.doc.horizontal"
             case .charts: "chart.xyaxis.line"
@@ -147,6 +149,15 @@ struct SessionDetailView: View {
             .padding(.bottom, 6)
 
             switch view {
+            case .summary:
+                SessionOverview(
+                    stored: stored,
+                    session: session,
+                    summary: summary,
+                    onEdit: { isEditing = true },
+                    onOpenMap: { isMapFullScreen = true },
+                    onReplay: { isPlayingBack = true }
+                )
             case .map:
                 mapView(session: session, summary: summary)
             case .ribbon:

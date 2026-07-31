@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import OpenWaterCore
+import SwiftData
 import SwiftUI
 
 /// The Record tab: a live map with a start button on it.
@@ -25,11 +26,16 @@ struct RecordTabView: View {
     @State private var spot = ""
     @State private var showingDetails = false
     @State private var showingEndConfirmation = false
+    @State private var showingDiscardConfirmation = false
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var showingCountdown = false
 
+    /// Pushed after a session is saved, so the rider lands on what they just
+    /// recorded instead of an empty Record tab.
+    @State private var path: [UUID] = []
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 switch recorder.state {
                 case .idle:
@@ -41,6 +47,16 @@ struct RecordTabView: View {
             .navigationTitle(recorder.state == .idle ? "Record" : sport.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(recorder.state == .idle ? .automatic : .hidden, for: .navigationBar)
+            .navigationDestination(for: UUID.self) { id in
+                if let stored = library.session(id: id), !stored.isDeleted {
+                    SessionDetailView(stored: stored)
+                } else {
+                    ContentUnavailableView(
+                        "Session no longer available",
+                        systemImage: "questionmark.folder"
+                    )
+                }
+            }
             .onAppear {
                 if recorder.state == .idle { sport = settings.lastSport }
                 recorder.prepare()
@@ -52,8 +68,21 @@ struct RecordTabView: View {
             }
             .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
                 Button("End & Save") { end() }
-                Button("Discard", role: .destructive) { recorder.discard() }
+                Button("Discard…", role: .destructive) { showingDiscardConfirmation = true }
                 Button("Keep Recording", role: .cancel) {}
+            }
+            // Discard sat one row below End & Save, and a mis-tap threw away
+            // an hour on the water that cannot be recorded again. It asks twice
+            // now, and says what is being lost.
+            .confirmationDialog(
+                "Discard this session?",
+                isPresented: $showingDiscardConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Discard Session", role: .destructive) { recorder.discard() }
+                Button("Keep Recording", role: .cancel) {}
+            } message: {
+                Text("\(Format.duration(recorder.metrics.duration)) and \(Format.distance(recorder.metrics.distance, unit: settings.units.distance)) will be deleted. This cannot be undone.")
             }
         }
     }
@@ -201,6 +230,9 @@ struct RecordTabView: View {
     // MARK: - Actions
 
     private func start() {
+        // Leaving the last session's detail on the stack would hide the live
+        // screen behind it for the whole of the next recording.
+        path = []
         settings.lastSport = sport
         recorder.autoPauseEnabled = settings.autoPauseWhileRecording
         recorder.title = title.trimmingCharacters(in: .whitespaces).isEmpty ? nil : title
@@ -209,8 +241,11 @@ struct RecordTabView: View {
     }
 
     private func end() {
+        // Landing back on an empty Record tab after an hour on the water is the
+        // wrong answer to "what did I just do?" — the session opens instead.
         if let session = recorder.finish() {
-            library.save(session)
+            let stored = library.save(session)
+            path = [stored.id]
         }
         title = ""
         spot = ""

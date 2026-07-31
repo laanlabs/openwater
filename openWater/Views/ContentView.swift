@@ -3,6 +3,8 @@ import SwiftUI
 
 struct ContentView: View {
 
+    @Environment(PhoneRecorder.self) private var recorder
+
     @State private var selection: ScreenshotRoute.Tab = .sessions
 
     var body: some View {
@@ -13,6 +15,10 @@ struct ContentView: View {
             Tab("Record", systemImage: "record.circle", value: ScreenshotRoute.Tab.record) {
                 RecordTabView()
             }
+            // A session runs for hours with the phone stowed, and a rider who
+            // opened the app to look at something else has no other way to tell
+            // it is still going.
+            .badge(recorder.state == .idle ? nil : Text("REC"))
             Tab("Bests", systemImage: "trophy", value: ScreenshotRoute.Tab.records) {
                 RecordsView()
             }

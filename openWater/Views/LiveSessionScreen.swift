@@ -1,3 +1,4 @@
+import MapKit
 import OpenWaterCore
 import SwiftUI
 
@@ -14,9 +15,17 @@ struct LiveSessionScreen: View {
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(AppSettings.self) private var settings
 
+    /// Whether the live map is showing. On by default: the space it fills was
+    /// empty, and a rider mid-session wants to see where they have been —
+    /// which runs were the fast ones, and where they are relative to the
+    /// launch. Collapsible for anyone who wants the speed and nothing else.
+    @AppStorage("liveMapVisible") private var showMap = true
+
+    @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+
     var body: some View {
         VStack(spacing: 0) {
-            Spacer()
+            Spacer(minLength: 8)
 
             Text(Format.speed(
                 recorder.metrics.currentSpeed,
@@ -42,10 +51,28 @@ struct LiveSessionScreen: View {
                     .padding(.top, 6)
             }
 
-            Spacer()
+            if showMap {
+                // Capped rather than greedy: past about a third of the screen
+                // the map stops telling you anything new and starts squeezing
+                // the numbers, which are what a glance is actually for.
+                liveMap
+                    .frame(maxHeight: 300)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+            } else {
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.snappy) { showMap = true }
+                } label: {
+                    Label("Show map", systemImage: "map")
+                        .font(.subheadline)
+                }
+                Spacer(minLength: 0)
+            }
 
             grid
                 .padding(.horizontal)
+                .padding(.top, 10)
 
             if let record = recorder.recordsHit.first {
                 Label(
@@ -57,11 +84,16 @@ struct LiveSessionScreen: View {
                 .padding(.top, 12)
             }
 
-            Spacer()
+            Spacer(minLength: 0)
 
+            // A wide gap under the controls on purpose. End sits directly
+            // above the tab bar, and a wet thumb aiming for it should not be
+            // able to land on Settings instead. The tab bar itself stays —
+            // trapping somebody on one screen for a three-hour session to
+            // protect them from a recoverable mis-tap is the worse trade.
             controls
                 .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.bottom, 22)
         }
     }
 
@@ -90,6 +122,38 @@ struct LiveSessionScreen: View {
             SummaryTile(label: "GPS", value: recorder.metrics.horizontalAccuracy >= 0
                 ? String(format: "±%.0f m", recorder.metrics.horizontalAccuracy)
                 : "—")
+        }
+    }
+
+    /// Where you have been, live.
+    ///
+    /// Deliberately not interactive — no gestures, no run selection. A rider
+    /// reading this is on the water with one hand free; anything that can be
+    /// panned out of position by a wet thumb and then has to be panned back is
+    /// worse than useless. Tapping it collapses it, and that is the only thing
+    /// it does.
+    private var liveMap: some View {
+        Map(position: $camera, interactionModes: []) {
+            UserAnnotation()
+            let coordinates = recorder.trackCoordinates
+            if coordinates.count > 1 {
+                MapPolyline(coordinates: coordinates)
+                    .stroke(.tint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .mapStyle(settings.mapStyle.mapStyle)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(alignment: .topTrailing) {
+            Button {
+                withAnimation(.snappy) { showMap = false }
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.semibold))
+                    .padding(8)
+                    .background(.regularMaterial, in: Circle())
+            }
+            .padding(8)
+            .accessibilityLabel("Hide map")
         }
     }
 

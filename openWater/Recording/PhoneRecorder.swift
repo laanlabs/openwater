@@ -39,6 +39,22 @@ final class PhoneRecorder {
     var recordsHit: [LiveRecord] { engine.recordsHit }
     var recoverable: RecordingEngine.RecoverableSession? { engine.recoverable }
 
+    /// The track so far, reduced for drawing.
+    ///
+    /// A three-hour session is ten thousand fixes and the live map redraws on
+    /// every one of them; at a few hundred points the line looks identical and
+    /// the redraw is free. Uniform sampling, because this is about the shape.
+    var trackCoordinates: [CLLocationCoordinate2D] {
+        let points = engine.recordedPoints
+        guard points.count > 1 else { return [] }
+        let step = max(1, points.count / 400)
+        var result = stride(from: 0, to: points.count, by: step)
+            .filter { points[$0].hasValidPosition }
+            .map { points[$0].clCoordinate }
+        if let last = points.last, last.hasValidPosition { result.append(last.clCoordinate) }
+        return result
+    }
+
     /// Optional name and spot set before starting, carried into the session.
     var title: String? {
         get { engine.title }

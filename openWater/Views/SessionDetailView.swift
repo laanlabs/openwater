@@ -14,6 +14,7 @@ struct SessionDetailView: View {
 
     @Environment(SessionLibrary.self) private var library
     @Environment(AppSettings.self) private var settings
+    @Environment(\.dismiss) private var dismiss
 
     @State private var session: Session?
     @State private var view: Mode = .summary
@@ -26,6 +27,7 @@ struct SessionDetailView: View {
     @State private var isMapFullScreen = false
     @State private var isPlayingBack = false
     @State private var isEditing = false
+    @State private var isConfirmingDelete = false
 
     /// Decode the stored archive into a usable session.
     ///
@@ -105,6 +107,13 @@ struct SessionDetailView: View {
                         .disabled(session == nil)
                     Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
                     Toggle("Flying only", systemImage: "airplane", isOn: $foilingOnly)
+                    Divider()
+                    // Deleting was only possible from the list, which is not
+                    // where anyone looks for it after opening a session and
+                    // deciding it was a false start.
+                    Button("Delete Session", systemImage: "trash", role: .destructive) {
+                        isConfirmingDelete = true
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -112,6 +121,19 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isExporting) {
             ExportView(stored: stored)
+        }
+        .confirmationDialog(
+            "Delete this session?",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                library.delete(stored)
+                dismiss()
+            }
+            Button("Keep", role: .cancel) {}
+        } message: {
+            Text("Its track and every metric go with it, and this cannot be undone.")
         }
         .sheet(isPresented: $isSharingImage) {
             if let session, let summary = session.summary {
@@ -266,23 +288,10 @@ struct SessionDetailView: View {
                     // whether it never had them. Say which, and offer the fix.
                     NoWindCard(session: session) { isEditing = true }
                 }
-                if summary.foil.flightCount > 0 {
-                    FoilSummaryCard(
-                        foil: summary.foil,
-                        falls: summary.fallSummary,
-                        units: settings.units,
-                        totalDistance: summary.distance,
-                        takeoffThreshold: session.effectiveFoilTakeoffSpeed,
-                        onChangeThreshold: { isEditing = true }
-                    )
-                }
-                if summary.downwind.glideCount > 0 {
-                    DownwindCard(downwind: summary.downwind, units: settings.units)
-                }
-                if summary.maneuverSummary.total > 0 {
-                    ManeuverCard(summary: summary.maneuverSummary)
-                }
-                QualityCard(quality: summary.quality, source: summary.speedSource)
+                // The foiling, turns, glide and quality cards live on the
+                // Summary tab. Repeating them here made Charts a second copy of
+                // it with two graphs on top, and neither tab was then worth
+                // scrolling to the bottom of.
             }
             .padding()
         }

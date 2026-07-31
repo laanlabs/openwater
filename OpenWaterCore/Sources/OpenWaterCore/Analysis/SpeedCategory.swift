@@ -45,8 +45,9 @@ public enum SpeedCategory: Hashable, Sendable, Codable, Identifiable {
         case .time(let s): "Best \(Self.durationLabel(s))"
         case .multiTime(let n, let s): "Average of best \(n) × \(Self.durationLabel(s))"
         case .distance(let m): "Fastest \(Self.distanceLabel(m))"
-        case .alpha(let m, let p):
-            "Alpha \(Self.distanceLabel(m)) — turn, finish within \(Int(p)) m of the start"
+        // The rule for alpha lives in `explanation`; spelling it out in the
+        // name makes a two-line row in a list where everything else is one.
+        case .alpha(let m, _): "Alpha \(Self.distanceLabel(m))"
         }
     }
 

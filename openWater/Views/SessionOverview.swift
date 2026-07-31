@@ -82,15 +82,13 @@ struct SessionOverview: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(stored.displayTitle)
-                .font(.title2.weight(.bold))
-
+            // No title here: the navigation bar already says it, and printing
+            // it twice a centimetre apart just costs a line of screen.
             HStack(spacing: 6) {
                 Text(session.startDate.formatted(
                     .dateTime.weekday(.wide).month(.abbreviated).day().year().hour().minute()
                 ))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.headline)
                 if let device = session.deviceModel, device.localizedCaseInsensitiveContains("watch") {
                     Image(systemName: "applewatch")
                         .font(.caption)
@@ -98,22 +96,33 @@ struct SessionOverview: View {
                 }
             }
 
-            if let wind = session.effectiveWind {
+            // Tappable: an estimated wind is the field riders most often want
+            // to correct, and every angle on the Charts tab is measured from it.
+            Button(action: onEdit) {
                 HStack(spacing: 8) {
                     Image(systemName: "wind")
                         .foregroundStyle(.secondary)
-                    Text(windText(wind))
-                        .font(.subheadline)
-                    if wind.source != .manual {
-                        Text("estimated")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
+                    if let wind = session.effectiveWind {
+                        Text(windText(wind))
+                            .font(.subheadline)
+                        if wind.source != .manual {
+                            Text("estimated")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    } else {
+                        Text("Set the wind")
+                            .font(.subheadline)
                     }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
+            .buttonStyle(.plain)
 
             if session.purpose != nil || session.feeling != nil {
                 HStack {
@@ -183,7 +192,7 @@ struct SessionOverview: View {
                     title: "Duration",
                     colour: .teal,
                     value: Format.duration(summary.duration),
-                    unit: ""
+                    unit: summary.duration >= 3600 ? "h:m:s" : "m:s"
                 )
                 DetailStat(
                     title: "Distance",
@@ -198,7 +207,7 @@ struct SessionOverview: View {
                     title: "Pause",
                     colour: .secondary,
                     value: Format.duration(pause),
-                    unit: ""
+                    unit: pause >= 3600 ? "h:m:s" : "m:s"
                 )
                 DetailStat(
                     title: "Pace",

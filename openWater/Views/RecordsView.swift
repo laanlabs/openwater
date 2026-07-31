@@ -12,8 +12,11 @@ struct RecordsView: View {
     @Query(sort: \StoredSession.startDate, order: .reverse)
     private var sessions: [StoredSession]
 
+    /// Pushed when a record is tapped.
+    @State private var path: [UUID] = []
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if library.records.isEmpty {
                     ContentUnavailableView(
@@ -23,16 +26,26 @@ struct RecordsView: View {
                     )
                 } else {
                     List {
-                        Section("Personal bests") {
+                        Section {
                             ForEach(SpeedCategory.standard) { category in
                                 if let holder = library.records[category] {
-                                    RecordRow(
-                                        category: category,
-                                        holder: holder,
-                                        units: settings.units
-                                    )
+                                    // Tappable, because the obvious next
+                                    // question about a personal best is "which
+                                    // session was that?" and there was no way
+                                    // to answer it.
+                                    NavigationLink(value: holder.sessionID) {
+                                        RecordRow(
+                                            category: category,
+                                            holder: holder,
+                                            units: settings.units
+                                        )
+                                    }
                                 }
                             }
+                        } header: {
+                            Text("Personal bests")
+                        } footer: {
+                            Text("Tap a record to open the session that set it.")
                         }
 
                         if let foiling = bestFoiling {
@@ -69,7 +82,17 @@ struct RecordsView: View {
                     }
                 }
             }
-            .navigationTitle("Records")
+            .navigationTitle("Bests")
+            .navigationDestination(for: UUID.self) { id in
+                if let stored = library.session(id: id), !stored.isDeleted {
+                    SessionDetailView(stored: stored)
+                } else {
+                    ContentUnavailableView(
+                        "Session no longer available",
+                        systemImage: "questionmark.folder"
+                    )
+                }
+            }
         }
     }
 
@@ -91,7 +114,9 @@ struct RecordRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 1) {
-                Text(category.shortName)
+                // The full name, not the abbreviation: "NM" means nothing to
+                // somebody who has not already learnt the category list.
+                Text(category.displayName)
                     .font(.subheadline.weight(.medium))
                 Text(holder.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption2)
@@ -177,6 +202,8 @@ struct TrendsView: View {
                             chart
                                 .frame(height: 260)
 
+                            summary
+
                             Text(explanation)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -186,6 +213,56 @@ struct TrendsView: View {
                 }
             }
             .navigationTitle("Trends")
+        }
+    }
+
+    /// Best, latest, and the gap between them.
+    ///
+    /// A line on its own answers "am I improving?" only if you can read a
+    /// gradient off two dozen points. These three numbers answer it directly,
+    /// and they were also the obvious thing to put in the half-screen of white
+    /// space the chart left behind.
+    @ViewBuilder
+    private var summary: some View {
+        let values = filtered.map(value(for:))
+        if let best = values.max(), let latest = values.last, values.count >= 2 {
+            let previous = values.dropLast().last ?? latest
+            let change = latest - previous
+
+            HStack(alignment: .top, spacing: 0) {
+                trendStat("Best", format(best), colour: .orange)
+                trendStat("Latest", format(latest), colour: .blue)
+                trendStat(
+                    "vs previous",
+                    (change >= 0 ? "+" : "") + format(change),
+                    colour: change >= 0 ? .green : .secondary
+                )
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func trendStat(_ label: String, _ value: String, colour: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(colour)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                BigNumber(value, size: 26)
+                Text(axisLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One decimal for speeds and rates, none for minutes — a chart of
+    /// "63.0 minutes" is false precision.
+    private func format(_ value: Double) -> String {
+        switch metric {
+        case .maxSpeed, .best500, .distance: String(format: "%.1f", value)
+        case .foilTime, .cleanRun, .dryGybes: String(format: "%.0f", value)
         }
     }
 
@@ -233,7 +310,7 @@ struct TrendsView: View {
     private var explanation: String {
         switch metric {
         case .maxSpeed:
-            "Peak speed depends as much on the day's wind as on you, so it is a noisy progress signal. The metrics below it move more honestly."
+            "Peak speed depends as much on the day's wind as on you, so it is a noisy progress signal. Time on foil, dry gybes and longest clean run track your own progress more honestly — switch metric above."
         case .best500:
             "A 500 m average is far harder to fluke than a peak, which makes it a better measure of real speed."
         case .foilTime:

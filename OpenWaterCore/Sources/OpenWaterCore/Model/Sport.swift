@@ -41,15 +41,37 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         }
     }
 
-    /// SF Symbols name, used by both platforms.
+    /// SF Symbols name.
+    ///
+    /// Every name here is verified to exist — `kite` was not a real symbol and
+    /// rendered as blank space in the picker, which is a silent failure: the row
+    /// still tapped, it just looked broken. `SportIconTests` asserts the whole
+    /// set resolves so that cannot happen again.
+    ///
+    /// Sports are also given distinct icons rather than one `wind` for all five
+    /// wind disciplines, so the picker can be scanned rather than read.
     public var symbolName: String {
         switch self {
-        case .wingfoil, .parawing, .windsurf, .windfoil, .sail: "wind"
-        case .kitesurf, .kitefoil: "kite"
-        case .downwindSUP, .sup, .prone: "figure.surfing"
+        // Wind held in the hands.
+        case .wingfoil: "wind"
+        case .parawing: "paperplane"
+        // Rig on the board.
+        case .windsurf: "sailboat"
+        case .windfoil: "sailboat.fill"
+        // Kite overhead.
+        case .kitesurf: "figure.wave"
+        case .kitefoil: "figure.wave.circle"
+        // Boat.
+        case .sail: "figure.sailing"
+        // Paddle and prone.
+        case .downwindSUP: "water.waves"
+        case .sup: "figure.surfing"
+        case .prone: "surfboard"
         case .kayak: "figure.outdoor.rowing"
-        case .efoil, .tow: "bolt.horizontal"
-        case .other: "water.waves"
+        // Powered.
+        case .efoil: "bolt.horizontal"
+        case .tow: "arrow.up.forward"
+        case .other: "figure.open.water.swim"
         }
     }
 
@@ -84,6 +106,16 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
 
     /// Tuning constants that make detection behave sensibly per discipline.
     public var thresholds: SportThresholds { SportThresholds.forSport(self) }
+
+    /// Every sport, ordered by how likely a rider of this app is to pick it.
+    ///
+    /// `allCases` is declaration order, which is not the order anyone wants to
+    /// choose from. This is the list every picker uses.
+    public static let recordable: [Sport] = [
+        .wingfoil, .parawing, .downwindSUP, .prone,
+        .windfoil, .windsurf, .kitefoil, .kitesurf,
+        .sail, .sup, .kayak, .efoil, .tow, .other,
+    ]
 }
 
 /// Per-sport tuning for the detectors. Every value is overridable in Settings —

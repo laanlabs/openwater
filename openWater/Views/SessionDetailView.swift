@@ -1,5 +1,6 @@
 import Charts
 import OpenWaterCore
+import SwiftData
 import SwiftUI
 
 /// One session, in depth.
@@ -29,6 +30,14 @@ struct SessionDetailView: View {
     /// Decoding a multi-megabyte track blocks, so it happens off the main actor
     /// — pushing this screen stays instant and the spinner covers the gap.
     private func loadSession() async {
+        // A SwiftData model can be deleted while a view still holds it — the
+        // list deletes one on iPad while its detail is open, or the store is
+        // reset underneath. Touching any property after that traps inside
+        // SwiftData rather than returning nil, so the check has to come first.
+        guard !stored.isDeleted, stored.modelContext != nil else {
+            session = nil
+            return
+        }
         let data = stored.archiveData
         session = await Task.detached {
             try? SessionArchive.decode(data).upToDateSession()

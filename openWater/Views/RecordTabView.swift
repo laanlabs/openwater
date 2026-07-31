@@ -197,12 +197,3 @@ struct RecordTabView: View {
         showingDetails = false
     }
 }
-
-extension Sport {
-    /// Sports offered when starting a recording, most likely first.
-    public static let recordable: [Sport] = [
-        .wingfoil, .parawing, .downwindSUP, .prone,
-        .windfoil, .windsurf, .kitefoil, .kitesurf,
-        .sail, .sup, .kayak, .efoil, .tow, .other,
-    ]
-}

@@ -101,8 +101,15 @@ struct SessionListView: View {
                 }
             }
             .navigationDestination(for: UUID.self) { id in
-                if let stored = library.session(id: id) {
+                if let stored = library.session(id: id), !stored.isDeleted {
                     SessionDetailView(stored: stored)
+                } else {
+                    // The session went away while its detail was on screen.
+                    // Saying so beats an empty screen with no explanation.
+                    ContentUnavailableView(
+                        "Session no longer available",
+                        systemImage: "questionmark.folder"
+                    )
                 }
             }
             .navigationTitle("Sessions")
@@ -206,8 +213,10 @@ struct SessionListView: View {
     }
 
     private func confirmDeletion() {
+        let removed = Set(pendingDeletion.map(\.id))
         for session in pendingDeletion { library.delete(session) }
         pendingDeletion = []
+        path.removeAll { removed.contains($0) }
     }
 
     /// What the confirmation prompt calls the thing being deleted.

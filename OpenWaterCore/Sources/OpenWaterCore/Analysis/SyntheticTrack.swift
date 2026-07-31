@@ -123,83 +123,71 @@ public enum SyntheticTrack {
         )
     }
 
-    /// A plausible wing session: reaches back and forth across the wind with
-    /// gybes between them, and a burst of speed on one run.
+    /// A plausible wing or parawing session.
     ///
-    /// With a northerly wind (wind *from* 0°), a broad reach on starboard is
-    /// about 135° and on port about 225°.
-    /// A plausible wing session, with the messiness that makes it useful.
+    /// The shape matters as much as the numbers. A real session launches from
+    /// one point on the shore and works the same patch of water over and over:
+    /// out on a reach, a rounded gybe at the far end, back on the other tack to
+    /// somewhere near where it started. Repeated twenty or thirty times, that
+    /// draws a bundle of long thin loops fanning out from the launch — which is
+    /// exactly the overlapping tangle the map legibility work exists to solve.
     ///
-    /// A constant-speed run is a bad fixture and a worse demo: if a rider holds
-    /// exactly 13 m/s for 75 seconds then the best 2 s, 10 s, 100 m, 250 m and
-    /// 500 m are all *identical*, which is arithmetically correct and tells you
-    /// nothing about whether the analysis works. Real riders surge in the gusts
-    /// and bleed speed in the lulls, so each run is built from several legs with
-    /// varying speed, and the window metrics separate the way they should.
-    public static func wingSession(
-        windFrom: Double = 0,
-        runs: Int = 8,
-        runDuration: TimeInterval = 90,
-        // Speeds chosen so the *peak* lands where a good wingfoiler's peak
-        // actually lands. Base speeds are only half the story: a 13 m/s base
-        // with ±2σ of 22 % gust reaches 20 m/s, which is 39 knots — windsurf
-        // world-record territory, and it makes every number in the demo look
-        // made up. The base and the gust have to be picked together.
-        cruiseSpeed: Double = 8.5,      // ~16.5 kn
-        burstSpeed: Double = 10.5,      // ~20 kn
-        burstOnRun: Int = 3,
+    /// The return leg is **aimed at the launch point** rather than held at a
+    /// fixed wind angle. That distinction is the whole thing: two fixed
+    /// reciprocal-ish headings never quite cancel, so the session creeps a
+    /// little further downwind every lap and after twenty of them has marched
+    /// clean across the bay. Riders do not do that, because they are steering
+    /// back to where their car is.
+    ///
+    /// Speeds vary within and between laps too: a constant-speed run makes the
+    /// best 2 s, 10 s, 100 m and 500 m all identical, which is arithmetically
+    /// correct and tells you nothing about whether the analysis works.
+    public static func wingSessionLegs(
+        windFrom: Double = 20,
+        runs: Int = 26,
+        runDuration: TimeInterval = 52,
+        cruiseSpeed: Double = 8.5,
+        burstSpeed: Double = 10.5,
+        burstOnRun: Int = 7,
         gybeDuration: TimeInterval = 6,
         gybeSpeed: Double = 4,
         /// How much speed varies within a run, as a fraction of its base speed.
         gustiness: Double = 0.12,
         /// Fraction of gybes carried without touching down.
-        dryGybeRate: Double = 0.5,
+        dryGybeRate: Double = 0.7,
+        /// How far the laps fan out from each other, degrees.
+        fanSpread: Double = 34,
         seed: UInt64 = 0xB0A7
-    ) -> [TrackPoint] {
+    ) -> [Leg] {
         var rng = SplitMix64(seed: seed)
         var legs: [Leg] = []
 
-        for i in 0..<runs {
-            let downwindish = i.isMultiple(of: 2)
-            // Alternate between a downwind reach and an upwind one, flipping
-            // tack every pair, so the four-run cycle is SE, NE, SW, NW — which
-            // sums to roughly zero and keeps the session inside a bay instead of
-            // marching off in one direction.
-            //
-            // With the wind from `windFrom`, upwind is `windFrom ± 45` and
-            // downwind is `windFrom ± 135`. Both are measured from the wind
-            // direction itself; adding 180 to the upwind leg (as this did
-            // originally) points it downwind too, which produced a track with
-            // only two heading modes and no upwind component at all.
-            let offset: Double = downwindish ? 135 : 45
-            let sign: Double = (i / 2).isMultiple(of: 2) ? 1 : -1
-            let heading = Geo.normalizeDegrees(windFrom + sign * offset)
-            let base = i == burstOnRun ? burstSpeed : cruiseSpeed
+        // Dead-reckon alongside the legs so the return can be steered home.
+        let launch = Geo.Coordinate(latitude: 0, longitude: 0)
+        var position = launch
 
-            // Break the run into gust-length chunks so speed is never flat.
-            let chunkCount = max(3, Int(runDuration / 12))
-            let chunkDuration = runDuration / Double(chunkCount)
+        /// Emit one leg and advance the simulated position with it.
+        func sail(heading: Double, distance: Double, base: Double, easeIn: Bool) {
+            let chunkCount = max(3, Int(distance / 110))
+            let chunkDistance = distance / Double(chunkCount)
             for chunk in 0..<chunkCount {
-                // Clamp the gust to ±2σ. An unclamped Gaussian occasionally
-                // produces a 3σ outlier, and on a 13 m/s base that is a 25-knot
-                // gust on top — which shows up as a world-record peak in a demo
-                // session and makes every number look untrustworthy.
+                // Clamp the gust to ±2σ: an unclamped Gaussian occasionally
+                // throws a 3σ outlier, which on a 10 m/s base reads as a
+                // world-record peak and makes every number look invented.
                 let swing = max(-2, min(2, rng.nextGaussian())) * gustiness
-                // The fastest chunk of the burst run is the session's peak.
-                let bias = (i == burstOnRun && chunk == chunkCount / 2) ? 0.12 : 0
-                let speed = max(2, base * (1 + swing + bias))
+                let speed = max(2.5, base * (1 + swing))
+                let legHeading = heading + rng.nextGaussian() * 2.5
                 legs.append(Leg(
                     speed: speed,
-                    heading: heading + rng.nextGaussian() * 4,
-                    duration: chunkDuration,
-                    transition: chunk == 0 ? 4 : 3
+                    heading: legHeading,
+                    duration: chunkDistance / speed,
+                    transition: (easeIn && chunk == 0) ? 5 : 3
                 ))
+                position = Geo.destination(from: position, bearing: legHeading, distance: chunkDistance)
             }
+        }
 
-            guard i < runs - 1 else { continue }
-            // A dry gybe carries speed through; a wet one drops to a crawl and
-            // needs a restart.
-            let dry = Double(i) / Double(max(1, runs - 1)) < dryGybeRate
+        func turn(at heading: Double, base: Double, dry: Bool) {
             legs.append(Leg(
                 speed: dry ? max(gybeSpeed, base * 0.72) : gybeSpeed * 0.4,
                 heading: heading,
@@ -207,7 +195,64 @@ public enum SyntheticTrack {
                 transition: 2
             ))
         }
-        return generate(legs: legs)
+
+        for lap in 0..<runs {
+            // The wind is not steady for an hour. Some laps are done in a lull
+            // and barely on the foil, some in a gust — and that spread is what
+            // makes a speed-coloured track readable. Without it every run lands
+            // in the middle of the ramp and the whole map comes out one shade of
+            // green, which looks tidy and shows nothing.
+            let windPhase = sin(Double(lap) * 0.9) * 0.5 + cos(Double(lap) * 0.37) * 0.28
+            let conditions = 1 + windPhase * 0.42
+            let base = max(4.2, (lap == burstOnRun ? burstSpeed : cruiseSpeed) * conditions)
+            let dry = Double((lap * 3) % 10) / 10 < dryGybeRate
+
+            // Fan the outbound legs across a spread of reaching angles so the
+            // loops splay from the launch instead of lying on top of each other.
+            let fan = (Double(lap) / Double(max(1, runs - 1)) - 0.5) * fanSpread
+            let outbound = Geo.normalizeDegrees(windFrom + 145 + fan + rng.nextGaussian() * 3)
+
+            // A few laps push much further out, as they do when the wind fills
+            // in or somebody chases a gust across the bay.
+            let reach = runDuration * cruiseSpeed * (lap % 7 == 3 ? 1.8 : 0.85 + Double(lap % 3) * 0.14)
+
+            sail(heading: outbound, distance: reach, base: base, easeIn: true)
+            turn(at: outbound, base: base, dry: dry)
+
+            // Home. Aimed at the launch, offset a little so the return does not
+            // retrace the outbound exactly — real tracks never do.
+            let home = Geo.bearing(from: position, to: launch) + rng.nextGaussian() * 6
+            let distanceHome = Geo.distance(position, launch)
+            sail(heading: home, distance: distanceHome * 0.94, base: base, easeIn: true)
+
+            if lap < runs - 1 {
+                turn(at: home, base: base, dry: dry)
+            }
+        }
+        return legs
+    }
+
+    /// The same session as ready-to-use fixes.
+    public static func wingSession(
+        windFrom: Double = 20,
+        runs: Int = 26,
+        runDuration: TimeInterval = 52,
+        cruiseSpeed: Double = 8.5,
+        burstSpeed: Double = 10.5,
+        burstOnRun: Int = 7,
+        gybeDuration: TimeInterval = 6,
+        gybeSpeed: Double = 4,
+        gustiness: Double = 0.12,
+        dryGybeRate: Double = 0.7,
+        fanSpread: Double = 34,
+        seed: UInt64 = 0xB0A7
+    ) -> [TrackPoint] {
+        generate(legs: wingSessionLegs(
+            windFrom: windFrom, runs: runs, runDuration: runDuration,
+            cruiseSpeed: cruiseSpeed, burstSpeed: burstSpeed, burstOnRun: burstOnRun,
+            gybeDuration: gybeDuration, gybeSpeed: gybeSpeed, gustiness: gustiness,
+            dryGybeRate: dryGybeRate, fanSpread: fanSpread, seed: seed
+        ))
     }
 
     /// An alpha loop: out, turn, and back to within a few metres of the start.

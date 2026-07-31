@@ -80,19 +80,20 @@ struct SplitsView: View {
             } else {
                 Chart(splits) { split in
                     BarMark(
-                        x: .value("Split", splitLabel(split)),
+                        x: .value("Split", split.number),
                         y: .value("Time", split.duration)
                     )
                     .foregroundStyle(split.isComplete ? Color.accentColor : Color.accentColor.opacity(0.45))
                     .cornerRadius(3)
                 }
                 .chartXAxis {
-                    // A long session is thirty bars, and thirty labels is a
-                    // grey smear. Six is enough to know where you are.
+                    // Numeric rather than a category per bar, so the axis can
+                    // thin its own labels: thirty of them on a phone is a grey
+                    // smear, and a category axis draws every one.
                     AxisMarks(values: .automatic(desiredCount: 6)) { value in
                         AxisValueLabel {
-                            if let label = value.as(String.self) {
-                                Text(label).font(.caption2)
+                            if let number = value.as(Int.self) {
+                                Text("\(number)").font(.caption2)
                             }
                         }
                     }
@@ -113,16 +114,6 @@ struct SplitsView: View {
         .padding(14)
         .frame(maxWidth: .infinity)
         .background(.background, in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    /// The x-axis label: the cumulative distance at the end of the split, so a
-    /// partial final split lands on the session's real total rather than
-    /// pretending to be a whole one.
-    private func splitLabel(_ split: Split) -> String {
-        let value = split.cumulativeDistance / settings.units.distance.metresPerUnit
-        return value < 10
-            ? String(format: "%.1f", value)
-            : String(format: "%.0f", value)
     }
 
     // MARK: - Table

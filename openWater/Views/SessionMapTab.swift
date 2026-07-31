@@ -25,6 +25,10 @@ struct SessionMapTab: View {
     var onFullScreen: () -> Void = {}
     var onReplay: () -> Void = {}
 
+    /// Apply a trim. The detail view owns saving it, because trimming re-runs
+    /// the analysis and the whole screen has to pick up the new numbers.
+    var onTrim: (SessionTrim) -> Void = { _ in }
+
     @Environment(AppSettings.self) private var settings
 
     @State private var elapsed: TimeInterval = 0
@@ -33,6 +37,10 @@ struct SessionMapTab: View {
     @State private var minimumSpeed: Double = 0
     @State private var showFalls = true
     @State private var showManeuvers = false
+
+    @State private var isTrimming = false
+    @State private var trimStart: TimeInterval = 0
+    @State private var trimEnd: TimeInterval = 0
 
     /// Reveal the track only as far as the playhead.
     ///
@@ -66,6 +74,7 @@ struct SessionMapTab: View {
             session: session,
             summary: summary,
             selectedRun: selectedRun,
+            highlight: isTrimming ? trimStart...max(trimStart + 1, trimEnd) : nil,
             showFalls: showFalls,
             showManeuvers: showManeuvers,
             minimumSpeed: minimumSpeed,
@@ -115,6 +124,16 @@ struct SessionMapTab: View {
             Picker("Show", selection: $foilFilter) {
                 ForEach(TrackMapView.FoilFilter.allCases) { option in
                     Label(option.rawValue, systemImage: option.symbol).tag(option)
+                }
+            }
+
+            Divider()
+
+            Button("Trim session…", systemImage: "scissors") { beginTrimming() }
+
+            if session.trim.isTrimmed {
+                Button("Restore full recording", systemImage: "arrow.uturn.backward") {
+                    onTrim(.none)
                 }
             }
 
@@ -178,9 +197,15 @@ struct SessionMapTab: View {
                 .accessibilityLabel("Replay session")
             }
 
-            liveNumbers
-            speedChart
-            transport
+            if isTrimming {
+                trimHeader
+                speedChart
+                trimControls
+            } else {
+                liveNumbers
+                speedChart
+                transport
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -244,11 +269,16 @@ struct SessionMapTab: View {
                 .foregroundStyle(.tint)
                 .interpolationMethod(.monotone)
             }
-            RuleMark(x: .value("Playhead", elapsed))
-                .foregroundStyle(.secondary)
-                .lineStyle(StrokeStyle(lineWidth: 1.5))
+            if !isTrimming {
+                RuleMark(x: .value("Playhead", elapsed))
+                    .foregroundStyle(.secondary)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+            }
         }
         .chartXAxis(.hidden)
+        // The axis is noise while trimming, and the yellow frame runs straight
+        // through the labels.
+        .chartYAxis(isTrimming ? .hidden : .automatic)
         .chartYAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { value in
                 AxisGridLine()
@@ -262,21 +292,31 @@ struct SessionMapTab: View {
         .frame(height: 82)
         .chartOverlay { proxy in
             GeometryReader { geometry in
-                Rectangle()
-                    .fill(.clear)
-                    .contentShape(.rect)
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                isScrubbing = true
-                                guard let plot = proxy.plotFrame else { return }
-                                let x = value.location.x - geometry[plot].origin.x
-                                if let time: TimeInterval = proxy.value(atX: x) {
-                                    elapsed = min(max(0, time), duration)
-                                }
-                            }
-                            .onEnded { _ in isScrubbing = false }
+                if isTrimming {
+                    TrimOverlay(
+                        start: $trimStart,
+                        end: $trimEnd,
+                        duration: duration,
+                        width: proxy.plotFrame.map { geometry[$0].width } ?? geometry.size.width
                     )
+                    .offset(x: proxy.plotFrame.map { geometry[$0].origin.x } ?? 0)
+                } else {
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(.rect)
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    isScrubbing = true
+                                    guard let plot = proxy.plotFrame else { return }
+                                    let x = value.location.x - geometry[plot].origin.x
+                                    if let time: TimeInterval = proxy.value(atX: x) {
+                                        elapsed = min(max(0, time), duration)
+                                    }
+                                }
+                                .onEnded { _ in isScrubbing = false }
+                        )
+                }
             }
         }
     }
@@ -374,5 +414,159 @@ struct WindDial: View {
     private var speedText: String {
         guard let speed = wind.speed else { return Format.bearing(wind.directionFrom, includeCardinal: false) }
         return Format.speed(speed, unit: units.speed, decimals: 0)
+    }
+}
+
+// MARK: - Trim
+
+extension SessionMapTab {
+
+    /// Open the trim, seeded with whatever is already set — or, on a session
+    /// that has never been trimmed, with the app's suggestion. Riders record
+    /// from the car park; offering the obvious cut beats making them find it.
+    func beginTrimming() {
+        if session.trim.isTrimmed {
+            trimStart = session.trim.startOffset
+            trimEnd = session.trim.endOffset ?? duration
+        } else if let suggested = session.suggestedTrim() {
+            trimStart = suggested.startOffset
+            trimEnd = suggested.endOffset ?? duration
+        } else {
+            trimStart = 0
+            trimEnd = duration
+        }
+        withAnimation(.snappy) { isTrimming = true }
+    }
+
+    var trimHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Keeping \(Format.duration(trimEnd - trimStart))")
+                    .font(.headline)
+                Text("from \(Format.duration(trimStart)) to \(Format.duration(trimEnd)) of \(Format.duration(duration))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    var trimControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    withAnimation(.snappy) { isTrimming = false }
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+
+                Button("Trim") {
+                    onTrim(SessionTrim(
+                        startOffset: trimStart,
+                        endOffset: trimEnd < duration - 1 ? trimEnd : nil
+                    ))
+                    withAnimation(.snappy) { isTrimming = false }
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .disabled(trimEnd - trimStart < 10)
+            }
+            .font(.headline)
+
+            // Said out loud because it is the difference between a rider using
+            // this and being frightened of it: the fixes are all still there.
+            Text("Nothing is deleted — the full recording is kept and you can widen or undo the trim later.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+}
+
+/// QuickTime's trim bar: a yellow frame over the timeline with a grab handle at
+/// each end, everything outside it dimmed.
+///
+/// Copied deliberately. Trimming a recording by dragging its two ends is a
+/// gesture people already have in their hands from every video app they have
+/// ever used, and inventing a different one here would buy nothing.
+struct TrimOverlay: View {
+
+    @Binding var start: TimeInterval
+    @Binding var end: TimeInterval
+    let duration: TimeInterval
+    let width: CGFloat
+
+    /// Handles are 16 points wide; anything narrower is hard to catch with a
+    /// thumb, and the two of them must never cross.
+    private let handleWidth: CGFloat = 16
+    private let minimumSpan: TimeInterval = 10
+
+    /// Which end the current drag grabbed. Decided once, when the finger goes
+    /// down, and held for the whole gesture — recomputing it per frame lets the
+    /// selection flip ends underneath the finger as it crosses the midpoint.
+    @State private var dragging: Edge?
+
+    private enum Edge { case start, end }
+
+    private var startX: CGFloat { CGFloat(start / max(duration, 1)) * width }
+    private var endX: CGFloat { CGFloat(end / max(duration, 1)) * width }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Dim what is being cut.
+            Rectangle()
+                .fill(.black.opacity(0.35))
+                .frame(width: max(0, startX))
+            Rectangle()
+                .fill(.black.opacity(0.35))
+                .frame(width: max(0, width - endX))
+                .offset(x: endX)
+
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.yellow, lineWidth: 3)
+                .frame(width: max(handleWidth * 2, endX - startX))
+                .offset(x: startX)
+
+            handle(at: startX, isStart: true)
+            handle(at: endX - handleWidth, isStart: false)
+        }
+        .frame(width: width)
+        .contentShape(.rect)
+        // One gesture over the whole bar rather than one per handle. A gesture
+        // attached to a 16-point handle reports positions in *that* view's
+        // coordinate space, so the arithmetic that turns a touch into a time
+        // was working from a sixteen-point-wide world.
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if dragging == nil {
+                        let x = value.startLocation.x
+                        dragging = abs(x - startX) <= abs(x - endX) ? .start : .end
+                    }
+                    let time = TimeInterval(value.location.x / max(width, 1)) * duration
+                    switch dragging {
+                    case .start:
+                        start = min(max(0, time), end - minimumSpan)
+                    case .end:
+                        end = max(min(duration, time), start + minimumSpan)
+                    case nil:
+                        break
+                    }
+                }
+                .onEnded { _ in dragging = nil }
+        )
+    }
+
+    private func handle(at x: CGFloat, isStart: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 5)
+            .fill(Color.yellow)
+            .frame(width: handleWidth)
+            .overlay {
+                Image(systemName: isStart ? "chevron.compact.left" : "chevron.compact.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.black.opacity(0.55))
+            }
+            .offset(x: x)
+            .allowsHitTesting(false)
     }
 }

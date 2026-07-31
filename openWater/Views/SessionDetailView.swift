@@ -164,6 +164,23 @@ struct SessionDetailView: View {
         }
     }
 
+    /// Apply a trim and re-analyse.
+    ///
+    /// Off the main actor because a trim re-runs the whole analysis on the
+    /// surviving fixes, which on a three-hour track is real work. Nothing is
+    /// destroyed — `trimmed(to:)` keeps the full recording alongside, so this
+    /// is reversible and can be widened again later.
+    private func applyTrim(_ trim: SessionTrim, to session: Session) {
+        let categories = settings.categories
+        Task {
+            let trimmed = await Task.detached {
+                session.trimmed(to: trim, categories: categories)
+            }.value
+            library.save(trimmed)
+            await loadSession()
+        }
+    }
+
     // MARK: - Content
 
     @ViewBuilder
@@ -204,7 +221,8 @@ struct SessionDetailView: View {
             summary: summary,
             selectedRun: $selectedRun,
             onFullScreen: { isMapFullScreen = true },
-            onReplay: { isPlayingBack = true }
+            onReplay: { isPlayingBack = true },
+            onTrim: { trim in applyTrim(trim, to: session) }
         )
     }
 

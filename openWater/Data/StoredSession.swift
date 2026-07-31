@@ -62,6 +62,16 @@ final class StoredSession {
     var gearIDs: [UUID]
     var photoNames: [String]
 
+    /// The code of the web share, if this session has ever been shared.
+    ///
+    /// Kept so a rider can get the same link back rather than scattering copies
+    /// of one session across the internet every time they tap Share. It is
+    /// deliberately *not* cleared by `update(with:)`: a link that has been sent
+    /// to someone keeps working, and pretending otherwise would be worse than
+    /// admitting the shared copy is a snapshot from when it was made.
+    var shareCode: String?
+    var sharedAt: Date?
+
     /// Bumped when the analysis engine changes, so stale rows can be found and
     /// recomputed rather than quietly showing numbers from an older algorithm.
     var analysisVersion: Int
@@ -113,6 +123,9 @@ final class StoredSession {
         self.fallCount = summary?.fallSummary.count ?? 0
         self.longestCleanStreak = summary?.fallSummary.longestCleanStreak ?? 0
         self.glideFraction = summary?.downwind.glideFraction ?? 0
+
+        self.shareCode = nil
+        self.sharedAt = nil
 
         self.archiveData = (try? SessionArchive(session: session).encoded()) ?? Data()
     }

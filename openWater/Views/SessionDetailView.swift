@@ -21,6 +21,7 @@ struct SessionDetailView: View {
     @State private var highlight: ClosedRange<TimeInterval>?
     @State private var foilingOnly = false
     @State private var isExporting = false
+    @State private var isSharingToWeb = false
     @State private var isMapFullScreen = false
     @State private var isPlayingBack = false
     @State private var isEditing = false
@@ -95,6 +96,8 @@ struct SessionDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Edit…", systemImage: "pencil") { isEditing = true }
+                    Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }
+                        .disabled(session == nil)
                     Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
                     Toggle("Flying only", systemImage: "airplane", isOn: $foilingOnly)
                 } label: {
@@ -104,6 +107,11 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isExporting) {
             ExportView(stored: stored)
+        }
+        .sheet(isPresented: $isSharingToWeb) {
+            if let session {
+                WebShareView(stored: stored, session: session)
+            }
         }
         .sheet(isPresented: $isEditing, onDismiss: reloadSession) {
             SessionEditView(stored: stored)

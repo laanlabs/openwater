@@ -239,20 +239,39 @@ Expected rating: 4+
 9. APP PRIVACY ("nutrition label")
 --------------------------------------------------------------------------
 
-Answer: "Data Not Collected".
+Answer: "Data Is Collected" — one category only, and only when the user asks
+for it.
 
-    This is accurate as the app currently stands, and it is worth keeping that
-    way. Every claim below is checkable in the source:
+    DATA TYPE:        Location — Precise Location
+    LINKED TO USER:   No
+    USED FOR TRACKING: No
+    PURPOSE:          App Functionality
+
+    Declare this because of one feature: "Share a Link". When a rider taps it,
+    openWater uploads a reduced copy of that session — the track, the speeds
+    and the splits — to Firebase Storage and returns a link they can send to
+    anyone. Nothing is uploaded until they tap it, and nothing else in the app
+    talks to a server.
+
+    Everything else remains true and is checkable in the source:
 
     • No analytics SDK, no crash reporter, no advertising identifier
-    • No network calls except Apple Maps tile loading, which is Apple's own
-      framework and is not data the developer collects
-    • Location, heart rate and motion never leave the device
+    • No account, no sign-in, no identifier of any kind attached to a share
+    • Recording, analysis, import and export all work with no network at all
+    • Location, heart rate and motion never leave the device otherwise
     • HealthKit is written to only, and only with the user's permission
-    • Export and sharing are user-initiated every time
 
-    If an analytics SDK or a sync server is ever added, this section must be
-    updated before that build ships.
+    What a share does NOT include: notes, gear, heart rate, the device model,
+    the raw GPS fixes, or any identifier. The first and last 200 m of the track
+    are trimmed by default so a shared map does not show the launch point.
+
+    Because there is no account, a share cannot be listed or deleted from
+    inside the app — the share screen says so before the upload, not after. If
+    that becomes a data-deletion problem under App Review's rules, the answer is
+    a per-share delete token, not silence.
+
+    If an analytics SDK or any further server feature is ever added, this
+    section must be updated before that build ships.
 
 Permission strings shipping in the build:
 
@@ -297,7 +316,16 @@ Permission strings shipping in the build:
     location background mode are needed because a session runs for one to three
     hours with the phone in a pocket or a waterproof pouch and the screen off;
     without background location the recording stops and the user loses their
-    session. No location data is transmitted anywhere.
+    session. Location data is transmitted only when the user taps "Share a
+    Link" on a finished session — see below.
+
+    SHARING A SESSION TO THE WEB
+    Session detail → ••• → "Share a Link" uploads a reduced copy of that one
+    session (track, speeds, splits) to Firebase Storage and returns a link at
+    openwater.app/s/<code>. It is the only feature that sends anything off the
+    device, it never happens automatically, and the screen states exactly what
+    is and is not included before the upload. There is no account: the 22-
+    character code in the link is what keeps a share unlisted.
 
     APPLE WATCH
     The watch app records independently and does not require the iPhone to be

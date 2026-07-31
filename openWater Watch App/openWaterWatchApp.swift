@@ -17,6 +17,12 @@ struct openWaterWatchApp: App {
                 .task {
                     await recorder.prepare()
                     sync.activate()
+
+                    // Screenshot capture: begin a real session so the live
+                    // screens have genuine data. No-op without the argument.
+                    if WatchScreenshotRoute.shouldAutoStart {
+                        recorder.start(sport: WatchScreenshotRoute.sport ?? settings.lastSport)
+                    }
                     // The phone owns the record book, so the watch asks for it
                     // at launch. Without it a live "personal best" alert would
                     // only ever mean "best so far today", which is not the same

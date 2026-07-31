@@ -14,7 +14,7 @@ struct LiveSessionView: View {
     @Environment(WatchSettings.self) private var settings
     @Environment(WatchSyncClient.self) private var sync
 
-    @State private var page: Page = .speed
+    @State private var page: Page = WatchScreenshotRoute.page ?? .speed
     @State private var showingEndConfirmation = false
 
     enum Page: Int, CaseIterable, Hashable {

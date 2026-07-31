@@ -165,7 +165,23 @@ public final class LiveAnalyzer: @unchecked Sendable {
         elapsed.append(t)
         cumulative.append((cumulative.last ?? 0) + step)
         speeds.append(smoothed)
-        courses.append(point.course.map(Geo.normalizeDegrees) ?? courses.last ?? 0)
+        // Course, derived from movement when the receiver does not supply it.
+        //
+        // `TrackBuilder` already does this for the post-session pass, but the
+        // live path did not — so on any device or import without a course
+        // channel the live heading sat at 000° forever, and the angles screen
+        // showed a compass permanently pointing north while the rider reached
+        // back and forth.
+        let derivedCourse: Double? = {
+            if let course = point.course, course >= 0, course.isFinite {
+                return Geo.normalizeDegrees(course)
+            }
+            // A short hop is dominated by position noise, so hold the previous
+            // heading rather than emitting a random one.
+            guard let previous = lastCoordinate, step > 1.5 else { return nil }
+            return Geo.bearing(from: previous, to: point.coordinate)
+        }()
+        courses.append(derivedCourse ?? courses.last ?? 0)
         lastCoordinate = point.coordinate
 
         return update(with: point, at: t, dt: dt, smoothed: smoothed)

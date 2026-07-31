@@ -208,14 +208,20 @@ Privacy Policy URL     [REQUIRED — see section 9]                       [VERIF
 Version           1.0
 Build             1
 Copyright         2026 Laan Labs                                        [VERIFY]
-Minimum iOS       26.2
-Minimum watchOS   26.2
+Minimum iOS       18.0
+Minimum watchOS   11.0
+Minimum macOS     15.0
+Minimum visionOS  2.0
 Devices           iPhone, iPad, Apple Watch
 
-    The 26.2 minimum is very high and excludes most devices in use today.
-    It is inherited from the project's deployment target. Lowering it to
-    iOS 17 / watchOS 10 would reach far more riders — the package already
-    supports those versions. Worth deciding before release. [VERIFY]
+    iOS 18 is the floor set by the two APIs the app genuinely relies on:
+    SwiftData's #Index macro and the value-based Tab initialiser. Going
+    lower would mean giving up query indexes and rewriting the tab bar,
+    for devices that iOS 18 already covers — it runs on iPhone XR/XS and
+    later. The larger gain over the previous 26.2 setting is reaching
+    riders who simply have not updated yet.
+
+    watchOS 11 pairs with iOS 18 and covers Apple Watch Series 6 and later.
 
 
 --------------------------------------------------------------------------
@@ -315,18 +321,25 @@ Contact               [VERIFY — name, email, phone]
 11. SCREENSHOTS
 --------------------------------------------------------------------------
 
-Required sizes and what is in Marketing/screenshots:
+Required sizes and what is in Marketing/screenshots/appstore:
 
-    iPhone 6.9"   1320 x 2868   REQUIRED   raw/iphone, appstore/iphone
-    iPad 13"      2064 x 2752   REQUIRED   raw/ipad,   appstore/ipad
+    iPhone 6.9"   1320 x 2868   iphone-6.9
+    iPhone 6.7"   1284 x 2778   iphone-6.7
+    iPhone 6.5"   1242 x 2688   iphone-6.5
+    iPad 13"      2064 x 2752   ipad-13
+    Watch 49mm     410 x  502   watch-410x502
+    Watch 46mm     416 x  496   watch-416x496
 
-    Apple accepts these two sizes alone and scales them for smaller devices,
-    so no other size is needed.
+    All three iPhone sizes are provided because App Store Connect's required
+    size depends on which display slot the app record uses, and it rejects
+    anything that is not an exact match. Upload whichever it asks for.
 
-    Apple Watch    Only required if the watch app is listed with its own
-                   screenshots. 410 x 502 for Series 10 / Ultra. NOT YET
-                   CAPTURED — the watchOS simulator runtime would need to be
-                   installed to produce these. [VERIFY]
+    The watch screenshots are plain captures rather than composed panels:
+    a watch screenshot is 410 points wide on the listing, and headline text
+    composited at that size is illegible. They were captured from a genuine
+    recording session — the simulator was driven along a real route with
+    `simctl location`, so the speeds, splits and flight timer on them were
+    all actually computed.
 
 Order (most compelling first — most viewers never scroll past the third):
 
@@ -363,14 +376,11 @@ readable — better than any static frame.
 13. PRE-SUBMISSION CHECKLIST
 --------------------------------------------------------------------------
 
-    [ ] Decide the deployment target (see section 7) — 26.2 excludes almost
-        everyone today
     [ ] Confirm the app name is available in App Store Connect
     [ ] Publish a privacy policy and put its URL in section 6
     [ ] Fill in the review contact details
     [ ] Confirm the copyright holder name
     [ ] Add an App Store icon (1024x1024, no alpha, no rounded corners) —
         openWater/Assets.xcassets/AppIcon.appiconset/icon-1024.png
-    [ ] Capture Apple Watch screenshots if listing the watch app separately
     [ ] Archive and validate the build in Xcode
     [ ] Confirm HealthKit entitlement is present on the watch target

@@ -12,15 +12,25 @@ one command regenerates the whole set rather than leaving stale art behind.
 Marketing/
 ├── AppStore-Metadata.txt      Everything App Store Connect asks for
 ├── capture-screenshots.sh     Drives a simulator, captures raw screens
+├── build-appstore-assets.sh   Raw captures → every required size
 ├── Compose.swift              Composes raw screens into marketing panels
 └── screenshots/
     ├── raw/                   Straight device captures, no styling
     │   ├── iphone/            1320 x 2868
-    │   └── ipad/              2064 x 2752
-    └── appstore/              Branded panels with headlines and CTAs
-        ├── iphone/            1320 x 2868  ← upload these
-        └── ipad/              2064 x 2752  ← and these
+    │   ├── ipad/              2064 x 2752
+    │   └── watch/              422 x  514
+    └── appstore/              ← upload these
+        ├── iphone-6.9/        1320 x 2868
+        ├── iphone-6.7/        1284 x 2778
+        ├── iphone-6.5/        1242 x 2688
+        ├── ipad-13/           2064 x 2752
+        ├── watch-410x502/      410 x  502
+        └── watch-416x496/      416 x  496
 ```
+
+All three iPhone sizes are produced because App Store Connect's required size
+depends on which display slot the app record uses, and it rejects anything that
+is not an exact match. Upload whichever it asks for.
 
 ## Regenerating
 
@@ -32,11 +42,36 @@ xcodebuild -scheme openWater -destination 'platform=iOS Simulator,name=iPhone 17
 ./Marketing/capture-screenshots.sh <iphone-simulator-udid> Marketing/screenshots/raw/iphone
 ./Marketing/capture-screenshots.sh <ipad-simulator-udid>   Marketing/screenshots/raw/ipad
 
-swift Marketing/Compose.swift Marketing/screenshots/raw/iphone Marketing/screenshots/appstore/iphone 1320 2868 iphone
-swift Marketing/Compose.swift Marketing/screenshots/raw/ipad   Marketing/screenshots/appstore/ipad   2064 2752 ipad
+./Marketing/build-appstore-assets.sh
 ```
 
-`xcrun simctl list devices` gives the UDIDs.
+`xcrun simctl list devices` gives the UDIDs. The last step turns the raw
+captures into every required size and verifies the dimensions.
+
+## Apple Watch
+
+The watch screenshots are captures of a **real recording session**, not mocked
+data. The simulator was driven along a course with `simctl location`, so the
+speeds, splits, distance and flight timer visible on them were all genuinely
+computed by the same engine that runs on a wrist:
+
+```bash
+xcrun simctl boot <watch-udid>
+xcodebuild -scheme "openWater Watch App" -destination "platform=watchOS Simulator,id=<watch-udid>" -derivedDataPath /tmp/ow-watch build
+xcrun simctl install <watch-udid> "/tmp/ow-watch/Build/Products/Debug-watchsimulator/openWater Watch App.app"
+
+xcrun simctl location <watch-udid> start --speed=9 \
+  37.8450,-122.3400 37.8490,-122.3330 37.8450,-122.3260 37.8410,-122.3330
+```
+
+Then launch the app, tap Start, and capture each page with
+`xcrun simctl io <watch-udid> screenshot`. Paging needs taps because Water Lock
+engages at session start, so this part is not scripted.
+
+Two of the watch captures show simulator limitations rather than app ones, and
+are excluded from the marketing set for that reason: the angles page has no
+wind set, and the foil page correctly reports "no motion sensor" because a
+simulator has no accelerometer. Both behave differently on real hardware.
 
 ## How the capture works
 
@@ -62,10 +97,6 @@ charged battery, which is what Apple's own screenshots use.
 `AppStore-Metadata.txt` has a checklist at the end. The items that genuinely
 block submission:
 
-- **Deployment target is iOS 26.2**, which excludes nearly every device in use
-  today. `OpenWaterCore` already supports iOS 17 / watchOS 10 — lowering the app
-  targets to match would reach vastly more riders.
 - **A privacy policy URL is required**, even though the app collects nothing.
-- **Apple Watch screenshots are not captured.** They need the watchOS simulator
-  runtime installed, and are only required if the watch app is listed with its
-  own screenshots.
+- **The app name must be checked for availability** in App Store Connect.
+- **Review contact details and the copyright holder** still need filling in.

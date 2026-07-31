@@ -49,7 +49,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Privacy when sharing")
                 } footer: {
-                    Text("The start and end of a track are usually your car or your home. Trimming them is on by default for anything you share. Your own copy is never changed.")
+                    Text("The start and end of a track are usually your car or your home, and they are the part of a shared file that identifies where you launch. Trimming them is on by default for anything you share, and your own copy is never changed.\n\nThis is not an exclusion zone: if you sail back over your launch point during a session, those passes stay in the track.")
                 }
 
                 Section("Apple Watch") {

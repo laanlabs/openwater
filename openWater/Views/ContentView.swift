@@ -4,20 +4,26 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
+
+    @State private var selection: ScreenshotRoute.Tab = .sessions
+
     var body: some View {
-        TabView {
-            Tab("Sessions", systemImage: "list.bullet") {
+        TabView(selection: $selection) {
+            Tab("Sessions", systemImage: "list.bullet", value: ScreenshotRoute.Tab.sessions) {
                 SessionListView()
             }
-            Tab("Records", systemImage: "trophy") {
+            Tab("Records", systemImage: "trophy", value: ScreenshotRoute.Tab.records) {
                 RecordsView()
             }
-            Tab("Trends", systemImage: "chart.xyaxis.line") {
+            Tab("Trends", systemImage: "chart.xyaxis.line", value: ScreenshotRoute.Tab.trends) {
                 TrendsView()
             }
-            Tab("Settings", systemImage: "gearshape") {
+            Tab("Settings", systemImage: "gearshape", value: ScreenshotRoute.Tab.settings) {
                 SettingsView()
             }
+        }
+        .onAppear {
+            if let route = ScreenshotRoute.requested { selection = route.tab }
         }
     }
 }
@@ -44,6 +50,9 @@ struct SessionListView: View {
     @State private var currentImport: ImportedTrack?
     @State private var importQueue: [ImportedTrack] = []
 
+    /// Navigation path, so a screenshot route can push a session without a tap.
+    @State private var path: [UUID] = []
+
     private var filtered: [StoredSession] {
         guard let sportFilter else { return sessions }
         return sessions.filter { $0.sport == sportFilter }
@@ -56,7 +65,7 @@ struct SessionListView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if sessions.isEmpty {
                     EmptyLibraryView(isImporting: $isImporting, isRecording: $isRecording)
@@ -68,9 +77,7 @@ struct SessionListView: View {
                                 .listRowBackground(Color.clear)
                         }
                         ForEach(filtered) { session in
-                            NavigationLink {
-                                SessionDetailView(stored: session)
-                            } label: {
+                            NavigationLink(value: session.id) {
                                 SessionRow(session: session)
                             }
                         }
@@ -79,7 +86,15 @@ struct SessionListView: View {
                     .listStyle(.plain)
                 }
             }
+            .navigationDestination(for: UUID.self) { id in
+                if let stored = library.session(id: id) {
+                    SessionDetailView(stored: stored)
+                }
+            }
             .navigationTitle("Sessions")
+            .onChange(of: sessions.count, initial: true) { _, _ in
+                applyScreenshotRouteIfNeeded()
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     watchStatus
@@ -216,30 +231,20 @@ struct SessionListView: View {
         currentImport = importQueue.isEmpty ? nil : importQueue.removeFirst()
     }
 
+    /// Push the first session when launched with a screenshot route that needs
+    /// one. No-op in normal use — `ScreenshotRoute.requested` is nil unless the
+    /// capture script passed the argument.
+    private func applyScreenshotRouteIfNeeded() {
+        guard let route = ScreenshotRoute.requested,
+              route.opensSession,
+              path.isEmpty,
+              let first = sessions.first else { return }
+        path = [first.id]
+    }
+
     /// A synthetic session, so the app is explorable without getting wet.
     private func addDemoSession() {
-        var points = SyntheticTrack.wingSession(runs: 14, runDuration: 75)
-        // Give it motion data so flights, falls and the ribbon all have
-        // something real to work with.
-        for i in points.indices {
-            points[i].verticalAccelSD = (points[i].speed ?? 0) > 5 ? 0.4 : 2.6
-            points[i].verticalAccelPeak = (points[i].speed ?? 0) > 5 ? 1.8 : 8.0
-        }
-        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
-        let summary = SessionAnalyzer(
-            configuration: .init(sport: .wingfoil, categories: settings.categories)
-        ).analyse(track)
-
-        library.save(Session(
-            sport: .wingfoil,
-            startDate: track.startDate ?? Date(),
-            endDate: track.endDate ?? Date(),
-            track: track,
-            notes: "Demo session — generated, not recorded.",
-            spotName: "Demo Bay",
-            wind: summary.wind,
-            summary: summary
-        ))
+        library.save(DemoData.wingSession(categories: settings.categories))
     }
 }
 

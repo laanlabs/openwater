@@ -1,0 +1,376 @@
+openWater — App Store Connect metadata
+======================================
+
+Everything App Store Connect asks for, ready to paste. Character limits are
+noted; the values below are already within them.
+
+Fields marked [VERIFY] need a decision or a real URL before submission — they
+are placeholders, not facts.
+
+
+--------------------------------------------------------------------------
+1. APP INFORMATION
+--------------------------------------------------------------------------
+
+App Name (30 max)
+    openWater
+
+    Uses 10 of 30. Note that App Store names must be unique — check
+    availability in App Store Connect before committing to it. [VERIFY]
+
+Subtitle (30 max)
+    Speed & foil tracker
+
+    Alternatives, all within 30:
+        Wing, foil & downwind speed     (28)
+        GPS speed for wing & foil       (25)
+        Foil speed, splits & angles     (27)
+
+Bundle ID
+    com.laan.labs.openWater
+
+Primary Language
+    English (U.S.)
+
+SKU
+    openwater-ios-001
+
+Primary Category
+    Health & Fitness
+
+Secondary Category
+    Sports
+
+    Health & Fitness is primary because the app records workouts and writes
+    to HealthKit. Sports carries less competition but weaker discovery for
+    activity trackers.
+
+
+--------------------------------------------------------------------------
+2. PROMOTIONAL TEXT (170 max)
+--------------------------------------------------------------------------
+
+Editable without a new build — use it for seasonal or release messaging.
+
+    Now with full session replay: watch your track play back with speed
+    heatmapping, and see exactly where every flight, gybe and fall happened.
+
+    (149 characters)
+
+
+--------------------------------------------------------------------------
+3. DESCRIPTION (4000 max)
+--------------------------------------------------------------------------
+
+openWater is a GPS speed and technique tracker for wingfoiling, parawinging,
+downwinding, windsurfing, kitesurfing and sailing. It is open source, works
+entirely offline, and never asks you to create an account.
+
+RECORD ON YOUR WATCH OR YOUR PHONE
+
+Start a session in one tap. The Apple Watch app runs standalone — it does not
+need your phone nearby, or even installed. Water Lock engages automatically,
+and the session keeps recording with the screen off and your wrist down. Your
+track is written to disk continuously, so a flat battery or a crash costs you
+seconds, not your session.
+
+Seven live screens: speed, splits, session totals, wind angles, foil time,
+controls, and a racing start countdown you can sync to the committee boat's gun.
+
+SPEED, MEASURED PROPERLY
+
+Every category the speedsurfing community actually uses:
+
+• 2 second peak
+• Best 10 seconds, and the average of your 5 best 10-second runs
+• 100 m, 250 m, 500 m, 1 km, 2 km, nautical mile, 5 km, 10 km
+• Alpha 500 — a 500 m run with a gybe, finishing within 50 m of its start
+• 30 minute and 1 hour averages
+• Any custom distance you add, applied retroactively to sessions you already
+  recorded
+
+These are computed on the continuous track rather than snapped to the nearest
+GPS fix, because a single second of slop is ten metres at twenty knots. Speed
+comes from the receiver's Doppler measurement, not from differencing positions.
+
+SEE WHAT ACTUALLY HAPPENED
+
+An hour of winging in a bay is forty passes through the same water, and drawn
+as one line it is unreadable. openWater fixes that:
+
+• Flights are drawn bold, slow sections fade back, falls get a marker
+• Pick any single run and the other thirty-nine drop away
+• The Runs view drops the map entirely — one lane per run, stacked in time, so
+  nothing overlaps. It reads top to bottom like a score.
+• Replay the whole session with a playhead, speed heatmap and live readout
+
+FOR FOILERS
+
+• Time on foil, number of flights, longest flight, takeoff speed
+• How long your pump-up takes
+• Falls counted separately from touchdowns, because they are not the same thing
+• Longest clean run — the metric that keeps improving long after top speed stops
+
+FOR WING AND PARAWING
+
+• Wind direction worked out from your own track, with no weather service and no
+  internet needed
+• Polar curve, VMG upwind and downwind, tacking and gybing angles
+• Gybes and tacks detected and scored: entry speed, minimum speed, recovery
+  time, and whether you stayed on the foil
+• Port versus starboard comparison, so you can see the side you have been
+  quietly avoiding
+
+FOR DOWNWINDING
+
+• Glides detected from the pump-and-glide rhythm
+• Glide count, longest glide, and what share of the run was free
+• How often you linked to the next glide without dropping
+• The swell period you were riding
+
+YOUR DATA IS YOURS
+
+• Import GPX, TCX, FIT and CSV — Garmin, Coros, Suunto and most apps
+• Export GPX, TCX, CSV, GeoJSON, or a complete lossless archive
+• No account, no server, no tracking. Nothing leaves your device unless you
+  send it.
+• Sharing trims the start and end of your track by default, because those are
+  usually your car or your home
+
+HONEST NUMBERS
+
+Every session is graded for GPS quality. A figure computed without Doppler
+speed says so. A detected gybe or jump carries a confidence, and the raw
+samples are always kept so you can check anything. openWater will tell you when
+it does not know something rather than guessing.
+
+OPEN SOURCE
+
+The complete source, including every analysis algorithm, is public. If you
+disagree with how a number is calculated, you can read exactly what it does —
+and change it.
+
+    (about 3,300 characters)
+
+
+--------------------------------------------------------------------------
+4. KEYWORDS (100 characters max, comma separated, no spaces after commas)
+--------------------------------------------------------------------------
+
+Do not repeat words already in the app name or subtitle — Apple indexes those
+separately, so repeating them wastes the limit.
+
+    wingfoil,foiling,windsurf,kitesurf,gps,knots,sailing,downwind,parawing,
+    watersports,SUP,gybe
+
+    As one line (99 characters):
+
+wingfoil,foiling,windsurf,kitesurf,gps,knots,sailing,downwind,parawing,watersports,SUP,gybe
+
+    Deliberately excluded, and why:
+      "speed", "tracker", "foil"  — already in the name/subtitle
+      "wing"                      — covered by "wingfoil" as a substring match
+      "GPS speed"                 — Apple matches across keyword combinations,
+                                    so the individual words suffice
+
+
+--------------------------------------------------------------------------
+5. WHAT'S NEW (4000 max) — version 1.0
+--------------------------------------------------------------------------
+
+    First release.
+
+    Record on Apple Watch or iPhone, review every speed category the
+    speedsurfing community uses, and see your session as something you can
+    actually read — flights, falls and gybes marked, runs separated, and the
+    whole thing replayable.
+
+    Import from Garmin, Coros and Suunto. Export everything. No account.
+
+
+--------------------------------------------------------------------------
+6. URLS
+--------------------------------------------------------------------------
+
+Marketing URL          https://github.com/laanlabs/openwater            [VERIFY]
+Support URL            https://github.com/laanlabs/openwater/issues     [VERIFY]
+Privacy Policy URL     [REQUIRED — see section 9]                       [VERIFY]
+
+    A privacy policy URL is mandatory even for an app that collects nothing.
+    A short page stating that plainly is sufficient; GitHub Pages or a
+    PRIVACY.md rendered on the repo both work.
+
+
+--------------------------------------------------------------------------
+7. VERSION AND BUILD
+--------------------------------------------------------------------------
+
+Version           1.0
+Build             1
+Copyright         2026 Laan Labs                                        [VERIFY]
+Minimum iOS       26.2
+Minimum watchOS   26.2
+Devices           iPhone, iPad, Apple Watch
+
+    The 26.2 minimum is very high and excludes most devices in use today.
+    It is inherited from the project's deployment target. Lowering it to
+    iOS 17 / watchOS 10 would reach far more riders — the package already
+    supports those versions. Worth deciding before release. [VERIFY]
+
+
+--------------------------------------------------------------------------
+8. AGE RATING
+--------------------------------------------------------------------------
+
+Expected rating: 4+
+
+    All questionnaire answers are "None" / "No". The app has no user-generated
+    content, no ads, no in-app purchases, no gambling, no unrestricted web
+    access, and no contests.
+
+
+--------------------------------------------------------------------------
+9. APP PRIVACY ("nutrition label")
+--------------------------------------------------------------------------
+
+Answer: "Data Not Collected".
+
+    This is accurate as the app currently stands, and it is worth keeping that
+    way. Every claim below is checkable in the source:
+
+    • No analytics SDK, no crash reporter, no advertising identifier
+    • No network calls except Apple Maps tile loading, which is Apple's own
+      framework and is not data the developer collects
+    • Location, heart rate and motion never leave the device
+    • HealthKit is written to only, and only with the user's permission
+    • Export and sharing are user-initiated every time
+
+    If an analytics SDK or a sync server is ever added, this section must be
+    updated before that build ships.
+
+Permission strings shipping in the build:
+
+    NSLocationWhenInUseUsageDescription
+        openWater records your GPS track so it can measure your speed,
+        distance and runs.
+
+    NSLocationAlwaysAndWhenInUseUsageDescription
+        openWater records your GPS track while you are on the water, including
+        when your phone is in a pocket with the screen off.
+
+    NSMotionUsageDescription
+        openWater uses the motion sensors to tell when you are flying on the
+        foil, to count pumps, and to detect jumps.
+
+    NSHealthShareUsageDescription (watch)
+        openWater reads your heart rate during a session so your effort appears
+        alongside your speed.
+
+    NSHealthUpdateUsageDescription (watch)
+        openWater saves each session to Health as a workout, with its route, so
+        it counts toward your rings.
+
+
+--------------------------------------------------------------------------
+10. REVIEW NOTES
+--------------------------------------------------------------------------
+
+    openWater is a GPS speed tracker for watersports. No account is required
+    and there is nothing to sign in to.
+
+    TO TEST WITHOUT GOING ON THE WATER
+    The app ships with a demo session generator. On the Sessions tab, tap the
+    + button in the top right and choose "Add Demo Session". This creates a
+    complete wingfoil session and runs the full analysis on it, so every screen
+    — map, runs, charts, records, trends and session replay — can be reviewed
+    without recording anything.
+
+    LOCATION USE
+    Location is used only while a session is recording, which the user starts
+    explicitly with the Record button. The "always" authorization and the
+    location background mode are needed because a session runs for one to three
+    hours with the phone in a pocket or a waterproof pouch and the screen off;
+    without background location the recording stops and the user loses their
+    session. No location data is transmitted anywhere.
+
+    APPLE WATCH
+    The watch app records independently and does not require the iPhone to be
+    present. Completed sessions transfer to the iPhone when it is next
+    reachable.
+
+    HEALTHKIT
+    Used on the watch to keep the workout session alive (which is what allows
+    background GPS on watchOS), to read heart rate, and to save the finished
+    workout with its route. Declining Health permission does not prevent
+    recording.
+
+    OPEN SOURCE
+    Full source: https://github.com/laanlabs/openwater             [VERIFY]
+
+Demo account          Not required
+Contact               [VERIFY — name, email, phone]
+
+
+--------------------------------------------------------------------------
+11. SCREENSHOTS
+--------------------------------------------------------------------------
+
+Required sizes and what is in Marketing/screenshots:
+
+    iPhone 6.9"   1320 x 2868   REQUIRED   raw/iphone, appstore/iphone
+    iPad 13"      2064 x 2752   REQUIRED   raw/ipad,   appstore/ipad
+
+    Apple accepts these two sizes alone and scales them for smaller devices,
+    so no other size is needed.
+
+    Apple Watch    Only required if the watch app is listed with its own
+                   screenshots. 410 x 502 for Series 10 / Ultra. NOT YET
+                   CAPTURED — the watchOS simulator runtime would need to be
+                   installed to produce these. [VERIFY]
+
+Order (most compelling first — most viewers never scroll past the third):
+
+    1. Every speed category, measured properly
+    2. See what actually happened  (state-aware map)
+    3. Runs, unstacked              (Ribbon)
+    4. Replay the whole session
+    5. Angles, gybes and time on foil
+    6. Your record book
+    7. Progress that keeps moving   (trends)
+    8. Your data, your device
+
+Regenerate the raw captures at any time with:
+
+    Marketing/capture-screenshots.sh <simulator-udid> <output-dir>
+
+Compose the marketing versions with:
+
+    Marketing/compose-screenshots.sh
+
+
+--------------------------------------------------------------------------
+12. APP PREVIEW VIDEO (optional)
+--------------------------------------------------------------------------
+
+Not produced. The single strongest 15–30 second sequence would be the session
+replay: a track drawing itself in with the speed heatmap while the readout
+counts, then cutting to the Runs view resolving the same session into separate
+lanes. That shows the app's actual argument — that a track can be made
+readable — better than any static frame.
+
+
+--------------------------------------------------------------------------
+13. PRE-SUBMISSION CHECKLIST
+--------------------------------------------------------------------------
+
+    [ ] Decide the deployment target (see section 7) — 26.2 excludes almost
+        everyone today
+    [ ] Confirm the app name is available in App Store Connect
+    [ ] Publish a privacy policy and put its URL in section 6
+    [ ] Fill in the review contact details
+    [ ] Confirm the copyright holder name
+    [ ] Add an App Store icon (1024x1024, no alpha, no rounded corners) —
+        openWater/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+    [ ] Capture Apple Watch screenshots if listing the watch app separately
+    [ ] Archive and validate the build in Xcode
+    [ ] Confirm HealthKit entitlement is present on the watch target

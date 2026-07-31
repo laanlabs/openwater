@@ -34,9 +34,13 @@ public enum SyntheticTrack {
     ///   - speedAccuracy: reported speed accuracy, or `nil` to omit Doppler
     ///     entirely so the derived-speed path gets exercised.
     ///   - noise: metres of Gaussian position jitter (deterministic — seeded).
-    /// Open water in the middle of San Francisco Bay — the default start, so a
-    /// generated demo track lands on water rather than through a city.
-    public static let defaultStart = Geo.Coordinate(latitude: 37.8265, longitude: -122.3720)
+    /// Open water in San Francisco Bay, between Treasure Island and Berkeley.
+    ///
+    /// Picked so a generated session of a couple of kilometres stays on water in
+    /// every direction. The obvious-looking coordinates near the city are all on
+    /// land or too close to it, and a demo track drawn across somebody's street
+    /// grid undermines the thing it is demonstrating.
+    public static let defaultStart = Geo.Coordinate(latitude: 37.8450, longitude: -122.3400)
 
     public static func generate(
         legs: [Leg],
@@ -157,11 +161,19 @@ public enum SyntheticTrack {
 
         for i in 0..<runs {
             let downwindish = i.isMultiple(of: 2)
-            // Alternate tack every run, and alternate upwind/downwind so the
-            // track closes on itself the way a real session does.
+            // Alternate between a downwind reach and an upwind one, flipping
+            // tack every pair, so the four-run cycle is SE, NE, SW, NW — which
+            // sums to roughly zero and keeps the session inside a bay instead of
+            // marching off in one direction.
+            //
+            // With the wind from `windFrom`, upwind is `windFrom ± 45` and
+            // downwind is `windFrom ± 135`. Both are measured from the wind
+            // direction itself; adding 180 to the upwind leg (as this did
+            // originally) points it downwind too, which produced a track with
+            // only two heading modes and no upwind component at all.
             let offset: Double = downwindish ? 135 : 45
             let sign: Double = (i / 2).isMultiple(of: 2) ? 1 : -1
-            let heading = Geo.normalizeDegrees(windFrom + sign * offset + (downwindish ? 0 : 180))
+            let heading = Geo.normalizeDegrees(windFrom + sign * offset)
             let base = i == burstOnRun ? burstSpeed : cruiseSpeed
 
             // Break the run into gust-length chunks so speed is never flat.

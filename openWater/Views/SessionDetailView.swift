@@ -23,6 +23,18 @@ struct SessionDetailView: View {
     @State private var isMapFullScreen = false
     @State private var isPlayingBack = false
 
+    /// Apply a screenshot route's segment and full-screen state. Inert unless
+    /// the capture script passed `-openWaterScreen`.
+    private func applyScreenshotRouteIfNeeded() {
+        guard let route = ScreenshotRoute.requested else { return }
+        if let mode = route.detailMode { view = mode }
+        switch route {
+        case .playback: isPlayingBack = true
+        case .fullScreenMap: isMapFullScreen = true
+        default: break
+        }
+    }
+
     enum Mode: String, CaseIterable, Identifiable {
         case map = "Map"
         case ribbon = "Runs"
@@ -56,6 +68,7 @@ struct SessionDetailView: View {
             session = await Task.detached {
                 try? SessionArchive.decode(data).upToDateSession()
             }.value
+            applyScreenshotRouteIfNeeded()
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

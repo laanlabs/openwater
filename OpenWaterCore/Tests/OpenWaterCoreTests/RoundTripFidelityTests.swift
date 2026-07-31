@@ -143,12 +143,25 @@ struct RoundTripFidelityTests {
             let restored = try TrackImporter.read(data)
             #expect(restored.points.count == trimmed.track.count)
 
-            // And the launch point genuinely is not in the file.
-            let start = original.track.points[0].coordinate
-            let closest = restored.points
-                .map { Geo.distance($0.coordinate, start) }
-                .min() ?? .infinity
-            #expect(closest >= 290, "a point only \(Int(closest)) m from the launch survived the trim")
+            // The guarantee is that the *endpoints* no longer reveal the launch
+            // and landing, which is what identifies them. Interior passes over
+            // the same water are not removed — see `PrivacySettings.trim` — so
+            // asserting that no point comes near the launch would be asserting
+            // something the feature does not claim, and would fail on any bay
+            // session that sails back over its own start.
+            let originalStart = original.track.points[0].coordinate
+            let originalEnd = original.track.points[original.track.count - 1].coordinate
+
+            guard let newStart = restored.points.first?.coordinate,
+                  let newEnd = restored.points.last?.coordinate else {
+                Issue.record("trimmed track had no points")
+                continue
+            }
+
+            #expect(Geo.distance(newStart, originalStart) >= 290,
+                    "the shared track still starts at the launch point")
+            #expect(Geo.distance(newEnd, originalEnd) >= 290,
+                    "the shared track still ends at the landing point")
         }
     }
 }

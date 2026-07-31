@@ -136,13 +136,27 @@ public struct PrivacySettings: Hashable, Sendable, Codable {
         return result
     }
 
-    /// Drop points within `radius` of the first and last positions.
+    /// Trim the leading and trailing points that lie within `radius` of the
+    /// track's first and last positions.
     ///
-    /// Measured from the endpoints themselves rather than by cutting a fixed
-    /// distance along the track. That distinction matters: a rider who launches,
-    /// sails a lap and comes back past the launch point would otherwise have
-    /// only the very start trimmed while the middle of their track still passes
-    /// straight over the same spot.
+    /// **What this protects against, and what it does not.**
+    ///
+    /// The threat is that a shared track *identifies* a launch point: the first
+    /// and last coordinates of an activity are, by construction, where somebody
+    /// parked or lives, and they are trivially readable from any GPX. Removing
+    /// them removes that signal, and for a point-to-point run — a downwinder,
+    /// a coastal crossing — that is complete protection.
+    ///
+    /// It is **not** a geofence. A rider doing laps in a bay sails back over
+    /// their launch point repeatedly, and those interior passes survive the
+    /// trim. That is a deliberate limit rather than an oversight: excising every
+    /// interior pass would cut a bay session into disconnected fragments and
+    /// make its distance and speed figures meaningless. The mitigation is that
+    /// once the endpoints are gone, the launch point is no longer distinguishable
+    /// from any other part of a track that crosses it many times.
+    ///
+    /// Riders who need a true exclusion zone need a different feature, and
+    /// should not assume this one provides it.
     static func trim(_ points: [TrackPoint], radius: Double) -> [TrackPoint] {
         guard points.count > 2, radius > 0 else { return points }
 

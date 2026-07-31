@@ -498,6 +498,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-iOS.plist";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
@@ -505,7 +506,6 @@
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				INFOPLIST_FILE = Info-iOS.plist;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -546,6 +546,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-iOS.plist";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
@@ -553,7 +554,6 @@
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				INFOPLIST_FILE = Info-iOS.plist;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -695,13 +695,13 @@
 				DEVELOPMENT_TEAM = 34FWY7G2HB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-watchOS.plist";
 				INFOPLIST_KEY_CLKComplicationPrincipalClass = "";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "openWater reads your heart rate during a session so your effort appears alongside your speed.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "openWater saves each session to Health as a workout, with its route, so it counts toward your rings.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when the screen is off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
-				INFOPLIST_FILE = Info-watchOS.plist;
 				INFOPLIST_KEY_WKApplication = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.laan.labs.openWater;
 				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
@@ -738,13 +738,13 @@
 				DEVELOPMENT_TEAM = 34FWY7G2HB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Info-watchOS.plist";
 				INFOPLIST_KEY_CLKComplicationPrincipalClass = "";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "openWater reads your heart rate during a session so your effort appears alongside your speed.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "openWater saves each session to Health as a workout, with its route, so it counts toward your rings.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when the screen is off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
-				INFOPLIST_FILE = Info-watchOS.plist;
 				INFOPLIST_KEY_WKApplication = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.laan.labs.openWater;
 				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;

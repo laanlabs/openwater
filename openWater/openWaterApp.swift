@@ -40,7 +40,10 @@ struct openWaterApp: App {
                 .environment(sync)
                 .environment(settings)
                 .environment(recorder)
-                .task { sync.activate() }
+                .task {
+                    library.applyLaunchArgumentsIfNeeded()
+                    sync.activate()
+                }
                 .onChange(of: scenePhase) { _, phase in
                     // Push buffered fixes to disk whenever the app leaves the
                     // foreground. Recording continues in the background, but a

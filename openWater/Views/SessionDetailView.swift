@@ -12,6 +12,15 @@ struct SessionDetailView: View {
 
     let stored: StoredSession
 
+    /// Captured at construction, while the model is definitely valid, so every
+    /// later lookup can go through the store instead of through this reference.
+    private let id: UUID
+
+    init(stored: StoredSession) {
+        self.stored = stored
+        self.id = stored.id
+    }
+
     @Environment(SessionLibrary.self) private var library
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
@@ -42,7 +51,13 @@ struct SessionDetailView: View {
             session = nil
             return
         }
-        let data = stored.archiveData
+        // Fetched rather than read straight off the model this view is holding:
+        // the row can go while the screen is open, and an invalidated model
+        // traps on property access instead of returning nil.
+        guard let data = library.archiveData(id: id) else {
+            session = nil
+            return
+        }
         session = await Task.detached {
             try? SessionArchive.decode(data).upToDateSession()
         }.value

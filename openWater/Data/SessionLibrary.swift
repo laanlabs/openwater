@@ -59,6 +59,21 @@ final class SessionLibrary {
         return stored
     }
 
+    /// The encoded archive for a session, fetched fresh from the store.
+    ///
+    /// Never read `archiveData` off a `StoredSession` a view has been holding.
+    /// SwiftData invalidates a model when its row goes — deleted from another
+    /// screen, or a store migration that could not carry it — and touching a
+    /// property on an invalidated model is a trap, not an optional. It is not
+    /// catchable and it takes the app with it; the only safe read is one that
+    /// starts from a fetch.
+    func archiveData(id: UUID) -> Data? {
+        guard let stored = try? context.fetch(
+            FetchDescriptor<StoredSession>(predicate: #Predicate { $0.id == id })
+        ).first else { return nil }
+        return stored.archiveData.isEmpty ? nil : stored.archiveData
+    }
+
     func delete(_ stored: StoredSession) {
         context.delete(stored)
         persist()

@@ -1,32 +1,113 @@
-//
-//  openWaterApp.swift
-//  openWater
-//
-//  Created by jclaan on 7/30/26.
-//
-
-import SwiftUI
+import OpenWaterCore
 import SwiftData
+import SwiftUI
 
 @main
 struct openWaterApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
+    private let container: ModelContainer
+    @State private var library: SessionLibrary
+    @State private var sync: PhoneSyncClient
+    @State private var settings = AppSettings()
+    @State private var recorder = PhoneRecorder()
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let container: ModelContainer
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            container = try ModelContainer(for: StoredSession.self)
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // A store that will not open is almost always a schema mismatch
+            // during development. Falling back to memory keeps the app usable
+            // and makes the problem visible instead of crashing on launch.
+            container = try! ModelContainer(
+                for: StoredSession.self,
+                configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            )
         }
-    }()
+        self.container = container
+
+        let library = SessionLibrary(context: container.mainContext)
+        _library = State(initialValue: library)
+        _sync = State(initialValue: PhoneSyncClient(library: library))
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(library)
+                .environment(sync)
+                .environment(settings)
+                .environment(recorder)
+                .task { sync.activate() }
+                .onChange(of: scenePhase) { _, phase in
+                    // Push buffered fixes to disk whenever the app leaves the
+                    // foreground. Recording continues in the background, but a
+                    // termination there is silent — flushing here bounds the
+                    // loss to seconds rather than the whole session.
+                    if phase != .active { recorder.flush() }
+                }
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(container)
+    }
+}
+
+/// Phone-side preferences.
+@MainActor
+@Observable
+final class AppSettings {
+
+    var units: UnitPreferences { didSet { persist() } }
+
+    /// Extra windows the rider has added — the "max speed over X km" they
+    /// actually care about, on top of the standard categories.
+    var customDistances: [Double] { didSet { persist() } }
+    var customDurations: [Double] { didSet { persist() } }
+
+    /// Privacy defaults applied when sharing.
+    var sharingPrivacy: PrivacySettings { didSet { persist() } }
+
+    /// Sport pre-selected when recording, so a rider who does the same thing
+    /// every session is one tap from starting.
+    var lastSport: Sport { didSet { persist() } }
+
+    /// Auto-pause when stationary. Off by default — a mistimed pause corrupts
+    /// the averages people care about.
+    var autoPauseWhileRecording: Bool { didSet { persist() } }
+
+    private let defaults = UserDefaults.standard
+
+    init() {
+        let speed = defaults.string(forKey: "speedUnit").flatMap(SpeedUnit.init(rawValue:)) ?? .knots
+        let distance = defaults.string(forKey: "distanceUnit").flatMap(DistanceUnit.init(rawValue:)) ?? .metric
+        units = UnitPreferences(speed: speed, distance: distance)
+        customDistances = defaults.array(forKey: "customDistances") as? [Double] ?? []
+        customDurations = defaults.array(forKey: "customDurations") as? [Double] ?? []
+        sharingPrivacy = defaults.data(forKey: "sharingPrivacy")
+            .flatMap { try? JSONDecoder().decode(PrivacySettings.self, from: $0) }
+            ?? .sharing
+        lastSport = defaults.string(forKey: "lastSport").flatMap(Sport.init(rawValue:)) ?? .wingfoil
+        autoPauseWhileRecording = defaults.bool(forKey: "autoPauseWhileRecording")
+    }
+
+    /// Every category to evaluate: the standards plus whatever the rider added.
+    var categories: [SpeedCategory] {
+        var all = SpeedCategory.standard
+        all += customDistances.sorted().map { SpeedCategory.distance(metres: $0) }
+        all += customDurations.sorted().map { SpeedCategory.time(seconds: $0) }
+        return all
+    }
+
+    private func persist() {
+        defaults.set(units.speed.rawValue, forKey: "speedUnit")
+        defaults.set(units.distance.rawValue, forKey: "distanceUnit")
+        defaults.set(customDistances, forKey: "customDistances")
+        defaults.set(customDurations, forKey: "customDurations")
+        defaults.set(lastSport.rawValue, forKey: "lastSport")
+        defaults.set(autoPauseWhileRecording, forKey: "autoPauseWhileRecording")
+        if let data = try? JSONEncoder().encode(sharingPrivacy) {
+            defaults.set(data, forKey: "sharingPrivacy")
+        }
     }
 }

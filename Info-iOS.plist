@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Only the keys Xcode's INFOPLIST_KEY_* build settings will not produce.
+
+	  UIBackgroundModes is silently dropped when supplied as
+	  INFOPLIST_KEY_UIBackgroundModes, and without it CoreLocation raises an
+	  exception the moment `allowsBackgroundLocationUpdates` is set — taking the
+	  app down at launch. Everything else stays in the build settings, where it
+	  is easier to keep in step with the watch target.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+</dict>
+</plist>

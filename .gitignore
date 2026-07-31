@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Xcode build output
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode's per-user scheme management — the schemes themselves are shared, but
+# which ones are visible and in what order is a personal preference.
+*.xcscmblueprint
+*.xccheckout

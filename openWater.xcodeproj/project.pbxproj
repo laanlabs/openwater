@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A0A0A0A000000000000000E4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E2 /* OpenWaterCore */; };
+		A0A0A0A000000000000000E5 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E3 /* OpenWaterCore */; };
+		A0A0A0A000000000000000F0 /* openWater Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A0A0A0A000000000000000E7 /* openWater Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A0A0A0A000000000000000F4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000F3 /* OpenWaterCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		7FDB7D80301C341100F5A563 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,12 +28,34 @@
 			remoteGlobalIDString = 7FDB7D6F301C341000F5A563;
 			remoteInfo = openWater;
 		};
+		A0A0A0A000000000000000F2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7FDB7D68301C341000F5A563 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A0A0A0A000000000000000E8;
+			remoteInfo = "openWater Watch App";
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A0A0A0A000000000000000EF /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				A0A0A0A000000000000000F0 /* openWater Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		7FDB7D70301C341000F5A563 /* openWater.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = openWater.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7FDB7D7F301C341100F5A563 /* openWaterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = openWaterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7FDB7D89301C341100F5A563 /* openWaterUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = openWaterUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0A0A0A000000000000000E7 /* openWater Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "openWater Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,6 +74,11 @@
 			path = openWaterUITests;
 			sourceTree = "<group>";
 		};
+		A0A0A0A000000000000000E6 /* openWater Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "openWater Watch App";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +86,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0A0A0A000000000000000E4 /* OpenWaterCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -59,6 +94,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0A0A0A000000000000000F4 /* OpenWaterCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +102,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0A0A0A000000000000000EA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A0A0A0A000000000000000E5 /* OpenWaterCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +122,7 @@
 				7FDB7D72301C341000F5A563 /* openWater */,
 				7FDB7D82301C341100F5A563 /* openWaterTests */,
 				7FDB7D8C301C341100F5A563 /* openWaterUITests */,
+				A0A0A0A000000000000000E6 /* openWater Watch App */,
 				7FDB7D71301C341000F5A563 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +133,7 @@
 				7FDB7D70301C341000F5A563 /* openWater.app */,
 				7FDB7D7F301C341100F5A563 /* openWaterTests.xctest */,
 				7FDB7D89301C341100F5A563 /* openWaterUITests.xctest */,
+				A0A0A0A000000000000000E7 /* openWater Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,16 +148,19 @@
 				7FDB7D6C301C341000F5A563 /* Sources */,
 				7FDB7D6D301C341000F5A563 /* Frameworks */,
 				7FDB7D6E301C341000F5A563 /* Resources */,
+				A0A0A0A000000000000000EF /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A0A0A0A000000000000000F1 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7FDB7D72301C341000F5A563 /* openWater */,
 			);
 			name = openWater;
 			packageProductDependencies = (
+				A0A0A0A000000000000000E2 /* OpenWaterCore */,
 			);
 			productName = openWater;
 			productReference = 7FDB7D70301C341000F5A563 /* openWater.app */;
@@ -135,6 +184,7 @@
 			);
 			name = openWaterTests;
 			packageProductDependencies = (
+				A0A0A0A000000000000000F3 /* OpenWaterCore */,
 			);
 			productName = openWaterTests;
 			productReference = 7FDB7D7F301C341100F5A563 /* openWaterTests.xctest */;
@@ -163,6 +213,29 @@
 			productReference = 7FDB7D89301C341100F5A563 /* openWaterUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A0A0A0A000000000000000E8 /* openWater Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A0A0A0A000000000000000EC /* Build configuration list for PBXNativeTarget "openWater Watch App" */;
+			buildPhases = (
+				A0A0A0A000000000000000E9 /* Sources */,
+				A0A0A0A000000000000000EA /* Frameworks */,
+				A0A0A0A000000000000000EB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A0A0A0A000000000000000E6 /* openWater Watch App */,
+			);
+			name = "openWater Watch App";
+			packageProductDependencies = (
+				A0A0A0A000000000000000E3 /* OpenWaterCore */,
+			);
+			productName = "openWater Watch App";
+			productReference = A0A0A0A000000000000000E7 /* openWater Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -184,6 +257,9 @@
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = 7FDB7D6F301C341000F5A563;
 					};
+					A0A0A0A000000000000000E8 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 				};
 			};
 			buildConfigurationList = 7FDB7D6B301C341000F5A563 /* Build configuration list for PBXProject "openWater" */;
@@ -195,6 +271,9 @@
 			);
 			mainGroup = 7FDB7D67301C341000F5A563;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A0A0A0A000000000000000E1 /* XCLocalSwiftPackageReference "OpenWaterCore" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7FDB7D71301C341000F5A563 /* Products */;
 			projectDirPath = "";
@@ -203,6 +282,7 @@
 				7FDB7D6F301C341000F5A563 /* openWater */,
 				7FDB7D7E301C341100F5A563 /* openWaterTests */,
 				7FDB7D88301C341100F5A563 /* openWaterUITests */,
+				A0A0A0A000000000000000E8 /* openWater Watch App */,
 			);
 		};
 /* End PBXProject section */
@@ -223,6 +303,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7FDB7D87301C341100F5A563 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0A0A0A000000000000000EB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -253,6 +340,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A0A0A0A000000000000000E9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -265,6 +359,12 @@
 			isa = PBXTargetDependency;
 			target = 7FDB7D6F301C341000F5A563 /* openWater */;
 			targetProxy = 7FDB7D8A301C341100F5A563 /* PBXContainerItemProxy */;
+		};
+		A0A0A0A000000000000000F1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = A0A0A0A000000000000000E8 /* openWater Watch App */;
+			targetProxy = A0A0A0A000000000000000F2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -398,10 +498,14 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_FILE = Info-iOS.plist;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -442,10 +546,14 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_FILE = Info-iOS.plist;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
@@ -575,6 +683,92 @@
 			};
 			name = Release;
 		};
+		A0A0A0A000000000000000ED /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "openWater Watch App/openWater Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 34FWY7G2HB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CLKComplicationPrincipalClass = "";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "openWater reads your heart rate during a session so your effort appears alongside your speed.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "openWater saves each session to Health as a workout, with its route, so it counts toward your rings.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when the screen is off.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
+				INFOPLIST_FILE = Info-watchOS.plist;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.laan.labs.openWater;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.laan.labs.openWater.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
+		A0A0A0A000000000000000EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "openWater Watch App/openWater Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 34FWY7G2HB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CLKComplicationPrincipalClass = "";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "openWater reads your heart rate during a session so your effort appears alongside your speed.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "openWater saves each session to Health as a workout, with its route, so it counts toward your rings.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when the screen is off.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
+				INFOPLIST_FILE = Info-watchOS.plist;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.laan.labs.openWater;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.laan.labs.openWater.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -614,7 +808,38 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A0A0A0A000000000000000EC /* Build configuration list for PBXNativeTarget "openWater Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0A0A0A000000000000000ED /* Debug */,
+				A0A0A0A000000000000000EE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A0A0A0A000000000000000E1 /* XCLocalSwiftPackageReference "OpenWaterCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = OpenWaterCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A0A0A0A000000000000000E2 /* OpenWaterCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterCore;
+		};
+		A0A0A0A000000000000000E3 /* OpenWaterCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterCore;
+		};
+		A0A0A0A000000000000000F3 /* OpenWaterCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 7FDB7D68301C341000F5A563 /* Project object */;
 }

@@ -1,0 +1,113 @@
+import Foundation
+import Testing
+@testable import OpenWaterCore
+
+@Suite("Session trim")
+struct SessionTrimTests {
+
+    /// Ten minutes of sitting still, twenty of sailing, five more of sitting —
+    /// the shape of a real recording where somebody hit record on the beach and
+    /// stopped it back at the car.
+    private func session() -> Session {
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 0.1, heading: 90, duration: 600),
+            .init(speed: 9, heading: 120, duration: 1200, transition: 10),
+            .init(speed: 0.1, heading: 120, duration: 300, transition: 10),
+        ])
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(track)
+        return Session(
+            sport: .wingfoil,
+            startDate: track.startDate ?? Date(),
+            endDate: track.endDate ?? Date(),
+            track: track,
+            wind: summary.wind,
+            summary: summary
+        )
+    }
+
+    @Test("Trimming lifts the averages that dead time was dragging down")
+    func trimImprovesAverages() {
+        let original = session()
+        let before = try! #require(original.summary)
+
+        let trimmed = original.trimmed(to: SessionTrim(startOffset: 600, endOffset: 1800))
+        let after = try! #require(trimmed.summary)
+
+        #expect(after.duration < before.duration)
+        #expect(after.averageSpeed > before.averageSpeed,
+                "average was \(before.averageSpeed), should rise once the sitting is cut")
+        // Essentially all the distance was covered while sailing. Not exactly
+        // all: the fixture drifts at 0.1 m/s rather than sitting perfectly
+        // still, which over fifteen minutes is a real hundred metres — as it
+        // would be on the water.
+        #expect(after.distance > before.distance * 0.95,
+                "trimmed \(after.distance) of \(before.distance) — the trim cut into the sailing")
+        #expect(after.distance <= before.distance)
+    }
+
+    @Test("Nothing is deleted — a trim can be widened again")
+    func trimIsReversible() {
+        let original = session()
+        let originalPoints = original.track.count
+
+        let trimmed = original.trimmed(to: SessionTrim(startOffset: 600, endOffset: 1800))
+        #expect(trimmed.track.count < originalPoints)
+        // The full recording is still there behind the trim.
+        #expect(trimmed.rawPoints.count == originalPoints)
+
+        let restored = trimmed.trimmed(to: .none)
+        #expect(restored.track.count == originalPoints)
+        #expect(restored.summary?.distance == original.summary?.distance)
+        #expect(restored.summary?.maxSpeed == original.summary?.maxSpeed)
+        // And with no trim in force it stops carrying a second copy.
+        #expect(restored.untrimmedPoints == nil)
+    }
+
+    @Test("An untrimmed session does not store its track twice")
+    func noDuplicateStorageWhenUntrimmed() {
+        let original = session()
+        #expect(original.untrimmedPoints == nil)
+        #expect(!original.trim.isTrimmed)
+    }
+
+    @Test("A suggested trim finds the sailing and leaves the sitting out")
+    func suggestsSensibleTrim() {
+        let original = session()
+        let suggestion = try! #require(original.suggestedTrim())
+
+        // Riding starts around 600 s in; the suggestion should land near there
+        // with a little padding, not chop into the sailing.
+        #expect(suggestion.startOffset > 500)
+        #expect(suggestion.startOffset < 620)
+
+        let end = try! #require(suggestion.endOffset)
+        #expect(end > 1780)
+        #expect(end < 1900)
+    }
+
+    @Test("A session that is riding throughout gets no suggestion")
+    func noSuggestionWhenNothingToTrim() {
+        let points = SyntheticTrack.constantSpeed(9, duration: 900)
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let session = Session(
+            sport: .wingfoil,
+            startDate: track.startDate ?? Date(),
+            endDate: track.endDate ?? Date(),
+            track: track,
+            summary: SessionAnalyzer(sport: .wingfoil).analyse(track)
+        )
+        #expect(session.suggestedTrim() == nil)
+    }
+
+    @Test("Trimming survives an archive round trip")
+    func trimSurvivesEncoding() throws {
+        let trimmed = session().trimmed(to: SessionTrim(startOffset: 600, endOffset: 1800))
+        let data = try SessionArchive(session: trimmed).encoded()
+        let restored = try SessionArchive.decode(data).session
+
+        #expect(restored.trim == trimmed.trim)
+        #expect(restored.rawPoints.count == trimmed.rawPoints.count)
+        #expect(restored.track.count == trimmed.track.count)
+    }
+}

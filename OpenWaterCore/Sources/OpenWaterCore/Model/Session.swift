@@ -50,6 +50,25 @@ public struct Session: Sendable, Codable, Identifiable {
     public var startBattery: Double?
     public var endBattery: Double?
 
+    /// Which part of the recording counts as the session.
+    ///
+    /// Recording never stops for a break — see `SessionTrim`. The boundaries are
+    /// moved afterwards instead, and stored rather than applied destructively.
+    public var trim: SessionTrim = .none
+
+    /// Every fix as recorded, before the trim.
+    ///
+    /// Only populated once a trim is in force. Without one the track already
+    /// *is* the whole recording, and keeping a second copy would double the
+    /// archive for nothing.
+    public var untrimmedPoints: [TrackPoint]?
+
+    /// Every fix that was recorded, trim or no trim.
+    ///
+    /// This is what a trim is recomputed from, which is what makes trimming
+    /// reversible: nothing is ever deleted.
+    public var rawPoints: [TrackPoint] { untrimmedPoints ?? track.points }
+
     /// Cached analysis. Recomputed when `analysisVersion` no longer matches the
     /// current engine.
     public var summary: SessionSummary?
@@ -102,6 +121,8 @@ public struct Session: Sendable, Codable, Identifiable {
         appVersion: String? = nil,
         startBattery: Double? = nil,
         endBattery: Double? = nil,
+        trim: SessionTrim = .none,
+        untrimmedPoints: [TrackPoint]? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -120,6 +141,8 @@ public struct Session: Sendable, Codable, Identifiable {
         self.appVersion = appVersion
         self.startBattery = startBattery
         self.endBattery = endBattery
+        self.trim = trim
+        self.untrimmedPoints = untrimmedPoints
         self.summary = summary
     }
 }

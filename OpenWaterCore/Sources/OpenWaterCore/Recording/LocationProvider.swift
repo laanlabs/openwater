@@ -56,6 +56,24 @@ public final class LocationProvider: NSObject {
         manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.distanceFilter = kCLDistanceFilterNone
         manager.activityType = .otherNavigation
+
+        // The single most important line here.
+        //
+        // `pausesLocationUpdatesAutomatically` defaults to **true**. When iOS
+        // decides the device has stopped moving it pauses the location stream
+        // and calls `locationManagerDidPauseLocationUpdates` — and it is under
+        // no obligation to ever resume. For a walking app that saves battery;
+        // for this one it silently ends the recording, and the rider finds out
+        // hours later that their session stops twenty minutes in.
+        //
+        // It misfires constantly on the water: sitting on the board between
+        // runs, drifting, or waiting for a gust all look like "stationary" to a
+        // heuristic tuned for someone who parked the car. Auto-pause is
+        // something openWater decides for itself, from speed, with a threshold
+        // the rider can see — not something CoreLocation does behind its back.
+        #if os(iOS)
+        manager.pausesLocationUpdatesAutomatically = false
+        #endif
         // Required for fixes to keep arriving with the screen off — without it
         // the stream stops as soon as the app is not frontmost, even inside a
         // workout session on the watch.
@@ -68,6 +86,13 @@ public final class LocationProvider: NSObject {
         // is backgrounded.
         if Self.declaresBackgroundLocationMode {
             manager.allowsBackgroundLocationUpdates = true
+            #if os(iOS)
+            // The blue pill in the status bar. Not optional in spirit: an app
+            // holding GPS in the background while the rider is in Messages
+            // should say so, and it doubles as the rider's own confirmation
+            // that the session is still running.
+            manager.showsBackgroundLocationIndicator = true
+            #endif
         } else {
             Self.logger.error(
                 "Info.plist does not list \"location\" in UIBackgroundModes — recording will stop when the app is backgrounded."
@@ -100,6 +125,12 @@ public final class LocationProvider: NSObject {
     /// Warm the receiver up before recording begins, so the first fixes of a
     /// session are not the worst ones.
     public func warmUp() {
+        manager.startUpdatingLocation()
+    }
+
+    /// Kick the stream back into life after the system stopped it.
+    func restart() {
+        manager.stopUpdatingLocation()
         manager.startUpdatingLocation()
     }
 }
@@ -137,6 +168,29 @@ extension LocationProvider: CLLocationManagerDelegate {
     public nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Self.logger.error("location failure: \(error.localizedDescription)")
     }
+
+    #if os(iOS)
+    /// iOS decided to pause the location stream.
+    ///
+    /// With `pausesLocationUpdatesAutomatically = false` this should never
+    /// arrive, but it is the failure that silently ends a recording with no way
+    /// for the rider to notice, so it is worth handling rather than trusting the
+    /// flag. Restarting costs nothing if it never fires and saves the session if
+    /// it does.
+    public nonisolated func locationManagerDidPauseLocationUpdates(_ manager: CLLocationManager) {
+        Self.logger.error("CoreLocation paused location updates — restarting")
+        Task { @MainActor in
+            // Restart through our own reference rather than the one handed to
+            // the callback, which is isolated to the delegate's context.
+            guard self.isRunning else { return }
+            self.restart()
+        }
+    }
+
+    public nonisolated func locationManagerDidResumeLocationUpdates(_ manager: CLLocationManager) {
+        Self.logger.info("CoreLocation resumed location updates")
+    }
+    #endif
 }
 
 extension TrackPoint {

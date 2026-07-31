@@ -87,10 +87,13 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Analysis version", value: "\(SessionSummary.currentVersion)")
+                    Link(destination: URL(string: "https://github.com/laanlabs/openwater")!) {
+                        Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Detected events — flights, gybes, falls, jumps — are labelled with a confidence and can be wrong. The raw samples are always kept so any number can be checked.")
+                    Text("Every feature is free, including the ones other apps charge for — the full speed categories, foiling analysis, gybe and tack analysis, session replay and the race countdown. There is no subscription, no trial and no account.\n\nDetected events — flights, gybes, falls, jumps — are labelled with a confidence and can be wrong. The raw samples are always kept so any number can be checked.")
                 }
             }
             .navigationTitle("Settings")

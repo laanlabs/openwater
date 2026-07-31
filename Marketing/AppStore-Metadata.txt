@@ -52,10 +52,10 @@ Secondary Category
 
 Editable without a new build — use it for seasonal or release messaging.
 
-    Now with full session replay: watch your track play back with speed
-    heatmapping, and see exactly where every flight, gybe and fall happened.
+    Every feature free: speed categories, foiling analysis, gybe stats,
+    splits, replay and a race countdown. No subscription, ever.
 
-    (149 characters)
+    (131 characters)
 
 
 --------------------------------------------------------------------------
@@ -65,6 +65,10 @@ Editable without a new build — use it for seasonal or release messaging.
 openWater is a GPS speed and technique tracker for wingfoiling, parawinging,
 downwinding, windsurfing, kitesurfing and sailing. It is open source, works
 entirely offline, and never asks you to create an account.
+
+Everything in it is free. No subscription, no trial, no locked features — the
+full speed categories, foiling analysis, gybe and tack analysis, distance
+splits, session replay and the race countdown are all just part of the app.
 
 RECORD ON YOUR WATCH OR YOUR PHONE
 

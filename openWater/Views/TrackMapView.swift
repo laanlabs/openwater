@@ -38,16 +38,48 @@ struct TrackMapView: View {
     /// Only draw stretches spent flying.
     var foilingOnly: Bool = false
 
+    /// Which ride states to draw. The point of separating flying from the rest
+    /// is that a foil session's track is two different activities on top of
+    /// each other, and looking at either one alone is far more readable than
+    /// looking at both.
+    var foilFilter: FoilFilter = .everything
+
+    /// Draw only up to this elapsed time. Used by the scrubber, so dragging
+    /// through the session reveals it in order instead of showing the finished
+    /// tangle all at once.
+    var partialUpTo: TimeInterval?
+
+    /// Where the scrubber is, marked on the track.
+    var playhead: TimeInterval?
+
     /// Base map. Satellite is worth having on water, where the standard map is
     /// a featureless blue field with nothing to orient by.
     var style: MapStyleOption = .standard
 
     @State private var camera: MapCameraPosition = .automatic
 
+    /// What counts as visible track.
+    enum FoilFilter: String, CaseIterable, Identifiable {
+        case everything = "Everything"
+        case foiling = "On foil"
+        case notFoiling = "Off foil"
+
+        var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .everything: "point.topleft.down.to.point.bottomright.curvepath"
+            case .foiling: "airplane"
+            case .notFoiling: "water.waves"
+            }
+        }
+    }
+
     var body: some View {
         Map(position: $camera) {
             // Ghost layer first, so the highlighted content draws over it.
-            if selectedRun != nil || highlight != nil || foilingOnly || minimumSpeed > 0 {
+            if selectedRun != nil || highlight != nil || foilingOnly
+                || foilFilter != .everything || minimumSpeed > 0 || partialUpTo != nil {
                 MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
                     .stroke(
                         style.isDark ? .white.opacity(0.28) : .gray.opacity(0.22),
@@ -91,6 +123,16 @@ struct TrackMapView: View {
                 }
             }
 
+            if let playhead, let position = session.track.coordinate(atElapsed: playhead) {
+                Annotation("", coordinate: position.clCoordinate, anchor: .center) {
+                    Playhead(
+                        speed: session.track.speed[session.track.index(atElapsed: playhead) ?? 0],
+                        maxSpeed: summary.maxSpeed
+                    )
+                }
+                .annotationTitles(.hidden)
+            }
+
             if let start = session.track.points.first?.clCoordinate {
                 Marker("Start", systemImage: "flag", coordinate: start)
                     .tint(.green)
@@ -111,6 +153,12 @@ struct TrackMapView: View {
         summary.segments.filter { segment in
             if let selectedRun, segment.runIndex != selectedRun { return false }
             if foilingOnly, segment.state != .foiling { return false }
+            switch foilFilter {
+            case .everything: break
+            case .foiling: if segment.state != .foiling { return false }
+            case .notFoiling: if segment.state == .foiling { return false }
+            }
+            if let partialUpTo, segment.startElapsed > partialUpTo { return false }
             if minimumSpeed > 0, segment.maxSpeed < minimumSpeed { return false }
             if let highlight {
                 let overlaps = segment.startElapsed <= highlight.upperBound
@@ -123,7 +171,14 @@ struct TrackMapView: View {
 
     private func coordinates(for segment: StateSegment) -> [CLLocationCoordinate2D] {
         guard segment.startIndex >= 0, segment.endIndex < session.track.count else { return [] }
-        return session.track.points[segment.startIndex...segment.endIndex].map(\.clCoordinate)
+        // Clip the segment the scrubber is inside, so the drawn track ends
+        // exactly at the playhead rather than jumping a whole segment ahead.
+        var end = segment.endIndex
+        if let partialUpTo, segment.endElapsed > partialUpTo {
+            end = min(end, session.track.index(atElapsed: partialUpTo) ?? segment.startIndex)
+        }
+        guard end > segment.startIndex else { return [] }
+        return session.track.points[segment.startIndex...end].map(\.clCoordinate)
     }
 
     // MARK: - Styling

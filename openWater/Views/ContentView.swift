@@ -20,15 +20,22 @@ struct ContentView: View {
         // Reading it from a view that ignores the bottom safe area is the only
         // way to get the number: the bar's own background has to run all the
         // way down past the home indicator, while its buttons stay above it.
+        // Stacked above the bar rather than inset behind it. A safe-area inset
+        // is the tidier construction and it only reaches content that reads the
+        // safe area — a screen that simply fills its space, like the session
+        // map with its panel pinned to the bottom, ran underneath the bar and
+        // had its controls cut in half. Nothing can do that to a VStack.
         GeometryReader { proxy in
-            ZStack {
-                page(.sessions) { SessionListView() }
-                page(.records) { RecordsView() }
-                page(.record) { RecordTabView(isActive: selection == .record) }
-                page(.trends) { TrendsView() }
-                page(.settings) { SettingsView() }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                ZStack {
+                    page(.sessions) { SessionListView() }
+                    page(.records) { RecordsView() }
+                    page(.record) { RecordTabView(isActive: selection == .record) }
+                    page(.trends) { TrendsView() }
+                    page(.settings) { SettingsView() }
+                }
+                .frame(maxHeight: .infinity)
+
                 OpenWaterTabBar(
                     selection: $selection,
                     isRecording: recorder.state != .idle,

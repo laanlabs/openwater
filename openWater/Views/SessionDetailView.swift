@@ -17,7 +17,7 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var session: Session?
-    @State private var view: Mode = .summary
+    @State private var view: Mode = .map
     @State private var selectedRun: Int?
     @State private var highlight: ClosedRange<TimeInterval>?
     @State private var foilingOnly = false
@@ -199,70 +199,13 @@ struct SessionDetailView: View {
     }
 
     private func mapView(session: Session, summary: SessionSummary) -> some View {
-        VStack(spacing: 0) {
-            TrackMapView(
-                session: session,
-                summary: summary,
-                selectedRun: selectedRun,
-                highlight: highlight,
-                showFalls: true,
-                showManeuvers: selectedRun != nil,
-                foilingOnly: foilingOnly,
-                style: settings.mapStyle
-            )
-            .frame(maxHeight: .infinity)
-            .overlay(alignment: .bottomLeading) {
-                SpeedLegend(
-                    maxSpeed: summary.maxSpeed,
-                    units: settings.units,
-                    onDark: settings.mapStyle.isDark
-                )
-                .padding(10)
-            }
-            .overlay(alignment: .topTrailing) {
-                // Sharing the screen with the scrubber and the metric grid
-                // leaves the map about a third of the display, which is enough
-                // to orient by and not enough to read a track in.
-                VStack(spacing: 8) {
-                    MapStyleButton(selection: Bindable(settings).mapStyle)
-
-                    Button {
-                        isMapFullScreen = true
-                    } label: {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.subheadline)
-                            .padding(9)
-                            .background(.regularMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Full screen map")
-
-                    Button {
-                        isPlayingBack = true
-                    } label: {
-                        Image(systemName: "play.fill")
-                            .font(.subheadline)
-                            .padding(9)
-                            .background(.regularMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Replay session")
-                }
-                .padding(10)
-            }
-
-            if !summary.runs.isEmpty {
-                runScrubber(summary: summary)
-            }
-
-            ScrollView {
-                MetricGrid(summary: summary, units: settings.units) { range in
-                    // Tapping a metric shows exactly where on the water it
-                    // happened — a number you cannot locate is hard to trust.
-                    withAnimation { highlight = range; selectedRun = nil }
-                }
-                .padding()
-            }
-            .frame(maxHeight: 320)
-        }
+        SessionMapTab(
+            session: session,
+            summary: summary,
+            selectedRun: $selectedRun,
+            onFullScreen: { isMapFullScreen = true },
+            onReplay: { isPlayingBack = true }
+        )
     }
 
     private func ribbonView(session: Session, summary: SessionSummary) -> some View {

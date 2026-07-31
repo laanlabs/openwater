@@ -36,6 +36,7 @@ enum ScreenshotRoute: String {
         switch self {
         case .records: .records
         case .trends: .trends
+        case .record: .record
         default: .sessions
         }
     }
@@ -59,6 +60,6 @@ enum ScreenshotRoute: String {
     }
 
     enum Tab: String, Hashable {
-        case sessions, records, trends, settings
+        case sessions, record, records, trends, settings
     }
 }

@@ -13,7 +13,20 @@ struct MetricGrid: View {
     let units: UnitPreferences
     var onSelect: (ClosedRange<TimeInterval>?) -> Void = { _ in }
 
+    /// Categories the session was too short or too slow to satisfy, hidden by
+    /// default.
+    ///
+    /// A twenty-minute session cannot have a one-hour average, and showing
+    /// eight greyed-out tiles saying so pushes the numbers that *do* exist off
+    /// the screen. They stay reachable — "not achieved" is information, and a
+    /// rider working toward a nautical mile wants to know how close they got —
+    /// but they should not be the first thing in view.
+    @State private var showsUnachieved = false
+
     private let columns = [GridItem(.adaptive(minimum: 96), spacing: 8)]
+
+    private var achieved: [SpeedResult] { summary.speedResults.filter(\.isValid) }
+    private var unachieved: [SpeedResult] { summary.speedResults.filter { !$0.isValid } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -41,12 +54,38 @@ struct MetricGrid: View {
                 .foregroundStyle(.secondary)
 
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(summary.speedResults) { result in
+                ForEach(achieved) { result in
                     CategoryTile(result: result, units: units) {
-                        onSelect(result.isValid
-                                 ? result.startElapsed...result.endElapsed
-                                 : nil)
+                        onSelect(result.startElapsed...result.endElapsed)
                     }
+                }
+            }
+
+            if !unachieved.isEmpty {
+                Button {
+                    withAnimation(.snappy) { showsUnachieved.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: showsUnachieved ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                        Text(showsUnachieved
+                             ? "Hide \(unachieved.count) not reached"
+                             : "\(unachieved.count) not reached this session")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+
+                if showsUnachieved {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(unachieved) { result in
+                            CategoryTile(result: result, units: units) {
+                                onSelect(nil)
+                            }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -372,6 +411,12 @@ struct FoilSummaryCard: View {
     let foil: FoilSummary
     let falls: FallSummary
     let units: UnitPreferences
+    /// Session total, so the on-foil distance can be shown as a share.
+    let totalDistance: Double
+    /// The speed above which the detector counts the board as flying.
+    let takeoffThreshold: Double
+    /// Set to make the threshold adjustable from here.
+    var onChangeThreshold: (() -> Void)?
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
 
@@ -383,10 +428,31 @@ struct FoilSummaryCard: View {
 
             LazyVGrid(columns: columns, spacing: 8) {
                 SummaryTile(label: "Time on foil", value: Format.duration(foil.timeOnFoil))
-                SummaryTile(label: "Of moving time", value: "\(Int(foil.foilingFraction * 100))%")
+                SummaryTile(label: "Time %", value: "\(Int(foil.foilingFraction * 100))%")
+                SummaryTile(
+                    label: "Distance on foil",
+                    value: Format.distance(foil.distanceOnFoil, unit: units.distance)
+                )
+                // Distance share is a different number from time share, and for
+                // a foiler it is usually the flattering one — you cover far more
+                // ground per minute up than down.
+                SummaryTile(
+                    label: "Distance %",
+                    value: totalDistance > 0
+                        ? "\(Int((foil.distanceOnFoil / totalDistance) * 100))%"
+                        : "—"
+                )
+                SummaryTile(
+                    label: "Avg speed on foil",
+                    value: Format.speed(foil.averageFlightSpeed, unit: units.speed, decimals: 1)
+                )
                 SummaryTile(label: "Flights", value: "\(foil.flightCount)")
                 if let longest = foil.longestFlight {
                     SummaryTile(label: "Longest flight", value: Format.duration(longest.duration))
+                    SummaryTile(
+                        label: "Longest segment",
+                        value: Format.distance(longest.distance, unit: units.distance)
+                    )
                 }
                 SummaryTile(
                     label: "Avg takeoff",
@@ -403,6 +469,22 @@ struct FoilSummaryCard: View {
                 if let recovery = falls.averageRecoveryTime {
                     SummaryTile(label: "Avg restart", value: Format.shortDuration(recovery))
                 }
+            }
+
+            // The takeoff threshold is a judgement call, not a constant: a big
+            // board on a big foil flies at a speed a small one is still
+            // ploughing at. Saying what was used — and letting it be changed —
+            // is the difference between a number a rider trusts and one they
+            // argue with.
+            if let onChangeThreshold {
+                Button {
+                    onChangeThreshold()
+                } label: {
+                    Text("Counting as flying above \(Format.speed(takeoffThreshold, unit: units.speed, decimals: 1)) · change")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
             }
 
             if !foil.usedMotionData {
@@ -539,5 +621,44 @@ struct QualityCard: View {
         case .fair: .orange
         case .poor: .red
         }
+    }
+}
+
+/// Shown on the charts tab when angles cannot be computed.
+///
+/// Everything angular — the polar, VMG, tacking and gybing angles, whether a
+/// turn was a tack or a gybe — is measured from the wind. When openWater cannot
+/// work it out from the track, those sections simply are not there, and a blank
+/// gap reads as a bug rather than as a missing input. This explains which it is
+/// and offers the one action that fixes it.
+struct NoWindCard: View {
+
+    let session: Session
+    let onSetWind: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("No wind direction for this session", systemImage: "wind")
+                .font(.subheadline.weight(.medium))
+
+            Text(explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Set the wind direction", systemImage: "pencil", action: onSetWind)
+                .font(.callout)
+                .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var explanation: String {
+        if let wind = session.effectiveWind, wind.confidence < 0.5 {
+            return "openWater tried to work the wind out from the shape of your track but was not confident enough to use the answer (\(Int(wind.confidence * 100))%). Your polar, VMG and tacking angles all measure from the wind, so they are not shown. Set it by hand and they will appear."
+        }
+        return "Your polar, VMG, tacking and gybing angles are all measured from the wind direction. openWater normally works it out from the shape of your track, but this session did not have enough upwind and downwind sailing for that to be reliable. Set it by hand and the angle sections will appear."
     }
 }

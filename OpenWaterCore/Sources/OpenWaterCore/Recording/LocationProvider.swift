@@ -32,6 +32,12 @@ public final class LocationProvider: NSObject {
     /// while the receiver is still cold.
     public private(set) var hasFix = false
 
+    /// Most recent position, whether or not a session is recording.
+    ///
+    /// Used by anything that needs to know roughly where the rider is before
+    /// they start — the map, and the weather lookup.
+    public private(set) var lastCoordinate: Geo.Coordinate?
+
     /// Whether the host app declares the `location` background mode.
     nonisolated static let declaresBackgroundLocationMode: Bool = {
         let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
@@ -119,6 +125,9 @@ extension LocationProvider: CLLocationManagerDelegate {
             if let last = accuracies.last {
                 self.latestAccuracy = last
                 if last >= 0, last < 30 { self.hasFix = true }
+            }
+            if let last = points.last, last.hasValidPosition {
+                self.lastCoordinate = last.coordinate
             }
             guard self.isRunning else { return }
             for point in points { self.onFix?(point) }

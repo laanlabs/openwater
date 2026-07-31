@@ -220,15 +220,24 @@ struct SessionDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 SpeedChart(session: session, summary: summary, units: settings.units)
+
                 if let polar = summary.polar {
                     PolarChart(polar: polar, units: settings.units)
                     AngleSummary(polar: polar, units: settings.units)
+                } else if session.sport.isWindPowered {
+                    // Silently omitting the angles section leaves a rider
+                    // wondering whether the app has them and they are lost, or
+                    // whether it never had them. Say which, and offer the fix.
+                    NoWindCard(session: session) { isEditing = true }
                 }
                 if summary.foil.flightCount > 0 {
                     FoilSummaryCard(
                         foil: summary.foil,
                         falls: summary.fallSummary,
-                        units: settings.units
+                        units: settings.units,
+                        totalDistance: summary.distance,
+                        takeoffThreshold: session.sport.thresholds.foilTakeoffSpeed,
+                        onChangeThreshold: { isEditing = true }
                     )
                 }
                 if summary.downwind.glideCount > 0 {

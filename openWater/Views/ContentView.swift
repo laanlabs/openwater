@@ -12,7 +12,10 @@ struct ContentView: View {
             Tab("Sessions", systemImage: "list.bullet", value: ScreenshotRoute.Tab.sessions) {
                 SessionListView()
             }
-            Tab("Records", systemImage: "trophy", value: ScreenshotRoute.Tab.records) {
+            Tab("Record", systemImage: "record.circle", value: ScreenshotRoute.Tab.record) {
+                RecordTabView()
+            }
+            Tab("Bests", systemImage: "trophy", value: ScreenshotRoute.Tab.records) {
                 RecordsView()
             }
             Tab("Trends", systemImage: "chart.xyaxis.line", value: ScreenshotRoute.Tab.trends) {
@@ -35,14 +38,12 @@ struct SessionListView: View {
     @Environment(SessionLibrary.self) private var library
     @Environment(PhoneSyncClient.self) private var sync
     @Environment(AppSettings.self) private var settings
-    @Environment(PhoneRecorder.self) private var recorder
 
     @Query(sort: \StoredSession.startDate, order: .reverse)
     private var sessions: [StoredSession]
 
     @State private var sportFilter: Sport?
     @State private var isImporting = false
-    @State private var isRecording = false
     @State private var importMessage: String?
 
     /// The file currently awaiting sport confirmation, and the rest of the
@@ -53,6 +54,13 @@ struct SessionListView: View {
 
     /// Navigation path, so a screenshot route can push a session without a tap.
     @State private var path: [UUID] = []
+
+    /// Sessions swiped for deletion, held until confirmed.
+    ///
+    /// A session is an hour on the water that cannot be recreated, and a swipe
+    /// is easy to do by accident while scrolling. Nothing is removed until the
+    /// rider says so, and the prompt names what will go.
+    @State private var pendingDeletion: [StoredSession] = []
 
     private var filtered: [StoredSession] {
         guard let sportFilter else { return sessions }
@@ -69,22 +77,9 @@ struct SessionListView: View {
         NavigationStack(path: $path) {
             Group {
                 if sessions.isEmpty {
-                    EmptyLibraryView(isImporting: $isImporting, isRecording: $isRecording)
+                    EmptyLibraryView(isImporting: $isImporting)
                 } else {
                     List {
-                        Section {
-                            StartSessionCard(
-                                sport: settings.lastSport,
-                                isRecording: recorder.state != .idle,
-                                elapsed: recorder.metrics.duration
-                            ) {
-                                isRecording = true
-                            }
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                        }
-
                         Section {
                             if availableSports.count > 1 {
                                 sportFilterBar
@@ -143,9 +138,6 @@ struct SessionListView: View {
             ) { result in
                 handleImport(result)
             }
-            .fullScreenCover(isPresented: $isRecording) {
-                RecordView()
-            }
             .sheet(item: $currentImport, onDismiss: advanceImportQueue) { track in
                 ImportView(imported: track) { sport in
                     // Building the session runs the full analysis, which on a
@@ -153,6 +145,19 @@ struct SessionListView: View {
                     // once, on an explicit action, and the result is cached.
                     library.save(track.makeSession(sport: sport))
                 }
+            }
+            .confirmationDialog(
+                "Delete session?",
+                isPresented: Binding(
+                    get: { !pendingDeletion.isEmpty },
+                    set: { if !$0 { pendingDeletion = [] } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { confirmDeletion() }
+                Button("Keep", role: .cancel) { pendingDeletion = [] }
+            } message: {
+                Text(deletionPrompt)
             }
             .alert("Import", isPresented: .constant(importMessage != nil)) {
                 Button("OK") { importMessage = nil }
@@ -197,9 +202,21 @@ struct SessionListView: View {
     // MARK: Actions
 
     private func delete(at offsets: IndexSet) {
-        for index in offsets {
-            library.delete(filtered[index])
+        pendingDeletion = offsets.map { filtered[$0] }
+    }
+
+    private func confirmDeletion() {
+        for session in pendingDeletion { library.delete(session) }
+        pendingDeletion = []
+    }
+
+    /// What the confirmation prompt calls the thing being deleted.
+    private var deletionPrompt: String {
+        guard let first = pendingDeletion.first else { return "" }
+        if pendingDeletion.count == 1 {
+            return "Delete \"\(first.displayTitle)\"? Its track and every metric go with it, and this cannot be undone."
         }
+        return "Delete \(pendingDeletion.count) sessions? Their tracks and every metric go with them, and this cannot be undone."
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -411,7 +428,6 @@ struct FilterChip: View {
 struct EmptyLibraryView: View {
 
     @Binding var isImporting: Bool
-    @Binding var isRecording: Bool
     @Environment(PhoneSyncClient.self) private var sync
 
     var body: some View {
@@ -425,88 +441,12 @@ struct EmptyLibraryView: View {
             }
         } actions: {
             VStack(spacing: 10) {
-                Button("Record a session") { isRecording = true }
-                    .buttonStyle(.borderedProminent)
+                Text("Use the Record tab to start one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button("Import a file") { isImporting = true }
+                    .buttonStyle(.borderedProminent)
             }
         }
-    }
-}
-
-// MARK: - Start card
-
-/// The primary action, sized for the situation it is actually used in.
-///
-/// Starting a session happens on a beach, in a wetsuit, with cold hands, often
-/// through a waterproof pouch — and frequently with the phone already half
-/// stowed. A toolbar glyph is the wrong control for that: it is small, it is at
-/// the top of the screen where a thumb cannot reach, and it gives no feedback
-/// through plastic.
-///
-/// So it is a full-width card at the top of the list, tall enough to hit
-/// without looking. When a session is already running it changes to show that
-/// and becomes the way back into it, because the second worst thing after
-/// failing to start a recording is not realising one is running.
-struct StartSessionCard: View {
-
-    let sport: Sport
-    let isRecording: Bool
-    let elapsed: TimeInterval
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(.white.opacity(0.22))
-                        .frame(width: 62, height: 62)
-                    Image(systemName: isRecording ? "waveform" : "record.circle")
-                        .font(.system(size: 30, weight: .medium))
-                        .foregroundStyle(.white)
-                        .symbolEffect(.pulse, isActive: isRecording)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isRecording ? "Recording" : "Start a session")
-                        .font(.title3.weight(.semibold))
-                    HStack(spacing: 6) {
-                        if isRecording {
-                            Text(Format.duration(elapsed))
-                                .monospacedDigit()
-                        } else {
-                            Image(systemName: sport.symbolName)
-                                .font(.caption)
-                            Text(sport.displayName)
-                        }
-                    }
-                    .font(.subheadline)
-                    .opacity(0.85)
-                }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.headline)
-                    .opacity(0.7)
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity)
-            .background(
-                LinearGradient(
-                    colors: isRecording
-                        ? [.red, .red.opacity(0.75)]
-                        : [.accentColor, .accentColor.opacity(0.78)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 18)
-            )
-            .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isRecording ? "Recording in progress. Open session." : "Start a \(sport.displayName) session")
     }
 }

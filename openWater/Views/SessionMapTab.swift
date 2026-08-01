@@ -437,17 +437,40 @@ extension SessionMapTab {
     /// that has never been trimmed, with the app's suggestion. Riders record
     /// from the car park; offering the obvious cut beats making them find it.
     func beginTrimming() {
-        if session.trim.isTrimmed {
-            trimStart = session.trim.startOffset
-            trimEnd = session.trim.endOffset ?? duration
-        } else if let suggested = session.suggestedTrim() {
-            trimStart = suggested.startOffset
-            trimEnd = suggested.endOffset ?? duration
+        // Seeded in the timeline that is on screen, never from the stored trim.
+        //
+        // `SessionTrim`'s offsets are measured from the start of the *recording*,
+        // while the chart and this screen's clock are the *trimmed* track — so
+        // feeding a stored trim straight back in put the end handle past the
+        // right-hand edge of a chart it no longer belonged to. On an
+        // already-trimmed session it read "from 21:08 to 45:12 of 30:01", with
+        // one handle off the screen entirely.
+        //
+        // So a second trim narrows what is already kept, which is both
+        // predictable and always visible. Widening is "Restore full recording"
+        // and start again — offered in the map menu.
+        if let suggested = session.suggestedTrim() {
+            trimStart = min(max(0, suggested.startOffset), duration)
+            trimEnd = min(suggested.endOffset ?? duration, duration)
         } else {
             trimStart = 0
             trimEnd = duration
         }
+        if trimEnd - trimStart < 10 {
+            trimStart = 0
+            trimEnd = duration
+        }
         withAnimation(.snappy) { isTrimming = true }
+    }
+
+    /// Convert the on-screen selection into offsets from the start of the
+    /// recording, which is what a `SessionTrim` means.
+    private var selectedTrim: SessionTrim {
+        // Left at the far right? Then whatever the end already was stays.
+        session.trim.narrowed(
+            start: trimStart,
+            end: trimEnd >= duration - 1 ? nil : trimEnd
+        )
     }
 
     var trimHeader: some View {
@@ -473,10 +496,7 @@ extension SessionMapTab {
                 .frame(maxWidth: .infinity)
 
                 Button("Trim") {
-                    onTrim(SessionTrim(
-                        startOffset: trimStart,
-                        endOffset: trimEnd < duration - 1 ? trimEnd : nil
-                    ))
+                    onTrim(selectedTrim)
                     withAnimation(.snappy) { isTrimming = false }
                 }
                 .buttonStyle(.borderedProminent)
@@ -487,7 +507,7 @@ extension SessionMapTab {
 
             // Said out loud because it is the difference between a rider using
             // this and being frightened of it: the fixes are all still there.
-            Text("Nothing is deleted — the full recording is kept and you can widen or undo the trim later.")
+            Text("Nothing is deleted. \"Restore full recording\" in the map menu puts every fix back, whenever you want it.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -520,8 +540,15 @@ struct TrimOverlay: View {
 
     private enum Edge { case start, end }
 
-    private var startX: CGFloat { CGFloat(start / max(duration, 1)) * width }
-    private var endX: CGFloat { CGFloat(end / max(duration, 1)) * width }
+    // Clamped on the way out as well as on the way in. A handle drawn from an
+    // out-of-range value does not look wrong, it looks *absent* — it is simply
+    // off the side of the chart, which is exactly how the last bug presented.
+    private var startX: CGFloat {
+        min(max(0, CGFloat(start / max(duration, 1)) * width), width - handleWidth)
+    }
+    private var endX: CGFloat {
+        min(max(handleWidth, CGFloat(end / max(duration, 1)) * width), width)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {

@@ -111,3 +111,66 @@ struct SessionTrimTests {
         #expect(restored.track.count == trimmed.track.count)
     }
 }
+
+@Suite("Trimming a trimmed session")
+struct NestedTrimTests {
+
+    /// Ten minutes of sitting, twenty of sailing, five of sitting again.
+    private func session() -> Session {
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 0.1, heading: 90, duration: 600),
+            .init(speed: 9, heading: 120, duration: 1200, transition: 10),
+            .init(speed: 0.1, heading: 120, duration: 300, transition: 10),
+        ])
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(track)
+        return Session(
+            sport: .wingfoil,
+            startDate: track.startDate ?? Date(),
+            endDate: track.endDate ?? Date(),
+            track: track,
+            wind: summary.wind,
+            summary: summary
+        )
+    }
+
+    @Test("A second selection is measured from what is on screen, not the recording")
+    func narrowingComposes() {
+        let first = SessionTrim(startOffset: 600, endOffset: 1800)
+        // The rider now sees a 20-minute session and drags in one minute at
+        // each end. In their clock that is 60 … 1140.
+        let second = first.narrowed(start: 60, end: 1140)
+
+        #expect(second.startOffset == 660)
+        #expect(second.endOffset == 1740)
+    }
+
+    @Test("Leaving the end alone keeps 'to the end' rather than pinning it")
+    func openEndedStaysOpen() {
+        let open = SessionTrim(startOffset: 600, endOffset: nil)
+        let narrowed = open.narrowed(start: 30, end: nil)
+
+        #expect(narrowed.startOffset == 630)
+        #expect(narrowed.endOffset == nil, "an open end must not become a timestamp")
+    }
+
+    @Test("Trimming twice keeps the result inside the recording")
+    func nestedTrimStaysInBounds() throws {
+        let original = session()
+        let recording = original.track.duration
+
+        let once = original.trimmed(to: SessionTrim(startOffset: 600, endOffset: 1800))
+        let visible = once.track.duration
+        #expect(visible < recording)
+
+        // Narrow by a minute at each end, in the visible session's clock.
+        let twice = once.trimmed(to: once.trim.narrowed(start: 60, end: visible - 60))
+
+        #expect(twice.track.duration < visible)
+        #expect(twice.trim.startOffset >= once.trim.startOffset)
+        #expect((twice.trim.endOffset ?? recording) <= recording,
+                "a second trim ran past the end of the recording")
+        // Still reversible all the way back.
+        #expect(twice.rawPoints.count == original.track.count)
+    }
+}

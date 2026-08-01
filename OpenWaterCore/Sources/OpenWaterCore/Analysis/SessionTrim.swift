@@ -38,6 +38,27 @@ public struct SessionTrim: Hashable, Sendable, Codable {
         startOffset > 0.5 || endOffset != nil
     }
 
+    /// Compose a selection made on an already-trimmed timeline.
+    ///
+    /// A trim's offsets are measured from the start of the *recording*, but a
+    /// rider trimming a second time is looking at the trimmed session — their
+    /// 0:00 is this trim's `startOffset`. Feeding their numbers back in
+    /// unconverted produces a range that can run clean off the end of the
+    /// session; the UI showed "from 21:08 to 45:12 of 30:01" and drew one
+    /// handle off the edge of the screen.
+    ///
+    /// - Parameters:
+    ///   - start: seconds from the start of the *visible* session.
+    ///   - end: seconds from the start of the visible session, or `nil` to keep
+    ///     whatever this trim already ends at — usually "to the end", which must
+    ///     not silently become a fixed timestamp.
+    public func narrowed(start: TimeInterval, end: TimeInterval?) -> SessionTrim {
+        SessionTrim(
+            startOffset: startOffset + max(0, start),
+            endOffset: end.map { startOffset + max(0, $0) } ?? endOffset
+        )
+    }
+
     /// Points falling inside the trim.
     public func apply(to points: [TrackPoint]) -> [TrackPoint] {
         guard let first = points.first else { return points }

@@ -41,6 +41,7 @@ struct SessionMapTab: View {
     @State private var isTrimming = false
     @State private var trimStart: TimeInterval = 0
     @State private var trimEnd: TimeInterval = 0
+    @State private var trimEdge: TrackMapView.TrimEdge?
 
     /// Reveal the track only as far as the playhead.
     ///
@@ -81,6 +82,8 @@ struct SessionMapTab: View {
             foilFilter: foilFilter,
             partialUpTo: showPartialTrack ? elapsed : nil,
             playhead: isScrubbing || elapsed > 0 ? elapsed : nil,
+            trimRange: isTrimming ? trimStart...max(trimStart + 1, trimEnd) : nil,
+            activeTrimEdge: trimEdge,
             style: settings.mapStyle
         )
         .overlay(alignment: .top) { topChrome }
@@ -309,7 +312,8 @@ struct SessionMapTab: View {
                         start: $trimStart,
                         end: $trimEnd,
                         duration: duration,
-                        width: proxy.plotFrame.map { geometry[$0].width } ?? geometry.size.width
+                        width: proxy.plotFrame.map { geometry[$0].width } ?? geometry.size.width,
+                        active: $trimEdge
                     )
                     .offset(x: proxy.plotFrame.map { geometry[$0].origin.x } ?? 0)
                 } else {
@@ -533,12 +537,16 @@ struct TrimOverlay: View {
     private let handleWidth: CGFloat = 16
     private let minimumSpan: TimeInterval = 10
 
-    /// Which end the current drag grabbed. Decided once, when the finger goes
-    /// down, and held for the whole gesture — recomputing it per frame lets the
-    /// selection flip ends underneath the finger as it crosses the midpoint.
-    @State private var dragging: Edge?
+    /// Which end the current drag grabbed, published so the map can mark it.
+    @Binding var active: TrackMapView.TrimEdge?
 
-    private enum Edge { case start, end }
+    /// Where the finger went down. A gesture keeps one `startLocation` for its
+    /// whole life, so a change in it means a *new* gesture — which is how the
+    /// grabbed end gets re-decided even when the previous drag never delivered
+    /// its `onEnded` (a cancelled touch, or the scroll view taking over). That
+    /// is the bug where the wrong handle moved: the old choice stuck, and
+    /// grabbing one end dragged the other.
+    @State private var gestureOrigin: CGFloat = .nan
 
     // Clamped on the way out as well as on the way in. A handle drawn from an
     // out-of-range value does not look wrong, it looks *absent* — it is simply
@@ -566,8 +574,8 @@ struct TrimOverlay: View {
                 .frame(width: max(handleWidth * 2, endX - startX))
                 .offset(x: startX)
 
-            handle(at: startX, isStart: true)
-            handle(at: endX - handleWidth, isStart: false)
+            handle(at: startX, isStart: true, isActive: active == .start)
+            handle(at: endX - handleWidth, isStart: false, isActive: active == .end)
         }
         .frame(width: width)
         .contentShape(.rect)
@@ -578,12 +586,13 @@ struct TrimOverlay: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    if dragging == nil {
+                    if active == nil || value.startLocation.x != gestureOrigin {
+                        gestureOrigin = value.startLocation.x
                         let x = value.startLocation.x
-                        dragging = abs(x - startX) <= abs(x - endX) ? .start : .end
+                        active = abs(x - startX) <= abs(x - endX) ? .start : .end
                     }
                     let time = TimeInterval(value.location.x / max(width, 1)) * duration
-                    switch dragging {
+                    switch active {
                     case .start:
                         start = min(max(0, time), end - minimumSpan)
                     case .end:
@@ -592,13 +601,16 @@ struct TrimOverlay: View {
                         break
                     }
                 }
-                .onEnded { _ in dragging = nil }
+                .onEnded { _ in
+                    active = nil
+                    gestureOrigin = .nan
+                }
         )
     }
 
-    private func handle(at x: CGFloat, isStart: Bool) -> some View {
+    private func handle(at x: CGFloat, isStart: Bool, isActive: Bool) -> some View {
         RoundedRectangle(cornerRadius: 5)
-            .fill(Color.yellow)
+            .fill(isActive ? Color.orange : Color.yellow)
             .frame(width: handleWidth)
             .overlay {
                 Image(systemName: isStart ? "chevron.compact.left" : "chevron.compact.right")

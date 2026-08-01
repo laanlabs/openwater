@@ -52,11 +52,24 @@ struct TrackMapView: View {
     /// Where the scrubber is, marked on the track.
     var playhead: TimeInterval?
 
+    /// The stretch a trim would keep, marked at both ends. Declared after
+    /// `playhead` so the call sites read in the order the arguments appear.
+    ///
+    /// Dragging a handle on a chart tells a rider *when* they are cutting; only
+    /// the map tells them *where*, which on a session of forty overlapping
+    /// passes is the thing they actually need to see.
+    var trimRange: ClosedRange<TimeInterval>?
+
+    /// Which end the finger is on, drawn larger so it is findable in a tangle.
+    var activeTrimEdge: TrimEdge?
+
     /// Base map. Satellite is worth having on water, where the standard map is
     /// a featureless blue field with nothing to orient by.
     var style: MapStyleOption = .standard
 
     @State private var camera: MapCameraPosition = .automatic
+
+    public enum TrimEdge { case start, end }
 
     /// What counts as visible track.
     enum FoilFilter: String, CaseIterable, Identifiable {
@@ -123,6 +136,21 @@ struct TrackMapView: View {
                 }
             }
 
+            if let trimRange {
+                if let position = session.track.coordinate(atElapsed: trimRange.lowerBound) {
+                    Annotation("", coordinate: position.clCoordinate, anchor: .center) {
+                        TrimMarker(isStart: true, isActive: activeTrimEdge == .start)
+                    }
+                    .annotationTitles(.hidden)
+                }
+                if let position = session.track.coordinate(atElapsed: trimRange.upperBound) {
+                    Annotation("", coordinate: position.clCoordinate, anchor: .center) {
+                        TrimMarker(isStart: false, isActive: activeTrimEdge == .end)
+                    }
+                    .annotationTitles(.hidden)
+                }
+            }
+
             if let playhead, let position = session.track.coordinate(atElapsed: playhead) {
                 Annotation("", coordinate: position.clCoordinate, anchor: .center) {
                     Playhead(
@@ -173,12 +201,25 @@ struct TrackMapView: View {
         guard segment.startIndex >= 0, segment.endIndex < session.track.count else { return [] }
         // Clip the segment the scrubber is inside, so the drawn track ends
         // exactly at the playhead rather than jumping a whole segment ahead.
+        var start = segment.startIndex
         var end = segment.endIndex
         if let partialUpTo, segment.endElapsed > partialUpTo {
             end = min(end, session.track.index(atElapsed: partialUpTo) ?? segment.startIndex)
         }
-        guard end > segment.startIndex else { return [] }
-        return session.track.points[segment.startIndex...end].map(\.clCoordinate)
+        // Clip to the trim at both ends, per sample rather than per segment.
+        // Filtering whole segments by overlap is not enough: a short session is
+        // one long segment, so it overlaps any selection and gets drawn in full,
+        // and the part being cut looks identical to the part being kept.
+        if let trimRange {
+            if segment.startElapsed < trimRange.lowerBound {
+                start = max(start, session.track.index(atElapsed: trimRange.lowerBound) ?? start)
+            }
+            if segment.endElapsed > trimRange.upperBound {
+                end = min(end, session.track.index(atElapsed: trimRange.upperBound) ?? end)
+            }
+        }
+        guard end > start else { return [] }
+        return session.track.points[start...end].map(\.clCoordinate)
     }
 
     // MARK: - Styling
@@ -422,5 +463,33 @@ struct SpeedLegend: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.regularMaterial, in: Capsule())
+    }
+}
+
+
+/// One end of a trim selection, on the map.
+struct TrimMarker: View {
+
+    let isStart: Bool
+    let isActive: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(isActive ? Color.orange : Color.yellow)
+                .frame(width: isActive ? 30 : 22, height: isActive ? 30 : 22)
+                .overlay {
+                    Circle().stroke(.white, lineWidth: 2.5)
+                }
+                .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+
+            Image(systemName: isStart ? "chevron.right" : "chevron.left")
+                .font(.system(size: isActive ? 14 : 11, weight: .black))
+                .foregroundStyle(.black.opacity(0.65))
+        }
+        // The end being dragged grows, so the eye can find it without hunting
+        // through the other forty passes crossing the same water.
+        .animation(.snappy(duration: 0.15), value: isActive)
+        .accessibilityLabel(isStart ? "Trim start" : "Trim end")
     }
 }

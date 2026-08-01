@@ -12,17 +12,23 @@ struct StartView: View {
     @Environment(WatchSettings.self) private var settings
     @Environment(WatchSyncClient.self) private var sync
 
-    @State private var showingSportPicker = false
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 10) {
-                    startButton
-                    sportButton
+                VStack(spacing: 8) {
+                    ForEach(sports) { sport in
+                        SportCard(sport: sport) {
+                            start(sport)
+                        }
+                    }
+
                     gpsStatus
-                    NavigationLink {
-                        WatchSettingsView()
+                        .padding(.top, 2)
+
+                    Button {
+                        showingSettings = true
                     } label: {
                         Label("Settings", systemImage: "gearshape")
                             .font(.caption2)
@@ -39,57 +45,27 @@ struct StartView: View {
             .navigationTitle("openWater")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { recorder.warmUpSensors() }
-            .sheet(isPresented: $showingSportPicker) {
-                SportPickerView(selection: Binding(
-                    get: { settings.lastSport },
-                    set: { settings.lastSport = $0 }
-                ))
+            .sheet(isPresented: $showingSettings) {
+                NavigationStack { WatchSettingsView() }
             }
         }
     }
 
-    // MARK: - Pieces
-
-    private var startButton: some View {
-        Button {
-            recorder.autoPauseEnabled = settings.autoPause
-            recorder.start(sport: settings.lastSport)
-        } label: {
-            VStack(spacing: 2) {
-                Image(systemName: "record.circle")
-                    .font(.system(size: 30))
-                Text("Start")
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-        }
-        .tint(.green)
-    }
-
-    private var sportButton: some View {
-        Button {
-            showingSportPicker = true
-        } label: {
-            HStack {
-                Image(systemName: settings.lastSport.symbolName)
-                Text(settings.lastSport.displayName)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .font(.caption)
-        }
-        .buttonStyle(.bordered)
-    }
-
-    /// GPS state, shown plainly rather than hidden.
+    /// The sport last used first, then the rest.
     ///
-    /// Starting before the receiver has settled is the single most common way to
-    /// ruin a session's numbers, so the state is surfaced up front instead of
-    /// being something a rider discovers afterwards.
+    /// Picking the activity *is* starting the session — there is no separate
+    /// start button, because on a beach in a wetsuit the shortest path from
+    /// cold to recording is one tap, and a rider who does the same thing every
+    /// session finds it at the top every time.
+    private var sports: [Sport] {
+        let recordable = Sport.recordable
+        guard let index = recordable.firstIndex(of: settings.lastSport) else { return recordable }
+        var ordered = recordable
+        ordered.remove(at: index)
+        ordered.insert(settings.lastSport, at: 0)
+        return ordered
+    }
+
     private var gpsStatus: some View {
         HStack(spacing: 5) {
             Image(systemName: gpsSymbol)
@@ -143,9 +119,41 @@ struct StartView: View {
         .font(.caption2)
         .foregroundStyle(.secondary)
     }
+
+    private func start(_ sport: Sport) {
+        settings.lastSport = sport
+        recorder.autoPauseEnabled = settings.autoPause
+        recorder.start(sport: sport)
+    }
 }
 
-/// Sport picker. Wind sports first, because that is what this app is for.
+/// One activity, sized to be hit without looking.
+struct SportCard: View {
+
+    let sport: Sport
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: sport.symbolName)
+                    .font(.system(size: 22))
+                    .frame(width: 30)
+                Text(sport.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(Color.accentColor.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct SportPickerView: View {
 
     @Binding var selection: Sport

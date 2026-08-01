@@ -4,10 +4,12 @@ import WatchKit
 
 /// The live session: swipeable pages, each answering one question.
 ///
-/// Page order is deliberate. Speed is first because it is what you glance at
-/// mid-run. Splits is second because it is what you check between runs. The
-/// controls page is last-but-one so it is reachable but never accidental, and
-/// the countdown lives past it because it is a pre-start tool.
+/// Horizontal paging, and the order is deliberate. The stats land first because
+/// that is what a glance mid-run is for. Controls sit one page to the *left*,
+/// which is the direction a thumb travels to get back — stop and pause should
+/// be one deliberate swipe away, never on the page you are reading. Everything
+/// else is to the right, in the order it gets checked: splits between runs,
+/// then the session totals, then the sport-specific detail.
 struct LiveSessionView: View {
 
     @Environment(SessionRecorder.self) private var recorder
@@ -18,11 +20,12 @@ struct LiveSessionView: View {
     @State private var showingEndConfirmation = false
 
     enum Page: Int, CaseIterable, Hashable {
-        case speed, splits, session, angles, foil, controls, countdown
+        case controls, speed, splits, session, angles, foil, countdown
     }
 
     var body: some View {
         TabView(selection: $page) {
+            ControlsPage(showingEndConfirmation: $showingEndConfirmation).tag(Page.controls)
             SpeedPage().tag(Page.speed)
             SplitsPage().tag(Page.splits)
             SessionPage().tag(Page.session)
@@ -32,10 +35,9 @@ struct LiveSessionView: View {
             if recorder.sport.isFoiling {
                 FoilPage().tag(Page.foil)
             }
-            ControlsPage(showingEndConfirmation: $showingEndConfirmation).tag(Page.controls)
             CountdownPage().tag(Page.countdown)
         }
-        .tabViewStyle(.verticalPage)
+        .tabViewStyle(.page)
         .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
             Button("End & Save") { Task { await end() } }
             Button("Discard", role: .destructive) { recorder.discard() }
@@ -60,62 +62,93 @@ struct SpeedPage: View {
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(Format.speed(
-                recorder.metrics.currentSpeed,
-                unit: settings.units.speed,
-                decimals: 1,
-                includeSymbol: false
-            ))
-            // Rounded, monospaced digits: rounded reads at a glance in spray,
-            // monospaced stops the layout jittering as digits change at 1 Hz.
-            .font(.system(size: 62, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .minimumScaleFactor(0.5)
-            .lineLimit(1)
-            .foregroundStyle(recorder.state == .paused ? .secondary : .primary)
+        VStack(alignment: .leading, spacing: 0) {
+            // Elapsed time first. On the water the question is rarely "how fast
+            // am I *now*" alone — it is that against how long you have been out.
+            Text(Format.duration(recorder.metrics.duration))
+                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
 
-            Text(settings.units.speed.symbol)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            Divider().padding(.vertical, 2)
 
-            // Always-on dimming strips everything but the essentials, which is
-            // what makes a three-hour session survivable on one charge.
-            if !isLuminanceReduced {
-                HStack(spacing: 12) {
-                    MetricPair(
-                        label: "MAX",
-                        value: Format.speed(recorder.metrics.maxSpeed, unit: settings.units.speed,
-                                            decimals: 1, includeSymbol: false)
-                    )
-                    MetricPair(
-                        label: "AVG",
-                        value: Format.speed(recorder.metrics.averageMovingSpeed, unit: settings.units.speed,
-                                            decimals: 1, includeSymbol: false)
-                    )
-                    MetricPair(
-                        label: "10s",
-                        value: Format.speed(recorder.metrics.current10s, unit: settings.units.speed,
-                                            decimals: 1, includeSymbol: false)
-                    )
-                }
-                .padding(.top, 4)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(Format.speed(
+                    recorder.metrics.currentSpeed,
+                    unit: settings.units.speed,
+                    decimals: 1,
+                    includeSymbol: false
+                ))
+                // Rounded, monospaced digits: rounded reads at a glance in
+                // spray, monospaced stops the layout jittering as the digits
+                // change at 1 Hz.
+                .font(.system(size: 52, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .foregroundStyle(recorder.state == .paused ? .secondary : .primary)
+
+                Spacer(minLength: 0)
+
+                Text(settings.units.speed.symbol)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+
+            // Heading, which is what tells a downwinder whether they are still
+            // on the line they meant to be on.
+            Text(headingText)
+                .font(.system(size: 26, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             if recorder.state == .paused {
                 Label("Paused", systemImage: "pause.fill")
                     .font(.caption2)
                     .foregroundStyle(.orange)
-                    .padding(.top, 2)
+            }
+
+            Spacer(minLength: 0)
+
+            // Always-on dimming strips everything but the essentials, which is
+            // what makes a three-hour session survivable on one charge.
+            if !isLuminanceReduced {
+                Divider().padding(.bottom, 3)
+                HStack {
+                    HStack(spacing: 3) {
+                        Text(heartRateText)
+                            .monospacedDigit()
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.pink)
+                    }
+                    Spacer()
+                    Text(Format.distance(recorder.metrics.distance, unit: settings.units.distance))
+                        .monospacedDigit()
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
         }
-        .containerBackground(.green.gradient.opacity(0.18), for: .tabView)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// `116°SE`, or an em dash until the receiver has a heading to give — a
+    /// bearing of 000° that means "unknown" is worse than no bearing at all.
+    private var headingText: String {
+        let course = recorder.metrics.heading
+        guard course.isFinite, course >= 0 else { return "—" }
+        return "\(Format.bearing(course, includeCardinal: false))\(Format.cardinal(course))"
+    }
+
+    private var heartRateText: String {
+        guard let bpm = recorder.metrics.heartRate, bpm > 0 else { return "0" }
+        return String(Int(bpm.rounded()))
     }
 }
 
-// MARK: - Splits
-
-/// Every headline category, live. This is the page riders stare at between runs.
 struct SplitsPage: View {
 
     @Environment(SessionRecorder.self) private var recorder
@@ -413,52 +446,78 @@ struct ControlsPage: View {
     @Binding var showingEndConfirmation: Bool
 
     @Environment(SessionRecorder.self) private var recorder
+    @Environment(WatchSettings.self) private var settings
+
+    @State private var showingSettings = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                if recorder.state == .paused {
-                    Button {
-                        recorder.resume()
-                    } label: {
-                        Label("Resume", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .tint(.green)
-                } else {
-                    Button {
-                        recorder.pause()
-                    } label: {
-                        Label("Pause", systemImage: "pause.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .tint(.orange)
-                }
-
-                Button {
+        // A 2×2 grid of targets rather than a list. Every one of these is
+        // pressed with a cold wet finger, often through a wetsuit sleeve, and
+        // the difference between "stop" and "pause" being mistaken is an hour
+        // of session — so they are large, far apart, and coloured differently.
+        Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+            GridRow {
+                controlButton("Stop", systemImage: "xmark", tint: .red) {
                     showingEndConfirmation = true
-                } label: {
-                    Label("End", systemImage: "stop.fill")
-                        .frame(maxWidth: .infinity)
                 }
-                .tint(.red)
-
-                Button {
-                    WKInterfaceDevice.current().enableWaterLock()
-                } label: {
-                    Label("Water Lock", systemImage: "drop.fill")
-                        .frame(maxWidth: .infinity)
+                if recorder.state == .paused {
+                    controlButton("Resume", systemImage: "play.fill", tint: .green) {
+                        recorder.resume()
+                    }
+                } else {
+                    controlButton("Pause", systemImage: "pause.fill", tint: .green) {
+                        recorder.pause()
+                    }
                 }
-                .tint(.blue)
             }
-            .font(.caption)
-            .padding(.horizontal, 2)
+            GridRow {
+                controlButton("Lock", systemImage: "drop.fill", tint: .cyan) {
+                    // Water Lock. On a wrist that is about to be underwater
+                    // every few seconds this is not a nicety — without it the
+                    // screen takes taps from the water and the session ends by
+                    // itself.
+                    WKInterfaceDevice.current().enableWaterLock()
+                }
+                // A sheet rather than a NavigationLink: the live pages are a
+                // bare TabView with no navigation stack around them, and a link
+                // with nowhere to push is a button that silently does nothing.
+                controlButton("Settings", systemImage: "gearshape.fill", tint: .blue) {
+                    showingSettings = true
+                }
+            }
         }
-        .containerBackground(.gray.gradient.opacity(0.2), for: .tabView)
+        .padding(.horizontal, 2)
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack { WatchSettingsView() }
+        }
+    }
+
+    private func controlButton(
+        _ title: String,
+        systemImage: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            controlLabel(title, systemImage: systemImage, tint: tint)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func controlLabel(_ title: String, systemImage: String, tint: Color) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: systemImage)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(tint.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 }
-
-// MARK: - Shared bits
 
 struct MetricPair: View {
     let label: String

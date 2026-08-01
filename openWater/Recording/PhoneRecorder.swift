@@ -118,6 +118,9 @@ final class PhoneRecorder {
     func start(sport: Sport) {
         guard engine.state == .idle else { return }
 
+        // Before the receiver is asked for anything, so the first fixes of the
+        // session already come at the rate this sport needs.
+        location.configure(for: sport)
         engine.start(sport: sport)
         motion.start()
         location.start()

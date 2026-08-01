@@ -90,6 +90,10 @@ final class SessionRecorder {
         guard engine.state == .idle else { return }
         routeLocations.removeAll()
 
+        // Before the receiver is asked for anything, so the first fixes of the
+        // session already come at the rate this sport needs.
+        location.configure(for: sport)
+
         let startDate = Date()
         engine.start(sport: sport, at: startDate)
 

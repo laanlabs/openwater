@@ -117,9 +117,14 @@ struct LiveSessionScreen: View {
                     ? Format.speed(best, unit: settings.units.speed, decimals: 1, includeSymbol: false)
                     : "—"
             }())
+            // Accuracy *and* rate: the two independent ways GPS can be letting
+            // a session down, and a rider who says "it feels slow" needs to be
+            // able to see which one it is.
             SummaryTile(label: "GPS", value: recorder.metrics.horizontalAccuracy >= 0
                 ? String(format: "±%.0f m", recorder.metrics.horizontalAccuracy)
                 : "—")
+            SummaryTile(label: "Fix rate", value: recorder.metrics.fixInterval
+                .map { String(format: "%.1f s", $0) } ?? "—")
         }
     }
 

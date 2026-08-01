@@ -144,11 +144,62 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
-    /// Fixes worse than this are dropped outright.
+    /// Fixes worse than this are dropped outright by the post-session build.
+    ///
+    /// Strict on purpose: a saved session's numbers are claims, and a 30-metre
+    /// fix cannot support one.
     public var maxHorizontalAccuracy: Double  // metres
+
+    /// Fixes worse than this are ignored by the *live* screens.
+    ///
+    /// Deliberately far looser than the one above, because the two are
+    /// answering different questions. The recorded analysis is a claim about
+    /// how fast somebody went; the live screen is a rider glancing at their
+    /// wrist. Holding the live display to record-grade accuracy meant that a
+    /// cold receiver, a car park, or a hand over the watch froze the numbers
+    /// completely — every fix silently discarded, the speed stuck on its last
+    /// value, and nothing on screen to say why. A slightly noisy number now
+    /// beats a frozen one; the session is still built strictly afterwards.
+    public var liveAccuracyLimit: Double      // metres
 
     /// Physically impossible for the sport — used to reject GPS spikes.
     public var maxPlausibleSpeed: Double      // m/s
+
+    /// How the receiver should be driven for a sport.
+    ///
+    /// Kept in plain values rather than `CLLocationAccuracy` and friends so the
+    /// model layer stays platform-free — `LocationProvider` translates it. The
+    /// distinction that matters is battery against resolution: three hours of
+    /// navigation-grade fixes is a real cost, and a kayak tour does not need
+    /// what a speed run does.
+    public struct LocationProfile: Sendable, Hashable {
+
+        public enum Accuracy: Sendable, Hashable {
+            /// The most the receiver can give, and the mode that keeps Doppler
+            /// speed flowing. Everything on foil uses this.
+            case navigation
+            /// Best available without the navigation-grade power draw.
+            case best
+        }
+
+        public enum Activity: Sendable, Hashable {
+            case otherNavigation, fitness
+        }
+
+        public var accuracy: Accuracy
+        public var activity: Activity
+        /// Metres a rider must move before a new fix is delivered. Always nil
+        /// for recording — a distance filter destroys the even sampling every
+        /// windowed metric assumes — but named here so it cannot be set by
+        /// accident somewhere else.
+        public var distanceFilter: Double?
+
+        public init(accuracy: Accuracy, activity: Activity, distanceFilter: Double? = nil) {
+            self.accuracy = accuracy
+            self.activity = activity
+            self.distanceFilter = distanceFilter
+        }
+    }
 
     public static func forSport(_ sport: Sport) -> SportThresholds {
         var t = SportThresholds(
@@ -160,15 +211,22 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             maneuverMaxDuration: 12,
             cadenceBandHz: 0.4...3.0,
             maxHorizontalAccuracy: 12,
+            liveAccuracyLimit: 35,
             maxPlausibleSpeed: 30            // ~58 kn
         )
         switch sport {
         case .wingfoil, .parawing:
             t.foilTakeoffSpeed = 4.5          // ~8.7 kn
             t.maxPlausibleSpeed = 25
+            // Foiling is where a lost second actually costs something: the runs
+            // are short, the accelerations are sharp, and a gap in the fixes
+            // lands straight in the 2-second peak. Take everything the receiver
+            // offers and let the post-session build throw the rubbish away.
+            t.liveAccuracyLimit = 50
         case .windfoil, .kitefoil:
             t.foilTakeoffSpeed = 5.5
             t.maxPlausibleSpeed = 32
+            t.liveAccuracyLimit = 50
         case .windsurf:
             t.foilTakeoffSpeed = .infinity    // no flight phase
             t.movingSpeed = 1.5
@@ -181,6 +239,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             t.foilTakeoffSpeed = 3.5
             t.movingSpeed = 0.8
             t.maxPlausibleSpeed = 15
+            t.liveAccuracyLimit = 50
         case .sup, .kayak:
             t.foilTakeoffSpeed = .infinity
             t.movingSpeed = 0.5
@@ -194,9 +253,31 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         case .efoil, .tow:
             t.foilTakeoffSpeed = 4.0
             t.maxPlausibleSpeed = 20
+            t.liveAccuracyLimit = 50
         case .other:
             break
         }
         return t
+    }
+}
+
+
+extension Sport {
+
+    /// How to drive the receiver for this sport.
+    ///
+    /// Everything that flies gets navigation-grade fixes in the foreground and
+    /// the background alike, because that is the mode Doppler speed arrives in
+    /// and a foiling run is over in twenty seconds. Paddling and sailing get
+    /// the same delivery rate — iOS gives about one fix a second either way —
+    /// at a slightly lower power draw, which matters over a four-hour crossing.
+    public var locationProfile: SportThresholds.LocationProfile {
+        switch self {
+        case .wingfoil, .parawing, .windfoil, .kitefoil, .downwindSUP, .prone, .efoil, .tow,
+             .windsurf, .kitesurf:
+            SportThresholds.LocationProfile(accuracy: .navigation, activity: .otherNavigation)
+        case .sup, .kayak, .sail, .other:
+            SportThresholds.LocationProfile(accuracy: .best, activity: .otherNavigation)
+        }
     }
 }

@@ -276,6 +276,13 @@ struct SessionPage: View {
             Text(accuracy >= 0 ? String(format: "±%.0f m", accuracy) : "no fix")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+            // How often fixes are actually landing, which is a different
+            // failure from how good they are.
+            if let interval = recorder.metrics.fixInterval {
+                Text(String(format: "· %.1f s", interval))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

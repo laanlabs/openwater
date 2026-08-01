@@ -53,9 +53,7 @@ public final class LocationProvider: NSObject {
     public override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        manager.distanceFilter = kCLDistanceFilterNone
-        manager.activityType = .otherNavigation
+        apply(.init(accuracy: .navigation, activity: .otherNavigation))
 
         // The single most important line here.
         //
@@ -102,6 +100,39 @@ public final class LocationProvider: NSObject {
     }
 
     // MARK: - Control
+
+    /// Drive the receiver the way this sport needs it.
+    ///
+    /// Called before every session rather than once at launch: a rider who does
+    /// a downwinder in the morning and a paddle in the evening should get the
+    /// right trade-off for each, and the wrong one persisting from the last
+    /// session is exactly the kind of thing nobody would ever notice was
+    /// happening.
+    public func configure(for sport: Sport) {
+        apply(sport.locationProfile)
+    }
+
+    private func apply(_ profile: SportThresholds.LocationProfile) {
+        switch profile.accuracy {
+        case .navigation:
+            // The mode that keeps Doppler speed coming. Anything less and
+            // `CLLocation.speed` starts arriving as −1, which the whole app
+            // depends on.
+            manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        case .best:
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+        }
+
+        // A distance filter would silently destroy the even sampling every
+        // window metric assumes, so it is off unless a profile asks otherwise —
+        // and none of them do.
+        manager.distanceFilter = profile.distanceFilter ?? kCLDistanceFilterNone
+
+        switch profile.activity {
+        case .otherNavigation: manager.activityType = .otherNavigation
+        case .fitness: manager.activityType = .fitness
+        }
+    }
 
     public func requestAuthorization() {
         manager.requestWhenInUseAuthorization()

@@ -41,6 +41,14 @@ public struct LiveMetrics: Hashable, Sendable, Codable {
     /// Live GPS accuracy in metres, so a rider can see when a number is soft.
     public var horizontalAccuracy: Double = -1
 
+    /// Seconds between the last two fixes the live screens accepted.
+    ///
+    /// Worth surfacing because "the GPS feels slow" is otherwise unfalsifiable:
+    /// a rider cannot tell a receiver that is genuinely delivering once every
+    /// four seconds from one delivering every second whose fixes are being
+    /// thrown away upstream. One number on screen distinguishes them.
+    public var fixInterval: TimeInterval?
+
     public var isMoving: Bool = false
 
     public init() {}
@@ -130,7 +138,7 @@ public final class LiveAnalyzer: @unchecked Sendable {
     @discardableResult
     public func add(_ point: TrackPoint) -> [LiveRecord] {
         guard point.hasValidPosition,
-              point.horizontalAccuracy <= thresholds.maxHorizontalAccuracy else {
+              point.horizontalAccuracy <= thresholds.liveAccuracyLimit else {
             metrics.horizontalAccuracy = point.horizontalAccuracy
             return []
         }
@@ -202,6 +210,7 @@ public final class LiveAnalyzer: @unchecked Sendable {
         metrics.heading = courses.last ?? 0
         metrics.heartRate = point.heartRate ?? metrics.heartRate
         metrics.horizontalAccuracy = point.horizontalAccuracy
+        metrics.fixInterval = elapsed.count > 1 ? dt : nil
         metrics.isMoving = smoothed >= thresholds.movingSpeed
 
         if metrics.isMoving, dt > 0, dt < 30 { metrics.movingTime += dt }

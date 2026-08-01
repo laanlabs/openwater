@@ -2,11 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+	  HealthKit only, and nothing else.
+
+	  The workout session is what keeps the app alive with the wrist down, and
+	  that is all this entitlement is for. Two others used to sit here and
+	  neither was ever used: `healthkit.background-delivery`, which is for
+	  observer queries waking the app on new samples, and `healthkit.access`,
+	  which is for clinical records and was an empty array.
+
+	  They are gone because an unused entitlement is not free. Every one of them
+	  has to be present on the App ID and in the provisioning profile, and when
+	  automatic signing cannot add one, the failure lands as an embedded watch
+	  app that quietly never installs — with nothing on screen to say why.
+	-->
 	<key>com.apple.developer.healthkit</key>
-	<true/>
-	<key>com.apple.developer.healthkit.access</key>
-	<array/>
-	<key>com.apple.developer.healthkit.background-delivery</key>
 	<true/>
 </dict>
 </plist>

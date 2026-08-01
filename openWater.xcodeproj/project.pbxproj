@@ -499,6 +499,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-iOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = OpenWater;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
@@ -547,6 +548,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-iOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = OpenWater;
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
@@ -696,6 +698,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-watchOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = OpenWater;
 				INFOPLIST_KEY_CLKComplicationPrincipalClass = "";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "openWater reads your heart rate during a session so your effort appears alongside your speed.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "openWater saves each session to Health as a workout, with its route, so it counts toward your rings.";
@@ -739,6 +742,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-watchOS.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = OpenWater;
 				INFOPLIST_KEY_CLKComplicationPrincipalClass = "";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "openWater reads your heart rate during a session so your effort appears alongside your speed.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "openWater saves each session to Health as a workout, with its route, so it counts toward your rings.";

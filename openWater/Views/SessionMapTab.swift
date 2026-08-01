@@ -78,6 +78,9 @@ struct SessionMapTab: View {
             map
             panel
         }
+        // The trim bar's start handle lives in the edge-swipe zone, so reaching
+        // for it popped the session instead of grabbing the handle.
+        .interactivePopGesture(enabled: !isTrimming)
     }
 
     // MARK: - Map

@@ -15,35 +15,41 @@ struct ContentView: View {
     /// built, so a first launch does not pay for five screens.
     @State private var visited: Set<ScreenshotRoute.Tab> = [.sessions]
 
+    /// Room kept clear for the bar. The capsule is 62 points tall including its
+    /// rise, and it sits 6 above the home indicator.
+    private let barReservedHeight: CGFloat = 68
+
     var body: some View {
         // The reader is here to hand the bar the bottom inset it has to fill.
         // Reading it from a view that ignores the bottom safe area is the only
         // way to get the number: the bar's own background has to run all the
         // way down past the home indicator, while its buttons stay above it.
-        // Stacked above the bar rather than inset behind it. A safe-area inset
-        // is the tidier construction and it only reaches content that reads the
-        // safe area — a screen that simply fills its space, like the session
-        // map with its panel pinned to the bottom, ran underneath the bar and
-        // had its controls cut in half. Nothing can do that to a VStack.
-        GeometryReader { proxy in
-            VStack(spacing: 0) {
-                ZStack {
-                    page(.sessions) { SessionListView() }
-                    page(.records) { RecordsView() }
-                    page(.record) { RecordTabView(isActive: selection == .record) }
-                    page(.trends) { TrendsView() }
-                    page(.settings) { SettingsView() }
-                }
-                .frame(maxHeight: .infinity)
-
-                OpenWaterTabBar(
-                    selection: $selection,
-                    isRecording: recorder.state != .idle,
-                    bottomInset: proxy.safeAreaInsets.bottom
-                )
+        // The bar floats over the content rather than sitting in a slot below
+        // it: `safeAreaPadding` reserves the room so nothing important ends up
+        // underneath, while the pages still draw the full height behind it —
+        // which is what makes a floating bar look like one instead of a strip
+        // stuck to a wall.
+        ZStack(alignment: .bottom) {
+            ZStack {
+                page(.sessions) { SessionListView() }
+                page(.records) { RecordsView() }
+                page(.record) { RecordTabView(isActive: selection == .record) }
+                page(.trends) { TrendsView() }
+                page(.settings) { SettingsView() }
             }
+            // Plain padding, not `safeAreaPadding`: the safe-area version does
+            // not reach a NavigationStack whose content simply fills its space,
+            // and the session map's transport row ended up under the bar again.
+            // Reserving a little less than the bar's full height leaves the
+            // capsule overlapping the page edge, which is what makes it read as
+            // floating rather than as a strip in a slot.
+            .padding(.bottom, barReservedHeight - 6)
+
+            OpenWaterTabBar(
+                selection: $selection,
+                isRecording: recorder.state != .idle
+            )
         }
-        .ignoresSafeArea(edges: .bottom)
         .onAppear {
             if let route = ScreenshotRoute.requested { select(route.tab) }
         }
@@ -90,8 +96,6 @@ struct OpenWaterTabBar: View {
 
     @Binding var selection: ScreenshotRoute.Tab
     var isRecording: Bool
-    /// Height of the home-indicator strip, which the bar's background covers.
-    var bottomInset: CGFloat = 0
 
     /// How far the middle of the bar rises. Deliberately small — the point is
     /// emphasis, not a floating action button.
@@ -113,21 +117,19 @@ struct OpenWaterTabBar: View {
             item(.settings, "Settings", "gearshape")
         }
         .frame(height: rise + barHeight)
-        .padding(.bottom, bottomInset)
         .background {
-            let shape = BumpedBarShape(rise: rise, bumpRadius: buttonSize / 2 + 6)
-            // Attached to the bottom edge and running the full width, with the
-            // background covering the home-indicator strip. A floating capsule
-            // wastes a band of screen on every side of itself, and this app
-            // spends its screen on maps.
-            //
-            // Opaque rather than a material: a translucent bar looks lovely over
-            // a list and turns to mush over the Record tab's map, and there are
-            // ten-point labels on it.
+            let shape = BumpedBarShape(rise: rise, bumpRadius: buttonSize / 2 + 6, cornerRadius: barHeight / 2)
+            // Opaque rather than a material even though it floats: a
+            // translucent bar looks lovely over a list and turns to mush over
+            // the Record tab's map, and there are ten-point labels on it. The
+            // shadow is what sells the float.
             shape
                 .fill(.background)
-                .overlay { shape.stroke(Color(.separator).opacity(0.55), lineWidth: 0.5) }
+                .overlay { shape.stroke(Color(.separator).opacity(0.5), lineWidth: 0.5) }
+                .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
         }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
     }
 
     // MARK: Items
@@ -211,19 +213,19 @@ struct BumpedBarShape: Shape {
 
     var rise: CGFloat
     var bumpRadius: CGFloat
+    /// Rounding on the bar itself. Half its height gives the capsule.
+    var cornerRadius: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
 
-        // Square: the bar meets the screen edges, so there is nothing for a
-        // corner radius to round against.
         let bar = CGRect(
             x: rect.minX,
             y: rect.minY + rise,
             width: rect.width,
             height: rect.height - rise
         )
-        path.addRect(bar)
+        path.addRoundedRect(in: bar, cornerSize: CGSize(width: cornerRadius, height: cornerRadius))
 
         // Centred on the bar's top edge and pulled up by the rise, so the two
         // shapes overlap by well over half the circle and the join reads as a

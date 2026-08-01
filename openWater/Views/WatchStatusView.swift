@@ -54,7 +54,7 @@ struct WatchStatusView: View {
             case .installedNotReachable:
                 "Not connected this second, which is normal — the watch only talks to the phone when they are near each other. Sessions you record on the watch transfer as soon as it is back in range."
             case .connected:
-                "Record on either one. Sessions from the watch arrive here on their own, and your personal bests are kept in step so a live alert on the wrist means something real."
+                "Record on either one. Sessions recorded on the watch send themselves across as soon as the two are near each other — there is nothing to press. Your personal bests are kept in step too, so a live alert on the wrist means something real."
             }
         }
     }
@@ -92,10 +92,39 @@ struct WatchStatusView: View {
             }
 
             if state == .connected || state == .installedNotReachable {
+                // The button for "my session is still on the watch".
+                //
+                // A transfer queued while the watch was out of range is retried
+                // by the system on its own, but on its own can mean the next
+                // time both devices happen to be awake together. A rider
+                // standing in the car park wondering where their session went
+                // needs to be able to ask now.
+                Button {
+                    sync.requestSync()
+                } label: {
+                    HStack(spacing: 6) {
+                        if sync.isSyncing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
+                        }
+                        Text(sync.isSyncing ? "Checking the watch…" : "Check for sessions on the watch")
+                    }
+                    .font(.subheadline)
+                }
+                .disabled(sync.isSyncing)
+
+                if let message = sync.lastSyncMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Button {
                     sync.pushRecords()
                 } label: {
-                    Label("Send my bests to the watch", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Send my bests to the watch", systemImage: "trophy")
                         .font(.subheadline)
                 }
             }

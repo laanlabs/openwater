@@ -178,6 +178,30 @@ extension WatchSyncClient: WCSessionDelegate {
         }
     }
 
+    /// The phone asking for anything still sitting on the wrist.
+    ///
+    /// A transfer queued while the watch was out of range is retried by the
+    /// system on its own, but "on its own" can mean the next time the two
+    /// devices happen to be awake together. A rider standing in the car park
+    /// wondering where their session went should be able to ask.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        guard message["request"] as? String == "sync" else {
+            replyHandler([:])
+            return
+        }
+        Task { @MainActor in
+            self.retryQueued()
+            replyHandler([
+                "queued": self.queuedSessions.count,
+                "outstanding": self.pendingTransfers,
+            ])
+        }
+    }
+
     nonisolated func session(
         _ session: WCSession,
         didReceiveApplicationContext applicationContext: [String: Any]

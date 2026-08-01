@@ -52,6 +52,47 @@ final class PhoneSyncClient: NSObject {
     /// exactly the semantics of "here is the current record book" — unlike a
     /// message, which needs both apps awake, or a file, which would queue up
     /// stale copies.
+    /// True while a sync request is in flight, so the button can say so.
+    var isSyncing = false
+
+    /// Result of the last manual sync, for the panel to show.
+    var lastSyncMessage: String?
+
+    /// Ask the watch to send anything it is still holding.
+    ///
+    /// Transfers queued out of range are retried by the system eventually, but
+    /// eventually is not a time. This is the "eventually is now" button — it
+    /// only works while the watch is reachable, and says so plainly when it is
+    /// not rather than appearing to do something.
+    func requestSync() {
+        guard let session, session.activationState == .activated else {
+            lastSyncMessage = "The watch is not connected."
+            return
+        }
+        guard session.isReachable else {
+            lastSyncMessage = "Your watch is out of range. Open openWater on it while it is near your phone."
+            return
+        }
+
+        isSyncing = true
+        lastSyncMessage = nil
+        session.sendMessage(["request": "sync"]) { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isSyncing = false
+                let queued = reply["queued"] as? Int ?? 0
+                self.lastSyncMessage = queued > 0
+                    ? "Sending \(queued) session\(queued == 1 ? "" : "s") from your watch…"
+                    : "Your watch has nothing waiting."
+            }
+        } errorHandler: { [weak self] error in
+            Task { @MainActor in
+                self?.isSyncing = false
+                self?.lastSyncMessage = error.localizedDescription
+            }
+        }
+    }
+
     func pushRecords() {
         guard let session, session.activationState == .activated else { return }
         do {

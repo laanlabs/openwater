@@ -82,6 +82,13 @@ final class StoredSession {
     /// thumbnail-sized map can resolve anyway.
     var previewTrack: [Double] = []
 
+    /// What recorded it — "Apple Watch", "iPhone", or nil for an imported file.
+    ///
+    /// Optional so old rows keep decoding: Swift's synthesized decoder does not
+    /// fall back to a property default when a key is absent, and every session
+    /// anybody currently has was written before this existed.
+    var deviceModel: String?
+
     /// Bumped when the analysis engine changes, so stale rows can be found and
     /// recomputed rather than quietly showing numbers from an older algorithm.
     var analysisVersion: Int
@@ -137,6 +144,7 @@ final class StoredSession {
         self.shareCode = nil
         self.sharedAt = nil
         self.previewTrack = StoredSession.previewTrack(for: session.track)
+        self.deviceModel = session.deviceModel
 
         self.archiveData = (try? SessionArchive(session: session).encoded()) ?? Data()
     }
@@ -216,6 +224,38 @@ final class StoredSession {
         analysisVersion = replacement.analysisVersion
         archiveData = replacement.archiveData
         previewTrack = replacement.previewTrack
+        deviceModel = replacement.deviceModel
+    }
+
+    /// Where the session came from, for the badge on its card.
+    enum Origin {
+        case watch, phone, imported
+
+        var symbol: String {
+            switch self {
+            case .watch: "applewatch"
+            case .phone: "iphone"
+            case .imported: "square.and.arrow.down"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .watch: "Recorded on Apple Watch"
+            case .phone: "Recorded on iPhone"
+            case .imported: "Imported"
+            }
+        }
+    }
+
+    /// `nil` means "not worked out yet" and shows no badge at all; an empty
+    /// string means the archive genuinely had no device, which is what an
+    /// imported file looks like. Guessing "imported" for a row that simply
+    /// predates this column would put the wrong icon on every old session.
+    var origin: Origin? {
+        guard let deviceModel else { return nil }
+        if deviceModel.isEmpty { return .imported }
+        return deviceModel.localizedCaseInsensitiveContains("watch") ? .watch : .phone
     }
 
     // MARK: Map preview
@@ -268,14 +308,22 @@ final class StoredSession {
     /// frames.
     @MainActor
     func backfillPreviewTrack() async {
-        guard previewTrack.isEmpty, !isDeleted, modelContext != nil else { return }
+        // Runs for anything the row is missing. Decoding the archive is the
+        // expensive part, so the two backfills share the one pass rather than
+        // each paying for their own.
+        let needsPreview = previewTrack.isEmpty
+        let needsDevice = deviceModel == nil
+        guard needsPreview || needsDevice, !isDeleted, modelContext != nil else { return }
+
         let data = archiveData
-        let points = await Task.detached {
-            guard let session = try? SessionArchive.decode(data).session else { return [Double]() }
-            return StoredSession.previewTrack(for: session.track)
+        let filled: (points: [Double], device: String) = await Task.detached {
+            guard let session = try? SessionArchive.decode(data).session else { return ([], "") }
+            return (StoredSession.previewTrack(for: session.track), session.deviceModel ?? "")
         }.value
-        guard !points.isEmpty, !isDeleted, modelContext != nil else { return }
-        previewTrack = points
+
+        guard !isDeleted, modelContext != nil else { return }
+        if needsPreview, !filled.points.isEmpty { previewTrack = filled.points }
+        if needsDevice { deviceModel = filled.device }
     }
 }
 

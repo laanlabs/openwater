@@ -44,9 +44,19 @@ struct SessionCard: View {
                     Text(session.displayTitle)
                         .font(.title3.weight(.semibold))
                         .lineLimit(1)
-                    Text(session.startDate.formatted(
-                        .dateTime.weekday(.abbreviated).day().month(.abbreviated).year().hour().minute()
-                    ))
+                    HStack(spacing: 5) {
+                        Text(session.startDate.formatted(
+                            .dateTime.weekday(.abbreviated).day().month(.abbreviated).year().hour().minute()
+                        ))
+                        // Which wrist or pocket it came off. Riders who record
+                        // on both end up with two sessions from one afternoon,
+                        // and this is the only thing that tells them apart.
+                        if let origin = session.origin {
+                            Image(systemName: origin.symbol)
+                                .font(.caption)
+                                .accessibilityLabel(origin.label)
+                        }
+                    }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 }

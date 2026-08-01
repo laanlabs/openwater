@@ -258,6 +258,7 @@ struct SessionEditView: View {
 
     // MARK: - Save
 
+    @MainActor
     private func save() async {
         guard let session else { return }
         let edited = currentEdits

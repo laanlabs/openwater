@@ -258,6 +258,15 @@ final class StoredSession {
     ///
     /// Decoding is the expensive part, so it happens once, off the main actor,
     /// and only for rows that actually appear on screen.
+    ///
+    /// `@MainActor` is load-bearing, not decoration. Without it this method is
+    /// nonisolated, so after the `await` it resumes on whatever thread the
+    /// detached work finished on — and the line below writes to a SwiftData
+    /// model bound to the main-actor context. SwiftData asserts its queue and
+    /// the assert is a trap: `_dispatch_assert_queue_fail`, straight to a
+    /// crash, on a background thread with none of this code in the visible
+    /// frames.
+    @MainActor
     func backfillPreviewTrack() async {
         guard previewTrack.isEmpty, !isDeleted, modelContext != nil else { return }
         let data = archiveData

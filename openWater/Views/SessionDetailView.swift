@@ -42,6 +42,7 @@ struct SessionDetailView: View {
     ///
     /// Decoding a multi-megabyte track blocks, so it happens off the main actor
     /// — pushing this screen stays instant and the spinner covers the gap.
+    @MainActor
     private func loadSession() async {
         // A SwiftData model can be deleted while a view still holds it — the
         // list deletes one on iPad while its detail is open, or the store is
@@ -185,6 +186,7 @@ struct SessionDetailView: View {
     /// surviving fixes, which on a three-hour track is real work. Nothing is
     /// destroyed — `trimmed(to:)` keeps the full recording alongside, so this
     /// is reversible and can be widened again later.
+    @MainActor
     private func applyTrim(_ trim: SessionTrim, to session: Session) {
         let categories = settings.categories
         Task {

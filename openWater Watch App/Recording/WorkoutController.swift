@@ -20,7 +20,10 @@ import os
 @Observable
 final class WorkoutController: NSObject {
 
-    private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "Workout")
+    // Nonisolated so the HealthKit completion handlers and the nonisolated
+    // delegate methods — which are the ones that most need to log — can reach
+    // it. A Logger is Sendable; only the inferred isolation was in the way.
+    nonisolated private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "Workout")
 
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?

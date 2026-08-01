@@ -191,6 +191,7 @@ struct WebShareView: View {
         ))
     }
 
+    @MainActor
     private func share() {
         phase = .uploading
         didCopy = false

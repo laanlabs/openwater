@@ -27,6 +27,16 @@ public struct TrackBuilder: Sendable {
         /// Time gaps longer than this are treated as dropouts rather than as
         /// real travel, so the implied-speed check is skipped across them.
         public var dropoutGap: TimeInterval
+        /// A leg longer than this contributes no distance.
+        ///
+        /// Across a real hole in the recording — a receiver dropout, or a
+        /// stretch the rider cut out of the middle — the straight line between
+        /// the two surviving fixes is not a path anybody took. Counting it adds
+        /// distance that was never sailed and hands the speed windows a leg at
+        /// a speed nobody did, which is worse than admitting the gap. Thirty
+        /// seconds is far beyond any normal 1 Hz interruption, so ordinary
+        /// tracks are unaffected.
+        public var maxBridgedGap: TimeInterval
         /// Run the Kalman filter over the speed channel.
         public var smoothSpeed: Bool
         /// Speed accuracy worse than this in m/s means the sample cannot support
@@ -38,11 +48,13 @@ public struct TrackBuilder: Sendable {
             maxPlausibleSpeed: Double = 35,
             maxImpliedSpeed: Double = 45,
             dropoutGap: TimeInterval = 5,
+            maxBridgedGap: TimeInterval = 30,
             smoothSpeed: Bool = true,
             maxSpeedAccuracyForRecords: Double = 2.0
         ) {
             self.maxHorizontalAccuracy = maxHorizontalAccuracy
             self.maxPlausibleSpeed = maxPlausibleSpeed
+            self.maxBridgedGap = maxBridgedGap
             self.maxImpliedSpeed = maxImpliedSpeed
             self.dropoutGap = dropoutGap
             self.smoothSpeed = smoothSpeed
@@ -143,8 +155,11 @@ public struct TrackBuilder: Sendable {
         var cumulative = [Double](repeating: 0, count: accepted.count)
         for i in 1..<accepted.count {
             elapsed[i] = accepted[i].timestamp.timeIntervalSince(t0)
-            cumulative[i] = cumulative[i - 1]
-                + Geo.distance(accepted[i - 1].coordinate, accepted[i].coordinate)
+            let gap = accepted[i].timestamp.timeIntervalSince(accepted[i - 1].timestamp)
+            let step = gap <= options.maxBridgedGap
+                ? Geo.distance(accepted[i - 1].coordinate, accepted[i].coordinate)
+                : 0
+            cumulative[i] = cumulative[i - 1] + step
         }
 
         // 6 & 7. Speed channel.

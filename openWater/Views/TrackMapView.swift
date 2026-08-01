@@ -63,6 +63,10 @@ struct TrackMapView: View {
     /// Which end the finger is on, drawn larger so it is findable in a tangle.
     var activeTrimEdge: TrimEdge?
 
+    /// When true, `trimRange` is the stretch being *cut* rather than kept, so
+    /// the track stays whole and the doomed part is struck through instead.
+    var trimIsRemoval: Bool = false
+
     /// Base map. Satellite is worth having on water, where the standard map is
     /// a featureless blue field with nothing to orient by.
     var style: MapStyleOption = .standard
@@ -136,6 +140,16 @@ struct TrackMapView: View {
                 }
             }
 
+            if let trimRange, trimIsRemoval {
+                ForEach(summary.segments) { segment in
+                    MapPolyline(coordinates: coordinates(for: segment, clippedTo: trimRange))
+                        .stroke(
+                            Color.red.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [2, 7])
+                        )
+                }
+            }
+
             if let trimRange {
                 if let position = session.track.coordinate(atElapsed: trimRange.lowerBound) {
                     Annotation("", coordinate: position.clCoordinate, anchor: .center) {
@@ -197,6 +211,26 @@ struct TrackMapView: View {
         }
     }
 
+    /// The part of a segment inside an explicit range — used to draw the
+    /// stretch a removal would cut, over the top of the whole track.
+    private func coordinates(
+        for segment: StateSegment,
+        clippedTo range: ClosedRange<TimeInterval>
+    ) -> [CLLocationCoordinate2D] {
+        guard segment.endElapsed >= range.lowerBound,
+              segment.startElapsed <= range.upperBound else { return [] }
+        var start = segment.startIndex
+        var end = segment.endIndex
+        if segment.startElapsed < range.lowerBound {
+            start = max(start, session.track.index(atElapsed: range.lowerBound) ?? start)
+        }
+        if segment.endElapsed > range.upperBound {
+            end = min(end, session.track.index(atElapsed: range.upperBound) ?? end)
+        }
+        guard end > start, end < session.track.count else { return [] }
+        return session.track.points[start...end].map(\.clCoordinate)
+    }
+
     private func coordinates(for segment: StateSegment) -> [CLLocationCoordinate2D] {
         guard segment.startIndex >= 0, segment.endIndex < session.track.count else { return [] }
         // Clip the segment the scrubber is inside, so the drawn track ends
@@ -210,7 +244,7 @@ struct TrackMapView: View {
         // Filtering whole segments by overlap is not enough: a short session is
         // one long segment, so it overlaps any selection and gets drawn in full,
         // and the part being cut looks identical to the part being kept.
-        if let trimRange {
+        if let trimRange, !trimIsRemoval {
             if segment.startElapsed < trimRange.lowerBound {
                 start = max(start, session.track.index(atElapsed: trimRange.lowerBound) ?? start)
             }

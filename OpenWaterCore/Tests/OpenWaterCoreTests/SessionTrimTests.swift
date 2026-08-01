@@ -240,3 +240,97 @@ struct TrimRestoreTests {
         #expect(restored.untrimmedPoints == nil, "an untrimmed session should not carry a second copy")
     }
 }
+
+@Suite("Removing a segment")
+struct SegmentRemovalTests {
+
+    /// Out for ten minutes, a ten-minute stop in the middle, then ten more.
+    /// The stop is in a different place, so bridging it would invent distance.
+    private func session() -> Session {
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 10, heading: 90, duration: 600),
+            .init(speed: 0.05, heading: 90, duration: 600, transition: 5),
+            .init(speed: 10, heading: 90, duration: 600, transition: 5),
+        ])
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(track)
+        return Session(
+            sport: .wingfoil,
+            startDate: track.startDate ?? Date(),
+            endDate: track.endDate ?? Date(),
+            track: track,
+            wind: summary.wind,
+            summary: summary
+        )
+    }
+
+    @Test("The removed stretch is gone and the rest survives")
+    func removalDropsTheMiddle() throws {
+        let original = session()
+        let edited = original.trimmed(to: original.trim.removing(start: 600, end: 1200))
+
+        #expect(edited.trim.isTrimmed)
+        #expect(edited.trim.cuts.count == 1)
+        #expect(edited.track.count < original.track.count)
+        // Both ends are still there.
+        #expect(edited.track.duration > 1100, "the surviving ends were cut too")
+    }
+
+    /// The reason this needed work in the builder rather than only in the model.
+    @Test("Joining the ends does not invent distance across the gap")
+    func noPhantomDistanceAcrossTheJoin() throws {
+        let original = session()
+        let sailed = original.track.totalDistance
+
+        let edited = original.trimmed(to: original.trim.removing(start: 600, end: 1200))
+
+        // The middle was a stop, so almost no distance should be lost — and
+        // crucially none should be *gained* by drawing a line across the join.
+        #expect(edited.track.totalDistance <= sailed + 1,
+                "the join added \(edited.track.totalDistance - sailed) m nobody sailed")
+        #expect(edited.track.totalDistance > sailed * 0.9)
+    }
+
+    @Test("A removal survives the archive and can still be undone")
+    func removalIsReversible() throws {
+        let original = session()
+        let originalCount = original.track.count
+
+        let edited = original.trimmed(to: original.trim.removing(start: 600, end: 1200))
+        let data = try SessionArchive(session: edited).encoded()
+        let reloaded = try SessionArchive.decode(data).upToDateSession()
+
+        #expect(reloaded.trim.cuts.count == 1)
+        #expect(reloaded.track.count == edited.track.count)
+        #expect(reloaded.rawPoints.count == originalCount)
+
+        let restored = reloaded.trimmed(to: .none)
+        #expect(restored.track.count == originalCount)
+        #expect(!restored.trim.isTrimmed)
+    }
+
+    @Test("Overlapping cuts merge instead of piling up")
+    func cutsMerge() {
+        let trim = SessionTrim()
+            .removing(start: 600, end: 1200)
+            .removing(start: 1100, end: 1500)
+        #expect(trim.cuts.count == 1)
+        #expect(trim.cuts[0].start == 600)
+        #expect(trim.cuts[0].end == 1500)
+    }
+
+    @Test("Saving as a new activity leaves the original alone")
+    func newActivityIsStandalone() throws {
+        let original = session()
+        let edited = original.trimmed(to: original.trim.removing(start: 600, end: 1200))
+        let copy = edited.savedAsNewActivity()
+
+        #expect(copy.id != original.id)
+        #expect(copy.track.count == edited.track.count)
+        // The copy *is* the edit — no trim, and no second copy of the recording.
+        #expect(!copy.trim.isTrimmed)
+        #expect(copy.untrimmedPoints == nil)
+        // And the session it came from is untouched.
+        #expect(edited.rawPoints.count == original.track.count)
+    }
+}

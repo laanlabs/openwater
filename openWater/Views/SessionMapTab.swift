@@ -27,7 +27,7 @@ struct SessionMapTab: View {
 
     /// Apply a trim. The detail view owns saving it, because trimming re-runs
     /// the analysis and the whole screen has to pick up the new numbers.
-    var onTrim: (SessionTrim) -> Void = { _ in }
+    var onTrim: (SessionTrim, Bool) -> Void = { _, _ in }
 
     @Environment(AppSettings.self) private var settings
 
@@ -42,6 +42,23 @@ struct SessionMapTab: View {
     @State private var trimStart: TimeInterval = 0
     @State private var trimEnd: TimeInterval = 0
     @State private var trimEdge: TrackMapView.TrimEdge?
+    @State private var trimMode: TrimMode = .trim
+
+    enum TrimMode: String, CaseIterable, Identifiable {
+        case trim = "Trim"
+        case removeSegment = "Remove Segment"
+
+        var id: String { rawValue }
+
+        var explanation: String {
+            switch self {
+            case .trim:
+                "Keep the part between the handles. Everything outside them is set aside."
+            case .removeSegment:
+                "Remove a section from the middle of your track. The remaining parts will be joined together."
+            }
+        }
+    }
 
     /// Reveal the track only as far as the playhead.
     ///
@@ -75,6 +92,9 @@ struct SessionMapTab: View {
         // inset: nested insets fought with the tab bar's and the transport row
         // ended up underneath it.
         VStack(spacing: 0) {
+            // The trim panel is tall enough to swallow the screen, and the map
+            // is the thing being edited — it keeps a third of the height and
+            // the panel scrolls inside what is left.
             map
             panel
         }
@@ -99,6 +119,7 @@ struct SessionMapTab: View {
             playhead: isScrubbing || elapsed > 0 ? elapsed : nil,
             trimRange: isTrimming ? trimStart...max(trimStart + 1, trimEnd) : nil,
             activeTrimEdge: trimEdge,
+            trimIsRemoval: trimMode == .removeSegment,
             style: settings.mapStyle
         )
         .overlay(alignment: .top) { topChrome }
@@ -149,7 +170,7 @@ struct SessionMapTab: View {
 
             if session.trim.isTrimmed {
                 Button(restoreTitle, systemImage: "arrow.uturn.backward") {
-                    onTrim(.none)
+                    onTrim(.none, false)
                 }
             }
 
@@ -239,9 +260,17 @@ struct SessionMapTab: View {
                     duration: duration,
                     start: $trimStart,
                     end: $trimEnd,
-                    active: $trimEdge
+                    active: $trimEdge,
+                    invertSelection: trimMode == .removeSegment
                 )
-                .frame(height: 82)
+                .frame(height: 62)
+                HStack(spacing: 14) {
+                    endpointStepper("Start", value: $trimStart,
+                                    limit: 0...max(0, trimEnd - 10))
+                    endpointStepper("End", value: $trimEnd,
+                                    limit: min(duration, trimStart + 10)...duration)
+                }
+                trimStats
                 trimControls
             } else {
                 liveNumbers
@@ -478,6 +507,20 @@ extension SessionMapTab {
         withAnimation(.snappy) { isTrimming = true }
     }
 
+    /// Switching mode reseeds: a trim's ends and a cut's middle are not the
+    /// same selection, and carrying one over produces a nonsense default —
+    /// "remove the whole session" being the obvious one.
+    func reseed(for mode: TrimMode) {
+        switch mode {
+        case .trim:
+            trimStart = 0
+            trimEnd = duration
+        case .removeSegment:
+            trimStart = duration * 0.4
+            trimEnd = duration * 0.6
+        }
+    }
+
     /// Convert the on-screen selection into offsets from the start of the
     /// recording, which is what a `SessionTrim` means.
     private var selectedTrim: SessionTrim {
@@ -489,44 +532,203 @@ extension SessionMapTab {
     }
 
     var trimHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Keeping \(Format.duration(trimEnd - trimStart))")
-                    .font(.headline)
-                Text("from \(Format.duration(trimStart)) to \(Format.duration(trimEnd)) of \(Format.duration(duration))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            Text("Trim/Crop")
+                .font(.headline)
+
+            Picker("Mode", selection: $trimMode) {
+                ForEach(TrimMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
             }
-            Spacer()
+            .pickerStyle(.segmented)
+            .onChange(of: trimMode) { _, mode in
+                withAnimation(.snappy) { reseed(for: mode) }
+            }
+
+            Text(trimMode.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// One end, with the nudge buttons. Dragging is for finding the moment;
+    /// these are for landing on it — a second either way is not something a
+    /// thumb can do on a bar this wide.
+    func endpointStepper(
+        _ title: String,
+        value: Binding<TimeInterval>,
+        limit: ClosedRange<TimeInterval>
+    ) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Button {
+                    nudge(value, by: -1, within: limit)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 30, height: 28)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                }
+                .accessibilityLabel("\(title) back one second")
+
+                Text(Format.duration(value.wrappedValue))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .frame(minWidth: 52)
+
+                Button {
+                    nudge(value, by: 1, within: limit)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 30, height: 28)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+                }
+                .accessibilityLabel("\(title) forward one second")
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func nudge(
+        _ value: Binding<TimeInterval>,
+        by seconds: TimeInterval,
+        within limit: ClosedRange<TimeInterval>
+    ) {
+        guard limit.lowerBound <= limit.upperBound else { return }
+        value.wrappedValue = min(max(limit.lowerBound, value.wrappedValue + seconds), limit.upperBound)
+    }
+
+    /// What the session would look like if this were saved.
+    ///
+    /// Computed straight off the track's own prefix arrays rather than by
+    /// rebuilding and re-analysing — that happens once, on Save. A rider
+    /// dragging a handle needs the number to follow their thumb, and
+    /// re-running the whole analysis at sixty frames a second to tell them so
+    /// would make the control unusable.
+    var trimStats: some View {
+        let preview = TrimPreview(
+            track: session.track,
+            range: trimStart...max(trimStart + 1, trimEnd),
+            isRemoval: trimMode == .removeSegment
+        )
+        return HStack(alignment: .top, spacing: 0) {
+            statColumn("Distance", Format.distance(preview.distance, unit: settings.units.distance))
+            statColumn("Avg Speed", Format.speed(preview.averageSpeed, unit: settings.units.speed, decimals: 1))
+            statColumn("Max Speed", Format.speed(preview.maxSpeed, unit: settings.units.speed, decimals: 1))
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func statColumn(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     var trimControls: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    withAnimation(.snappy) { isTrimming = false }
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-
-                Button("Trim") {
-                    onTrim(selectedTrim)
-                    withAnimation(.snappy) { isTrimming = false }
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .disabled(trimEnd - trimStart < 10)
+            Button {
+                apply(asNewActivity: false)
+            } label: {
+                Text("Save")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
             }
-            .font(.headline)
+            .buttonStyle(.borderedProminent)
+            .disabled(!isSelectionUsable)
 
-            // Said out loud because it is the difference between a rider using
-            // this and being frightened of it: the fixes are all still there.
-            Text("Nothing is deleted. \"Restore full recording\" in the map menu puts every fix back, whenever you want it.")
+            Button {
+                apply(asNewActivity: true)
+            } label: {
+                Text("Save as New Activity")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!isSelectionUsable)
+
+            Button("Cancel") {
+                withAnimation(.snappy) { isTrimming = false }
+            }
+            .font(.subheadline)
+            .padding(.top, 2)
+
+            // Short enough to fit, because a reassurance nobody can read is
+            // not a reassurance. The long version lives in the map menu.
+            Text(trimMode == .trim
+                 ? "Nothing is deleted — this can be undone."
+                 : "Nothing is deleted, and the join adds no distance.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
         }
+    }
+
+    /// A selection has to leave something behind, and be worth doing.
+    private var isSelectionUsable: Bool {
+        let span = trimEnd - trimStart
+        guard span >= 10 else { return false }
+        return trimMode == .trim ? true : span < duration - 10
+    }
+
+    private func apply(asNewActivity: Bool) {
+        let trim = trimMode == .trim
+            ? selectedTrim
+            : session.trim.removing(start: trimStart, end: trimEnd)
+        onTrim(trim, asNewActivity)
+        withAnimation(.snappy) { isTrimming = false }
+    }
+}
+
+/// What a selection would leave behind, read off the track's prefix arrays.
+///
+/// Not a re-analysis. The real numbers come from rebuilding the track on Save;
+/// these are the same three figures computed directly, so they can follow a
+/// dragging thumb without running the whole engine sixty times a second. They
+/// agree with the saved result to within the sample either side of a boundary.
+struct TrimPreview {
+
+    let distance: Double
+    let averageSpeed: Double
+    let maxSpeed: Double
+
+    init(track: Track, range: ClosedRange<TimeInterval>, isRemoval: Bool) {
+        guard track.count > 1,
+              let lower = track.index(atElapsed: range.lowerBound),
+              let upper = track.index(atElapsed: range.upperBound),
+              upper > lower else {
+            distance = 0; averageSpeed = 0; maxSpeed = 0
+            return
+        }
+
+        let kept: [ClosedRange<Int>] = isRemoval
+            // Everything but the selection: the two ends that get joined.
+            ? [0...lower, upper...(track.count - 1)].filter { $0.lowerBound < $0.upperBound }
+            : [lower...upper]
+
+        var metres = 0.0
+        var seconds = 0.0
+        var peak = 0.0
+        for piece in kept {
+            metres += track.cumulativeDistance[piece.upperBound] - track.cumulativeDistance[piece.lowerBound]
+            seconds += track.elapsed[piece.upperBound] - track.elapsed[piece.lowerBound]
+            peak = max(peak, track.speed[piece.lowerBound...piece.upperBound].max() ?? 0)
+        }
+
+        distance = metres
+        averageSpeed = seconds > 0 ? metres / seconds : 0
+        maxSpeed = peak
     }
 }
 
@@ -548,6 +750,10 @@ struct TrimTimeline: View {
     @Binding var end: TimeInterval
     /// Which end the finger is on, published so the map can mark it.
     @Binding var active: TrackMapView.TrimEdge?
+
+    /// In remove-segment mode the selection is what goes, so the shading flips:
+    /// the middle is dimmed and the ends stay bright.
+    var invertSelection: Bool = false
 
     /// Handles are 16 points wide; anything narrower is hard to catch with a
     /// thumb, and the two of them must never cross.
@@ -575,16 +781,23 @@ struct TrimTimeline: View {
             ZStack(alignment: .topLeading) {
                 sparkline(size: geometry.size)
 
-                Rectangle()
-                    .fill(.black.opacity(0.35))
-                    .frame(width: max(0, startX))
-                Rectangle()
-                    .fill(.black.opacity(0.35))
-                    .frame(width: max(0, width - endX))
-                    .offset(x: endX)
+                if invertSelection {
+                    Rectangle()
+                        .fill(.red.opacity(0.30))
+                        .frame(width: max(0, endX - startX))
+                        .offset(x: startX)
+                } else {
+                    Rectangle()
+                        .fill(.black.opacity(0.35))
+                        .frame(width: max(0, startX))
+                    Rectangle()
+                        .fill(.black.opacity(0.35))
+                        .frame(width: max(0, width - endX))
+                        .offset(x: endX)
+                }
 
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.yellow, lineWidth: 3)
+                    .stroke(invertSelection ? Color.red : Color.yellow, lineWidth: 3)
                     .frame(width: max(handleWidth * 2, endX - startX), height: height)
                     .offset(x: startX)
 
@@ -600,6 +813,13 @@ struct TrimTimeline: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        // A drag that is mostly vertical belongs to the panel
+                        // scrolling past, not to a handle. Without this the bar
+                        // claims every touch that lands on it and the panel
+                        // cannot be scrolled at all.
+                        guard active != nil
+                                || abs(value.translation.width) > abs(value.translation.height)
+                        else { return }
                         if active == nil || value.startLocation.x != gestureOrigin {
                             gestureOrigin = value.startLocation.x
                             grabbedStartX = startX
@@ -610,9 +830,14 @@ struct TrimTimeline: View {
                         let time = TimeInterval(value.location.x / max(width, 1)) * duration
                         switch active {
                         case .start:
-                            start = min(max(0, time), end - minimumSpan)
+                            // `end - minimumSpan` goes negative on a session
+                            // shorter than the minimum span, and `min` then
+                            // drags the start below zero — which formats as
+                            // "--:--" and makes every downstream number
+                            // nonsense. Clamp the ceiling, not just the floor.
+                            start = min(max(0, time), max(0, end - minimumSpan))
                         case .end:
-                            end = max(min(duration, time), start + minimumSpan)
+                            end = max(min(duration, time), min(duration, start + minimumSpan))
                         case nil:
                             break
                         }
@@ -657,7 +882,7 @@ struct TrimTimeline: View {
 
     private func handle(isStart: Bool, isActive: Bool) -> some View {
         RoundedRectangle(cornerRadius: 5)
-            .fill(isActive ? Color.orange : Color.yellow)
+            .fill(isActive ? Color.orange : (invertSelection ? Color.red : Color.yellow))
             .frame(width: handleWidth)
             .overlay {
                 Image(systemName: isStart ? "chevron.compact.left" : "chevron.compact.right")

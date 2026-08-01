@@ -37,6 +37,7 @@ struct SessionDetailView: View {
     @State private var isPlayingBack = false
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
+    @State private var savedAsNewActivity = false
 
     /// Decode the stored archive into a usable session.
     ///
@@ -149,6 +150,11 @@ struct SessionDetailView: View {
         .sheet(isPresented: $isExporting) {
             ExportView(stored: stored)
         }
+        .alert("Saved as a new activity", isPresented: $savedAsNewActivity) {
+            Button("OK") {}
+        } message: {
+            Text("\(newActivityTitle) is in your sessions. This one is unchanged.")
+        }
         .confirmationDialog(
             "Delete this session?",
             isPresented: $isConfirmingDelete,
@@ -198,15 +204,34 @@ struct SessionDetailView: View {
     /// destroyed — `trimmed(to:)` keeps the full recording alongside, so this
     /// is reversible and can be widened again later.
     @MainActor
-    private func applyTrim(_ trim: SessionTrim, to session: Session) {
+    private func applyTrim(
+        _ trim: SessionTrim,
+        to session: Session,
+        asNewActivity: Bool = false
+    ) {
         let categories = settings.categories
         Task {
-            let trimmed = await Task.detached {
+            let edited = await Task.detached {
                 session.trimmed(to: trim, categories: categories)
             }.value
-            library.save(trimmed)
-            await loadSession()
+
+            if asNewActivity {
+                // The session on screen is left exactly as it was; the edit
+                // lands in the library as its own activity, and the list is
+                // where the rider will find it.
+                library.save(edited.savedAsNewActivity(titled: newActivityTitle))
+                savedAsNewActivity = true
+            } else {
+                library.save(edited)
+                await loadSession()
+            }
         }
+    }
+
+    /// Names the copy after the session it came from, so two rows called
+    /// "Wingfoil" do not appear with no way to tell them apart.
+    private var newActivityTitle: String {
+        "\(stored.displayTitle) (edited)"
     }
 
     // MARK: - Content
@@ -250,7 +275,7 @@ struct SessionDetailView: View {
             selectedRun: $selectedRun,
             onFullScreen: { isMapFullScreen = true },
             onReplay: { isPlayingBack = true },
-            onTrim: { trim in applyTrim(trim, to: session) }
+            onTrim: { trim, asNew in applyTrim(trim, to: session, asNewActivity: asNew) }
         )
     }
 

@@ -22,3 +22,6 @@ Package.resolved
 # which ones are visible and in what order is a personal preference.
 *.xcscmblueprint
 *.xccheckout
+
+# App Store Connect API keys — never in the repo.
+*.p8

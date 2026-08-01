@@ -11,6 +11,19 @@
 	  app down at launch. Everything else stays in the build settings, where it
 	  is easier to keep in step with the watch target.
 	-->
+	<!--
+	  Export compliance, answered here so every upload does not stop in
+	  App Store Connect waiting for someone to tick a box.
+
+	  "false" means the app uses no non-exempt encryption. openWater's only
+	  network call is an HTTPS upload of a shared session; HTTPS is the standard
+	  exemption, and there is no cryptography of our own anywhere in the app.
+	  If that ever stops being true — a custom cipher, an encrypted local store —
+	  this has to be revisited, because it is a legal declaration and not a
+	  build setting.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

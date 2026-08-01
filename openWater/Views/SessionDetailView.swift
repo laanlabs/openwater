@@ -119,6 +119,15 @@ struct SessionDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Edit…", systemImage: "pencil") { isEditing = true }
+
+                    // Offered wherever a rider might look for it, and only when
+                    // there is something to put back. The full recording is
+                    // always kept behind a trim, so this can never fail.
+                    if let session, session.trim.isTrimmed {
+                        Button("Restore Full Recording", systemImage: "arrow.uturn.backward") {
+                            applyTrim(.none, to: session)
+                        }
+                    }
                     Button("Share Image…", systemImage: "photo") { isSharingImage = true }
                         .disabled(session == nil)
                     Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }

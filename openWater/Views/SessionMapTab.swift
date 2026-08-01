@@ -53,6 +53,18 @@ struct SessionMapTab: View {
 
     private var duration: TimeInterval { max(1, session.track.duration) }
 
+    /// How much recording is waiting behind the trim, named in the menu so the
+    /// rider can see there is something to get back without tapping to find out.
+    private var restoreTitle: String {
+        guard let first = session.rawPoints.first?.timestamp,
+              let last = session.rawPoints.last?.timestamp else {
+            return "Restore full recording"
+        }
+        let cut = last.timeIntervalSince(first) - session.track.duration
+        guard cut > 1 else { return "Restore full recording" }
+        return "Restore full recording (+\(Format.duration(cut)))"
+    }
+
     /// Index of the sample under the playhead.
     private var index: Int {
         session.track.index(atElapsed: elapsed) ?? 0
@@ -133,7 +145,7 @@ struct SessionMapTab: View {
             Divider()
 
             if session.trim.isTrimmed {
-                Button("Restore full recording", systemImage: "arrow.uturn.backward") {
+                Button(restoreTitle, systemImage: "arrow.uturn.backward") {
                     onTrim(.none)
                 }
             }
@@ -177,6 +189,11 @@ struct SessionMapTab: View {
                 Text(session.sport.displayName)
                     .font(.title3.weight(.bold))
                 Spacer()
+                if session.trim.isTrimmed {
+                    Label("Trimmed", systemImage: "scissors")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if foilFilter != .everything || minimumSpeed > 0 || showPartialTrack {
                     Button {
                         withAnimation(.snappy) {

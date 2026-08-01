@@ -174,3 +174,69 @@ struct NestedTrimTests {
         #expect(twice.rawPoints.count == original.track.count)
     }
 }
+
+@Suite("The original recording survives")
+struct TrimRestoreTests {
+
+    private func session() -> Session {
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 0.1, heading: 90, duration: 600),
+            .init(speed: 9, heading: 120, duration: 1200, transition: 10),
+            .init(speed: 0.1, heading: 120, duration: 300, transition: 10),
+        ])
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(track)
+        return Session(
+            sport: .wingfoil,
+            startDate: track.startDate ?? Date(),
+            endDate: track.endDate ?? Date(),
+            track: track,
+            wind: summary.wind,
+            summary: summary
+        )
+    }
+
+    /// The promise the trim UI makes out loud — "nothing is deleted" — has to
+    /// survive being written to disk and read back, or it is a lie the moment
+    /// the app is relaunched.
+    @Test("A trim survives an archive round trip and can still be undone")
+    func originalSurvivesTheArchive() throws {
+        let original = session()
+        let originalCount = original.track.count
+        let originalDuration = original.track.duration
+
+        let trimmed = original.trimmed(to: SessionTrim(startOffset: 600, endOffset: 1800))
+        #expect(trimmed.track.count < originalCount)
+
+        // Out to disk and back, exactly as the library stores it.
+        let data = try SessionArchive(session: trimmed).encoded()
+        let reloaded = try SessionArchive.decode(data).upToDateSession()
+
+        #expect(reloaded.trim.isTrimmed)
+        #expect(reloaded.track.count == trimmed.track.count)
+        #expect(reloaded.rawPoints.count == originalCount,
+                "the untrimmed recording did not survive the archive")
+
+        // And restoring from the reloaded copy gives back the whole recording.
+        let restored = reloaded.trimmed(to: .none)
+        #expect(restored.track.count == originalCount)
+        #expect(abs(restored.track.duration - originalDuration) < 0.001)
+        #expect(!restored.trim.isTrimmed)
+    }
+
+    @Test("Restoring after two trims returns the whole recording, not the first cut")
+    func restoreFromNestedTrim() throws {
+        let original = session()
+        let originalCount = original.track.count
+
+        let once = original.trimmed(to: SessionTrim(startOffset: 600, endOffset: 1800))
+        let visible = once.track.duration
+        let twice = once.trimmed(to: once.trim.narrowed(start: 60, end: visible - 60))
+
+        let data = try SessionArchive(session: twice).encoded()
+        let restored = try SessionArchive.decode(data).upToDateSession().trimmed(to: .none)
+
+        #expect(restored.track.count == originalCount)
+        #expect(restored.untrimmedPoints == nil, "an untrimmed session should not carry a second copy")
+    }
+}

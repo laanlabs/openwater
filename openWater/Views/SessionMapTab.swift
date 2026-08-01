@@ -53,9 +53,9 @@ struct SessionMapTab: View {
         var explanation: String {
             switch self {
             case .trim:
-                "Keep the part between the handles. Everything outside them is set aside."
+                "Keeps what is between the handles."
             case .removeSegment:
-                "Remove a section from the middle of your track. The remaining parts will be joined together."
+                "Cuts the middle out; the ends are joined."
             }
         }
     }
@@ -209,7 +209,12 @@ struct SessionMapTab: View {
 
     private var panel: some View {
         VStack(spacing: 10) {
-            HStack {
+            // The sport, the scissors and the play button all step aside while
+            // trimming: the navigation bar already names the session and the
+            // mode picker names what is being done to it, so the row is pure
+            // decoration exactly when the map needs the height most.
+            if !isTrimming {
+                HStack {
                 Text(session.sport.displayName)
                     .font(.title3.weight(.bold))
                 Spacer()
@@ -251,6 +256,7 @@ struct SessionMapTab: View {
                         .background(.quaternary, in: Circle())
                 }
                 .accessibilityLabel("Replay session")
+                }
             }
 
             if isTrimming {
@@ -532,10 +538,7 @@ extension SessionMapTab {
     }
 
     var trimHeader: some View {
-        VStack(spacing: 10) {
-            Text("Trim/Crop")
-                .font(.headline)
-
+        VStack(spacing: 6) {
             Picker("Mode", selection: $trimMode) {
                 ForEach(TrimMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
             }
@@ -545,9 +548,9 @@ extension SessionMapTab {
             }
 
             Text(trimMode.explanation)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -636,42 +639,39 @@ extension SessionMapTab {
     }
 
     var trimControls: some View {
-        VStack(spacing: 8) {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.snappy) { isTrimming = false }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 38, height: 40)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel")
+
+            Button {
+                apply(asNewActivity: true)
+            } label: {
+                Text("Save as New")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!isSelectionUsable)
+
             Button {
                 apply(asNewActivity: false)
             } label: {
                 Text("Save")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
+                    .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
             .disabled(!isSelectionUsable)
-
-            Button {
-                apply(asNewActivity: true)
-            } label: {
-                Text("Save as New Activity")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!isSelectionUsable)
-
-            Button("Cancel") {
-                withAnimation(.snappy) { isTrimming = false }
-            }
-            .font(.subheadline)
-            .padding(.top, 2)
-
-            // Short enough to fit, because a reassurance nobody can read is
-            // not a reassurance. The long version lives in the map menu.
-            Text(trimMode == .trim
-                 ? "Nothing is deleted — this can be undone."
-                 : "Nothing is deleted, and the join adds no distance.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 

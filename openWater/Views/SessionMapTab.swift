@@ -214,7 +214,14 @@ struct SessionMapTab: View {
 
             if isTrimming {
                 trimHeader
-                speedChart
+                TrimTimeline(
+                    samples: chartSamples,
+                    duration: duration,
+                    start: $trimStart,
+                    end: $trimEnd,
+                    active: $trimEdge
+                )
+                .frame(height: 82)
                 trimControls
             } else {
                 liveNumbers
@@ -284,16 +291,11 @@ struct SessionMapTab: View {
                 .foregroundStyle(.tint)
                 .interpolationMethod(.monotone)
             }
-            if !isTrimming {
-                RuleMark(x: .value("Playhead", elapsed))
-                    .foregroundStyle(.secondary)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-            }
+            RuleMark(x: .value("Playhead", elapsed))
+                .foregroundStyle(.secondary)
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
         }
         .chartXAxis(.hidden)
-        // The axis is noise while trimming, and the yellow frame runs straight
-        // through the labels.
-        .chartYAxis(isTrimming ? .hidden : .automatic)
         .chartYAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { value in
                 AxisGridLine()
@@ -307,32 +309,21 @@ struct SessionMapTab: View {
         .frame(height: 82)
         .chartOverlay { proxy in
             GeometryReader { geometry in
-                if isTrimming {
-                    TrimOverlay(
-                        start: $trimStart,
-                        end: $trimEnd,
-                        duration: duration,
-                        width: proxy.plotFrame.map { geometry[$0].width } ?? geometry.size.width,
-                        active: $trimEdge
-                    )
-                    .offset(x: proxy.plotFrame.map { geometry[$0].origin.x } ?? 0)
-                } else {
-                    Rectangle()
-                        .fill(.clear)
-                        .contentShape(.rect)
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    isScrubbing = true
-                                    guard let plot = proxy.plotFrame else { return }
-                                    let x = value.location.x - geometry[plot].origin.x
-                                    if let time: TimeInterval = proxy.value(atX: x) {
-                                        elapsed = min(max(0, time), duration)
-                                    }
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(.rect)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                isScrubbing = true
+                                guard let plot = proxy.plotFrame else { return }
+                                let x = value.location.x - geometry[plot].origin.x
+                                if let time: TimeInterval = proxy.value(atX: x) {
+                                    elapsed = min(max(0, time), duration)
                                 }
-                                .onEnded { _ in isScrubbing = false }
-                        )
-                }
+                            }
+                            .onEnded { _ in isScrubbing = false }
+                    )
             }
         }
     }
@@ -519,96 +510,132 @@ extension SessionMapTab {
     }
 }
 
-/// QuickTime's trim bar: a yellow frame over the timeline with a grab handle at
-/// each end, everything outside it dimmed.
+/// QuickTime's trim bar, drawn in one coordinate space.
 ///
-/// Copied deliberately. Trimming a recording by dragging its two ends is a
-/// gesture people already have in their hands from every video app they have
-/// ever used, and inventing a different one here would buy nothing.
-struct TrimOverlay: View {
+/// The speed profile is painted here rather than borrowed from the chart, and
+/// that is the point. Laying the handles over a Swift Charts view meant asking
+/// it where its plot area was and trusting the answer through every layout
+/// pass — and when the answer was wrong by a margin, a handle would sit off the
+/// side of the screen or an end would appear to jump. One `GeometryReader`,
+/// one width, one mapping from seconds to points, used by the drawing and the
+/// gesture alike: there is nothing left to disagree.
+struct TrimTimeline: View {
+
+    let samples: [(elapsed: TimeInterval, speed: Double)]
+    let duration: TimeInterval
 
     @Binding var start: TimeInterval
     @Binding var end: TimeInterval
-    let duration: TimeInterval
-    let width: CGFloat
+    /// Which end the finger is on, published so the map can mark it.
+    @Binding var active: TrackMapView.TrimEdge?
 
     /// Handles are 16 points wide; anything narrower is hard to catch with a
     /// thumb, and the two of them must never cross.
     private let handleWidth: CGFloat = 16
     private let minimumSpan: TimeInterval = 10
 
-    /// Which end the current drag grabbed, published so the map can mark it.
-    @Binding var active: TrackMapView.TrimEdge?
-
-    /// Where the finger went down. A gesture keeps one `startLocation` for its
-    /// whole life, so a change in it means a *new* gesture — which is how the
-    /// grabbed end gets re-decided even when the previous drag never delivered
-    /// its `onEnded` (a cancelled touch, or the scroll view taking over). That
-    /// is the bug where the wrong handle moved: the old choice stuck, and
-    /// grabbing one end dragged the other.
+    /// Where the finger went down, and where the two ends were at that moment.
+    ///
+    /// A gesture keeps one `startLocation` for its whole life, so a change in it
+    /// means a new gesture — which is how the grabbed end is re-decided even
+    /// when the previous drag never delivered its `onEnded`. Comparing against
+    /// the positions captured *then* rather than the live ones also stops the
+    /// choice flipping under the finger as the selection moves.
     @State private var gestureOrigin: CGFloat = .nan
-
-    // Clamped on the way out as well as on the way in. A handle drawn from an
-    // out-of-range value does not look wrong, it looks *absent* — it is simply
-    // off the side of the chart, which is exactly how the last bug presented.
-    private var startX: CGFloat {
-        min(max(0, CGFloat(start / max(duration, 1)) * width), width - handleWidth)
-    }
-    private var endX: CGFloat {
-        min(max(handleWidth, CGFloat(end / max(duration, 1)) * width), width)
-    }
+    @State private var grabbedStartX: CGFloat = 0
+    @State private var grabbedEndX: CGFloat = 0
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Dim what is being cut.
-            Rectangle()
-                .fill(.black.opacity(0.35))
-                .frame(width: max(0, startX))
-            Rectangle()
-                .fill(.black.opacity(0.35))
-                .frame(width: max(0, width - endX))
-                .offset(x: endX)
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let startX = x(for: start, in: width)
+            let endX = x(for: end, in: width)
 
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.yellow, lineWidth: 3)
-                .frame(width: max(handleWidth * 2, endX - startX))
-                .offset(x: startX)
+            ZStack(alignment: .topLeading) {
+                sparkline(size: geometry.size)
 
-            handle(at: startX, isStart: true, isActive: active == .start)
-            handle(at: endX - handleWidth, isStart: false, isActive: active == .end)
+                Rectangle()
+                    .fill(.black.opacity(0.35))
+                    .frame(width: max(0, startX))
+                Rectangle()
+                    .fill(.black.opacity(0.35))
+                    .frame(width: max(0, width - endX))
+                    .offset(x: endX)
+
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.yellow, lineWidth: 3)
+                    .frame(width: max(handleWidth * 2, endX - startX), height: height)
+                    .offset(x: startX)
+
+                handle(isStart: true, isActive: active == .start)
+                    .frame(height: height)
+                    .offset(x: startX)
+                handle(isStart: false, isActive: active == .end)
+                    .frame(height: height)
+                    .offset(x: max(0, endX - handleWidth))
+            }
+            .frame(width: width, height: height)
+            .contentShape(.rect)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if active == nil || value.startLocation.x != gestureOrigin {
+                            gestureOrigin = value.startLocation.x
+                            grabbedStartX = startX
+                            grabbedEndX = endX
+                            let x = value.startLocation.x
+                            active = abs(x - grabbedStartX) <= abs(x - grabbedEndX) ? .start : .end
+                        }
+                        let time = TimeInterval(value.location.x / max(width, 1)) * duration
+                        switch active {
+                        case .start:
+                            start = min(max(0, time), end - minimumSpan)
+                        case .end:
+                            end = max(min(duration, time), start + minimumSpan)
+                        case nil:
+                            break
+                        }
+                    }
+                    .onEnded { _ in
+                        active = nil
+                        gestureOrigin = .nan
+                    }
+            )
         }
-        .frame(width: width)
-        .contentShape(.rect)
-        // One gesture over the whole bar rather than one per handle. A gesture
-        // attached to a 16-point handle reports positions in *that* view's
-        // coordinate space, so the arithmetic that turns a touch into a time
-        // was working from a sixteen-point-wide world.
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if active == nil || value.startLocation.x != gestureOrigin {
-                        gestureOrigin = value.startLocation.x
-                        let x = value.startLocation.x
-                        active = abs(x - startX) <= abs(x - endX) ? .start : .end
-                    }
-                    let time = TimeInterval(value.location.x / max(width, 1)) * duration
-                    switch active {
-                    case .start:
-                        start = min(max(0, time), end - minimumSpan)
-                    case .end:
-                        end = max(min(duration, time), start + minimumSpan)
-                    case nil:
-                        break
-                    }
-                }
-                .onEnded { _ in
-                    active = nil
-                    gestureOrigin = .nan
-                }
-        )
     }
 
-    private func handle(at x: CGFloat, isStart: Bool, isActive: Bool) -> some View {
+    /// Seconds to points, clamped so a handle can never be drawn off the bar.
+    private func x(for time: TimeInterval, in width: CGFloat) -> CGFloat {
+        guard duration > 0, width > 0 else { return 0 }
+        let fraction = min(max(0, time / duration), 1)
+        return CGFloat(fraction) * width
+    }
+
+    /// The speed profile, filled. Not a chart — just the shape, so the rider can
+    /// see which part of the session they are keeping.
+    private func sparkline(size: CGSize) -> some View {
+        Canvas { context, canvasSize in
+            guard samples.count > 1, duration > 0 else { return }
+            let peak = max(samples.map(\.speed).max() ?? 1, 0.1)
+
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: canvasSize.height))
+            for sample in samples {
+                let px = CGFloat(min(max(0, sample.elapsed / duration), 1)) * canvasSize.width
+                let py = canvasSize.height * (1 - CGFloat(sample.speed / peak) * 0.92)
+                path.addLine(to: CGPoint(x: px, y: py))
+            }
+            path.addLine(to: CGPoint(x: canvasSize.width, y: canvasSize.height))
+            path.closeSubpath()
+
+            context.fill(path, with: .color(.accentColor.opacity(0.25)))
+            context.stroke(path, with: .color(.accentColor), lineWidth: 1.5)
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func handle(isStart: Bool, isActive: Bool) -> some View {
         RoundedRectangle(cornerRadius: 5)
             .fill(isActive ? Color.orange : Color.yellow)
             .frame(width: handleWidth)
@@ -617,7 +644,5 @@ struct TrimOverlay: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.black.opacity(0.55))
             }
-            .offset(x: x)
-            .allowsHitTesting(false)
     }
 }

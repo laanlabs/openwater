@@ -82,10 +82,25 @@ public final class MotionProvider {
         }
         isRunning = true
         manager.deviceMotionUpdateInterval = 1.0 / 10.0
+        // `@Sendable` is the whole fix for a crash that only ever happened on a
+        // real device.
+        //
+        // `CMDeviceMotionHandler` is imported from Objective-C without any
+        // Sendable annotation, so a closure written here — inside a `@MainActor`
+        // class, in Swift 6 mode — is inferred to *inherit main-actor
+        // isolation*. CoreMotion then calls it on the operation queue below, the
+        // runtime checks the executor, finds the wrong one, and traps:
+        // `_dispatch_assert_queue_fail`, on the first motion sample after the
+        // rider taps Start.
+        //
+        // It never reproduced in the simulator because `isDeviceMotionAvailable`
+        // is false there, so `start()` returns above and this handler is never
+        // installed. Marking it `@Sendable` makes it nonisolated, which is what
+        // it always was in fact.
         manager.startDeviceMotionUpdates(
             using: .xArbitraryZVertical,
             to: queue
-        ) { [weak self] motion, error in
+        ) { @Sendable [weak self] motion, error in
             guard let motion else {
                 if let error { Self.logger.error("motion error: \(error.localizedDescription)") }
                 return

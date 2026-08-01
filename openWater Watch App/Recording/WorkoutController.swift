@@ -90,7 +90,10 @@ final class WorkoutController: NSObject {
         self.routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: nil)
 
         session.startActivity(with: startDate)
-        builder.beginCollection(withStart: startDate) { success, error in
+        // Same hazard as MotionProvider: HealthKit's completion handler is not
+        // Sendable in the SDK, so a closure written inside this class inherits
+        // main-actor isolation and then gets called on HealthKit's own queue.
+        builder.beginCollection(withStart: startDate) { @Sendable success, error in
             if let error {
                 Self.logger.error("beginCollection failed: \(error.localizedDescription)")
             }

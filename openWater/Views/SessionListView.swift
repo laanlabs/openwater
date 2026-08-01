@@ -39,6 +39,7 @@ struct SessionListView: View {
     /// is easy to do by accident while scrolling. Nothing is removed until the
     /// rider says so, and the prompt names what will go.
     @State private var pendingDeletion: [StoredSession] = []
+    @State private var showingWatchStatus = false
 
     enum Period: String, CaseIterable, Identifiable {
         case allTime = "All time"
@@ -154,6 +155,19 @@ struct SessionListView: View {
             } message: {
                 Text(deletionPrompt)
             }
+            .sheet(isPresented: $showingWatchStatus) {
+                NavigationStack {
+                    ScrollView { WatchStatusView().padding() }
+                        .navigationTitle("Apple Watch")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { showingWatchStatus = false }
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+            }
             .alert("Import", isPresented: .constant(importMessage != nil)) {
                 Button("OK") { importMessage = nil }
             } message: {
@@ -257,14 +271,37 @@ struct SessionListView: View {
         }
     }
 
-    /// Watch connection state, shown plainly so a rider can tell at a glance
-    /// whether a session is still sitting on their wrist.
-    @ViewBuilder
+    /// Watch state, always visible and always tappable.
+    ///
+    /// It was a passive icon that appeared only once everything already worked
+    /// — which is precisely when nobody needs it. The case that matters is the
+    /// rider who has a watch and no app on it yet, so the icon is now there in
+    /// every state and opens the screen that explains how to fix whichever one
+    /// they are in.
     private var watchStatus: some View {
-        if sync.isPaired && sync.isWatchAppInstalled {
-            Image(systemName: sync.isReachable ? "applewatch" : "applewatch.slash")
-                .foregroundStyle(sync.isReachable ? .green : .secondary)
-                .accessibilityLabel(sync.isReachable ? "Watch connected" : "Watch not reachable")
+        Button {
+            showingWatchStatus = true
+        } label: {
+            Image(systemName: watchSymbol)
+                .foregroundStyle(watchTint)
+        }
+        .accessibilityLabel("Apple Watch")
+        .accessibilityValue(watchState.title)
+    }
+
+    private var watchState: WatchStatusView.State {
+        if !sync.isPaired { return .noWatch }
+        if !sync.isWatchAppInstalled { return .notInstalled }
+        return sync.isReachable ? .connected : .installedNotReachable
+    }
+
+    private var watchSymbol: String { watchState.symbol }
+
+    private var watchTint: Color {
+        switch watchState {
+        case .connected: .green
+        case .notInstalled: .orange
+        default: .secondary
         }
     }
 

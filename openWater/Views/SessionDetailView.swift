@@ -84,17 +84,19 @@ struct SessionDetailView: View {
         }
     }
 
+    /// Map first, because it is what a session is opened to look at and it is
+    /// the tab this screen lands on.
     enum Mode: String, CaseIterable, Identifiable {
-        case summary = "Summary"
         case map = "Map"
+        case summary = "Summary"
         case ribbon = "Runs"
         case charts = "Charts"
 
         var id: String { rawValue }
         var symbol: String {
             switch self {
-            case .summary: "list.bullet.rectangle"
             case .map: "map"
+            case .summary: "list.bullet.rectangle"
             case .ribbon: "chart.bar.doc.horizontal"
             case .charts: "chart.xyaxis.line"
             }

@@ -129,8 +129,6 @@ struct SessionMapTab: View {
 
             Divider()
 
-            Button("Trim session…", systemImage: "scissors") { beginTrimming() }
-
             if session.trim.isTrimmed {
                 Button("Restore full recording", systemImage: "arrow.uturn.backward") {
                     onTrim(.none)
@@ -188,6 +186,20 @@ struct SessionMapTab: View {
                             .font(.caption)
                     }
                 }
+                // Trimming lives next to the scrubber it operates on, not in a
+                // menu: it is the thing a rider does to the timeline, and a
+                // control that acts on what you are looking at should be where
+                // you are looking.
+                Button {
+                    beginTrimming()
+                } label: {
+                    Image(systemName: "scissors")
+                        .font(.subheadline)
+                        .padding(9)
+                        .background(.quaternary, in: Circle())
+                }
+                .accessibilityLabel("Trim session")
+
                 Button(action: onReplay) {
                     Image(systemName: "play.fill")
                         .font(.subheadline)

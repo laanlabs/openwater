@@ -41,6 +41,9 @@ struct RecordTabView: View {
     /// recorded instead of an empty Record tab.
     @State private var path: [UUID] = []
 
+    /// The session just saved, awaiting its debrief.
+    @State private var reviewing: StoredSession?
+
     var body: some View {
         NavigationStack(path: $path) {
             Group {
@@ -72,6 +75,9 @@ struct RecordTabView: View {
             }
             .sheet(isPresented: $showingCountdown) {
                 CountdownView(onStart: start)
+            }
+            .sheet(item: $reviewing) { stored in
+                SessionReviewView(stored: stored)
             }
             .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
                 Button("End & Save") { end() }
@@ -259,10 +265,12 @@ struct RecordTabView: View {
 
     private func end() {
         // Landing back on an empty Record tab after an hour on the water is the
-        // wrong answer to "what did I just do?" — the session opens instead.
+        // wrong answer to "what did I just do?" — the session opens instead,
+        // with the debrief over it while the conditions are still fresh.
         if let session = recorder.finish() {
             let stored = library.save(session)
             path = [stored.id]
+            reviewing = stored
         }
         title = ""
         spot = ""

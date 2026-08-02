@@ -78,21 +78,24 @@ struct ImportView: View {
                 }
 
                 dataQualitySection
-
-                Section {
-                    Button("Import") {
-                        onImport(sport)
-                        dismiss()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .fontWeight(.semibold)
-                }
             }
             .navigationTitle("Import session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+                // In the bar rather than as the last row of the form. A file
+                // with several warnings pushes that row below the fold, so the
+                // one button the screen exists for was the one thing a rider
+                // had to go looking for — and it sat opposite a Cancel that
+                // was always visible.
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") {
+                        onImport(sport)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
                 }
             }
         }

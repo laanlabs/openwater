@@ -48,11 +48,12 @@ struct openWaterApp: App {
                     sync.activate()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    // Push buffered fixes to disk whenever the app leaves the
-                    // foreground. Recording continues in the background, but a
-                    // termination there is silent — flushing here bounds the
-                    // loss to seconds rather than the whole session.
-                    if phase != .active { recorder.flush() }
+                    // Leaving the foreground: push buffered fixes to disk, and
+                    // hand back the receiver unless a session is actually being
+                    // recorded. A termination in the background is silent, so
+                    // flushing here bounds the loss to seconds rather than the
+                    // whole session.
+                    if phase != .active { recorder.enteredBackground() }
                 }
         }
         .modelContainer(container)

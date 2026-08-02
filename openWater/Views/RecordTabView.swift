@@ -69,8 +69,17 @@ struct RecordTabView: View {
             .onAppear {
                 if recorder.state == .idle { sport = settings.lastSport }
                 recorder.prepare()
-                recorder.warmUpSensors()
                 recorder.allTimeBests = library.records.mapValues(\.speed)
+                if isActive { recorder.warmUpSensors() }
+            }
+            // The tab stays in the hierarchy when the rider looks at something
+            // else, so `onDisappear` never fires — and the receiver stayed on.
+            .onChange(of: isActive) { _, active in
+                if active {
+                    recorder.warmUpSensors()
+                } else if recorder.state == .idle {
+                    recorder.stopWarmUp()
+                }
             }
             .sheet(isPresented: $showingCountdown) {
                 CountdownView(onStart: start)

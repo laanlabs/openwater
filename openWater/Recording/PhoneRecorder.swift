@@ -109,8 +109,17 @@ final class PhoneRecorder {
     }
 
     /// Warm the receiver so the first fixes are not the worst ones.
+    ///
+    /// Foreground only — see `LocationProvider.warmUp()`. Paired with
+    /// `stopWarmUp()`, which every caller must make on the way out.
     func warmUpSensors() {
         location.warmUp()
+    }
+
+    /// Give the receiver back when nobody is looking at it. A session in
+    /// progress is untouched.
+    func stopWarmUp() {
+        location.endWarmUp()
     }
 
     // MARK: - Control
@@ -181,6 +190,17 @@ final class PhoneRecorder {
     /// termination while recording loses seconds rather than the session.
     func flush() {
         engine.flush()
+    }
+
+    /// The app left the foreground.
+    ///
+    /// Recording carries on — that is what the background mode is for. Anything
+    /// else gives the receiver up: a warm-up left running was the reason the
+    /// blue location pill stayed lit, and the battery kept draining, for an app
+    /// that was not recording a thing.
+    func enteredBackground() {
+        flush()
+        if engine.state == .idle { location.endWarmUp() }
     }
 
     // MARK: - Ingest

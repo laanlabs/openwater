@@ -45,6 +45,9 @@ struct StartView: View {
             .navigationTitle("openWater")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { recorder.warmUpSensors() }
+            // Leaving the chooser — for the live screen or for the wrist going
+            // down — gives the receiver back. Only a recording session holds it.
+            .onDisappear { recorder.stopWarmUp() }
             .sheet(isPresented: $showingSettings) {
                 NavigationStack { WatchSettingsView() }
             }

@@ -84,6 +84,12 @@ final class SessionRecorder {
         location.warmUp()
     }
 
+    /// Give the receiver back when the chooser goes away. A session in progress
+    /// is untouched.
+    func stopWarmUp() {
+        location.endWarmUp()
+    }
+
     // MARK: - Control
 
     func start(sport: Sport) {

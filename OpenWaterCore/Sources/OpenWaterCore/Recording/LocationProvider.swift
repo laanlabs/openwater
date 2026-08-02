@@ -12,6 +12,18 @@ import os
 /// - `distanceFilter = .none` means every fix is delivered rather than only
 ///   those a certain distance apart. A distance filter would silently destroy
 ///   the uniform sampling the window metrics assume.
+///
+/// The receiver runs in exactly two modes, and the difference between them is
+/// the whole of this class's contract:
+///
+/// - **Recording** (`start()` … `stop()`) holds background updates, because a
+///   session has to survive the screen locking and the phone going in a pocket.
+/// - **Warming up** (`warmUp()` … `endWarmUp()`) is foreground-only and
+///   time-limited. It exists so the accuracy shown on the pre-session screen is
+///   real, which nobody reads from another app.
+///
+/// Nothing else may hold the receiver. Background GPS is a promise that a
+/// session is being written down.
 @MainActor
 @Observable
 public final class LocationProvider: NSObject {
@@ -26,6 +38,12 @@ public final class LocationProvider: NSObject {
     public private(set) var authorization: CLAuthorizationStatus = .notDetermined
     public private(set) var latestAccuracy: Double = -1
     public private(set) var isRunning = false
+
+    /// Whether background updates are currently held.
+    ///
+    /// Mirrors what was last set on the manager, so the state can be asserted
+    /// and reported rather than only inferred from a battery graph.
+    public private(set) var usesBackgroundUpdates = false
 
     /// True once at least one fix has arrived with usable accuracy — the signal
     /// the UI uses to say "ready" rather than letting a rider start recording
@@ -72,30 +90,19 @@ public final class LocationProvider: NSObject {
         #if os(iOS)
         manager.pausesLocationUpdatesAutomatically = false
         #endif
-        // Required for fixes to keep arriving with the screen off — without it
-        // the stream stops as soon as the app is not frontmost, even inside a
-        // workout session on the watch.
-        //
-        // CoreLocation *raises an exception* if this is set by an app that has
-        // not declared the `location` background mode, which takes the whole app
-        // down at launch. A shared component has no business doing that to its
-        // host, so the capability is checked first and its absence is logged
-        // rather than fatal: recording still works, it just stops when the app
-        // is backgrounded.
-        if Self.declaresBackgroundLocationMode {
-            manager.allowsBackgroundLocationUpdates = true
-            #if os(iOS)
-            // The blue pill in the status bar. Not optional in spirit: an app
-            // holding GPS in the background while the rider is in Messages
-            // should say so, and it doubles as the rider's own confirmation
-            // that the session is still running.
-            manager.showsBackgroundLocationIndicator = true
-            #endif
-        } else {
+        // Background updates are *not* switched on here. See `start()`.
+        if !Self.declaresBackgroundLocationMode {
             Self.logger.error(
                 "Info.plist does not list \"location\" in UIBackgroundModes — recording will stop when the app is backgrounded."
             )
         }
+        #if os(iOS)
+        // The blue pill in the status bar, for whenever background updates are
+        // actually on. Not optional in spirit: an app holding GPS in the
+        // background while the rider is in Messages should say so, and it
+        // doubles as the rider's own confirmation that the session is running.
+        manager.showsBackgroundLocationIndicator = true
+        #endif
         authorization = manager.authorizationStatus
     }
 
@@ -139,24 +146,85 @@ public final class LocationProvider: NSObject {
     }
 
     /// Start delivering fixes to `onFix`.
+    ///
+    /// This is the only thing that turns on background updates, and `stop()` is
+    /// the only thing that turns them off. That pairing is the whole point: the
+    /// permission used to be granted once at launch and never withdrawn, so the
+    /// warm-up stream — started merely by opening the Record tab — kept the
+    /// receiver alive in the background indefinitely, with the blue pill
+    /// showing and the battery draining, for an app that was not recording
+    /// anything. Background GPS is a promise that a session is being written
+    /// down; holding it at any other time is taking something for nothing.
     public func start() {
         guard !isRunning else { return }
+        endWarmUp(stoppingReceiver: false)
         isRunning = true
+        if Self.declaresBackgroundLocationMode {
+            manager.allowsBackgroundLocationUpdates = true
+            usesBackgroundUpdates = true
+        }
         manager.startUpdatingLocation()
-        Self.logger.info("location updates started")
+        Self.logger.info("location updates started (background: \(self.usesBackgroundUpdates))")
     }
 
     public func stop() {
         guard isRunning else { return }
         isRunning = false
+        manager.allowsBackgroundLocationUpdates = false
+        usesBackgroundUpdates = false
         manager.stopUpdatingLocation()
         Self.logger.info("location updates stopped")
     }
 
+    /// How long a warm-up runs before giving up on its own.
+    ///
+    /// Long enough to cover rigging up and reading the accuracy off the Record
+    /// screen; short enough that an app left open on that screen does not hold
+    /// the receiver all afternoon.
+    public static let warmUpDuration: TimeInterval = 180
+
+    private var warmUpTask: Task<Void, Never>?
+    private var isWarmingUp = false
+
     /// Warm the receiver up before recording begins, so the first fixes of a
     /// session are not the worst ones.
+    ///
+    /// Foreground only, and time-limited. It exists to make the GPS readout on
+    /// the pre-session screen honest, which is a foreground concern by
+    /// definition — nobody is reading it from another app.
     public func warmUp() {
+        guard !isRunning else { return }
+        manager.allowsBackgroundLocationUpdates = false
+        usesBackgroundUpdates = false
+        isWarmingUp = true
         manager.startUpdatingLocation()
+        Self.logger.info("warm-up started (foreground only)")
+
+        warmUpTask?.cancel()
+        warmUpTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.warmUpDuration))
+            guard !Task.isCancelled else { return }
+            self?.endWarmUp()
+        }
+    }
+
+    /// Give up the receiver if it is only warming up.
+    ///
+    /// Called when the pre-session screen goes away and when the app leaves the
+    /// foreground. A recording in progress is untouched.
+    public func endWarmUp() {
+        endWarmUp(stoppingReceiver: true)
+    }
+
+    private func endWarmUp(stoppingReceiver: Bool) {
+        warmUpTask?.cancel()
+        warmUpTask = nil
+        guard isWarmingUp else { return }
+        isWarmingUp = false
+        if stoppingReceiver, !isRunning {
+            manager.stopUpdatingLocation()
+            Self.logger.info("warm-up ended")
+        }
     }
 
     /// Kick the stream back into life after the system stopped it.

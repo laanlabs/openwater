@@ -151,10 +151,17 @@ struct SessionMapTab: View {
                 }
                 .accessibilityLabel("Full screen map")
 
+                // Out of the overflow menu and onto the map. Choosing the base
+                // layer is the most-used thing here and the only one with a
+                // running cost — satellite tiles are a download every time the
+                // map moves — so it should not take two taps and a read.
+                MapStyleButton(selection: Bindable(settings).mapStyle)
+
                 mapOptions
             }
         }
         .padding(10)
+        .mapChrome(onDark: settings.mapStyle.isDark)
     }
 
     /// Everything that changes what the map is showing, in one menu.
@@ -181,12 +188,6 @@ struct SessionMapTab: View {
             Toggle("Show turns", systemImage: "arrow.triangle.turn.up.right.diamond", isOn: $showManeuvers)
 
             Divider()
-
-            Picker("Map style", selection: Bindable(settings).mapStyle) {
-                ForEach(MapStyleOption.allCases) { option in
-                    Label(option.displayName, systemImage: option.symbolName).tag(option)
-                }
-            }
 
             Menu("Minimum speed") {
                 Button("Off") { minimumSpeed = 0 }

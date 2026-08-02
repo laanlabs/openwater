@@ -44,6 +44,7 @@ struct openWaterApp: App {
                 .environment(countdown)
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
+                    library.purgeExpiredTrash()
                     sync.activate()
                 }
                 .onChange(of: scenePhase) { _, phase in

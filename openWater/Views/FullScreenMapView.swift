@@ -128,6 +128,7 @@ struct FullScreenMapView: View {
         }
         .padding(.horizontal)
         .padding(.top, 4)
+        .mapChrome(onDark: settings.mapStyle.isDark)
         .opacity(showControls ? 1 : 0)
         .animation(.snappy, value: showControls)
     }

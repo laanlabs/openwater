@@ -458,12 +458,31 @@ struct MapStyleButton: View {
                 }
             }
         } label: {
-            Image(systemName: "square.3.layers.3d")
+            // The current layer's own symbol rather than a generic stack: the
+            // control says what the map is showing as well as what it does, and
+            // satellite is worth being able to spot and leave at a glance
+            // because it is the one that costs cellular data.
+            Image(systemName: selection.symbolName)
                 .font(.subheadline)
                 .padding(9)
                 .background(.regularMaterial, in: Circle())
         }
         .accessibilityLabel("Map style")
+        .accessibilityValue(selection.displayName)
+    }
+}
+
+extension View {
+    /// Make map chrome legible over whichever base map is underneath.
+    ///
+    /// `.regularMaterial` adapts to the *interface* appearance, not to what is
+    /// behind it, so in light mode the buttons over satellite imagery came out
+    /// pale-on-pale — the controls were there and could not be seen. Forcing
+    /// the dark scheme flips every material and label in the overlay in one
+    /// move, and the shadow lifts it off imagery that is busy as well as dark.
+    func mapChrome(onDark: Bool) -> some View {
+        environment(\.colorScheme, onDark ? .dark : .light)
+            .shadow(color: .black.opacity(onDark ? 0.45 : 0.12), radius: 5, y: 1)
     }
 }
 

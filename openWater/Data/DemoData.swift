@@ -82,7 +82,9 @@ extension SessionLibrary {
                 || arguments.contains(LaunchArgument.resetData) else { return }
 
         if arguments.contains(LaunchArgument.resetData) {
-            delete(ids: Set(allSessions().map(\.id)))
+            // A real delete, not the thirty-day one: a screenshot run asking
+            // for a clean library means clean, not "clean plus a full trash".
+            for stored in allSessions() { deletePermanently(stored) }
         }
         if arguments.contains(LaunchArgument.seedDemoData), allSessions().isEmpty {
             // Two sessions on different days, so the list, the records board and

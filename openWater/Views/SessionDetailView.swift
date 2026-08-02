@@ -166,7 +166,7 @@ struct SessionDetailView: View {
             }
             Button("Keep", role: .cancel) {}
         } message: {
-            Text("Its track and every metric go with it, and this cannot be undone.")
+            Text("It moves to Recently Deleted, where you can get it back for 30 days.")
         }
         .sheet(isPresented: $isSharingImage) {
             if let session, let summary = session.summary {

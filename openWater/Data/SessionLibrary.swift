@@ -74,18 +74,55 @@ final class SessionLibrary {
         return stored.archiveData.isEmpty ? nil : stored.archiveData
     }
 
+    // MARK: - Deleting
+
+    /// Move a session to Recently Deleted.
+    ///
+    /// Deliberately not a real delete. Every destructive control in this app is
+    /// one tap away from something a rider spent an afternoon producing and
+    /// cannot produce again, and no amount of confirmation dialogue makes a
+    /// mis-tap recoverable — only keeping the data does. Thirty days later
+    /// `purgeExpiredTrash()` finishes the job.
     func delete(_ stored: StoredSession) {
-        context.delete(stored)
+        stored.deletedAt = .now
         persist()
     }
 
     func delete(ids: Set<UUID>) {
         for id in ids {
-            guard let match = try? context.fetch(
-                FetchDescriptor<StoredSession>(predicate: #Predicate { $0.id == id })
-            ).first else { continue }
-            context.delete(match)
+            session(id: id)?.deletedAt = .now
         }
+        persist()
+    }
+
+    func restore(_ stored: StoredSession) {
+        stored.deletedAt = nil
+        persist()
+    }
+
+    /// Really delete, from the Recently Deleted screen where that is the
+    /// explicit intent rather than a slip.
+    func deletePermanently(_ stored: StoredSession) {
+        context.delete(stored)
+        persist()
+    }
+
+    func emptyTrash() {
+        for stored in trashedSessions() { context.delete(stored) }
+        persist()
+    }
+
+    func trashedSessions() -> [StoredSession] {
+        allSessions().filter(\.isTrashed)
+    }
+
+    /// Drop anything that has served its thirty days. Called at launch.
+    func purgeExpiredTrash() {
+        let cutoff = Date.now.addingTimeInterval(-StoredSession.trashRetention)
+        let expired = trashedSessions().filter { ($0.deletedAt ?? .now) < cutoff }
+        guard !expired.isEmpty else { return }
+        for stored in expired { context.delete(stored) }
+        Self.logger.info("purged \(expired.count) session(s) from Recently Deleted")
         persist()
     }
 
@@ -145,7 +182,10 @@ final class SessionLibrary {
     /// Reads only the indexed fields — never decodes an archive — so this stays
     /// cheap enough to run after every single save.
     func refreshRecords() {
-        let sessions = allSessions()
+        // Trashed sessions do not hold records. A rider who deletes a session
+        // recorded in a car expects the number to go with it, and a record
+        // pointing at a row the list no longer shows is untappable.
+        let sessions = allSessions().filter { !$0.isTrashed }
         var book: [SpeedCategory: RecordHolder] = [:]
 
         func consider(_ category: SpeedCategory, _ value: Double, _ session: StoredSession) {
@@ -220,7 +260,13 @@ final class SessionLibrary {
     /// Complete by construction — it re-encodes the same archives that were
     /// stored, so an export can never quietly omit a channel.
     func exportAll(privacy: PrivacySettings = .init()) throws -> Data {
-        let sessions = allSessions().compactMap { $0.fullSession() }
+        // Deleted sessions stay out. They are still on disk for their thirty
+        // days, but a backup is what the rider keeps, and they said they did
+        // not want these — restoring one is a job for Recently Deleted, not for
+        // a file that silently resurrects them somewhere else.
+        let sessions = allSessions()
+            .filter { !$0.isTrashed }
+            .compactMap { $0.fullSession() }
         let prepared = sessions.map { privacy.apply(to: $0) }
         return try SessionArchiveBundle(sessions: prepared).encoded(pretty: false)
     }

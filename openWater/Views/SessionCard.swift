@@ -21,10 +21,18 @@ struct SessionCard: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
+                // Always the standard map, whatever the detail maps are set to.
+                //
+                // A scroll through a season is dozens of these, and satellite
+                // previews mean dozens of imagery fetches — on a phone that is
+                // often on cellular, at a beach, for a picture 150 points tall
+                // where the shoreline reads as brown mush anyway. The shape of
+                // the track is the whole job here, and the plain map draws it
+                // more clearly and for free.
                 TrackThumbnail(
                     id: session.id,
                     samples: samples,
-                    style: settings.mapStyle,
+                    style: .standard,
                     height: 150
                 )
 

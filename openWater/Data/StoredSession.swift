@@ -93,6 +93,28 @@ final class StoredSession {
     /// recomputed rather than quietly showing numbers from an older algorithm.
     var analysisVersion: Int
 
+    /// When this session was moved to Recently Deleted, if it was.
+    ///
+    /// Nothing a rider records is ever destroyed by a single tap. A session is
+    /// an hour on the water that cannot be recorded again, and the delete
+    /// button is next to everything else — so it moves the row out of sight and
+    /// leaves the archive on disk for thirty days. Optional, both because old
+    /// rows predate it and because "nil" is the honest representation of a
+    /// session that was never deleted.
+    var deletedAt: Date?
+
+    var isTrashed: Bool { deletedAt != nil }
+
+    /// Days a trashed session survives before it is really gone.
+    static let trashRetention: TimeInterval = 30 * 24 * 3600
+
+    /// Days left before this one is purged, floored at zero.
+    var daysLeftInTrash: Int {
+        guard let deletedAt else { return 0 }
+        let remaining = Self.trashRetention - Date.now.timeIntervalSince(deletedAt)
+        return max(0, Int((remaining / 86_400).rounded(.up)))
+    }
+
     // MARK: The whole thing
 
     /// The encoded `SessionArchive`. External storage keeps multi-megabyte

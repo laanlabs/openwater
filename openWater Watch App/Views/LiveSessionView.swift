@@ -38,9 +38,13 @@ struct LiveSessionView: View {
             CountdownPage().tag(Page.countdown)
         }
         .tabViewStyle(.page)
+        // Ending saves. Discard used to sit right underneath, on a screen the
+        // size of a stamp, tapped by a wet finger — the single easiest way in
+        // the whole app to destroy a session. It is gone: the session syncs to
+        // the phone, and anything unwanted is deleted there, where it lands in
+        // Recently Deleted and can come back.
         .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
             Button("End & Save") { Task { await end() } }
-            Button("Discard", role: .destructive) { recorder.discard() }
             Button("Keep Recording", role: .cancel) {}
         }
     }

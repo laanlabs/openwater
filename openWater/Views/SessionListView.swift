@@ -16,7 +16,17 @@ struct SessionListView: View {
     @Environment(AppSettings.self) private var settings
 
     @Query(sort: \StoredSession.startDate, order: .reverse)
-    private var sessions: [StoredSession]
+    private var allRows: [StoredSession]
+
+    /// Everything except what is sitting in Recently Deleted.
+    ///
+    /// Filtered here rather than in the `@Query` predicate: SwiftData's
+    /// predicate support for optionals is fussy, the list already filters in
+    /// memory for period and sport, and a library is hundreds of rows, not
+    /// millions.
+    private var sessions: [StoredSession] { allRows.filter { !$0.isTrashed } }
+
+    private var trashed: [StoredSession] { allRows.filter(\.isTrashed) }
 
     @State private var sportFilter: Sport?
     @State private var period: Period = .allTime
@@ -39,6 +49,7 @@ struct SessionListView: View {
     /// is easy to do by accident while scrolling. Nothing is removed until the
     /// rider says so, and the prompt names what will go.
     @State private var pendingDeletion: [StoredSession] = []
+    @State private var showingTrash = false
     @State private var showingWatchStatus = false
 
     enum Period: String, CaseIterable, Identifiable {
@@ -155,6 +166,11 @@ struct SessionListView: View {
             } message: {
                 Text(deletionPrompt)
             }
+            .sheet(isPresented: $showingTrash) {
+                NavigationStack {
+                    RecentlyDeletedView(sessions: trashed)
+                }
+            }
             .sheet(isPresented: $showingWatchStatus) {
                 NavigationStack {
                     ScrollView { WatchStatusView().padding() }
@@ -265,6 +281,12 @@ struct SessionListView: View {
                 Button("Add Demo Session", systemImage: "wand.and.stars") {
                     addDemoSession()
                 }
+                if !trashed.isEmpty {
+                    Divider()
+                    Button("Recently Deleted (\(trashed.count))", systemImage: "trash") {
+                        showingTrash = true
+                    }
+                }
             } label: {
                 Image(systemName: "plus")
             }
@@ -318,9 +340,9 @@ struct SessionListView: View {
     private var deletionPrompt: String {
         guard let first = pendingDeletion.first else { return "" }
         if pendingDeletion.count == 1 {
-            return "Delete \"\(first.displayTitle)\"? Its track and every metric go with it, and this cannot be undone."
+            return "\"\(first.displayTitle)\" moves to Recently Deleted, where you can get it back for 30 days."
         }
-        return "Delete \(pendingDeletion.count) sessions? Their tracks and every metric go with them, and this cannot be undone."
+        return "\(pendingDeletion.count) sessions move to Recently Deleted, where you can get them back for 30 days."
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {

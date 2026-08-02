@@ -188,6 +188,7 @@ struct SessionPlaybackView: View {
         }
         .padding(.horizontal)
         .padding(.top, 4)
+        .mapChrome(onDark: settings.mapStyle.isDark)
     }
 
     /// Live values at the playhead — the point of scrubbing is to see what was

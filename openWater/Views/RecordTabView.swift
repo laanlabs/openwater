@@ -33,7 +33,6 @@ struct RecordTabView: View {
     @State private var spot = ""
     @State private var showingDetails = false
     @State private var showingEndConfirmation = false
-    @State private var showingDiscardConfirmation = false
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var showingCountdown = false
 
@@ -79,23 +78,25 @@ struct RecordTabView: View {
             .sheet(item: $reviewing) { stored in
                 SessionReviewView(stored: stored)
             }
+            // Ending a session saves it. There is no discard here.
+            //
+            // There used to be, one row below End & Save, behind its own second
+            // confirmation — and it was still the wrong shape. A rider walking
+            // up the beach with cold hands, salt on the screen and a phone in
+            // one hand does not read a dialog; they hit the button where the
+            // button was. Making the destructive option harder to confirm does
+            // not fix that, because they were never confirming deliberately.
+            //
+            // So the irreversible choice is simply not offered at the moment of
+            // highest haste. A session nobody wanted is deleted afterwards,
+            // from the list, where it goes to Recently Deleted and can come
+            // back. The worst case is now a stray row instead of a lost
+            // afternoon.
             .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
                 Button("End & Save") { end() }
-                Button("Discard…", role: .destructive) { showingDiscardConfirmation = true }
-                Button("Keep Recording", role: .cancel) {}
-            }
-            // Discard sat one row below End & Save, and a mis-tap threw away
-            // an hour on the water that cannot be recorded again. It asks twice
-            // now, and says what is being lost.
-            .confirmationDialog(
-                "Discard this session?",
-                isPresented: $showingDiscardConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Discard Session", role: .destructive) { recorder.discard() }
                 Button("Keep Recording", role: .cancel) {}
             } message: {
-                Text("\(Format.duration(recorder.metrics.duration)) and \(Format.distance(recorder.metrics.distance, unit: settings.units.distance)) will be deleted. This cannot be undone.")
+                Text("\(Format.duration(recorder.metrics.duration)) · \(Format.distance(recorder.metrics.distance, unit: settings.units.distance)) will be saved to your sessions.")
             }
         }
     }

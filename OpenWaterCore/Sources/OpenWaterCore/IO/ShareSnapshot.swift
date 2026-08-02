@@ -130,14 +130,11 @@ public struct ShareSnapshot: Sendable, Codable {
         let track = prepared.track
         let summary = prepared.summary
 
-        // Derived from the points the page will actually draw, not from the
-        // whole track: the downsample keeps the fastest sample per bucket, so a
-        // scale built from every fix would sit lower than what is on screen.
         let points = downsample(track: track, to: maximumPoints)
-        let scale = SpeedScale(
-            speeds: points.map { $0.count > 2 ? $0[2] : 0 },
-            movingAbove: prepared.sport.thresholds.movingSpeed
-        )
+        // Fixed, not per session — see `SpeedScale`. Still sent rather than
+        // hard-coded in the page, so a link drawn today keeps the ramp it was
+        // shared with if the app's ever changes.
+        let scale = SpeedScale.standard
 
         return ShareSnapshot(
             title: prepared.displayTitle,

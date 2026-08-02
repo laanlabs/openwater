@@ -145,7 +145,7 @@ struct ShareImageView: View {
                             .frame(width: proxy.size.width, height: mapHeight)
                             .clipped()
                     } else {
-                        SpeedTrackCanvas(samples: samples, scale: SpeedScale(speeds: samples.map(\.speed)), lineWidth: 4)
+                        SpeedTrackCanvas(samples: samples, scale: .standard, lineWidth: 4)
                             .padding(40 * scale)
                     }
 

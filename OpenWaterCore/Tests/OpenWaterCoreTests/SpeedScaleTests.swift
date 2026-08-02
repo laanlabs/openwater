@@ -4,93 +4,92 @@ import Testing
 
 /// The range the track's colours are spread across.
 ///
-/// Every one of these is a shape of session that made the old ramp — anchored
-/// to `0.35 × maxSpeed … maxSpeed` — come out as one flat colour. A single
-/// spike well above the riding speed was enough to do it, and that is the
-/// normal case rather than an unlucky one.
+/// Fixed in knots rather than fitted to each session, so these check the two
+/// things that follow from that: the anchors are where they are meant to be,
+/// and a speed maps to the same position no matter which session it came from.
+/// The colours themselves live in the app layer; what is pinned here is the
+/// scale they are laid along.
 @Suite("Speed scale")
 struct SpeedScaleTests {
 
-    /// Riding held between `low` and `high`, plus one brief spike.
-    private func session(low: Double, high: Double, spike: Double) -> [Double] {
-        var speeds = (0..<600).map { i in
-            low + (high - low) * (Double(i % 60) / 59)
-        }
-        speeds.append(spike)
-        return speeds
-    }
+    private let knot = SpeedScale.knot
 
-    @Test("One spike does not flatten the rest of the session")
-    func spikeDoesNotSwallowTheRange() {
-        // 7–10 m/s of riding with a single 13 m/s burst. Under the old rule the
-        // ramp ran 4.55–13, so all the riding landed between 0.29 and 0.64 —
-        // green to green.
-        let speeds = session(low: 7, high: 10, spike: 13)
-        let scale = SpeedScale(speeds: speeds, movingAbove: 1)
-
-        let bottom = scale.position(of: 7.2)
-        let top = scale.position(of: 9.8)
-        #expect(top - bottom > 0.7,
-                "riding spans only \(top - bottom) of the ramp; it should use most of it")
-    }
-
-    @Test("The tails clip rather than stretching the middle")
-    func tailsClip() {
-        let scale = SpeedScale(speeds: session(low: 7, high: 10, spike: 13), movingAbove: 1)
-        #expect(scale.position(of: 13) == 1)
+    @Test("Anchored at a standstill and at 25 knots")
+    func anchors() {
+        let scale = SpeedScale.standard
+        #expect(scale.lower == 0)
+        #expect(abs(scale.upper - 25 * knot) < 1e-9)
         #expect(scale.position(of: 0) == 0)
+        #expect(abs(scale.position(of: 25 * knot) - 1) < 1e-9)
+    }
+
+    @Test("Yellow sits at 15 knots")
+    func midpoint() {
+        // The middle stop is what makes the ramp match: fitting Waterspeed's
+        // rendering put it at 15 knots decisively — every neighbouring
+        // candidate was two to three times worse.
+        let scale = SpeedScale.standard
+        #expect(abs(scale.position(of: 15 * knot) - scale.midpoint) < 1e-9)
+        #expect(abs(scale.midpoint - 0.6) < 1e-9)
+    }
+
+    @Test("Both ends clamp")
+    func clamps() {
+        let scale = SpeedScale.standard
+        #expect(scale.position(of: -5) == 0)
         #expect(scale.position(of: 100) == 1)
     }
 
-    @Test("Drifting does not drag the bottom of the ramp down")
-    func slowSamplesAreExcluded() {
-        // Half the session sat at a standstill. Those samples are drawn muted,
-        // and letting them into the calculation is what compressed the riding
-        // into the top of the ramp.
-        var speeds = Array(repeating: 0.2, count: 600)
-        speeds += session(low: 8, high: 11, spike: 12)
-
-        let scale = SpeedScale(speeds: speeds, movingAbove: 1)
-        #expect(scale.lower > 5, "bottom of the ramp came out at \(scale.lower)")
-        #expect(scale.position(of: 8.2) < 0.3)
-        #expect(scale.position(of: 10.8) > 0.7)
+    @Test("The same speed is the same colour in every session")
+    func absoluteRatherThanRelative() {
+        // The whole reason for a fixed ramp. A relative one gives the same
+        // green to nineteen knots on a windy day and nine on a light one,
+        // and two sessions stop being comparable by eye.
+        let scale = SpeedScale.standard
+        for speed in stride(from: 0.0, through: 30 * knot, by: knot) {
+            #expect(scale.position(of: speed) == SpeedScale.standard.position(of: speed))
+        }
     }
 
-    @Test("A session ridden at one speed is not turned into a light show")
-    func flatSessionGetsAnHonestSpan() {
-        // A tow, or a long straight reach: almost no spread. Stretching a full
-        // rainbow over half a knot would render GPS noise as colour.
-        let speeds = (0..<600).map { i in 9.0 + Double(i % 3) * 0.05 }
-        let scale = SpeedScale(speeds: speeds, movingAbove: 1)
-
-        #expect(scale.upper - scale.lower >= 1,
-                "span of \(scale.upper - scale.lower) is narrower than the noise")
-        // And the middle of that span is still where the riding was.
-        #expect(abs(scale.position(of: 9.05) - 0.5) < 0.15)
+    @Test("Monotonic across the whole range")
+    func monotonic() {
+        let scale = SpeedScale.standard
+        var previous = -1.0
+        for speed in stride(from: 0.0, through: 20.0, by: 0.05) {
+            let position = scale.position(of: speed)
+            #expect(position >= previous)
+            previous = position
+        }
     }
 
-    @Test("Too few samples to judge falls back rather than inventing a range")
-    func tinyTrackFallsBack() {
-        let scale = SpeedScale(speeds: [4, 6, 8], movingAbove: 1)
-        #expect(scale.upper == 8)
-        #expect(scale.lower == 8 * 0.35)
-    }
-
-    @Test("An empty track cannot produce a divide by zero")
-    func emptyIsSafe() {
-        let scale = SpeedScale(speeds: [], movingAbove: 1)
+    @Test("A degenerate range cannot divide by zero")
+    func degenerate() {
+        let scale = SpeedScale(lower: 5, upper: 5)
         #expect(scale.upper > scale.lower)
         #expect(scale.position(of: 5).isFinite)
     }
 
-    @Test("The scale is monotonic")
-    func monotonic() {
-        let scale = SpeedScale(speeds: session(low: 6, high: 12, spike: 15), movingAbove: 1)
-        var previous = -1.0
-        for speed in stride(from: 0.0, through: 20.0, by: 0.25) {
-            let position = scale.position(of: speed)
-            #expect(position >= previous)
-            previous = position
+    /// The positions the app's ramp stops are laid against, checked at the
+    /// speeds the fit was measured at.
+    ///
+    /// Reading: a knot value, and where on the ramp it should land. Taken from
+    /// the reverse-engineered rendering — if `standard` is ever retuned, these
+    /// are what say whether it still matches the thing it was copied from.
+    @Test("Positions match the fitted reference points")
+    func fittedPositions() {
+        let scale = SpeedScale.standard
+        let expected: [(knots: Double, position: Double)] = [
+            (0, 0.00),
+            (3, 0.12),
+            (10, 0.40),
+            (15, 0.60),
+            (20, 0.80),
+            (25, 1.00),
+        ]
+        for (knots, position) in expected {
+            let actual = scale.position(of: knots * knot)
+            #expect(abs(actual - position) < 0.005,
+                    "\(knots) kt landed at \(actual), expected \(position)")
         }
     }
 }

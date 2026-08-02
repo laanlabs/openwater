@@ -34,39 +34,50 @@ struct PreviewSample: Hashable, Sendable {
     }
 }
 
-/// The speed ramp, shared by the thumbnail, the full map and the legend.
+/// The speed ramp, shared by the thumbnail, the full map, the legend and the
+/// share image.
 ///
-/// Hand-placed stops rather than a straight sweep of hue. A linear sweep from
-/// blue to red spends nearly half its range getting from blue to green and then
-/// crams yellow, orange and red into the last third — so two runs a knot apart
-/// near the top come out the same colour, which is exactly the comparison a
-/// rider is trying to make. These stops give the top half of the range most of
-/// the visible change.
-private let speedRampStops: [(t: Double, hue: Double)] = [
-    (0.00, 0.60),   // blue
-    (0.30, 0.48),   // cyan
-    (0.50, 0.33),   // green
-    (0.70, 0.17),   // yellow
-    (0.86, 0.08),   // orange
-    (1.00, 0.00),   // red
+/// Three stops, interpolated in RGB: red at a standstill, yellow at fifteen
+/// knots, green at twenty-five and above. Reversed from the usual convention on
+/// purpose — on the water the interesting question is "where was I going well",
+/// and green reads as *good* rather than as *slow*. The gybes come out red,
+/// which is exactly where the speed went.
+///
+/// The values are fitted from Waterspeed's rendering of a track we also hold,
+/// to within a few units of 255 across its whole range. Matching a tool riders
+/// already read fluently beats being subtly different for no reason.
+private let speedRampStops: [(t: Double, rgb: (Double, Double, Double))] = [
+    (0.0, (226, 46, 47)),     // #e22e2f — standstill
+    (0.6, (246, 212, 69)),    // #f6d445 — 15 kt
+    (1.0, (71, 156, 65)),     // #479c41 — 25 kt and above
 ]
 
-/// Hue for a position along the ramp, 0–1.
-func speedRampHue(_ t: Double) -> Double {
+/// The ramp's colour at a position along it, 0–1.
+///
+/// Interpolated in RGB rather than through hue. It matters: a hue sweep between
+/// the same endpoints passes through colours that are not on the line between
+/// them — a red-to-yellow hue sweep goes via a vivid orange that neither stop
+/// contains — and the result stops matching the thing being copied.
+func speedRampColour(position t: Double) -> UIColor {
     let t = max(0, min(1, t))
     for i in 1..<speedRampStops.count {
         let a = speedRampStops[i - 1], b = speedRampStops[i]
         guard t <= b.t else { continue }
         let span = b.t - a.t
         let f = span > 0 ? (t - a.t) / span : 0
-        return a.hue + (b.hue - a.hue) * f
+        return UIColor(
+            red: (a.rgb.0 + (b.rgb.0 - a.rgb.0) * f) / 255,
+            green: (a.rgb.1 + (b.rgb.1 - a.rgb.1) * f) / 255,
+            blue: (a.rgb.2 + (b.rgb.2 - a.rgb.2) * f) / 255,
+            alpha: 1
+        )
     }
-    return speedRampStops[speedRampStops.count - 1].hue
+    let last = speedRampStops[speedRampStops.count - 1].rgb
+    return UIColor(red: last.0 / 255, green: last.1 / 255, blue: last.2 / 255, alpha: 1)
 }
 
 func speedRampColour(_ speed: Double, scale: SpeedScale) -> UIColor {
-    UIColor(hue: speedRampHue(scale.position(of: speed)),
-            saturation: 0.9, brightness: 0.95, alpha: 1)
+    speedRampColour(position: scale.position(of: speed))
 }
 
 /// A static map image of a session's track, for the session list.
@@ -172,7 +183,7 @@ final class TrackThumbnailCache {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         let points = samples.map { snapshot.point(for: $0.coordinate) }
-        let scale = SpeedScale(speeds: samples.map(\.speed))
+        let scale = SpeedScale.standard
 
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             snapshot.image.draw(at: .zero)

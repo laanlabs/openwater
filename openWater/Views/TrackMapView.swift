@@ -107,15 +107,9 @@ struct TrackMapView: View {
         let highlight: ClosedRange<TimeInterval>?
     }
 
-    /// The ramp this session is coloured across. Derived from the speeds that
-    /// will actually be drawn, so the full sweep of colour lands on the range
-    /// the rider spent the session in.
-    var speedScale: SpeedScale {
-        SpeedScale(
-            speeds: session.track.speed,
-            movingAbove: session.sport.thresholds.movingSpeed
-        )
-    }
+    /// The ramp every session is coloured across. Fixed in knots, so the same
+    /// colour means the same speed in every session a rider looks at.
+    var speedScale: SpeedScale { .standard }
 
     private var bandKey: BandKey {
         BandKey(
@@ -492,7 +486,7 @@ struct TrackMapView: View {
 
     nonisolated private static func bandColour(_ band: Int, dimmed: Bool) -> Color {
         let t = Double(band) / Double(speedBandCount - 1)
-        let colour = Color(hue: speedRampHue(t), saturation: 0.9, brightness: 0.95)
+        let colour = Color(speedRampColour(position: t))
         return dimmed ? colour.opacity(0.75) : colour
     }
 
@@ -869,13 +863,13 @@ struct SpeedLegend: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Both ends carry a "≤" and "≥": the ramp clips its tails on
-            // purpose, and a bare number would claim the fastest run was this
-            // speed exactly.
-            Text("≤" + Format.speed(scale.lower, unit: units.speed, decimals: 0, includeSymbol: false))
+            // The bottom of the ramp is a standstill, so it needs no number —
+            // and only the top carries a "≥", because that end genuinely
+            // clamps while the bottom cannot be passed.
+            Text(Format.speed(scale.lower, unit: units.speed, decimals: 0, includeSymbol: false))
             LinearGradient(
                 colors: (0...12).map { i in
-                    Color(hue: speedRampHue(Double(i) / 12), saturation: 0.9, brightness: 0.95)
+                    Color(speedRampColour(position: Double(i) / 12))
                 },
                 startPoint: .leading,
                 endPoint: .trailing

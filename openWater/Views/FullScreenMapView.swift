@@ -21,12 +21,7 @@ struct FullScreenMapView: View {
 
     /// The ramp the track is drawn with, so the legend cannot claim a
     /// different range from the colours beside it.
-    private var speedScale: SpeedScale {
-        SpeedScale(
-            speeds: session.track.speed,
-            movingAbove: session.sport.thresholds.movingSpeed
-        )
-    }
+    private var speedScale: SpeedScale { .standard }
     @Environment(\.dismiss) private var dismiss
 
     @State private var foilingOnly = false

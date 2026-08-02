@@ -20,11 +20,36 @@ struct SessionOverview: View {
 
     @Environment(AppSettings.self) private var settings
 
+    @State private var showingNotes = false
+
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
                 header
                 headlineNumbers
+
+                // Directly under the numbers it explains, not buried in a
+                // menu. The question "why does this not match the other app?"
+                // occurs while looking at them.
+                Button {
+                    showingNotes = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle")
+                        Text("How these numbers were measured")
+                            .font(.subheadline)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .frame(maxWidth: .infinity)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
 
                 NavigationLink {
                     SplitsView(session: session)
@@ -76,6 +101,9 @@ struct SessionOverview: View {
             .padding(.bottom, 28)
         }
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $showingNotes) {
+            MeasurementNotesView(session: session, summary: summary)
+        }
     }
 
     // MARK: - Header

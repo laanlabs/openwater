@@ -80,7 +80,10 @@ struct SessionCard: View {
                     CardStat(
                         group: " ",
                         groupColour: .orange,
-                        label: "Avg \(settings.units.speed.symbol)",
+                        // "Avg" next to a total duration invites the reader to
+                        // divide distance by time and find it does not agree.
+                        // It is the moving average, so it says so.
+                        label: "Avg moving",
                         value: Format.speed(session.averageMovingSpeed, unit: settings.units.speed,
                                             decimals: 1, includeSymbol: false)
                     )

@@ -50,6 +50,7 @@ struct SessionListView: View {
     /// rider says so, and the prompt names what will go.
     @State private var pendingDeletion: [StoredSession] = []
     @State private var showingTrash = false
+    @State private var showingBulkExport = false
     @State private var showingWatchStatus = false
 
     enum Period: String, CaseIterable, Identifiable {
@@ -166,6 +167,12 @@ struct SessionListView: View {
             } message: {
                 Text(deletionPrompt)
             }
+            .sheet(isPresented: $showingBulkExport) {
+                // The filtered set, not the whole library: a rider who has
+                // narrowed to "wingfoil, this year" has already said what they
+                // mean, and re-picking it inside the sheet would be busywork.
+                BulkExportView(sessions: filtered)
+            }
             .sheet(isPresented: $showingTrash) {
                 NavigationStack {
                     RecentlyDeletedView(sessions: trashed)
@@ -280,6 +287,11 @@ struct SessionListView: View {
                 }
                 Button("Add Demo Session", systemImage: "wand.and.stars") {
                     addDemoSession()
+                }
+                if !sessions.isEmpty {
+                    Button("Export Sessions…", systemImage: "square.and.arrow.up.on.square") {
+                        showingBulkExport = true
+                    }
                 }
                 if !trashed.isEmpty {
                     Divider()

@@ -71,6 +71,10 @@ struct TrackMapView: View {
     /// a featureless blue field with nothing to orient by.
     var style: MapStyleOption = .standard
 
+    /// Only for the peak-speed label. Everything else on the map is drawn, not
+    /// written.
+    var units: UnitPreferences = .default
+
     @State private var camera: MapCameraPosition = .automatic
 
     public enum TrimEdge { case start, end }
@@ -104,16 +108,33 @@ struct TrackMapView: View {
                     )
             }
 
-            ForEach(visibleSegments) { segment in
-                MapPolyline(coordinates: coordinates(for: segment))
+            ForEach(speedBands) { band in
+                MapPolyline(coordinates: band.coordinates)
                     .stroke(
-                        style(for: segment),
+                        band.style,
                         style: StrokeStyle(
-                            lineWidth: lineWidth(for: segment),
+                            lineWidth: band.width,
                             lineCap: .round,
                             lineJoin: .round
                         )
                     )
+            }
+
+            // The fastest moment of the session, marked.
+            //
+            // It is the number on the top of the summary and there was nothing
+            // saying where it happened — so a rider could not go and look at
+            // the run that produced it, or notice that it came from a spot they
+            // know is a GPS blackspot.
+            if let peak = maxSpeedCoordinate {
+                Annotation("", coordinate: peak, anchor: .bottom) {
+                    MaxSpeedMarker(
+                        speed: summary.maxSpeed,
+                        units: units,
+                        onDark: style.isDark
+                    )
+                }
+                .annotationTitles(.hidden)
             }
 
             if showFalls {
@@ -185,6 +206,12 @@ struct TrackMapView: View {
             }
         }
         .mapStyle(style.mapStyle)
+        // MapKit puts its compass in the top-right the moment the map is
+        // rotated and its scale in the top-left when zoomed — both underneath
+        // the app's own controls, which live in exactly those corners. The
+        // session already shows wind direction on its own dial, so the system
+        // pair is redundant here rather than merely inconvenient.
+        .mapControls { }
         .onChange(of: selectedRun) { _, _ in frameSelection() }
         .onAppear { frameSelection() }
     }
@@ -254,6 +281,128 @@ struct TrackMapView: View {
         }
         guard end > start else { return [] }
         return session.track.points[start...end].map(\.clCoordinate)
+    }
+
+    // MARK: - Speed banding
+
+    /// One stretch of track drawn in a single colour.
+    struct SpeedBand: Identifiable {
+        let id: Int
+        let coordinates: [CLLocationCoordinate2D]
+        let style: AnyShapeStyle
+        let width: Double
+    }
+
+    /// How many steps the ramp is quantised into along the track.
+    ///
+    /// Enough that acceleration out of a gybe reads as a gradient, few enough
+    /// that a three-hour session is a few hundred polylines rather than ten
+    /// thousand. MapKit draws each one separately, and that is the cost.
+    private static let speedBandCount = 12
+
+    /// The track, split so that colour follows speed *along* it.
+    ///
+    /// It used to be one polyline per ride-state segment, coloured by that
+    /// segment's average. A foiling run is a single segment lasting minutes, so
+    /// the entire run came out one flat colour — which is why the map read as
+    /// green everywhere with grey for the slow bits, while the list thumbnail,
+    /// which colours per sample, showed the full ramp. The two are drawing the
+    /// same data and disagreeing, and the map was the one throwing it away.
+    ///
+    /// State still controls weight and opacity; only the colour is now per
+    /// stretch rather than per segment.
+    private var speedBands: [SpeedBand] {
+        var bands: [SpeedBand] = []
+        var id = 0
+        let speeds = session.track.speed
+
+        for segment in visibleSegments {
+            let coordinates = coordinates(for: segment)
+            guard coordinates.count > 1 else { continue }
+            let width = lineWidth(for: segment)
+
+            // Muted states carry no speed information worth showing — a fall or
+            // a drift is about where it happened, not how fast — so they stay a
+            // single stroke.
+            guard segment.state == .foiling || segment.state == .riding else {
+                bands.append(SpeedBand(id: id, coordinates: coordinates,
+                                       style: style(for: segment), width: width))
+                id += 1
+                continue
+            }
+
+            // The coordinates may have been clipped by the trim or the
+            // playhead, so walk from the segment's own start index.
+            let start = clippedStartIndex(for: segment)
+            var runStart = 0
+            var runBand = band(forSpeedAt: start, in: speeds)
+
+            for offset in 1..<coordinates.count {
+                let next = band(forSpeedAt: start + offset, in: speeds)
+                // A minimum run length, because the cost here is one MapKit
+                // overlay per colour change: a noisy stretch flickering between
+                // two adjacent bands every sample would otherwise turn a
+                // three-hour session into thousands of polylines. Four samples
+                // is a few seconds — far below anything the eye reads as a
+                // separate colour.
+                guard next != runBand, offset - runStart >= 4 else { continue }
+                // Overlap by one point so consecutive bands meet rather than
+                // leaving a gap the width of the line at every colour change.
+                bands.append(SpeedBand(
+                    id: id,
+                    coordinates: Array(coordinates[runStart...offset]),
+                    style: bandStyle(runBand, dimmed: segment.state == .riding),
+                    width: width
+                ))
+                id += 1
+                runStart = offset
+                runBand = next
+            }
+            bands.append(SpeedBand(
+                id: id,
+                coordinates: Array(coordinates[runStart...]),
+                style: bandStyle(runBand, dimmed: segment.state == .riding),
+                width: width
+            ))
+            id += 1
+        }
+        return bands
+    }
+
+    /// Where the session's fastest sample happened.
+    private var maxSpeedCoordinate: CLLocationCoordinate2D? {
+        let speeds = session.track.speed
+        guard speeds.count > 1,
+              let index = speeds.indices.max(by: { speeds[$0] < speeds[$1] }),
+              let point = session.track.points[safe: index],
+              point.hasValidPosition else { return nil }
+        // Hidden while the track is filtered down to something else: a peak
+        // pinned outside the stretch on screen is just confusing.
+        if let partialUpTo, session.track.elapsed[index] > partialUpTo { return nil }
+        if foilingOnly || foilFilter != .everything || selectedRun != nil { return nil }
+        return point.clCoordinate
+    }
+
+    private func clippedStartIndex(for segment: StateSegment) -> Int {
+        var start = segment.startIndex
+        if let trimRange, !trimIsRemoval, segment.startElapsed < trimRange.lowerBound {
+            start = max(start, session.track.index(atElapsed: trimRange.lowerBound) ?? start)
+        }
+        return start
+    }
+
+    private func band(forSpeedAt index: Int, in speeds: [Double]) -> Int {
+        guard index >= 0, index < speeds.count else { return 0 }
+        let top = max(summary.maxSpeed, 1)
+        let bottom = top * 0.35
+        let t = max(0, min(1, (speeds[index] - bottom) / max(0.1, top - bottom)))
+        return Int(t * Double(Self.speedBandCount - 1))
+    }
+
+    private func bandStyle(_ band: Int, dimmed: Bool) -> AnyShapeStyle {
+        let t = Double(band) / Double(Self.speedBandCount - 1)
+        let colour = Color(hue: 0.58 - 0.58 * t, saturation: 0.85, brightness: 0.95)
+        return AnyShapeStyle(dimmed ? colour.opacity(0.75) : colour)
     }
 
     // MARK: - Styling
@@ -328,6 +477,42 @@ struct TrackMapView: View {
 }
 
 // MARK: - Markers
+
+/// Where the session's top speed happened, with the number on it.
+///
+/// Labelled rather than left as another dot: the map already has falls and
+/// turns marked, and an unlabelled marker in that company is a puzzle. The
+/// point of showing it at all is to connect the headline figure to a place.
+struct MaxSpeedMarker: View {
+    let speed: Double
+    let units: UnitPreferences
+    let onDark: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 3) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 9, weight: .bold))
+                Text(Format.speed(speed, unit: units.speed, decimals: 1))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.red, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(onDark ? 0.7 : 0.9), lineWidth: 1.5))
+
+            // A stem, so the capsule points at the sample rather than hovering
+            // near it — at this zoom a few points of offset is tens of metres.
+            Rectangle()
+                .fill(Color.red)
+                .frame(width: 2, height: 7)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+        .accessibilityLabel("Top speed \(Format.speed(speed, unit: units.speed, decimals: 1))")
+    }
+}
 
 struct FallMarker: View {
     let fall: Fall
@@ -462,13 +647,37 @@ struct MapStyleButton: View {
             // control says what the map is showing as well as what it does, and
             // satellite is worth being able to spot and leave at a glance
             // because it is the one that costs cellular data.
-            Image(systemName: selection.symbolName)
-                .font(.subheadline)
-                .padding(9)
-                .background(.regularMaterial, in: Circle())
+            MapChromeButton { Image(systemName: selection.symbolName) }
         }
         .accessibilityLabel("Map style")
         .accessibilityValue(selection.displayName)
+    }
+}
+
+/// A circular control that floats on a map.
+///
+/// Its own view because the size is the point: these were a small glyph with
+/// nine points of padding, which lands under Apple's 44-point minimum and made
+/// the ••• menu in particular hard to hit — on a boat, with wet hands, over a
+/// map that pans if you miss.
+struct MapChromeButton<Label: View>: View {
+    var action: (() -> Void)?
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        if let action {
+            Button(action: action) { chrome }.buttonStyle(.plain)
+        } else {
+            chrome
+        }
+    }
+
+    private var chrome: some View {
+        label()
+            .font(.subheadline)
+            .frame(width: 44, height: 44)
+            .background(.regularMaterial, in: Circle())
+            .contentShape(Circle())
     }
 }
 

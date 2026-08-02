@@ -228,6 +228,103 @@ struct SpeedChart: View {
         return result
     }
 
+    /// Where the session's fastest sample sits on the trace.
+    private var peak: (minutes: Double, speed: Double)? {
+        let speeds = session.track.speed
+        guard let index = speeds.indices.max(by: { speeds[$0] < speeds[$1] }),
+              speeds[index] > 0 else { return nil }
+        return (session.track.elapsed[index] / 60,
+                units.speed.convert(fromMetresPerSecond: speeds[index]))
+    }
+
+    /// The plot's own units, so the lanes below can be positioned in them.
+    private var displayMax: Double {
+        max(units.speed.convert(fromMetresPerSecond: summary.maxSpeed), 1) * 1.08
+    }
+
+    /// Height of one activity lane, in y-axis units.
+    private var laneHeight: Double { displayMax * 0.05 }
+
+    @ChartContentBuilder
+    private var trace: some ChartContent {
+        ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
+            LineMark(
+                x: .value("Minutes", sample.elapsed / 60),
+                y: .value("Speed", units.speed.convert(fromMetresPerSecond: sample.speed))
+            )
+            .interpolationMethod(.monotone)
+            .foregroundStyle(.tint)
+        }
+    }
+
+    /// Runs and flights as bars under the trace rather than shading over it.
+    ///
+    /// The shading answered "was I flying here?" at the cost of washing out the
+    /// part of the chart the speeds are drawn in, and it could only ever show
+    /// one thing at a time. Two thin lanes below the axis show flights *and*
+    /// runs together and leave the trace alone. They live inside this chart, in
+    /// negative y where no speed can go, because that is the only way to be
+    /// certain they line up with it — a separate chart underneath drifts by the
+    /// width of the y-axis labels.
+    @ChartContentBuilder
+    private var laneMarks: some ChartContent {
+        ForEach(summary.runs) { run in
+            RectangleMark(
+                xStart: .value("From", run.startElapsed / 60),
+                xEnd: .value("To", run.endElapsed / 60),
+                yStart: .value("Lane", -laneHeight * 2.3),
+                yEnd: .value("Lane", -laneHeight * 1.3)
+            )
+            .foregroundStyle(.blue.opacity(0.55))
+            .cornerRadius(1)
+        }
+        ForEach(summary.flights) { flight in
+            RectangleMark(
+                xStart: .value("From", flight.startElapsed / 60),
+                xEnd: .value("To", flight.endElapsed / 60),
+                yStart: .value("Lane", -laneHeight),
+                yEnd: .value("Lane", 0)
+            )
+            .foregroundStyle(.green.opacity(0.75))
+            .cornerRadius(1)
+        }
+    }
+
+    @ChartContentBuilder
+    private var fallMarks: some ChartContent {
+        ForEach(summary.fallSummary.falls) { fall in
+            PointMark(
+                x: .value("Minutes", fall.elapsed / 60),
+                y: .value("Speed", 0)
+            )
+            .symbol(.circle)
+            .symbolSize(28)
+            .foregroundStyle(.red)
+        }
+    }
+
+    /// The headline number, on the trace that produced it. It was printed at
+    /// the top of the screen with nothing on the chart saying which spike it
+    /// came from.
+    @ChartContentBuilder
+    private var peakMark: some ChartContent {
+        if let peak {
+            PointMark(
+                x: .value("Minutes", peak.minutes),
+                y: .value("Speed", peak.speed)
+            )
+            .symbol(.circle)
+            .symbolSize(70)
+            .foregroundStyle(.red)
+            .annotation(position: .top, spacing: 2, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                Text(Format.speed(summary.maxSpeed, unit: units.speed, decimals: 1))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("SPEED")
@@ -235,44 +332,64 @@ struct SpeedChart: View {
                 .foregroundStyle(.secondary)
 
             Chart {
-                // Shade the flights, so time on foil is readable straight off
-                // the speed trace.
-                ForEach(summary.flights) { flight in
-                    RectangleMark(
-                        xStart: .value("From", flight.startElapsed / 60),
-                        xEnd: .value("To", flight.endElapsed / 60)
-                    )
-                    .foregroundStyle(.green.opacity(0.12))
-                }
-
-                ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
-                    LineMark(
-                        x: .value("Minutes", sample.elapsed / 60),
-                        y: .value("Speed", units.speed.convert(fromMetresPerSecond: sample.speed))
-                    )
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(.tint)
-                }
-
-                ForEach(summary.fallSummary.falls) { fall in
-                    PointMark(
-                        x: .value("Minutes", fall.elapsed / 60),
-                        y: .value("Speed", 0)
-                    )
-                    .symbol(.circle)
-                    .symbolSize(28)
-                    .foregroundStyle(.red)
+                trace
+                laneMarks
+                fallMarks
+                peakMark
+            }
+            // Room below zero for the lanes, without letting them shrink the
+            // speed trace into the top half of the plot.
+            .chartYScale(domain: -laneHeight * 2.6 ... displayMax)
+            .chartYAxis {
+                AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                    if let speed = value.as(Double.self), speed >= 0 {
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel()
+                    }
                 }
             }
             .chartXAxisLabel("minutes")
             .chartYAxisLabel(units.speed.symbol)
-            .frame(height: 180)
+            .frame(height: 200)
 
+            legend
+        }
+    }
+
+    private var legend: some View {
+        HStack(spacing: 12) {
             if !summary.flights.isEmpty {
-                Text("Shaded green: on the foil. Red dots: falls.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                LaneKey(colour: .green.opacity(0.75), label: "On foil")
             }
+            if !summary.runs.isEmpty {
+                LaneKey(colour: .blue.opacity(0.55), label: "Runs")
+            }
+            if !summary.fallSummary.falls.isEmpty {
+                LaneKey(colour: .red, label: "Falls", isDot: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+}
+
+private struct LaneKey: View {
+    let colour: Color
+    let label: String
+    var isDot = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if isDot {
+                Circle().fill(colour).frame(width: 6, height: 6)
+            } else {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(colour)
+                    .frame(width: 14, height: 5)
+            }
+            Text(label)
         }
     }
 }

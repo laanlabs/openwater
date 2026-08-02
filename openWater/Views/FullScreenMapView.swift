@@ -37,7 +37,8 @@ struct FullScreenMapView: View {
                 showManeuvers: showManeuvers,
                 minimumSpeed: minimumSpeed,
                 foilingOnly: foilingOnly,
-                style: settings.mapStyle
+                style: settings.mapStyle,
+                units: settings.units
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottomLeading) {
@@ -81,8 +82,9 @@ struct FullScreenMapView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.headline)
-                    .padding(10)
+                    .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
+                    .contentShape(Circle())
             }
 
             Spacer()
@@ -101,8 +103,9 @@ struct FullScreenMapView: View {
             } label: {
                 Image(systemName: "play.fill")
                     .font(.headline)
-                    .padding(10)
+                    .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
+                    .contentShape(Circle())
             }
             .accessibilityLabel("Replay session")
 
@@ -122,8 +125,9 @@ struct FullScreenMapView: View {
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.headline)
-                    .padding(10)
+                    .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
+                    .contentShape(Circle())
             }
         }
         .padding(.horizontal)

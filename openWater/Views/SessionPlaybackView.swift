@@ -159,8 +159,9 @@ struct SessionPlaybackView: View {
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.headline)
-                    .padding(10)
+                    .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
+                    .contentShape(Circle())
             }
 
             Spacer()
@@ -182,8 +183,9 @@ struct SessionPlaybackView: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.headline)
-                    .padding(10)
+                    .frame(width: 44, height: 44)
                     .background(.regularMaterial, in: Circle())
+                    .contentShape(Circle())
             }
         }
         .padding(.horizontal)

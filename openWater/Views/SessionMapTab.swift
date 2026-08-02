@@ -120,7 +120,8 @@ struct SessionMapTab: View {
             trimRange: isTrimming ? trimStart...max(trimStart + 1, trimEnd) : nil,
             activeTrimEdge: trimEdge,
             trimIsRemoval: trimMode == .removeSegment,
-            style: settings.mapStyle
+            style: settings.mapStyle,
+            units: settings.units
         )
         .overlay(alignment: .top) { topChrome }
         .overlay(alignment: .bottomLeading) {
@@ -143,11 +144,8 @@ struct SessionMapTab: View {
             Spacer()
 
             VStack(spacing: 8) {
-                Button(action: onFullScreen) {
+                MapChromeButton(action: onFullScreen) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.subheadline)
-                        .padding(9)
-                        .background(.regularMaterial, in: Circle())
                 }
                 .accessibilityLabel("Full screen map")
 
@@ -198,10 +196,7 @@ struct SessionMapTab: View {
                 }
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.subheadline)
-                .padding(9)
-                .background(.regularMaterial, in: Circle())
+            MapChromeButton { Image(systemName: "ellipsis") }
         }
         .accessibilityLabel("Map options")
     }
@@ -245,16 +240,18 @@ struct SessionMapTab: View {
                 } label: {
                     Image(systemName: "scissors")
                         .font(.subheadline)
-                        .padding(9)
+                        .frame(width: 40, height: 40)
                         .background(.quaternary, in: Circle())
+                        .contentShape(Circle())
                 }
                 .accessibilityLabel("Trim session")
 
                 Button(action: onReplay) {
                     Image(systemName: "play.fill")
                         .font(.subheadline)
-                        .padding(9)
+                        .frame(width: 40, height: 40)
                         .background(.quaternary, in: Circle())
+                        .contentShape(Circle())
                 }
                 .accessibilityLabel("Replay session")
                 }

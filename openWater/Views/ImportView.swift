@@ -128,6 +128,71 @@ struct ImportView: View {
 }
 
 /// Format picker for exporting one session.
+/// One way of writing a session out.
+///
+/// Shared between the single-session sheet and bulk export, so the two can
+/// never drift into offering different formats or different descriptions of
+/// the same format.
+struct ExportOption: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let symbol: String
+    let make: (StoredSession, SessionLibrary, AppSettings) throws -> Data
+    let fileExtension: String
+
+    static let all: [ExportOption] = [
+        ExportOption(
+            id: "openwater",
+            title: "openWater archive",
+            detail: "Everything, losslessly. Use this to back up or move to another device.",
+            symbol: "shippingbox",
+            make: { s, l, a in try l.export(s, as: .openwater, privacy: a.sharingPrivacy) },
+            fileExtension: "openwater"
+        ),
+        ExportOption(
+            id: "gpx",
+            title: "GPX",
+            detail: "Understood by almost everything — Strava, Garmin Connect, Google Earth. Keeps speed and heart rate in extensions.",
+            symbol: "point.topleft.down.to.point.bottomright.curvepath",
+            make: { s, l, a in try l.export(s, as: .gpx, privacy: a.sharingPrivacy) },
+            fileExtension: "gpx"
+        ),
+        ExportOption(
+            id: "tcx",
+            title: "TCX",
+            detail: "Garmin's training format. Speed is part of the standard schema.",
+            symbol: "doc.text",
+            make: { s, l, a in try l.export(s, as: .tcx, privacy: a.sharingPrivacy) },
+            fileExtension: "tcx"
+        ),
+        ExportOption(
+            id: "csv",
+            title: "CSV",
+            detail: "One row per sample, every channel. For spreadsheets and your own analysis.",
+            symbol: "tablecells",
+            make: { s, l, a in try l.export(s, as: .csv, privacy: a.sharingPrivacy, units: a.units) },
+            fileExtension: "csv"
+        ),
+        ExportOption(
+            id: "geojson",
+            title: "GeoJSON",
+            detail: "For mapping tools. Includes a separate feature per flight and fall.",
+            symbol: "map",
+            make: { s, l, a in try l.exportGeoJSON(s, privacy: a.sharingPrivacy) },
+            fileExtension: "geojson"
+        ),
+    ]
+
+    /// A filename that sorts by date and says what it is.
+    func filename(for stored: StoredSession) -> String {
+        let stamp = stored.startDate.formatted(
+            .iso8601.year().month().day().dateSeparator(.dash)
+        )
+        return "openWater-\(stored.sport.rawValue)-\(stamp).\(fileExtension)"
+    }
+}
+
 struct ExportView: View {
 
     let stored: StoredSession
@@ -139,59 +204,7 @@ struct ExportView: View {
     @State private var exportURL: URL?
     @State private var errorMessage: String?
 
-    private struct Option: Identifiable {
-        let id: String
-        let title: String
-        let detail: String
-        let symbol: String
-        let make: (StoredSession, SessionLibrary, AppSettings) throws -> Data
-        let fileExtension: String
-    }
-
-    private var options: [Option] {
-        [
-            Option(
-                id: "openwater",
-                title: "openWater archive",
-                detail: "Everything, losslessly. Use this to back up or move to another device.",
-                symbol: "shippingbox",
-                make: { s, l, a in try l.export(s, as: .openwater, privacy: a.sharingPrivacy) },
-                fileExtension: "openwater"
-            ),
-            Option(
-                id: "gpx",
-                title: "GPX",
-                detail: "Understood by almost everything. Keeps speed and heart rate in extensions.",
-                symbol: "point.topleft.down.to.point.bottomright.curvepath",
-                make: { s, l, a in try l.export(s, as: .gpx, privacy: a.sharingPrivacy) },
-                fileExtension: "gpx"
-            ),
-            Option(
-                id: "tcx",
-                title: "TCX",
-                detail: "Garmin's training format. Speed is part of the standard schema.",
-                symbol: "doc.text",
-                make: { s, l, a in try l.export(s, as: .tcx, privacy: a.sharingPrivacy) },
-                fileExtension: "tcx"
-            ),
-            Option(
-                id: "csv",
-                title: "CSV",
-                detail: "One row per sample, every channel. For spreadsheets and your own analysis.",
-                symbol: "tablecells",
-                make: { s, l, a in try l.export(s, as: .csv, privacy: a.sharingPrivacy, units: a.units) },
-                fileExtension: "csv"
-            ),
-            Option(
-                id: "geojson",
-                title: "GeoJSON",
-                detail: "For mapping tools. Includes a separate feature per flight and fall.",
-                symbol: "map",
-                make: { s, l, a in try l.exportGeoJSON(s, privacy: a.sharingPrivacy) },
-                fileExtension: "geojson"
-            ),
-        ]
-    }
+    private var options: [ExportOption] { ExportOption.all }
 
     var body: some View {
         NavigationStack {
@@ -252,14 +265,11 @@ struct ExportView: View {
         }
     }
 
-    private func export(_ option: Option) {
+    private func export(_ option: ExportOption) {
         do {
             let data = try option.make(stored, library, settings)
-            let stamp = stored.startDate.formatted(
-                .iso8601.year().month().day().dateSeparator(.dash)
-            )
             let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("openWater-\(stored.sport.rawValue)-\(stamp).\(option.fileExtension)")
+                .appendingPathComponent(option.filename(for: stored))
             try data.write(to: url, options: .atomic)
             exportURL = url
             errorMessage = nil

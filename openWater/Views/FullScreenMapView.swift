@@ -18,6 +18,15 @@ struct FullScreenMapView: View {
     @Binding var selectedRun: Int?
 
     @Environment(AppSettings.self) private var settings
+
+    /// The ramp the track is drawn with, so the legend cannot claim a
+    /// different range from the colours beside it.
+    private var speedScale: SpeedScale {
+        SpeedScale(
+            speeds: session.track.speed,
+            movingAbove: session.sport.thresholds.movingSpeed
+        )
+    }
     @Environment(\.dismiss) private var dismiss
 
     @State private var foilingOnly = false
@@ -44,7 +53,7 @@ struct FullScreenMapView: View {
             .overlay(alignment: .bottomLeading) {
                 if showControls {
                     SpeedLegend(
-                        maxSpeed: summary.maxSpeed,
+                        scale: speedScale,
                         units: settings.units,
                         onDark: settings.mapStyle.isDark
                     )

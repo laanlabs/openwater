@@ -145,7 +145,7 @@ struct ShareImageView: View {
                             .frame(width: proxy.size.width, height: mapHeight)
                             .clipped()
                     } else {
-                        SpeedTrackCanvas(samples: samples, ceiling: summary.maxSpeed, lineWidth: 4)
+                        SpeedTrackCanvas(samples: samples, scale: SpeedScale(speeds: samples.map(\.speed)), lineWidth: 4)
                             .padding(40 * scale)
                     }
 
@@ -301,7 +301,7 @@ struct ShareImageView: View {
 struct SpeedTrackCanvas: View {
 
     let samples: [PreviewSample]
-    let ceiling: Double
+    let scale: SpeedScale
     var lineWidth: CGFloat = 3
 
     var body: some View {
@@ -321,14 +321,14 @@ struct SpeedTrackCanvas: View {
             let squeeze = cos(minLat * .pi / 180)
             let latitudeSpan = max(maxLat - minLat, 1e-6)
             let longitudeSpan = max((maxLon - minLon) * squeeze, 1e-6)
-            let scale = min(size.width / longitudeSpan, size.height / latitudeSpan)
-            let originX = (size.width - longitudeSpan * scale) / 2
-            let originY = (size.height - latitudeSpan * scale) / 2
+            let zoom = min(size.width / longitudeSpan, size.height / latitudeSpan)
+            let originX = (size.width - longitudeSpan * zoom) / 2
+            let originY = (size.height - latitudeSpan * zoom) / 2
 
             func project(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
                 CGPoint(
-                    x: originX + (coordinate.longitude - minLon) * squeeze * scale,
-                    y: originY + (maxLat - coordinate.latitude) * scale
+                    x: originX + (coordinate.longitude - minLon) * squeeze * zoom,
+                    y: originY + (maxLat - coordinate.latitude) * zoom
                 )
             }
 
@@ -339,7 +339,7 @@ struct SpeedTrackCanvas: View {
                 let speed = max(samples[index - 1].speed, samples[index].speed)
                 context.stroke(
                     path,
-                    with: .color(Color(speedRampColour(speed, ceiling: ceiling))),
+                    with: .color(Color(speedRampColour(speed, scale: scale))),
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
                 )
             }

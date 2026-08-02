@@ -34,14 +34,39 @@ struct PreviewSample: Hashable, Sendable {
     }
 }
 
-/// The speed ramp, shared by the thumbnail and the full map: blue through
-/// green and yellow to red, scaled to the session's own top speed rather than
-/// an absolute one, so a light-wind session is not rendered uniformly blue.
-func speedRampColour(_ speed: Double, ceiling: Double) -> UIColor {
-    let top = max(ceiling, 1)
-    let bottom = top * 0.35
-    let t = max(0, min(1, (speed - bottom) / max(0.1, top - bottom)))
-    return UIColor(hue: (0.58 - 0.58 * t), saturation: 0.85, brightness: 0.95, alpha: 1)
+/// The speed ramp, shared by the thumbnail, the full map and the legend.
+///
+/// Hand-placed stops rather than a straight sweep of hue. A linear sweep from
+/// blue to red spends nearly half its range getting from blue to green and then
+/// crams yellow, orange and red into the last third — so two runs a knot apart
+/// near the top come out the same colour, which is exactly the comparison a
+/// rider is trying to make. These stops give the top half of the range most of
+/// the visible change.
+private let speedRampStops: [(t: Double, hue: Double)] = [
+    (0.00, 0.60),   // blue
+    (0.30, 0.48),   // cyan
+    (0.50, 0.33),   // green
+    (0.70, 0.17),   // yellow
+    (0.86, 0.08),   // orange
+    (1.00, 0.00),   // red
+]
+
+/// Hue for a position along the ramp, 0–1.
+func speedRampHue(_ t: Double) -> Double {
+    let t = max(0, min(1, t))
+    for i in 1..<speedRampStops.count {
+        let a = speedRampStops[i - 1], b = speedRampStops[i]
+        guard t <= b.t else { continue }
+        let span = b.t - a.t
+        let f = span > 0 ? (t - a.t) / span : 0
+        return a.hue + (b.hue - a.hue) * f
+    }
+    return speedRampStops[speedRampStops.count - 1].hue
+}
+
+func speedRampColour(_ speed: Double, scale: SpeedScale) -> UIColor {
+    UIColor(hue: speedRampHue(scale.position(of: speed)),
+            saturation: 0.9, brightness: 0.95, alpha: 1)
 }
 
 /// A static map image of a session's track, for the session list.
@@ -147,7 +172,7 @@ final class TrackThumbnailCache {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         let points = samples.map { snapshot.point(for: $0.coordinate) }
-        let ceiling = samples.map(\.speed).max() ?? 1
+        let scale = SpeedScale(speeds: samples.map(\.speed))
 
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             snapshot.image.draw(at: .zero)
@@ -174,7 +199,7 @@ final class TrackThumbnailCache {
             cg.setLineWidth(2.6)
             for index in 1..<points.count {
                 let speed = max(samples[index - 1].speed, samples[index].speed)
-                cg.setStrokeColor(speedRampColour(speed, ceiling: ceiling).cgColor)
+                cg.setStrokeColor(speedRampColour(speed, scale: scale).cgColor)
                 cg.move(to: points[index - 1])
                 cg.addLine(to: points[index])
                 cg.strokePath()

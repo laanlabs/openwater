@@ -103,6 +103,16 @@ struct TrackMapView: View {
         let highlight: ClosedRange<TimeInterval>?
     }
 
+    /// The ramp this session is coloured across. Derived from the speeds that
+    /// will actually be drawn, so the full sweep of colour lands on the range
+    /// the rider spent the session in.
+    var speedScale: SpeedScale {
+        SpeedScale(
+            speeds: session.track.speed,
+            movingAbove: session.sport.thresholds.movingSpeed
+        )
+    }
+
     private var bandKey: BandKey {
         BandKey(
             sessionID: session.id,
@@ -272,13 +282,13 @@ struct TrackMapView: View {
             // ever got near a trim.
             let track = session.track
             let segments = visibleSegments
-            let ceiling = summary.maxSpeed
+            let ramp = speedScale
             let dark = style.isDark
             let lastIndex = partialUpTo.flatMap { track.index(atElapsed: $0) }
             let computed = await Task.detached(priority: .userInitiated) {
                 Self.makeBands(
                     track: track, segments: segments,
-                    maxSpeed: ceiling, onDark: dark, upTo: lastIndex
+                    scale: ramp, onDark: dark, upTo: lastIndex
                 )
             }.value
             guard !Task.isCancelled else { return }
@@ -335,7 +345,7 @@ struct TrackMapView: View {
     /// Enough that acceleration out of a gybe reads as a gradient, few enough
     /// that a three-hour session is a few hundred polylines rather than ten
     /// thousand. MapKit draws each one separately, and that is the cost.
-    private static let speedBandCount = 12
+    private static let speedBandCount = 16
 
     /// The track, split so that colour follows speed *along* it.
     ///
@@ -351,13 +361,21 @@ struct TrackMapView: View {
     nonisolated static func makeBands(
         track: Track,
         segments: [StateSegment],
-        maxSpeed: Double,
+        scale: SpeedScale,
         onDark: Bool,
         upTo lastIndex: Int?
     ) -> [SpeedBand] {
         var bands: [SpeedBand] = []
         var id = 0
-        let speeds = track.speed
+
+        // Colour follows a short rolling mean rather than the raw samples.
+        //
+        // At one sample a second an unsmoothed ramp flickers between
+        // neighbouring bands on GPS noise, which reads as stripes rather than
+        // as a gradient — and costs one MapKit overlay per flicker. Five
+        // seconds is well below the length of any run, so a real acceleration
+        // still shows as one; only the jitter goes.
+        let speeds = Self.smoothed(track.speed, window: 5)
 
         for segment in segments {
             guard segment.startIndex >= 0, segment.endIndex < track.count else { continue }
@@ -386,10 +404,10 @@ struct TrackMapView: View {
             let start = segment.startIndex
             let dimmed = segment.state == .riding
             var runStart = 0
-            var runBand = band(forSpeedAt: start, in: speeds, maxSpeed: maxSpeed)
+            var runBand = band(forSpeedAt: start, in: speeds, scale: scale)
 
             for offset in 1..<coordinates.count {
-                let next = band(forSpeedAt: start + offset, in: speeds, maxSpeed: maxSpeed)
+                let next = band(forSpeedAt: start + offset, in: speeds, scale: scale)
                 // A minimum run length, because the cost here is one MapKit
                 // overlay per colour change: a noisy stretch flickering between
                 // two adjacent bands every sample would otherwise turn a
@@ -420,21 +438,33 @@ struct TrackMapView: View {
         return bands
     }
 
+    /// Centred rolling mean, computed once per rebuild.
+    nonisolated private static func smoothed(_ speeds: [Double], window: Int) -> [Double] {
+        guard speeds.count > window, window > 1 else { return speeds }
+        let half = window / 2
+        var prefix: [Double] = [0]
+        prefix.reserveCapacity(speeds.count + 1)
+        for speed in speeds { prefix.append(prefix[prefix.count - 1] + speed) }
+
+        return speeds.indices.map { i in
+            let lower = max(0, i - half)
+            let upper = min(speeds.count, i + half + 1)
+            return (prefix[upper] - prefix[lower]) / Double(upper - lower)
+        }
+    }
+
     nonisolated private static func band(
         forSpeedAt index: Int,
         in speeds: [Double],
-        maxSpeed: Double
+        scale: SpeedScale
     ) -> Int {
         guard index >= 0, index < speeds.count else { return 0 }
-        let top = max(maxSpeed, 1)
-        let bottom = top * 0.35
-        let t = max(0, min(1, (speeds[index] - bottom) / max(0.1, top - bottom)))
-        return Int(t * Double(speedBandCount - 1))
+        return Int(scale.position(of: speeds[index]) * Double(speedBandCount - 1))
     }
 
     nonisolated private static func bandColour(_ band: Int, dimmed: Bool) -> Color {
         let t = Double(band) / Double(speedBandCount - 1)
-        let colour = Color(hue: 0.58 - 0.58 * t, saturation: 0.85, brightness: 0.95)
+        let colour = Color(hue: speedRampHue(t), saturation: 0.9, brightness: 0.95)
         return dimmed ? colour.opacity(0.75) : colour
     }
 
@@ -746,23 +776,29 @@ extension View {
 /// the ramp is scaled to each session rather than to an absolute range, the
 /// end labels carry the actual numbers.
 struct SpeedLegend: View {
-    let maxSpeed: Double
+    /// The same scale the track is drawn with. Passing the session's top speed
+    /// and re-deriving the ends here is how the legend and the map came to
+    /// disagree about what the colours meant.
+    let scale: SpeedScale
     let units: UnitPreferences
     var onDark: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(Format.speed(maxSpeed * 0.35, unit: units.speed, decimals: 0, includeSymbol: false))
+            // Both ends carry a "≤" and "≥": the ramp clips its tails on
+            // purpose, and a bare number would claim the fastest run was this
+            // speed exactly.
+            Text("≤" + Format.speed(scale.lower, unit: units.speed, decimals: 0, includeSymbol: false))
             LinearGradient(
-                colors: (0...8).map { i in
-                    Color(hue: 0.58 - 0.58 * (Double(i) / 8), saturation: 0.85, brightness: 0.95)
+                colors: (0...12).map { i in
+                    Color(hue: speedRampHue(Double(i) / 12), saturation: 0.9, brightness: 0.95)
                 },
                 startPoint: .leading,
                 endPoint: .trailing
             )
             .frame(width: 64, height: 6)
             .clipShape(Capsule())
-            Text(Format.speed(maxSpeed, unit: units.speed, decimals: 0))
+            Text("≥" + Format.speed(scale.upper, unit: units.speed, decimals: 0))
         }
         .font(.caption2.weight(.medium))
         .foregroundStyle(onDark ? .white : .primary)

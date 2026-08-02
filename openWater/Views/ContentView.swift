@@ -50,6 +50,14 @@ struct ContentView: View {
                 isRecording: recorder.state != .idle
             )
         }
+        // The bar stays at the bottom of the screen when a keyboard opens
+        // instead of riding up on top of it. It had been sitting exactly where
+        // the keyboard's own accessory bar goes, drawing over the "Done" button
+        // that dismisses a number pad — which is why a decimal pad, having no
+        // return key, could not be closed at all. A system tab bar hides behind
+        // the keyboard for this reason; the pages inside still get the keyboard
+        // inset, because each one scrolls itself.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
             if let route = ScreenshotRoute.requested { select(route.tab) }
         }

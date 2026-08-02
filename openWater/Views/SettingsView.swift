@@ -9,6 +9,9 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     @State private var newDistance = ""
+    @State private var distanceProblem: String?
+    @State private var justAdded: Double?
+    @FocusState private var distanceFieldFocused: Bool
     @State private var isExporting = false
     @State private var exportURL: URL?
     @State private var recomputeMessage: String?
@@ -84,6 +87,31 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            // A decimal pad has no return key, so without a way out the
+            // keyboard stayed up through scrolling and even a tab switch,
+            // sitting over the rest of Settings. Two ways out, because there
+            // was none.
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Our own bar rather than `ToolbarItemGroup(placement:
+                // .keyboard)`, which renders nothing inside this app's custom
+                // tab container — the system accessory never appeared no matter
+                // which view it was attached to. A safe-area inset is drawn by
+                // us, above the keyboard, and cannot silently fail to exist.
+                if distanceFieldFocused {
+                    HStack {
+                        Spacer()
+                        Button("Done") { distanceFieldFocused = false }
+                            .font(.body.weight(.semibold))
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(.bar)
+                    .transition(.move(edge: .bottom))
+                }
+            }
+            .animation(.snappy, value: distanceFieldFocused)
+            .onChange(of: newDistance) { _, _ in distanceProblem = nil }
             .alert("Done", isPresented: .constant(recomputeMessage != nil)) {
                 Button("OK") { recomputeMessage = nil }
             } message: {
@@ -105,6 +133,15 @@ struct SettingsView: View {
     ///
     /// Adding one recomputes from the stored track, so it works retroactively on
     /// every session ever recorded rather than only on future ones.
+    ///
+    /// This section used to take metres and nothing else, silently reject
+    /// anything under fifty, and clear the field either way. Somebody wanting a
+    /// 1 km window typed "1", watched it vanish, and had no way of knowing
+    /// whether it had worked — with a number pad up that they could not dismiss,
+    /// because a number pad has no return key and nothing here provided one.
+    /// Every part of that is fixed below: entry in the rider's own unit, one-tap
+    /// presets for the distances people actually use, a reason shown when a
+    /// value is refused, and a keyboard that closes.
     private var customWindowsSection: some View {
         @Bindable var settings = settings
 
@@ -112,6 +149,15 @@ struct SettingsView: View {
             ForEach(settings.customDistances.sorted(), id: \.self) { metres in
                 HStack {
                     Text(SpeedCategory.distance(metres: metres).shortName)
+                    if metres == justAdded {
+                        // Confirmation the row on screen is the one you just
+                        // asked for — a list that silently grew by one is easy
+                        // to miss, especially below the keyboard.
+                        Text("Added")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .transition(.opacity)
+                    }
                     Spacer()
                     Button("Remove", role: .destructive) {
                         settings.customDistances.removeAll { $0 == metres }
@@ -119,23 +165,89 @@ struct SettingsView: View {
                     .font(.caption)
                 }
             }
+
             HStack {
-                TextField("Distance in metres", text: $newDistance)
-                    .keyboardType(.numberPad)
-                Button("Add") {
-                    if let metres = Double(newDistance), metres >= 50, metres <= 100_000 {
-                        settings.customDistances.append(metres)
-                        settings.customDistances = Array(Set(settings.customDistances))
-                    }
-                    newDistance = ""
-                }
-                .disabled(Double(newDistance) == nil)
+                TextField("Distance", text: $newDistance)
+                    .keyboardType(.decimalPad)
+                    .focused($distanceFieldFocused)
+                    .onSubmit(addCustomDistance)
+
+                Text(settings.units.distance.symbol)
+                    .foregroundStyle(.secondary)
+                Button("Add", action: addCustomDistance)
+                    .disabled(Double(newDistance.trimmingCharacters(in: .whitespaces)) == nil)
             }
+
+            if let distanceProblem {
+                Label(distanceProblem, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            // The distances people ask for, one tap, no typing and no unit
+            // arithmetic.
+            HStack(spacing: 8) {
+                ForEach(presetDistances, id: \.metres) { preset in
+                    Button(preset.label) { add(metres: preset.metres) }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .font(.caption)
+                        .disabled(settings.customDistances.contains(preset.metres))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
         } header: {
             Text("Custom distances")
         } footer: {
-            Text("Add any distance you want a best time over — 1 km, 3 km, 5 km. Adding one recalculates from your stored tracks, so it applies to every session you already have.")
+            Text("Add any distance you want a best speed over. Adding one recalculates from your stored tracks, so it applies to every session you already have.")
         }
+    }
+
+    /// Sensible presets in whichever unit the rider reads.
+    private var presetDistances: [(label: String, metres: Double)] {
+        let unit = settings.units.distance
+        let per = unit.metresPerUnit
+        return [
+            (unit == .metric ? "500 m" : "½ \(unit.symbol)", per / 2),
+            ("1 \(unit.symbol)", per),
+            ("3 \(unit.symbol)", per * 3),
+            ("5 \(unit.symbol)", per * 5),
+        ]
+    }
+
+    private func addCustomDistance() {
+        let text = newDistance.trimmingCharacters(in: .whitespaces)
+        guard let entered = Double(text) else {
+            distanceProblem = "Enter a number."
+            return
+        }
+        add(metres: entered * settings.units.distance.metresPerUnit)
+    }
+
+    private func add(metres: Double) {
+        // Bounds explained rather than enforced in silence. Below 50 m a "best
+        // speed over" window is one or two GPS fixes and measures noise; above
+        // 100 km no session is long enough for it to ever be reached.
+        guard metres >= 50 else {
+            distanceProblem = "Too short to measure — 50 m is the minimum."
+            return
+        }
+        guard metres <= 100_000 else {
+            distanceProblem = "Too long — 100 km is the maximum."
+            return
+        }
+        let rounded = (metres * 10).rounded() / 10
+        guard !settings.customDistances.contains(rounded) else {
+            distanceProblem = "\(SpeedCategory.distance(metres: rounded).shortName) is already in the list."
+            return
+        }
+
+        settings.customDistances.append(rounded)
+        newDistance = ""
+        distanceProblem = nil
+        distanceFieldFocused = false
+        withAnimation { justAdded = rounded }
     }
 
     private func exportAll() {

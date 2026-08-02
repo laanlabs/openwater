@@ -64,6 +64,15 @@ public struct ShareSnapshot: Sendable, Codable {
     /// to the session's own spread rather than to its peak.
     public var speedFloor: Double?
 
+    /// The speed the ramp's middle stop sits at — the session's mean.
+    ///
+    /// The one anchor a page cannot work out for itself from a downsampled
+    /// track, and the one that decides whether the whole thing looks right:
+    /// yellow belongs at the rider's average, not halfway up the range.
+    /// Optional for the same reason as the floor — links shared before it
+    /// existed will never have it.
+    public var speedMid: Double?
+
     public struct Category: Sendable, Codable {
         public var name: String
         public var speed: Double
@@ -87,7 +96,8 @@ public struct ShareSnapshot: Sendable, Codable {
         runCount: Int,
         points: [[Double]],
         speedCeiling: Double,
-        speedFloor: Double? = nil
+        speedFloor: Double? = nil,
+        speedMid: Double? = nil
     ) {
         self.version = version
         self.createdAt = createdAt
@@ -107,6 +117,7 @@ public struct ShareSnapshot: Sendable, Codable {
         self.points = points
         self.speedCeiling = speedCeiling
         self.speedFloor = speedFloor
+        self.speedMid = speedMid
     }
 
     // MARK: - Building
@@ -131,10 +142,10 @@ public struct ShareSnapshot: Sendable, Codable {
         let summary = prepared.summary
 
         let points = downsample(track: track, to: maximumPoints)
-        // Fixed, not per session — see `SpeedScale`. Still sent rather than
-        // hard-coded in the page, so a link drawn today keeps the ramp it was
-        // shared with if the app's ever changes.
-        let scale = SpeedScale.standard
+        // Built from the points the page will actually draw. The downsample
+        // keeps the fastest sample per bucket, so a scale from every fix would
+        // put the mean below what is on screen.
+        let scale = SpeedScale(speeds: points.map { $0.count > 2 ? $0[2] : 0 })
 
         return ShareSnapshot(
             title: prepared.displayTitle,
@@ -156,7 +167,8 @@ public struct ShareSnapshot: Sendable, Codable {
             // The same scale the app draws with, so a link looks like the
             // session it came from rather than like a different recording.
             speedCeiling: scale.upper,
-            speedFloor: scale.lower
+            speedFloor: scale.lower,
+            speedMid: scale.middleSpeed
         )
     }
 

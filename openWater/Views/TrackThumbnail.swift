@@ -46,38 +46,41 @@ struct PreviewSample: Hashable, Sendable {
 /// The values are fitted from Waterspeed's rendering of a track we also hold,
 /// to within a few units of 255 across its whole range. Matching a tool riders
 /// already read fluently beats being subtly different for no reason.
-private let speedRampStops: [(t: Double, rgb: (Double, Double, Double))] = [
-    (0.0, (226, 46, 47)),     // #e22e2f — standstill
-    (0.6, (246, 212, 69)),    // #f6d445 — 15 kt
-    (1.0, (71, 156, 65)),     // #479c41 — 25 kt and above
+private let speedRampStops: [(Double, Double, Double)] = [
+    (231, 54, 47),     // #e7362f — a standstill
+    (238, 211, 69),    // #eed345 — the session's mean speed
+    (127, 174, 65),    // #7fae41 — its 97th percentile and above
 ]
 
 /// The ramp's colour at a position along it, 0–1.
 ///
+/// The middle stop sits at `midpoint` rather than halfway, because the middle
+/// of this ramp is the session's mean speed and that is rarely the middle of
+/// its range. Passing it in is what keeps the two halves — below average and
+/// above it — from being stretched to the same width.
+///
 /// Interpolated in RGB rather than through hue. It matters: a hue sweep between
 /// the same endpoints passes through colours that are not on the line between
-/// them — a red-to-yellow hue sweep goes via a vivid orange that neither stop
-/// contains — and the result stops matching the thing being copied.
-func speedRampColour(position t: Double) -> UIColor {
+/// them — red to yellow goes via a vivid orange that neither stop contains —
+/// and the result stops matching the thing being copied.
+func speedRampColour(position t: Double, midpoint: Double) -> UIColor {
     let t = max(0, min(1, t))
-    for i in 1..<speedRampStops.count {
-        let a = speedRampStops[i - 1], b = speedRampStops[i]
-        guard t <= b.t else { continue }
-        let span = b.t - a.t
-        let f = span > 0 ? (t - a.t) / span : 0
-        return UIColor(
-            red: (a.rgb.0 + (b.rgb.0 - a.rgb.0) * f) / 255,
-            green: (a.rgb.1 + (b.rgb.1 - a.rgb.1) * f) / 255,
-            blue: (a.rgb.2 + (b.rgb.2 - a.rgb.2) * f) / 255,
-            alpha: 1
-        )
-    }
-    let last = speedRampStops[speedRampStops.count - 1].rgb
-    return UIColor(red: last.0 / 255, green: last.1 / 255, blue: last.2 / 255, alpha: 1)
+    let mid = max(0.05, min(0.95, midpoint))
+    let (a, b, f): ((Double, Double, Double), (Double, Double, Double), Double) =
+        t <= mid
+        ? (speedRampStops[0], speedRampStops[1], mid > 0 ? t / mid : 0)
+        : (speedRampStops[1], speedRampStops[2], mid < 1 ? (t - mid) / (1 - mid) : 0)
+
+    return UIColor(
+        red: (a.0 + (b.0 - a.0) * f) / 255,
+        green: (a.1 + (b.1 - a.1) * f) / 255,
+        blue: (a.2 + (b.2 - a.2) * f) / 255,
+        alpha: 1
+    )
 }
 
 func speedRampColour(_ speed: Double, scale: SpeedScale) -> UIColor {
-    speedRampColour(position: scale.position(of: speed))
+    speedRampColour(position: scale.position(of: speed), midpoint: scale.midpoint)
 }
 
 /// A static map image of a session's track, for the session list.
@@ -183,7 +186,7 @@ final class TrackThumbnailCache {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         let points = samples.map { snapshot.point(for: $0.coordinate) }
-        let scale = SpeedScale.standard
+        let scale = SpeedScale(speeds: samples.map(\.speed))
 
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             snapshot.image.draw(at: .zero)

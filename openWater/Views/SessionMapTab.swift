@@ -33,7 +33,7 @@ struct SessionMapTab: View {
 
     /// The ramp the track is drawn with, so the legend cannot claim a
     /// different range from the colours beside it.
-    private var speedScale: SpeedScale { .standard }
+    private var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
 
     @State private var elapsed: TimeInterval = 0
     @State private var isScrubbing = false

@@ -107,9 +107,9 @@ struct TrackMapView: View {
         let highlight: ClosedRange<TimeInterval>?
     }
 
-    /// The ramp every session is coloured across. Fixed in knots, so the same
-    /// colour means the same speed in every session a rider looks at.
-    var speedScale: SpeedScale { .standard }
+    /// The ramp this session is coloured across, built from its own speeds so
+    /// the whole sweep of colour lands on the range actually ridden.
+    var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
 
     private var bandKey: BandKey {
         BandKey(
@@ -442,7 +442,7 @@ struct TrackMapView: View {
                 bands.append(SpeedBand(
                     id: id,
                     coordinates: Array(coordinates[runStart...offset]),
-                    colour: bandColour(runBand, dimmed: dimmed),
+                    colour: bandColour(runBand, dimmed: dimmed, midpoint: scale.midpoint),
                     width: width
                 ))
                 id += 1
@@ -452,7 +452,7 @@ struct TrackMapView: View {
             bands.append(SpeedBand(
                 id: id,
                 coordinates: Array(coordinates[runStart...]),
-                colour: bandColour(runBand, dimmed: dimmed),
+                colour: bandColour(runBand, dimmed: dimmed, midpoint: scale.midpoint),
                 width: width
             ))
             id += 1
@@ -484,9 +484,9 @@ struct TrackMapView: View {
         return Int(scale.position(of: speeds[index]) * Double(speedBandCount - 1))
     }
 
-    nonisolated private static func bandColour(_ band: Int, dimmed: Bool) -> Color {
+    nonisolated private static func bandColour(_ band: Int, dimmed: Bool, midpoint: Double) -> Color {
         let t = Double(band) / Double(speedBandCount - 1)
-        let colour = Color(speedRampColour(position: t))
+        let colour = Color(speedRampColour(position: t, midpoint: midpoint))
         return dimmed ? colour.opacity(0.75) : colour
     }
 
@@ -868,8 +868,8 @@ struct SpeedLegend: View {
             // clamps while the bottom cannot be passed.
             Text(Format.speed(scale.lower, unit: units.speed, decimals: 0, includeSymbol: false))
             LinearGradient(
-                colors: (0...12).map { i in
-                    Color(speedRampColour(position: Double(i) / 12))
+                colors: (0...16).map { i in
+                    Color(speedRampColour(position: Double(i) / 16, midpoint: scale.midpoint))
                 },
                 startPoint: .leading,
                 endPoint: .trailing

@@ -95,7 +95,12 @@ struct ImportView: View {
                         onImport(sport)
                         dismiss()
                     }
-                    .fontWeight(.semibold)
+                    // Filled with the accent colour rather than left as text on
+                    // the standard capsule. Cancel and Import otherwise look
+                    // identical — same shape, same weight, same colour — and
+                    // the one that does the thing the screen is for should not
+                    // have to be found by reading.
+                    .buttonStyle(.borderedProminent)
                 }
             }
         }

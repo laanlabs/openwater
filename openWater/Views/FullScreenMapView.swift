@@ -47,7 +47,17 @@ struct FullScreenMapView: View {
                 minimumSpeed: minimumSpeed,
                 foilingOnly: foilingOnly,
                 style: settings.mapStyle,
-                units: settings.units
+                units: settings.units,
+                onSeek: { time in
+                    // Full screen has no scrubber of its own — the useful
+                    // answer to "what happened here" is the run it belongs to,
+                    // which isolates it and dims everything else.
+                    withAnimation(.snappy) {
+                        selectedRun = summary.runs.first {
+                            time >= $0.startElapsed && time <= $0.endElapsed
+                        }?.index
+                    }
+                }
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottomLeading) {

@@ -75,6 +75,10 @@ struct TrackMapView: View {
     /// written.
     var units: UnitPreferences = .default
 
+    /// Called with the elapsed time of the nearest sample when the rider taps
+    /// the track. Nil disables it.
+    var onSeek: ((TimeInterval) -> Void)?
+
     @State private var camera: MapCameraPosition = .automatic
 
     /// The drawn track, rebuilt only when something that actually changes its
@@ -146,6 +150,15 @@ struct TrackMapView: View {
     }
 
     var body: some View {
+        // The reader is only here for the tap: it is the one way to turn a
+        // point on screen back into a coordinate, which is what makes the
+        // track itself a control rather than a picture.
+        MapReader { proxy in
+            map(proxy: proxy)
+        }
+    }
+
+    private func map(proxy: MapProxy) -> some View {
         Map(position: $camera) {
             // Ghost layer first, so the highlighted content draws over it.
             if showsGhostLayer {
@@ -301,6 +314,21 @@ struct TrackMapView: View {
         // session already shows wind direction on its own dial, so the system
         // pair is redundant here rather than merely inconvenient.
         .mapControls { }
+        // Tap the track to jump to that moment.
+        //
+        // The scrubber under the map answers "what was happening at 14:32",
+        // but nobody thinks in elapsed seconds — they think "what was I doing
+        // on *that* run", and they are already pointing at it. Taps that land
+        // away from the track do nothing rather than seeking to the nearest
+        // point on it, because a seek the rider did not ask for looks like a
+        // bug and there is no undo for losing your place.
+        .onTapGesture { point in
+            guard let onSeek,
+                  let tapped = proxy.convert(point, from: .local),
+                  let hit = nearestSample(to: tapped, tapped: point, proxy: proxy)
+            else { return }
+            onSeek(hit)
+        }
         .onChange(of: selectedRun) { _, _ in frameSelection() }
         .onAppear { frameSelection() }
     }
@@ -516,6 +544,62 @@ struct TrackMapView: View {
                 if let last = points.last { result.append(last.clCoordinate) }
                 return result
             }
+    }
+
+    /// The elapsed time of the track sample nearest a tap, if the tap was
+    /// close enough to count.
+    ///
+    /// Two passes on purpose. The first finds the nearest sample by real-world
+    /// distance, which is cheap and needs no projection. The second measures
+    /// how far that sample actually landed from the finger *on screen*, which
+    /// is the only threshold that makes sense: 40 metres is a miss when the
+    /// whole bay fills the screen and a direct hit when zoomed into one gybe.
+    private func nearestSample(
+        to coordinate: CLLocationCoordinate2D,
+        tapped point: CGPoint,
+        proxy: MapProxy
+    ) -> TimeInterval? {
+        let track = session.track
+        guard track.count > 1 else { return nil }
+        let target = Geo.Coordinate(latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+        // Stride over a few hundred candidates rather than every fix: at the
+        // zoom levels a finger can distinguish, neighbouring samples are the
+        // same pixel, and a tap should not walk ten thousand points.
+        let step = max(1, track.count / 600)
+        var best: (index: Int, distance: Double)?
+        for index in stride(from: 0, to: track.count, by: step) {
+            let point = track.points[index]
+            guard point.hasValidPosition else { continue }
+            let distance = Geo.distance(point.coordinate, target)
+            if best == nil || distance < best!.distance {
+                best = (index, distance)
+            }
+        }
+        guard let best else { return nil }
+
+        // Refine within the stride, so the playhead lands on the sample under
+        // the finger rather than up to a few seconds either side of it.
+        var refined = best.index
+        var refinedDistance = best.distance
+        for index in max(0, best.index - step)...min(track.count - 1, best.index + step) {
+            let candidate = track.points[index]
+            guard candidate.hasValidPosition else { continue }
+            let distance = Geo.distance(candidate.coordinate, target)
+            if distance < refinedDistance {
+                refined = index
+                refinedDistance = distance
+            }
+        }
+
+        guard let onScreen = proxy.convert(track.points[refined].clCoordinate, to: .local) else {
+            return nil
+        }
+        let miss = hypot(onScreen.x - point.x, onScreen.y - point.y)
+        // Generous, because a finger is wide and a track drawn at five points
+        // is thin — but not so generous that tapping open water seeks.
+        guard miss <= 44 else { return nil }
+        return track.elapsed[refined]
     }
 
     /// Where the session's fastest sample happened.

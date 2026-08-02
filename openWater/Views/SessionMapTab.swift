@@ -151,7 +151,13 @@ struct SessionMapTab: View {
             activeTrimEdge: trimEdge,
             trimIsRemoval: trimMode == .removeSegment,
             style: settings.mapStyle,
-            units: settings.units
+            units: settings.units,
+            onSeek: isTrimming ? nil : { time in
+                // Not while trimming: the handles are what a tap means there,
+                // and moving the playhead under them would read as one of them
+                // jumping.
+                withAnimation(.snappy) { elapsed = min(max(0, time), duration) }
+            }
         )
         .overlay(alignment: .top) { topChrome }
         .overlay(alignment: .bottomLeading) {

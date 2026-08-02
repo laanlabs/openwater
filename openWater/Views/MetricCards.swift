@@ -631,6 +631,10 @@ struct DownwindCard: View {
 
             LazyVGrid(columns: columns, spacing: 8) {
                 SummaryTile(label: "Glides", value: "\(downwind.glideCount)")
+                // The time, not only the share of it. "Time on foil" is a
+                // headline figure and its downwind counterpart was being shown
+                // as a percentage of a duration printed on another screen.
+                SummaryTile(label: "Time gliding", value: Format.duration(downwind.glideTime))
                 SummaryTile(label: "Gliding", value: "\(Int(downwind.glideFraction * 100))%")
                 if let longest = downwind.longestGlide {
                     SummaryTile(label: "Longest glide", value: Format.shortDuration(longest.duration))

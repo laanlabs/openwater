@@ -77,6 +77,45 @@ struct TrackMapView: View {
 
     @State private var camera: MapCameraPosition = .automatic
 
+    /// The drawn track, rebuilt only when something that actually changes its
+    /// shape changes — never while a trim handle is moving.
+    @State private var bands: [SpeedBand] = []
+    @State private var fullTrack: [CLLocationCoordinate2D] = []
+
+    private var showsGhostLayer: Bool {
+        selectedRun != nil || highlight != nil || foilingOnly
+            || foilFilter != .everything || minimumSpeed > 0 || partialUpTo != nil
+    }
+
+    /// Everything the base layer depends on. `trimRange` is deliberately absent:
+    /// the selection is drawn over the top instead of carved out of it, so a
+    /// drag costs one polyline rather than a full rebuild.
+    private struct BandKey: Equatable {
+        let sessionID: UUID
+        let selectedRun: Int?
+        let foilingOnly: Bool
+        let foilFilter: FoilFilter
+        let minimumSpeed: Double
+        /// Quantised to the second. The scrubber moves continuously and the
+        /// difference between two neighbouring frames is one sample.
+        let partialUpTo: Int?
+        let onDark: Bool
+        let highlight: ClosedRange<TimeInterval>?
+    }
+
+    private var bandKey: BandKey {
+        BandKey(
+            sessionID: session.id,
+            selectedRun: selectedRun,
+            foilingOnly: foilingOnly,
+            foilFilter: foilFilter,
+            minimumSpeed: minimumSpeed,
+            partialUpTo: partialUpTo.map { Int($0) },
+            onDark: style.isDark,
+            highlight: highlight
+        )
+    }
+
     public enum TrimEdge { case start, end }
 
     /// What counts as visible track.
@@ -99,19 +138,24 @@ struct TrackMapView: View {
     var body: some View {
         Map(position: $camera) {
             // Ghost layer first, so the highlighted content draws over it.
-            if selectedRun != nil || highlight != nil || foilingOnly
-                || foilFilter != .everything || minimumSpeed > 0 || partialUpTo != nil {
-                MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
+            if showsGhostLayer {
+                MapPolyline(coordinates: fullTrack)
                     .stroke(
                         style.isDark ? .white.opacity(0.28) : .gray.opacity(0.22),
                         lineWidth: 2
                     )
             }
 
-            ForEach(speedBands) { band in
+            // The base track. Everything about it is cached and none of it
+            // depends on `trimRange`, so dragging a trim handle leaves this
+            // layer byte-for-byte identical and SwiftUI has nothing to diff.
+            // That is the whole performance story: it used to be several
+            // hundred polylines rebuilt from ten thousand samples on every
+            // frame of the drag.
+            ForEach(bands) { band in
                 MapPolyline(coordinates: band.coordinates)
                     .stroke(
-                        band.style,
+                        band.colour,
                         style: StrokeStyle(
                             lineWidth: band.width,
                             lineCap: .round,
@@ -119,6 +163,7 @@ struct TrackMapView: View {
                         )
                     )
             }
+
 
             // The fastest moment of the session, marked.
             //
@@ -161,12 +206,27 @@ struct TrackMapView: View {
                 }
             }
 
-            if let trimRange, trimIsRemoval {
-                ForEach(summary.segments) { segment in
-                    MapPolyline(coordinates: coordinates(for: segment, clippedTo: trimRange))
+            // What the edit would throw away, greyed over the top of the
+            // track.
+            //
+            // Marking what is *kept* was tried first and does not work: on a
+            // session of forty overlapping passes a highlight under the line
+            // merges into one solid mass and the speed colours — the reason for
+            // looking at the map — disappear. Dimming what goes leaves the kept
+            // track exactly as it was, which is also the thing being judged.
+            //
+            // Cheap for the same reason it is useful: in trim mode the discarded
+            // part is usually just the two ends, and both are downsampled.
+            if trimRange != nil {
+                ForEach(Array(discardedCoordinates.enumerated()), id: \.offset) { _, piece in
+                    MapPolyline(coordinates: piece)
                         .stroke(
-                            Color.red.opacity(0.55),
-                            style: StrokeStyle(lineWidth: 6, lineCap: .round, dash: [2, 7])
+                            trimIsRemoval ? Color.red.opacity(0.8) : Color.black.opacity(0.55),
+                            style: StrokeStyle(
+                                lineWidth: 6,
+                                lineCap: .round,
+                                dash: trimIsRemoval ? [2, 8] : []
+                            )
                         )
                 }
             }
@@ -206,6 +266,25 @@ struct TrackMapView: View {
             }
         }
         .mapStyle(style.mapStyle)
+        .task(id: bandKey) {
+            // Off the main actor: a three-hour track is ten thousand samples,
+            // and doing this inline made opening a big session hitch before it
+            // ever got near a trim.
+            let track = session.track
+            let segments = visibleSegments
+            let ceiling = summary.maxSpeed
+            let dark = style.isDark
+            let lastIndex = partialUpTo.flatMap { track.index(atElapsed: $0) }
+            let computed = await Task.detached(priority: .userInitiated) {
+                Self.makeBands(
+                    track: track, segments: segments,
+                    maxSpeed: ceiling, onDark: dark, upTo: lastIndex
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            bands = computed
+            if fullTrack.isEmpty { fullTrack = track.points.map(\.clCoordinate) }
+        }
         // MapKit puts its compass in the top-right the moment the map is
         // rotated and its scale in the top-left when zoomed — both underneath
         // the app's own controls, which live in exactly those corners. The
@@ -238,58 +317,16 @@ struct TrackMapView: View {
         }
     }
 
-    /// The part of a segment inside an explicit range — used to draw the
-    /// stretch a removal would cut, over the top of the whole track.
-    private func coordinates(
-        for segment: StateSegment,
-        clippedTo range: ClosedRange<TimeInterval>
-    ) -> [CLLocationCoordinate2D] {
-        guard segment.endElapsed >= range.lowerBound,
-              segment.startElapsed <= range.upperBound else { return [] }
-        var start = segment.startIndex
-        var end = segment.endIndex
-        if segment.startElapsed < range.lowerBound {
-            start = max(start, session.track.index(atElapsed: range.lowerBound) ?? start)
-        }
-        if segment.endElapsed > range.upperBound {
-            end = min(end, session.track.index(atElapsed: range.upperBound) ?? end)
-        }
-        guard end > start, end < session.track.count else { return [] }
-        return session.track.points[start...end].map(\.clCoordinate)
-    }
-
-    private func coordinates(for segment: StateSegment) -> [CLLocationCoordinate2D] {
-        guard segment.startIndex >= 0, segment.endIndex < session.track.count else { return [] }
-        // Clip the segment the scrubber is inside, so the drawn track ends
-        // exactly at the playhead rather than jumping a whole segment ahead.
-        var start = segment.startIndex
-        var end = segment.endIndex
-        if let partialUpTo, segment.endElapsed > partialUpTo {
-            end = min(end, session.track.index(atElapsed: partialUpTo) ?? segment.startIndex)
-        }
-        // Clip to the trim at both ends, per sample rather than per segment.
-        // Filtering whole segments by overlap is not enough: a short session is
-        // one long segment, so it overlaps any selection and gets drawn in full,
-        // and the part being cut looks identical to the part being kept.
-        if let trimRange, !trimIsRemoval {
-            if segment.startElapsed < trimRange.lowerBound {
-                start = max(start, session.track.index(atElapsed: trimRange.lowerBound) ?? start)
-            }
-            if segment.endElapsed > trimRange.upperBound {
-                end = min(end, session.track.index(atElapsed: trimRange.upperBound) ?? end)
-            }
-        }
-        guard end > start else { return [] }
-        return session.track.points[start...end].map(\.clCoordinate)
-    }
-
     // MARK: - Speed banding
 
     /// One stretch of track drawn in a single colour.
-    struct SpeedBand: Identifiable {
+    ///
+    /// Holds a `Color` rather than an `AnyShapeStyle` so the whole array can be
+    /// built off the main actor and handed back.
+    struct SpeedBand: Identifiable, Sendable {
         let id: Int
         let coordinates: [CLLocationCoordinate2D]
-        let style: AnyShapeStyle
+        let colour: Color
         let width: Double
     }
 
@@ -303,42 +340,56 @@ struct TrackMapView: View {
     /// The track, split so that colour follows speed *along* it.
     ///
     /// It used to be one polyline per ride-state segment, coloured by that
-    /// segment's average. A foiling run is a single segment lasting minutes, so
-    /// the entire run came out one flat colour — which is why the map read as
-    /// green everywhere with grey for the slow bits, while the list thumbnail,
-    /// which colours per sample, showed the full ramp. The two are drawing the
-    /// same data and disagreeing, and the map was the one throwing it away.
+    /// segment's average — so a foiling run lasting minutes came out one flat
+    /// colour. State still controls weight and opacity; only the colour is per
+    /// stretch.
     ///
-    /// State still controls weight and opacity; only the colour is now per
-    /// stretch rather than per segment.
-    private var speedBands: [SpeedBand] {
+    /// Static and pure so it can run off the main actor. It is also the reason
+    /// the trim no longer clips the track: this is expensive, and making it
+    /// depend on a value that changes sixty times a second was what made
+    /// dragging a handle stutter.
+    nonisolated static func makeBands(
+        track: Track,
+        segments: [StateSegment],
+        maxSpeed: Double,
+        onDark: Bool,
+        upTo lastIndex: Int?
+    ) -> [SpeedBand] {
         var bands: [SpeedBand] = []
         var id = 0
-        let speeds = session.track.speed
+        let speeds = track.speed
 
-        for segment in visibleSegments {
-            let coordinates = coordinates(for: segment)
+        for segment in segments {
+            guard segment.startIndex >= 0, segment.endIndex < track.count else { continue }
+            // Stop exactly at the playhead rather than a whole segment past it,
+            // which is what makes the scrubber reveal the track in order.
+            let endIndex = min(segment.endIndex, lastIndex ?? segment.endIndex)
+            guard endIndex > segment.startIndex else { continue }
+            let coordinates = track.points[segment.startIndex...endIndex].map(\.clCoordinate)
             guard coordinates.count > 1 else { continue }
-            let width = lineWidth(for: segment)
+            let width = lineWidth(for: segment.state)
 
             // Muted states carry no speed information worth showing — a fall or
             // a drift is about where it happened, not how fast — so they stay a
             // single stroke.
             guard segment.state == .foiling || segment.state == .riding else {
-                bands.append(SpeedBand(id: id, coordinates: coordinates,
-                                       style: style(for: segment), width: width))
+                bands.append(SpeedBand(
+                    id: id,
+                    coordinates: coordinates,
+                    colour: mutedColour(for: segment.state, onDark: onDark),
+                    width: width
+                ))
                 id += 1
                 continue
             }
 
-            // The coordinates may have been clipped by the trim or the
-            // playhead, so walk from the segment's own start index.
-            let start = clippedStartIndex(for: segment)
+            let start = segment.startIndex
+            let dimmed = segment.state == .riding
             var runStart = 0
-            var runBand = band(forSpeedAt: start, in: speeds)
+            var runBand = band(forSpeedAt: start, in: speeds, maxSpeed: maxSpeed)
 
             for offset in 1..<coordinates.count {
-                let next = band(forSpeedAt: start + offset, in: speeds)
+                let next = band(forSpeedAt: start + offset, in: speeds, maxSpeed: maxSpeed)
                 // A minimum run length, because the cost here is one MapKit
                 // overlay per colour change: a noisy stretch flickering between
                 // two adjacent bands every sample would otherwise turn a
@@ -351,7 +402,7 @@ struct TrackMapView: View {
                 bands.append(SpeedBand(
                     id: id,
                     coordinates: Array(coordinates[runStart...offset]),
-                    style: bandStyle(runBand, dimmed: segment.state == .riding),
+                    colour: bandColour(runBand, dimmed: dimmed),
                     width: width
                 ))
                 id += 1
@@ -361,12 +412,80 @@ struct TrackMapView: View {
             bands.append(SpeedBand(
                 id: id,
                 coordinates: Array(coordinates[runStart...]),
-                style: bandStyle(runBand, dimmed: segment.state == .riding),
+                colour: bandColour(runBand, dimmed: dimmed),
                 width: width
             ))
             id += 1
         }
         return bands
+    }
+
+    nonisolated private static func band(
+        forSpeedAt index: Int,
+        in speeds: [Double],
+        maxSpeed: Double
+    ) -> Int {
+        guard index >= 0, index < speeds.count else { return 0 }
+        let top = max(maxSpeed, 1)
+        let bottom = top * 0.35
+        let t = max(0, min(1, (speeds[index] - bottom) / max(0.1, top - bottom)))
+        return Int(t * Double(speedBandCount - 1))
+    }
+
+    nonisolated private static func bandColour(_ band: Int, dimmed: Bool) -> Color {
+        let t = Double(band) / Double(speedBandCount - 1)
+        let colour = Color(hue: 0.58 - 0.58 * t, saturation: 0.85, brightness: 0.95)
+        return dimmed ? colour.opacity(0.75) : colour
+    }
+
+    /// Grey vanishes against imagery, so the muted states lift to white on a
+    /// dark base map.
+    nonisolated private static func mutedColour(for state: RideState, onDark: Bool) -> Color {
+        switch state {
+        case .slow: onDark ? .white.opacity(0.6) : .gray.opacity(0.55)
+        case .stopped: onDark ? .white.opacity(0.4) : .gray.opacity(0.35)
+        case .fall: .red.opacity(0.65)
+        default: onDark ? .white.opacity(0.6) : .gray.opacity(0.55)
+        }
+    }
+
+    nonisolated static func lineWidth(for state: RideState) -> Double {
+        switch state {
+        case .foiling: 5
+        case .riding: 3.5
+        case .slow: 2
+        case .stopped: 1.5
+        case .fall: 3
+        }
+    }
+
+    /// The stretches the edit would discard.
+    ///
+    /// The one thing on the map that changes per frame, so it is the one thing
+    /// allowed to be recomputed per frame — and it is capped at a few hundred
+    /// points per piece, because a marker drawn over an existing line does not
+    /// need every sample to look right. Everything else on the map is cached
+    /// precisely so that this can be cheap enough to be live.
+    private var discardedCoordinates: [[CLLocationCoordinate2D]] {
+        guard let trimRange,
+              let lower = session.track.index(atElapsed: trimRange.lowerBound),
+              let upper = session.track.index(atElapsed: trimRange.upperBound),
+              upper > lower, upper < session.track.count else { return [] }
+
+        let ranges: [ClosedRange<Int>] = trimIsRemoval
+            ? [lower...upper]
+            : [0...lower, upper...(session.track.count - 1)]
+
+        return ranges
+            .filter { $0.lowerBound < $0.upperBound }
+            .map { range in
+                let points = session.track.points[range]
+                let step = max(1, points.count / 400)
+                var result = stride(from: 0, to: points.count, by: step)
+                    .map { points[points.startIndex + $0].clCoordinate }
+                if let last = points.last { result.append(last.clCoordinate) }
+                return result
+            }
     }
 
     /// Where the session's fastest sample happened.
@@ -376,88 +495,13 @@ struct TrackMapView: View {
               let index = speeds.indices.max(by: { speeds[$0] < speeds[$1] }),
               let point = session.track.points[safe: index],
               point.hasValidPosition else { return nil }
-        // Hidden while the track is filtered down to something else: a peak
-        // pinned outside the stretch on screen is just confusing.
+        // Hidden while the track is filtered down to something else, or while a
+        // trim is in progress: a peak pinned outside the stretch on screen is
+        // just confusing.
         if let partialUpTo, session.track.elapsed[index] > partialUpTo { return nil }
+        if trimRange != nil { return nil }
         if foilingOnly || foilFilter != .everything || selectedRun != nil { return nil }
         return point.clCoordinate
-    }
-
-    private func clippedStartIndex(for segment: StateSegment) -> Int {
-        var start = segment.startIndex
-        if let trimRange, !trimIsRemoval, segment.startElapsed < trimRange.lowerBound {
-            start = max(start, session.track.index(atElapsed: trimRange.lowerBound) ?? start)
-        }
-        return start
-    }
-
-    private func band(forSpeedAt index: Int, in speeds: [Double]) -> Int {
-        guard index >= 0, index < speeds.count else { return 0 }
-        let top = max(summary.maxSpeed, 1)
-        let bottom = top * 0.35
-        let t = max(0, min(1, (speeds[index] - bottom) / max(0.1, top - bottom)))
-        return Int(t * Double(Self.speedBandCount - 1))
-    }
-
-    private func bandStyle(_ band: Int, dimmed: Bool) -> AnyShapeStyle {
-        let t = Double(band) / Double(Self.speedBandCount - 1)
-        let colour = Color(hue: 0.58 - 0.58 * t, saturation: 0.85, brightness: 0.95)
-        return AnyShapeStyle(dimmed ? colour.opacity(0.75) : colour)
-    }
-
-    // MARK: - Styling
-
-    /// Colour carries speed; weight and opacity carry state.
-    ///
-    /// Keeping those on separate visual channels is what lets a rider read both
-    /// at once. Encoding state as another hue would collide with the speed ramp
-    /// and make neither legible.
-    private func style(for segment: StateSegment) -> AnyShapeStyle {
-        switch segment.state {
-        case .foiling:
-            return AnyShapeStyle(speedColour(segment.averageSpeed))
-        case .riding:
-            return AnyShapeStyle(speedColour(segment.averageSpeed).opacity(0.75))
-        case .slow:
-            // Grey vanishes against imagery, so the muted states lift to white
-            // on a dark base map.
-            return AnyShapeStyle(style.isDark
-                ? Color.white.opacity(0.6)
-                : Color.gray.opacity(0.55))
-        case .stopped:
-            return AnyShapeStyle(style.isDark
-                ? Color.white.opacity(0.4)
-                : Color.gray.opacity(0.35))
-        case .fall:
-            return AnyShapeStyle(Color.red.opacity(0.65))
-        }
-    }
-
-    private func lineWidth(for segment: StateSegment) -> Double {
-        switch segment.state {
-        case .foiling: 5
-        case .riding: 3.5
-        case .slow: 2
-        case .stopped: 1.5
-        case .fall: 3
-        }
-    }
-
-    /// Speed ramp, scaled to this session rather than to an absolute range.
-    ///
-    /// An absolute scale would render a light-wind session entirely blue and a
-    /// windy one entirely red, which tells you nothing about either. Scaling to
-    /// the session's own spread means the ramp always separates that session's
-    /// fast runs from its slow ones.
-    private func speedColour(_ speed: Double) -> Color {
-        let top = max(summary.maxSpeed, 1)
-        let bottom = top * 0.35
-        let t = max(0, min(1, (speed - bottom) / max(0.1, top - bottom)))
-        return Color(
-            hue: 0.58 - 0.58 * t,   // blue → green → yellow → red
-            saturation: 0.85,
-            brightness: 0.95
-        )
     }
 
     // MARK: - Camera

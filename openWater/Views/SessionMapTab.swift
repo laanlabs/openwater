@@ -44,6 +44,11 @@ struct SessionMapTab: View {
     @State private var trimEdge: TrackMapView.TrimEdge?
     @State private var trimMode: TrimMode = .trim
 
+    /// Derived once per session rather than per frame. See `makeChartSamples`
+    /// and `TrimPreview.Index`.
+    @State private var chartSamples: [(elapsed: TimeInterval, speed: Double)] = []
+    @State private var previewIndex: TrimPreview.Index?
+
     enum TrimMode: String, CaseIterable, Identifiable {
         case trim = "Trim"
         case removeSegment = "Remove Segment"
@@ -101,6 +106,18 @@ struct SessionMapTab: View {
         // The trim bar's start handle lives in the edge-swipe zone, so reaching
         // for it popped the session instead of grabbing the handle.
         .interactivePopGesture(enabled: !isTrimming)
+        // Everything derived from the track that does not change while it is
+        // being edited, built once when the session appears rather than on
+        // every frame of a drag.
+        .task(id: session.id) {
+            let track = session.track
+            let derived = await Task.detached(priority: .userInitiated) {
+                (samples: Self.makeChartSamples(track), index: TrimPreview.Index(track: track))
+            }.value
+            guard !Task.isCancelled else { return }
+            chartSamples = derived.samples
+            previewIndex = derived.index
+        }
     }
 
     // MARK: - Map
@@ -110,7 +127,11 @@ struct SessionMapTab: View {
             session: session,
             summary: summary,
             selectedRun: selectedRun,
-            highlight: isTrimming ? trimStart...max(trimStart + 1, trimEnd) : nil,
+            // Not while trimming. `trimRange` below already marks the
+            // selection, and passing it as a highlight as well made the map's
+            // cached base layer depend on a value that changes sixty times a
+            // second — which rebuilt the whole track on every frame of a drag.
+            highlight: nil,
             showFalls: showFalls,
             showManeuvers: showManeuvers,
             minimumSpeed: minimumSpeed,
@@ -384,8 +405,11 @@ struct SessionMapTab: View {
     /// One point per pixel or so. A three-hour track is ten thousand samples and
     /// Swift Charts will happily try to draw all of them, on a chart ninety-six
     /// points tall.
-    private var chartSamples: [(elapsed: TimeInterval, speed: Double)] {
-        let track = session.track
+    ///
+    /// Cached rather than computed in `body`: it never changes for a given
+    /// session, and it was being rebuilt on every frame of a trim drag along
+    /// with everything else the timeline touches.
+    static func makeChartSamples(_ track: Track) -> [(elapsed: TimeInterval, speed: Double)] {
         guard track.count > 1 else { return [] }
         let step = max(1, track.count / 400)
         return stride(from: 0, to: track.count, by: step).map {
@@ -613,6 +637,7 @@ extension SessionMapTab {
     var trimStats: some View {
         let preview = TrimPreview(
             track: session.track,
+            index: previewIndex,
             range: trimStart...max(trimStart + 1, trimEnd),
             isRemoval: trimMode == .removeSegment
         )
@@ -697,11 +722,61 @@ extension SessionMapTab {
 /// agree with the saved result to within the sample either side of a boundary.
 struct TrimPreview {
 
+    /// Precomputed once per session so a range maximum is not a full scan.
+    ///
+    /// Distance and time are already prefix sums on the track — subtracting two
+    /// entries is free. The maximum was not, and it was the one figure being
+    /// recomputed over ten thousand samples on every frame of a drag. A block
+    /// maximum turns that into a walk of `n / blockSize` blocks plus at most two
+    /// partial blocks: exact, and about two hundred times less work.
+    struct Index: Equatable {
+        static let blockSize = 64
+        let blockMax: [Double]
+
+        init(track: Track) {
+            var maxima: [Double] = []
+            maxima.reserveCapacity(track.count / Self.blockSize + 1)
+            var i = 0
+            while i < track.count {
+                let end = min(i + Self.blockSize, track.count)
+                maxima.append(track.speed[i..<end].max() ?? 0)
+                i = end
+            }
+            blockMax = maxima
+        }
+
+        func maximum(in range: ClosedRange<Int>, speeds: [Double]) -> Double {
+            let size = Self.blockSize
+            let firstWhole = (range.lowerBound + size - 1) / size
+            let lastWhole = (range.upperBound + 1) / size - 1
+
+            guard firstWhole <= lastWhole else {
+                // Inside a single block, or spanning a boundary with no whole
+                // block between: just look at the samples.
+                return speeds[range.lowerBound...range.upperBound].max() ?? 0
+            }
+
+            var peak = 0.0
+            let headEnd = firstWhole * size - 1
+            if headEnd >= range.lowerBound {
+                peak = max(peak, speeds[range.lowerBound...headEnd].max() ?? 0)
+            }
+            for block in firstWhole...lastWhole where block < blockMax.count {
+                peak = max(peak, blockMax[block])
+            }
+            let tailStart = (lastWhole + 1) * size
+            if tailStart <= range.upperBound {
+                peak = max(peak, speeds[tailStart...range.upperBound].max() ?? 0)
+            }
+            return peak
+        }
+    }
+
     let distance: Double
     let averageSpeed: Double
     let maxSpeed: Double
 
-    init(track: Track, range: ClosedRange<TimeInterval>, isRemoval: Bool) {
+    init(track: Track, index: Index?, range: ClosedRange<TimeInterval>, isRemoval: Bool) {
         guard track.count > 1,
               let lower = track.index(atElapsed: range.lowerBound),
               let upper = track.index(atElapsed: range.upperBound),
@@ -721,7 +796,8 @@ struct TrimPreview {
         for piece in kept {
             metres += track.cumulativeDistance[piece.upperBound] - track.cumulativeDistance[piece.lowerBound]
             seconds += track.elapsed[piece.upperBound] - track.elapsed[piece.lowerBound]
-            peak = max(peak, track.speed[piece.lowerBound...piece.upperBound].max() ?? 0)
+            peak = max(peak, index?.maximum(in: piece, speeds: track.speed)
+                            ?? track.speed[piece.lowerBound...piece.upperBound].max() ?? 0)
         }
 
         distance = metres

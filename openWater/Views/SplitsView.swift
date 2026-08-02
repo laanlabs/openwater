@@ -39,6 +39,8 @@ struct SplitsView: View {
         session.splits(every: interval.metres(settings.units.distance))
     }
 
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
@@ -48,6 +50,7 @@ struct SplitsView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 24)
         }
+        .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Split")
         .navigationBarTitleDisplayMode(.inline)

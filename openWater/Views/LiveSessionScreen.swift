@@ -15,6 +15,10 @@ struct LiveSessionScreen: View {
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(AppSettings.self) private var settings
 
+    /// Room the floating tab bar takes. End and Pause clear it explicitly
+    /// rather than trusting a safe-area inset to reach this far.
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     /// Whether the live map is showing. On by default: the space it fills was
     /// empty, and a rider mid-session wants to see where they have been —
     /// which runs were the fast ones, and where they are relative to the
@@ -101,12 +105,13 @@ struct LiveSessionScreen: View {
 
             Spacer(minLength: 0)
 
-            // A gap under the controls on purpose. End sits above the tab bar,
-            // and a wet thumb aiming for it should not be able to land on
-            // Settings instead.
+            // Clear of the tab bar by its full height, plus a gap. End and
+            // Pause are the two controls that must never be covered — a rider
+            // who cannot stop a recording has lost the session — and a wet
+            // thumb aiming for End should not be able to land on Settings.
             controls
                 .padding(.horizontal)
-                .padding(.bottom, 10)
+                .padding(.bottom, tabBarHeight + 10)
         }
     }
 

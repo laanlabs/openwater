@@ -118,26 +118,35 @@ struct RecordTabView: View {
     // MARK: - Before starting
 
     private var idle: some View {
-        Group {
-            if isActive {
-                Map(position: $camera) {
-                    UserAnnotation()
+        // A bottom-aligned stack rather than a `safeAreaInset`, and the reason
+        // is a geometry trap worth remembering. The map has to run to the
+        // bottom of the screen, so it ignores the safe area — but a
+        // `safeAreaInset` attached after that places its content against the
+        // *ignored* edge, i.e. the physical bottom, while the tab bar sits
+        // above the home indicator. Padding by the bar's height then lands the
+        // Start button a home indicator's worth too low, which is exactly
+        // where it was hiding.
+        //
+        // Here the stack keeps the safe area, so the controls start above the
+        // home indicator and the padding lifts them clear of the bar. Only the
+        // map ignores it.
+        ZStack(alignment: .bottom) {
+            Group {
+                if isActive {
+                    Map(position: $camera) {
+                        UserAnnotation()
+                    }
+                    .mapStyle(settings.mapStyle.mapStyle)
+                    .mapControls {
+                        MapUserLocationButton()
+                        MapCompass()
+                    }
+                } else {
+                    Color(.systemGroupedBackground)
                 }
-                .mapStyle(settings.mapStyle.mapStyle)
-                .mapControls {
-                    MapUserLocationButton()
-                    MapCompass()
-                }
-            } else {
-                Color(.systemGroupedBackground)
             }
-        }
-        .ignoresSafeArea(edges: .bottom)
-        // An inset rather than a bottom-aligned overlay: the map runs under the
-        // controls, but the controls themselves stay above whatever the app
-        // puts below them — which is how Start stopped hiding behind the tab
-        // bar.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .ignoresSafeArea()
+
             controls
                 .padding(.bottom, tabBarHeight)
         }

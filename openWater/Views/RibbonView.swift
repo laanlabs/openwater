@@ -22,6 +22,8 @@ struct RibbonView: View {
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
 
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     var body: some View {
         if ribbon.isEmpty {
             ContentUnavailableView(
@@ -61,6 +63,7 @@ struct RibbonView: View {
                 }
                 .padding(.horizontal)
             }
+            .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         }
     }
 

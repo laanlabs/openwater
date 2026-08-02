@@ -23,6 +23,7 @@ struct SessionDetailView: View {
 
     @Environment(SessionLibrary.self) private var library
     @Environment(AppSettings.self) private var settings
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
     @Environment(\.dismiss) private var dismiss
 
     @State private var session: Session?
@@ -313,6 +314,7 @@ struct SessionDetailView: View {
             }
             .padding()
         }
+        .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
     }
 
     /// A horizontal strip of runs, ordered by time and coloured by speed.

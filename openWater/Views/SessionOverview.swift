@@ -19,6 +19,7 @@ struct SessionOverview: View {
     var onReplay: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
     @State private var showingNotes = false
 
@@ -100,6 +101,7 @@ struct SessionOverview: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 28)
         }
+        .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showingNotes) {
             MeasurementNotesView(session: session, summary: summary)

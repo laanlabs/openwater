@@ -50,7 +50,19 @@ public struct ShareSnapshot: Sendable, Codable {
 
     /// Speed at the top of the colour ramp, so the page shades the track the
     /// same way the app does.
+    ///
+    /// Kept for links shared before `speedFloor` existed: the page falls back
+    /// to the old `0.35 × ceiling … ceiling` range when the floor is absent, so
+    /// an old snapshot still renders rather than coming out black.
     public var speedCeiling: Double
+
+    /// Speed at the bottom of the colour ramp.
+    ///
+    /// Optional because it was added after the format shipped, and shared
+    /// snapshots are written once and never rewritten — an old one on Firebase
+    /// will never have this key. See `SpeedScale` for why the ramp is anchored
+    /// to the session's own spread rather than to its peak.
+    public var speedFloor: Double?
 
     public struct Category: Sendable, Codable {
         public var name: String
@@ -74,7 +86,8 @@ public struct ShareSnapshot: Sendable, Codable {
         flightCount: Int?,
         runCount: Int,
         points: [[Double]],
-        speedCeiling: Double
+        speedCeiling: Double,
+        speedFloor: Double? = nil
     ) {
         self.version = version
         self.createdAt = createdAt
@@ -93,6 +106,7 @@ public struct ShareSnapshot: Sendable, Codable {
         self.runCount = runCount
         self.points = points
         self.speedCeiling = speedCeiling
+        self.speedFloor = speedFloor
     }
 
     // MARK: - Building
@@ -116,6 +130,15 @@ public struct ShareSnapshot: Sendable, Codable {
         let track = prepared.track
         let summary = prepared.summary
 
+        // Derived from the points the page will actually draw, not from the
+        // whole track: the downsample keeps the fastest sample per bucket, so a
+        // scale built from every fix would sit lower than what is on screen.
+        let points = downsample(track: track, to: maximumPoints)
+        let scale = SpeedScale(
+            speeds: points.map { $0.count > 2 ? $0[2] : 0 },
+            movingAbove: prepared.sport.thresholds.movingSpeed
+        )
+
         return ShareSnapshot(
             title: prepared.displayTitle,
             sport: prepared.sport.displayName,
@@ -132,8 +155,11 @@ public struct ShareSnapshot: Sendable, Codable {
             foilingFraction: prepared.sport.isFoiling ? summary?.foil.foilingFraction : nil,
             flightCount: prepared.sport.isFoiling ? summary?.foil.flightCount : nil,
             runCount: summary?.runs.count ?? 0,
-            points: downsample(track: track, to: maximumPoints),
-            speedCeiling: max(summary?.maxSpeed ?? 1, 1)
+            points: points,
+            // The same scale the app draws with, so a link looks like the
+            // session it came from rather than like a different recording.
+            speedCeiling: scale.upper,
+            speedFloor: scale.lower
         )
     }
 

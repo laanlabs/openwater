@@ -17,25 +17,44 @@ import SwiftUI
 /// and argued with. A number on its own can only be believed or not.
 struct MeasurementNotesView: View {
 
-    let session: Session
-    let summary: SessionSummary
+    /// Where the numbers come from.
+    ///
+    /// A detail screen already has the decoded session; the list has only the
+    /// denormalised row and must decode one. Both reach the same explanation,
+    /// because the question is asked from both places.
+    enum Source {
+        case loaded(Session, SessionSummary)
+        case stored(StoredSession)
+    }
+
+    let source: Source
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
+    @State private var resolved: (session: Session, summary: SessionSummary)?
+
+    init(session: Session, summary: SessionSummary) {
+        source = .loaded(session, summary)
+        _resolved = State(initialValue: (session, summary))
+    }
+
+    init(stored: StoredSession) {
+        source = .stored(stored)
+    }
+
     private var units: UnitPreferences { settings.units }
-    private var quality: TrackQuality { summary.quality }
 
     var body: some View {
         NavigationStack {
-            List {
-                intro
-                durationSection
-                averageSection
-                maxSpeedSection
-                distanceSection
-                fixesSection
-                comparisonSection
+            Group {
+                if let resolved {
+                    content(session: resolved.session, summary: resolved.summary)
+                } else {
+                    ProgressView("Reading the session…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemGroupedBackground))
+                }
             }
             .navigationTitle("How this was measured")
             .navigationBarTitleDisplayMode(.inline)
@@ -44,6 +63,32 @@ struct MeasurementNotesView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .task {
+                guard resolved == nil, case .stored(let stored) = source else { return }
+                // Decoding a season-long archive is not list-row work, so it
+                // happens here, once, off the main actor.
+                let data = stored.archiveData
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    try? SessionArchive.decode(data).session
+                }.value
+                if let loaded, let summary = loaded.summary {
+                    resolved = (loaded, summary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func content(session: Session, summary: SessionSummary) -> some View {
+        let quality = summary.quality
+        List {
+            intro
+            durationSection(session: session, summary: summary)
+            averageSection(summary: summary)
+            maxSpeedSection(summary: summary)
+            distanceSection(session: session, summary: summary, quality: quality)
+            fixesSection(session: session, summary: summary, quality: quality)
+            comparisonSection
         }
     }
 
@@ -56,7 +101,7 @@ struct MeasurementNotesView: View {
         }
     }
 
-    private var durationSection: some View {
+    private func durationSection(session: Session, summary: SessionSummary) -> some View {
         Section {
             row("Total time", Format.duration(summary.duration))
             row("Moving time", Format.duration(summary.movingTime))
@@ -72,7 +117,7 @@ struct MeasurementNotesView: View {
         }
     }
 
-    private var averageSection: some View {
+    private func averageSection(summary: SessionSummary) -> some View {
         Section {
             row("Average moving", Format.speed(summary.averageMovingSpeed, unit: units.speed, decimals: 1))
             row("Average overall", Format.speed(summary.averageSpeed, unit: units.speed, decimals: 1))
@@ -87,7 +132,7 @@ struct MeasurementNotesView: View {
         }
     }
 
-    private var maxSpeedSection: some View {
+    private func maxSpeedSection(summary: SessionSummary) -> some View {
         Section {
             row("Peak sample", Format.speed(summary.maxSpeed, unit: units.speed, decimals: 1))
             if let best2s = summary.result(for: .time(seconds: 2)), best2s.isValid {
@@ -100,11 +145,11 @@ struct MeasurementNotesView: View {
         } header: {
             Text("Top speed")
         } footer: {
-            Text(maxSpeedExplanation)
+            Text(maxSpeedExplanation(summary))
         }
     }
 
-    private var maxSpeedExplanation: String {
+    private func maxSpeedExplanation(_ summary: SessionSummary) -> String {
         var text = ""
         switch summary.speedSource {
         case .doppler:
@@ -116,7 +161,7 @@ struct MeasurementNotesView: View {
         return text
     }
 
-    private var distanceSection: some View {
+    private func distanceSection(session: Session, summary: SessionSummary, quality: TrackQuality) -> some View {
         Section {
             row("Distance", Format.distance(summary.distance, unit: units.distance))
             row("Fixes used", "\(session.track.count)")
@@ -135,7 +180,7 @@ struct MeasurementNotesView: View {
         }
     }
 
-    private var fixesSection: some View {
+    private func fixesSection(session: Session, summary: SessionSummary, quality: TrackQuality) -> some View {
         Section {
             row("GPS quality", "\(Int(quality.score)) · \(quality.grade.displayName)")
             row("Average accuracy", String(format: "±%.0f m", quality.meanAccuracy))
@@ -143,17 +188,17 @@ struct MeasurementNotesView: View {
                 row("Accuracy limit used", String(format: "±%.0f m", limit))
             }
             row("Fix rate", String(format: "%.2f per second", quality.fixRate))
-            ForEach(rejectionCounts, id: \.reason) { entry in
+            ForEach(rejectionCounts(session), id: \.reason) { entry in
                 row(entry.reason, "\(entry.count)")
             }
         } header: {
             Text("What was thrown away")
         } footer: {
-            Text(fixesExplanation)
+            Text(fixesExplanation(session, quality))
         }
     }
 
-    private var fixesExplanation: String {
+    private func fixesExplanation(_ session: Session, _ quality: TrackQuality) -> String {
         var text = "A fix is dropped if it has no usable position, if its accuracy is worse than the limit for this recording, if the speed is physically impossible for the sport, or if reaching it from the previous fix would need a speed nothing can do — the classic GPS teleport.\n\n"
         if let limit = quality.accuracyLimitUsed,
            limit > session.sport.thresholds.maxHorizontalAccuracy {
@@ -191,7 +236,7 @@ struct MeasurementNotesView: View {
 
     // MARK: - Parts
 
-    private var rejectionCounts: [(reason: String, count: Int)] {
+    private func rejectionCounts(_ session: Session) -> [(reason: String, count: Int)] {
         Dictionary(grouping: session.track.rejections, by: \.reason)
             .map { (reason: $0.key.displayName, count: $0.value.count) }
             .sorted { $0.count > $1.count }

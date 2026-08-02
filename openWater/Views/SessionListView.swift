@@ -429,6 +429,8 @@ struct LibraryStatsCard: View {
 
     @Environment(AppSettings.self) private var settings
 
+    @State private var showingNotes = false
+
     private var maxSpeed: Double { sessions.map(\.maxSpeed).max() ?? 0 }
     private var distance: Double { sessions.reduce(0) { $0 + $1.distance } }
     private var duration: TimeInterval { sessions.reduce(0) { $0 + $1.duration } }
@@ -457,6 +459,18 @@ struct LibraryStatsCard: View {
                 Text(period.rawValue)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                // Adding up a season is its own set of choices — see the sheet.
+                Button {
+                    showingNotes = true
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("How these statistics are worked out")
             }
             .padding(.horizontal, 14)
             .padding(.top, 14)
@@ -479,6 +493,9 @@ struct LibraryStatsCard: View {
                 )
             }
             .padding(.horizontal, 14)
+            .sheet(isPresented: $showingNotes) {
+                LibraryStatsNotesView(sessions: sessions, period: period)
+            }
 
             Divider().padding(.vertical, 12)
 

@@ -14,6 +14,8 @@ struct SessionCard: View {
 
     @Environment(AppSettings.self) private var settings
 
+    @State private var showingNotes = false
+
     private var samples: [PreviewSample] {
         PreviewSample.decode(session.previewTrack)
     }
@@ -100,6 +102,26 @@ struct SessionCard: View {
                         value: Format.distance(session.distance, unit: settings.units.distance,
                                                includeSymbol: false)
                     )
+
+                    // On the card, not only inside the session.
+                    //
+                    // "Avg moving" is a choice, and the row above pairs it with
+                    // a total duration — so the reader who divides distance by
+                    // time and finds it does not agree is looking at *this*
+                    // screen when the question occurs. The answer belongs here
+                    // rather than two taps away.
+                    Button {
+                        showingNotes = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 34, height: 34)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("How these numbers were measured")
+                    .frame(width: 34, alignment: .trailing)
                 }
 
                 if session.sport.isFoiling && session.flightCount > 0 {
@@ -124,6 +146,9 @@ struct SessionCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.07), radius: 5, y: 2)
         .task { await session.backfillPreviewTrack() }
+        .sheet(isPresented: $showingNotes) {
+            MeasurementNotesView(stored: session)
+        }
     }
 
     private var durationLabel: String {

@@ -301,6 +301,10 @@ struct SessionDetailView: View {
                     // wondering whether the app has them and they are lost, or
                     // whether it never had them. Say which, and offer the fix.
                     NoWindCard(session: session) { isEditing = true }
+                } else {
+                    // Same reasoning, different answer: this sport was never
+                    // going to have one.
+                    NoPolarCard(sport: session.sport)
                 }
                 // The foiling, turns, glide and quality cards live on the
                 // Summary tab. Repeating them here made Charts a second copy of

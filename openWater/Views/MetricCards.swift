@@ -447,10 +447,44 @@ struct PolarChart: View {
             .chartYAxisLabel(units.speed.symbol)
             .frame(height: 180)
 
-            Text("Solid: what you held (90th percentile). Dashed: your single best in each band.")
+            // What the chart is, not only how to read it. "Polar" is a sailing
+            // word, and a rider who has not met it sees two curves against an
+            // axis labelled in degrees and has no way in.
+            Text("""
+            How fast you went at each angle to the wind. 0° is straight upwind,             90° is across it, 180° is straight downwind — so the shape shows             where this board and this wing actually work.
+
+            Solid: what you held (90th percentile). Dashed: your single best in             each band. Angles you spent less than 100 m at are left out.
+            """)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Why there is no polar for a sport that has no wind angle.
+///
+/// The card used to be absent with nothing in its place, which reads as a bug:
+/// a rider who has seen a polar on one session and not on the next has no way
+/// to tell whether the app lost it, is still working, or never had it. Sports
+/// without a sail or a wing are the common case — this says so once and takes
+/// no more room than that.
+struct NoPolarCard: View {
+
+    let sport: Sport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("No polar for \(sport.displayName)", systemImage: "chart.dots.scatter")
+                .font(.subheadline.weight(.medium))
+            Text("A polar plots your speed against the angle you were riding to the wind, which only means something under a sail, a wing or a kite. On \(sport.displayName) your speed comes from the water rather than from a wind angle, so there is nothing to plot it against.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

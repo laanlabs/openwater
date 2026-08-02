@@ -25,6 +25,7 @@ struct SessionEditView: View {
     @State private var windSpeedText = ""
     @State private var isSaving = false
 
+
     init(stored: StoredSession) {
         self.stored = stored
         // Seeded from the stored row so the form is populated instantly; the
@@ -208,6 +209,11 @@ struct SessionEditView: View {
                 Text(settings.units.speed.symbol)
                     .foregroundStyle(.secondary)
             }
+            RecordedWindRow(
+                session: session,
+                directionText: $windDirectionText,
+                speedText: $windSpeedText
+            )
         } header: {
             Text("Wind")
         } footer: {

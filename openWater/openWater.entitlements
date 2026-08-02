@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  WeatherKit, used for two things: the conditions strip on the Record tab,
+	  and the observed wind offered for a saved session in place of the one
+	  guessed from the shape of the track.
+
+	  This file is only half of it. The capability also has to be enabled on the
+	  App ID at developer.apple.com → Certificates, Identifiers & Profiles →
+	  Identifiers → com.laan.labs.openWater → WeatherKit, and the provisioning
+	  profile regenerated. `scripts/testflight.sh` passes
+	  `-allowProvisioningUpdates`, so it picks the new profile up on the next
+	  archive; a local build needs Xcode to refresh it once.
+
+	  Without both halves WeatherKit returns an error on every call. That is
+	  handled — the strip hides itself and the session keeps its estimated wind —
+	  but nothing about the app depends on it, which is the point.
+	-->
+	<key>com.apple.developer.weatherkit</key>
+	<true/>
+</dict>
+</plist>

@@ -37,7 +37,87 @@ final class WeatherLookup {
     }
 
     private(set) var state: State = .idle
+
+    /// Apple's legal attribution page, which must be reachable from anywhere
+    /// WeatherKit data is displayed. Fetched alongside the first reading.
+    private(set) var attributionURL: URL?
+
     private var lastRequestedCoordinate: Geo.Coordinate?
+
+    /// The wind that was actually blowing while a session was recorded.
+    ///
+    /// Not the same job as `load(for:)`, which answers "should I go out?".
+    /// This answers "what was it doing an hour ago", and it is the difference
+    /// between a polar measured against a real wind direction and one measured
+    /// against a direction guessed from the shape of the track. WeatherKit
+    /// serves historical hourly data, so it works for sessions recorded before
+    /// the app ever asked — and for GPX files imported from another device,
+    /// where there was never any chance of capturing conditions live.
+    ///
+    /// The hours are averaged as vectors and weighted by how much of the
+    /// session each covers. Averaging bearings arithmetically is the classic
+    /// error: 350° and 10° average to 180°, the exact opposite of the truth,
+    /// and a rider would see every angle in the session inverted.
+    ///
+    /// It is a model, not an anemometer on the beach. In a gorge, a bay, or
+    /// anywhere the geography bends the wind, the local truth can be a long way
+    /// from a 2 km grid cell — which is why this is offered for the rider to
+    /// accept rather than applied to their session unasked.
+    static func recordedWind(
+        at coordinate: Geo.Coordinate,
+        from start: Date,
+        to end: Date
+    ) async throws -> OpenWaterCore.Wind {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        // Widened by an hour at each end: WeatherKit returns whole hours, and a
+        // twenty-minute session sitting inside one of them would otherwise
+        // match nothing at all.
+        let forecast = try await WeatherService.shared.weather(
+            for: location,
+            including: .hourly(startDate: start.addingTimeInterval(-3600),
+                               endDate: end.addingTimeInterval(3600))
+        )
+
+        var eastward = 0.0      // vector components of the direction
+        var northward = 0.0
+        var speedSum = 0.0
+        var weightSum = 0.0
+
+        for hour in forecast.forecast {
+            // How much of the session this hour actually covers.
+            let hourEnd = hour.date.addingTimeInterval(3600)
+            let overlap = min(end, hourEnd).timeIntervalSince(max(start, hour.date))
+            let weight = max(0, overlap)
+            guard weight > 0 else { continue }
+
+            let radians = hour.wind.direction.converted(to: .degrees).value * .pi / 180
+            eastward += sin(radians) * weight
+            northward += cos(radians) * weight
+            speedSum += hour.wind.speed.converted(to: .metersPerSecond).value * weight
+            weightSum += weight
+        }
+
+        guard weightSum > 0 else { throw WeatherError.noHistoricalData }
+
+        let direction = atan2(eastward / weightSum, northward / weightSum) * 180 / .pi
+        return OpenWaterCore.Wind(
+            directionFrom: Geo.normalizeDegrees(direction),
+            speed: speedSum / weightSum,
+            source: .external,
+            confidence: 1
+        )
+    }
+
+    enum WeatherError: LocalizedError {
+        case noHistoricalData
+
+        var errorDescription: String? {
+            switch self {
+            case .noHistoricalData:
+                "No recorded conditions for that time and place."
+            }
+        }
+    }
 
     /// Fetch conditions, at most once per meaningful move.
     ///
@@ -67,6 +147,9 @@ final class WeatherLookup {
                 condition: weather.condition.description,
                 retrievedAt: weather.date
             ))
+            if attributionURL == nil {
+                attributionURL = try? await WeatherService.shared.attribution.legalPageURL
+            }
         } catch {
             // Not fatal and not worth a dialog: the app's entire purpose works
             // without it. Say plainly that conditions are unavailable.
@@ -144,12 +227,19 @@ struct WeatherCard: View {
 
             Spacer(minLength: 0)
 
-            // Provider attribution and retrieval time, both required by
-            // WeatherKit's terms and both things a rider should see anyway —
-            // a wind reading with no timestamp is not much use.
+            // Attribution and retrieval time. Both required by WeatherKit's
+            // terms — the mark *and* a link to Apple's legal page, which is the
+            // half that was missing and is the kind of thing App Review
+            // rejects for — and both things a rider should see anyway: a wind
+            // reading with no timestamp is not much use.
             VStack(alignment: .trailing, spacing: 1) {
-                Text(" Weather")
-                    .font(.system(size: 9))
+                if let legal = lookup.attributionURL {
+                    Link(" Weather", destination: legal)
+                        .font(.system(size: 9))
+                } else {
+                    Text(" Weather")
+                        .font(.system(size: 9))
+                }
                 Text(conditions.retrievedAt.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 9))
             }

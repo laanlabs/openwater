@@ -114,6 +114,15 @@ struct SessionReviewView: View {
                             .frame(width: 70)
                         Text(settings.units.speed.symbol).foregroundStyle(.secondary)
                     }
+                    // Right where a rider is already being asked what the wind
+                    // was doing, and the one moment they might not remember —
+                    // they have just come off the water, not been watching a
+                    // wind meter.
+                    RecordedWindRow(
+                        session: session,
+                        directionText: $windDirectionText,
+                        speedText: $windSpeedText
+                    )
                 } header: {
                     Text("Conditions")
                 } footer: {

@@ -131,6 +131,49 @@ If any of these fail the script stops before spending an upload.
 
 ---
 
+## Turning on WeatherKit
+
+Two things use it: the conditions strip on the Record tab, and **Use recorded
+conditions** on a session, which fills in the wind that was actually blowing
+from Apple's historical hourly data. That second one matters more than it
+sounds — without it a session's wind direction is guessed from the shape of the
+track, and every angle, VMG figure and polar in the app is measured from that
+guess.
+
+The code side is done. The account side needs your Apple ID and has to be done
+once:
+
+1. Go to [Certificates, Identifiers & Profiles →
+   Identifiers](https://developer.apple.com/account/resources/identifiers/list),
+   open **com.laan.labs.openWater**, tick **WeatherKit**, and save.
+2. In Xcode, let it refresh the provisioning profile (Signing & Capabilities
+   will offer to). `scripts/testflight.sh` passes `-allowProvisioningUpdates`,
+   so an archive picks the new profile up on its own.
+
+`openWater/openWater.entitlements` already declares
+`com.apple.developer.weatherkit`, and the target points at it.
+
+**Until step 1 is done, every WeatherKit call fails.** That is handled rather
+than fatal: the conditions strip hides itself, "Use recorded conditions" says
+so plainly, and the session keeps its estimated wind. Nothing else in the app
+touches the network.
+
+Worth knowing:
+
+- **A paid Apple Developer account is required.** WeatherKit is not available
+  on a free one.
+- **500,000 calls a month are included**, then it is billed per call. Each
+  session asks once and the answer is stored with it, so a library of a
+  thousand sessions costs a thousand calls, not a thousand per launch.
+- **Attribution is mandatory.** The  Weather mark and a link to Apple's legal
+  page must appear wherever the data is shown. Both are in place; if you move
+  that data to a new screen, they have to go with it.
+- **It is a model on a roughly 2 km grid, not an anemometer on the beach.** In a
+  gorge or a bay it can be well off what the rider felt, which is why the app
+  offers the figure for them to accept rather than applying it silently.
+
+---
+
 ## Getting the watch app onto a real Apple Watch
 
 Xcode installs the watch app *through* the phone, and it is quietly strict about

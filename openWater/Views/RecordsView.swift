@@ -15,6 +15,8 @@ struct RecordsView: View {
     /// Pushed when a record is tapped.
     @State private var path: [UUID] = []
 
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     var body: some View {
         NavigationStack(path: $path) {
             Group {
@@ -80,6 +82,7 @@ struct RecordsView: View {
                             )
                         }
                     }
+                    .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
                 }
             }
             .navigationTitle("Bests")
@@ -167,6 +170,8 @@ struct TrendsView: View {
         Array(Set(sessions.map(\.sport))).sorted { $0.displayName < $1.displayName }
     }
 
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     var body: some View {
         NavigationStack {
             Group {
@@ -210,6 +215,7 @@ struct TrendsView: View {
                         }
                         .padding()
                     }
+                    .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
                 }
             }
             .navigationTitle("Trends")

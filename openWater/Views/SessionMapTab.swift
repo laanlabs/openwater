@@ -31,6 +31,10 @@ struct SessionMapTab: View {
 
     @Environment(AppSettings.self) private var settings
 
+    /// This screen fills its space and ends in a fixed transport row, so it
+    /// keeps itself clear of the floating bar rather than drawing under it.
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     /// The ramp the track is drawn with, so the legend cannot claim a
     /// different range from the colours beside it.
     private var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
@@ -107,6 +111,7 @@ struct SessionMapTab: View {
             map
             panel
         }
+        .padding(.bottom, tabBarHeight)
         // The trim bar's start handle lives in the edge-swipe zone, so reaching
         // for it popped the session instead of grabbing the handle.
         .interactivePopGesture(enabled: !isTrimming)

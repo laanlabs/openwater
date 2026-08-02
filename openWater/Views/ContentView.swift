@@ -37,19 +37,34 @@ struct ContentView: View {
                 page(.trends) { TrendsView() }
                 page(.settings) { SettingsView() }
             }
-            // Plain padding, not `safeAreaPadding`: the safe-area version does
-            // not reach a NavigationStack whose content simply fills its space,
-            // and the session map's transport row ended up under the bar again.
-            // Reserving a little less than the bar's full height leaves the
-            // capsule overlapping the page edge, which is what makes it read as
-            // floating rather than as a strip in a slot.
-            .padding(.bottom, barReservedHeight - 6)
+            // No inset here. Neither `padding` nor `safeAreaPadding` at this
+            // level does the right thing for every page: plain padding shortens
+            // them all so nothing is ever drawn under the bar — which leaves a
+            // band of background below it and makes the glass pointless, since
+            // there is nothing behind it to see — and the safe-area version
+            // does not reach a page rooted in a `NavigationStack` at all, which
+            // put the Record tab's Start button and the session map's transport
+            // row underneath it.
+            //
+            // So each page takes the room in the way that suits it, from
+            // `floatingTabBarHeight` below: the scrolling ones as a content
+            // margin, so they draw through the glass and can still be scrolled
+            // clear, and the two that end in a fixed control as plain padding.
 
             OpenWaterTabBar(
                 selection: $selection,
                 isRecording: recorder.state != .idle
             )
         }
+        // Published for the screens that cannot use the safe-area inset.
+        //
+        // A scrolling page just draws through the bar and stops its content
+        // short, which is what `safeAreaPadding` above arranges. A page that
+        // fills its space and puts a fixed control at the bottom — the session
+        // map's transport row is the one — gets no such help from it, and the
+        // control ends up under the glass with no way to scroll it out. Those
+        // screens read this and keep clear themselves.
+        .environment(\.floatingTabBarHeight, barReservedHeight - 6)
         // The bar stays at the bottom of the screen when a keyboard opens
         // instead of riding up on top of it. It had been sitting exactly where
         // the keyboard's own accessory bar goes, drawing over the "Done" button
@@ -127,13 +142,18 @@ struct OpenWaterTabBar: View {
         .frame(height: rise + barHeight)
         .background {
             let shape = BumpedBarShape(rise: rise, bumpRadius: buttonSize / 2 + 6, cornerRadius: barHeight / 2)
-            // Opaque rather than a material even though it floats: a
-            // translucent bar looks lovely over a list and turns to mush over
-            // the Record tab's map, and there are ten-point labels on it. The
-            // shadow is what sells the float.
+            // Glass, so the track or the list scrolling underneath is visible
+            // through it and the bar reads as floating above the page rather
+            // than as a strip walling off the bottom of it.
+            //
+            // `.regularMaterial` rather than `.ultraThin`: the labels on here
+            // are ten points, and over the Record tab's satellite map a thinner
+            // material leaves them fighting the imagery. The hairline is what
+            // keeps the edge legible where the content behind happens to match
+            // the material, and the shadow is what sells the float.
             shape
-                .fill(.background)
-                .overlay { shape.stroke(Color(.separator).opacity(0.5), lineWidth: 0.5) }
+                .fill(.regularMaterial)
+                .overlay { shape.stroke(Color(.separator).opacity(0.6), lineWidth: 0.5) }
                 .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
         }
         .padding(.horizontal, 12)
@@ -246,5 +266,23 @@ struct BumpedBarShape: Shape {
         ))
 
         return path
+    }
+}
+
+
+// MARK: - Bar height
+
+private struct FloatingTabBarHeightKey: EnvironmentKey {
+    /// Zero, so a screen presented outside the tab container — a sheet, a
+    /// full-screen cover — reads the honest answer rather than reserving room
+    /// for a bar that is not there.
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// Room the floating tab bar occupies at the bottom of the window.
+    var floatingTabBarHeight: CGFloat {
+        get { self[FloatingTabBarHeightKey.self] }
+        set { self[FloatingTabBarHeightKey.self] = newValue }
     }
 }

@@ -28,6 +28,11 @@ struct RecordTabView: View {
     @Environment(SessionLibrary.self) private var library
     @Environment(AppSettings.self) private var settings
 
+    /// The Start button and the live screen's controls are fixed at the bottom,
+    /// so this screen keeps clear of the floating bar rather than drawing under
+    /// it. The map behind them still runs the full height.
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
     @State private var sport: Sport = .wingfoil
     @State private var title = ""
     @State private var spot = ""
@@ -134,6 +139,7 @@ struct RecordTabView: View {
         // bar.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             controls
+                .padding(.bottom, tabBarHeight)
         }
     }
 

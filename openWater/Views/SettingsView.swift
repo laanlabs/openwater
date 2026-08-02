@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(SessionLibrary.self) private var library
     @Environment(PhoneSyncClient.self) private var sync
     @Environment(AppSettings.self) private var settings
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
     @State private var newDistance = ""
     @State private var distanceProblem: String?
@@ -86,6 +87,7 @@ struct SettingsView: View {
                     Text("Every feature is free, including the ones other apps charge for — the full speed categories, foiling analysis, gybe and tack analysis, session replay and the race countdown. There is no subscription, no trial and no account.\n\nDetected events — flights, gybes, falls, jumps — are labelled with a confidence and can be wrong. The raw samples are always kept so any number can be checked.")
                 }
             }
+            .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
             .navigationTitle("Settings")
             // A decimal pad has no return key, so without a way out the
             // keyboard stayed up through scrolling and even a tab switch,

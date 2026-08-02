@@ -51,6 +51,11 @@ struct SessionListView: View {
     @State private var pendingDeletion: [StoredSession] = []
     @State private var showingTrash = false
     @State private var showingBulkExport = false
+
+    /// Room to leave at the bottom for the floating tab bar. Applied as a
+    /// content margin so the list draws through the glass rather than stopping
+    /// above it.
+    @Environment(\.floatingTabBarHeight) private var tabBarHeight
     @State private var showingWatchStatus = false
 
     enum Period: String, CaseIterable, Identifiable {
@@ -232,6 +237,7 @@ struct SessionListView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 24)
         }
+        .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
     }
 

@@ -70,7 +70,7 @@ struct SessionOverview: View {
                     DownwindCard(downwind: summary.downwind, units: settings.units)
                 }
                 HealthCard(session: session, summary: summary)
-                QualityCard(quality: summary.quality, source: summary.speedSource)
+                QualityCard(quality: summary.quality, source: summary.speedSource, sport: session.sport)
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 28)

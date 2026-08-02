@@ -144,10 +144,13 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
-    /// Fixes worse than this are dropped outright by the post-session build.
+    /// The accuracy the post-session build would *like* every fix to meet.
     ///
-    /// Strict on purpose: a saved session's numbers are claims, and a 30-metre
-    /// fix cannot support one.
+    /// Strict on purpose — a saved session's numbers are claims — but it is a
+    /// preference, not a guillotine. `TrackBuilder` raises it when a recording's
+    /// own spread says these fixes are simply what this receiver managed today,
+    /// because a flat limit applied to a real session deleted nine tenths of
+    /// it. See `TrackBuilder.Options.accuracyOutlierSigmas`.
     public var maxHorizontalAccuracy: Double  // metres
 
     /// Fixes worse than this are ignored by the *live* screens.

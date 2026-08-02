@@ -221,6 +221,17 @@ public struct TrackQuality: Hashable, Sendable, Codable {
     /// Points thrown away as a fraction of points offered, 0–1.
     public let rejectionRate: Double
 
+    /// The horizontal-accuracy limit this track was actually held to, metres.
+    ///
+    /// Usually the sport's strict limit. It is higher when honouring that limit
+    /// would have thrown away most of the recording — and that is precisely the
+    /// case a rider needs to be told about, because it is the difference
+    /// between "your receiver struggled" and "we deleted nine tenths of your
+    /// session and drew what was left". Optional so archives written before it
+    /// existed still decode: a synthesized decoder does not fill in defaults
+    /// for missing keys.
+    public let accuracyLimitUsed: Double?
+
     public init(
         score: Double,
         meanAccuracy: Double,
@@ -229,7 +240,8 @@ public struct TrackQuality: Hashable, Sendable, Codable {
         dropoutCount: Int,
         dropoutDuration: TimeInterval,
         dopplerCoverage: Double,
-        rejectionRate: Double
+        rejectionRate: Double,
+        accuracyLimitUsed: Double? = nil
     ) {
         self.score = score
         self.meanAccuracy = meanAccuracy
@@ -239,6 +251,7 @@ public struct TrackQuality: Hashable, Sendable, Codable {
         self.dropoutDuration = dropoutDuration
         self.dopplerCoverage = dopplerCoverage
         self.rejectionRate = rejectionRate
+        self.accuracyLimitUsed = accuracyLimitUsed
     }
 
     public static let unknown = TrackQuality(

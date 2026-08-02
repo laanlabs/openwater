@@ -575,6 +575,11 @@ struct QualityCard: View {
 
     let quality: TrackQuality
     let source: SpeedSource
+    /// Needed only to know what limit this session was *meant* to be held to,
+    /// so a relaxed one can be reported rather than passed off as normal.
+    let sport: Sport
+
+    private var strictLimit: Double { sport.thresholds.maxHorizontalAccuracy }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -604,6 +609,16 @@ struct QualityCard: View {
                             .foregroundStyle(.orange)
                     }
                 }
+            }
+
+            // Said out loud, because the alternative is what went wrong before:
+            // a session quietly kept only its best fixes, drew the holes as
+            // dropouts, and gave the rider no way to tell that the filter, not
+            // the receiver, was what lost their afternoon.
+            if let limit = quality.accuracyLimitUsed, limit > strictLimit {
+                Text("Your device reported soft fixes for most of this session, so points up to ±\(Int(limit)) m were kept rather than dropping the recording. The track and distance are right; treat the peak speeds as indicative.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if source == .derived {

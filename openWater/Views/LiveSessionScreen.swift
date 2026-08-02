@@ -51,6 +51,21 @@ struct LiveSessionScreen: View {
                     .padding(.top, 6)
             }
 
+            // A build without the location background mode records perfectly
+            // until the screen locks and then stops, and the rider finds out
+            // afterwards. That has shipped once. It is a packaging mistake with
+            // no runtime symptom, so the only defence is saying it out loud
+            // while there is still time to keep the screen on.
+            if !recorder.location.supportsBackgroundRecording {
+                Label("This build stops recording when the screen locks",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+            }
+
             if showMap {
                 // Capped rather than greedy: past about a third of the screen
                 // the map stops telling you anything new and starts squeezing

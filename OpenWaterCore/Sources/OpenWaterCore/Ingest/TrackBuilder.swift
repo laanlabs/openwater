@@ -15,8 +15,45 @@ import Foundation
 public struct TrackBuilder: Sendable {
 
     public struct Options: Sendable {
-        /// Fixes worse than this in metres are dropped.
+        /// Fixes worse than this in metres are dropped — *preferred*, not
+        /// absolute. See `accuracyOutlierSigmas`, which can relax it.
         public var maxHorizontalAccuracy: Double
+
+        /// How far past the recording's own spread a fix has to sit before the
+        /// accuracy gate calls it an outlier, in robust standard deviations.
+        ///
+        /// This exists because of a real session: forty-eight minutes of
+        /// parawinging came back as 189 points in 22 short bursts, separated by
+        /// gaps of up to three minutes, four of the bursts being a single fix.
+        /// The receiver had been running at 1 Hz throughout. What removed the
+        /// rest was this filter — a flat 12-metre limit meeting a phone that
+        /// spent the session with a body between it and the sky, where 15–40
+        /// metres is simply what a receiver reports. Nine tenths of the session
+        /// was deleted in silence, and because legs longer than
+        /// `maxBridgedGap` contribute no distance, most of the distance went
+        /// with it.
+        ///
+        /// The mistake was treating an accuracy limit as an absolute standard
+        /// when its job is an outlier test: throw out the fixes that are bad
+        /// *for this recording*. So the limit becomes the looser of the strict
+        /// value and `median + sigmas × MAD` of the accuracies actually
+        /// reported, capped by `accuracyCeiling`. Never tighter than the strict
+        /// value — a clean recording is judged exactly as before, because its
+        /// median and spread are both small.
+        ///
+        /// The median and MAD rather than mean and standard deviation
+        /// specifically because the thing being detected — a minority of very
+        /// bad fixes — is the thing that would corrupt a mean-based estimate
+        /// into accepting itself.
+        public var accuracyOutlierSigmas: Double
+
+        /// The furthest the gate will ever be relaxed, in metres.
+        ///
+        /// Past this a fix is not merely soft, it is wrong: at foiling speeds a
+        /// 1 Hz sample covers ~25 m, so a 60-metre fix cannot say which way the
+        /// rider was going. Keeping the session honest stops here — beyond it
+        /// the holes are the truthful answer.
+        public var accuracyCeiling: Double
         /// Speeds above this in m/s are treated as receiver spikes.
         public var maxPlausibleSpeed: Double
         /// Reject a fix if reaching it from the previous one would require more
@@ -45,6 +82,8 @@ public struct TrackBuilder: Sendable {
 
         public init(
             maxHorizontalAccuracy: Double = 12,
+            accuracyOutlierSigmas: Double = 3,
+            accuracyCeiling: Double = 60,
             maxPlausibleSpeed: Double = 35,
             maxImpliedSpeed: Double = 45,
             dropoutGap: TimeInterval = 5,
@@ -53,6 +92,8 @@ public struct TrackBuilder: Sendable {
             maxSpeedAccuracyForRecords: Double = 2.0
         ) {
             self.maxHorizontalAccuracy = maxHorizontalAccuracy
+            self.accuracyOutlierSigmas = accuracyOutlierSigmas
+            self.accuracyCeiling = accuracyCeiling
             self.maxPlausibleSpeed = maxPlausibleSpeed
             self.maxBridgedGap = maxBridgedGap
             self.maxImpliedSpeed = maxImpliedSpeed
@@ -105,6 +146,7 @@ public struct TrackBuilder: Sendable {
         sorted = deduped
 
         // 2 & 3. Structural validity and accuracy.
+        let accuracyLimit = resolvedAccuracyLimit(for: sorted)
         var accepted: [TrackPoint] = []
         accepted.reserveCapacity(sorted.count)
         for p in sorted {
@@ -114,7 +156,7 @@ public struct TrackBuilder: Sendable {
             }
             // A receiver that reports no accuracy at all (imported GPX) is given
             // the benefit of the doubt rather than having its whole track binned.
-            if p.horizontalAccuracy > options.maxHorizontalAccuracy {
+            if p.horizontalAccuracy > accuracyLimit {
                 rejections.append(.init(
                     timestamp: p.timestamp,
                     reason: .poorAccuracy,
@@ -174,7 +216,8 @@ public struct TrackBuilder: Sendable {
             elapsed: elapsed,
             offered: offered,
             rejected: rejections.count,
-            source: source
+            source: source,
+            accuracyLimit: accuracyLimit
         )
 
         return Track(
@@ -317,6 +360,42 @@ public struct TrackBuilder: Sendable {
         return course
     }
 
+    // MARK: - Accuracy gate
+
+    /// The accuracy limit this particular recording will be held to.
+    ///
+    /// The preferred limit, or `median + sigmas × MAD` of the accuracies this
+    /// recording actually reported if that is looser, capped at
+    /// `accuracyCeiling`. Never tighter than the preferred limit: a clean
+    /// recording is judged exactly as strictly as it was before.
+    ///
+    /// A short recording is left alone entirely. Ten fixes cannot establish
+    /// what a receiver's normal spread is, and a session that merely starts
+    /// badly should not talk the gate open for the rest of itself.
+    func resolvedAccuracyLimit(for points: [TrackPoint]) -> Double {
+        let strict = options.maxHorizontalAccuracy
+        guard options.accuracyOutlierSigmas > 0,
+              options.accuracyCeiling > strict else { return strict }
+
+        // Only fixes that reported an accuracy have a say. A negative value is
+        // the receiver saying the position itself is invalid, and those are
+        // rejected on their own account a few lines below.
+        let reported = points
+            .filter { $0.hasValidPosition }
+            .map(\.horizontalAccuracy)
+            .sorted()
+        guard reported.count >= 10 else { return strict }
+
+        let median = reported[reported.count / 2]
+        // Median absolute deviation, scaled to be comparable to a standard
+        // deviation for normally distributed data.
+        let deviations = reported.map { abs($0 - median) }.sorted()
+        let mad = deviations[deviations.count / 2] * 1.4826
+
+        return min(max(strict, median + options.accuracyOutlierSigmas * mad),
+                   options.accuracyCeiling)
+    }
+
     // MARK: - Quality
 
     private func scoreQuality(
@@ -324,7 +403,8 @@ public struct TrackBuilder: Sendable {
         elapsed: [TimeInterval],
         offered: Int,
         rejected: Int,
-        source: SpeedSource
+        source: SpeedSource,
+        accuracyLimit: Double
     ) -> TrackQuality {
         let n = points.count
         var accuracySum = 0.0
@@ -388,7 +468,8 @@ public struct TrackBuilder: Sendable {
             dropoutCount: dropoutCount,
             dropoutDuration: dropoutDuration,
             dopplerCoverage: dopplerCoverage,
-            rejectionRate: rejectionRate
+            rejectionRate: rejectionRate,
+            accuracyLimitUsed: accuracyLimit
         )
     }
 }

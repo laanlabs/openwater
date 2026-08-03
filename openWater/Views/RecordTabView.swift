@@ -51,6 +51,11 @@ struct RecordTabView: View {
     /// The session just saved, awaiting its debrief.
     @State private var reviewing: StoredSession?
 
+    /// Owned here, not by `WeatherCard`, because the card draws nothing until a
+    /// reading arrives and SwiftUI will not run a `task` attached to a view that
+    /// resolves to `EmptyView`. See the note on `WeatherCard`.
+    @State private var weather = WeatherLookup()
+
     var body: some View {
         NavigationStack(path: $path) {
             Group {
@@ -139,12 +144,15 @@ struct RecordTabView: View {
             controls
                 .padding(.bottom, tabBarHeight)
         }
+        .task(id: WeatherCard.coordinateKey(recorder.location.lastCoordinate)) {
+            await weather.load(for: recorder.location.lastCoordinate)
+        }
     }
 
     private var controls: some View {
         VStack(spacing: 10) {
             WatchPill()
-            WeatherCard(coordinate: recorder.location.lastCoordinate, units: settings.units)
+            WeatherCard(lookup: weather, units: settings.units)
 
             HStack(spacing: 10) {
                 Menu {

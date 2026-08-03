@@ -1,5 +1,6 @@
 import CoreLocation
 import OpenWaterCore
+import os
 import SwiftUI
 import WeatherKit
 
@@ -35,6 +36,14 @@ final class WeatherLookup {
         var condition: String
         var retrievedAt: Date
     }
+
+    /// Failures here are deliberately invisible on screen — see `WeatherCard`.
+    /// That is right for a rider and wrong for anyone trying to work out why
+    /// there is no wind reading, since the entitlement, the App ID capability
+    /// and the network can each fail with nothing to show for it. The reason
+    /// goes to the log, where `log stream --predicate 'subsystem ==
+    /// "com.laan.labs.openWater"'` will find it.
+    private static let log = Logger(subsystem: "com.laan.labs.openWater", category: "weather")
 
     private(set) var state: State = .idle
 
@@ -124,6 +133,9 @@ final class WeatherLookup {
     /// Re-requesting on every GPS fix would hammer the service for no benefit —
     /// the weather does not change over fifty metres.
     func load(for coordinate: Geo.Coordinate?) async {
+        // Whether there was a position, never where it was — this app does not
+        // put a rider's location in the system log.
+        Self.log.debug("conditions lookup: position \(coordinate == nil ? "not yet" : "available", privacy: .public)")
         guard let coordinate else { return }
         if let last = lastRequestedCoordinate,
            Geo.distance(last, coordinate) < 2000,
@@ -153,18 +165,26 @@ final class WeatherLookup {
         } catch {
             // Not fatal and not worth a dialog: the app's entire purpose works
             // without it. Say plainly that conditions are unavailable.
+            Self.log.error("Conditions lookup failed: \(error.localizedDescription, privacy: .public) — \(String(describing: error), privacy: .public)")
             state = .unavailable(error.localizedDescription)
         }
     }
 }
 
 /// Compact conditions readout for the record screen.
+///
+/// The lookup is owned by the caller rather than by this view, and that is not
+/// a style choice. Until a reading arrives this view renders `EmptyView`, and
+/// SwiftUI does not run `task`/`onAppear` on a view that resolves to
+/// `EmptyView` — it has no representation in the tree to attach them to. With
+/// the lookup and its `task` in here, the strip could never appear: idle drew
+/// nothing, drawing nothing meant the task never ran, and the task never
+/// running meant it stayed idle. Whatever kicks this off has to live on a view
+/// that is always there.
 struct WeatherCard: View {
 
-    let coordinate: Geo.Coordinate?
+    let lookup: WeatherLookup
     let units: UnitPreferences
-
-    @State private var lookup = WeatherLookup()
 
     var body: some View {
         Group {
@@ -188,14 +208,13 @@ struct WeatherCard: View {
                 EmptyView()
             }
         }
-        .task(id: coordinateKey) {
-            await lookup.load(for: coordinate)
-        }
     }
 
     /// Re-runs the lookup when the position changes meaningfully, not on every
-    /// fix — `task(id:)` compares this, so it is rounded.
-    private var coordinateKey: String {
+    /// fix. The caller attaches this to `task(id:)`, which compares it, so it
+    /// is rounded — about a kilometre, well inside the 2 km grid the data comes
+    /// on.
+    static func coordinateKey(_ coordinate: Geo.Coordinate?) -> String {
         guard let coordinate else { return "none" }
         return String(format: "%.2f,%.2f", coordinate.latitude, coordinate.longitude)
     }

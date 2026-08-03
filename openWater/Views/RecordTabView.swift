@@ -24,6 +24,10 @@ struct RecordTabView: View {
     /// The map is built only while the tab is actually visible.
     var isActive: Bool = true
 
+    /// Bumped by the tab bar every time Record is tapped. Any change clears
+    /// the pushed session so the rider lands on the screen that starts one.
+    var reset: Int = 0
+
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(SessionLibrary.self) private var library
     @Environment(AppSettings.self) private var settings
@@ -37,7 +41,6 @@ struct RecordTabView: View {
     @State private var title = ""
     @State private var spot = ""
     @State private var showingDetails = false
-    @State private var showingEndConfirmation = false
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var showingCountdown = false
 
@@ -55,7 +58,7 @@ struct RecordTabView: View {
                 case .idle:
                     idle
                 case .recording, .paused, .finishing:
-                    LiveSessionScreen(showingEndConfirmation: $showingEndConfirmation)
+                    LiveSessionScreen(onEnd: end)
                 }
             }
             .navigationTitle(recorder.state == .idle ? "Record" : sport.displayName)
@@ -79,6 +82,12 @@ struct RecordTabView: View {
             }
             // The tab stays in the hierarchy when the rider looks at something
             // else, so `onDisappear` never fires — and the receiver stayed on.
+            .onChange(of: reset) { _, _ in
+                // Only the stack is cleared. A recording in progress is left
+                // exactly alone — tapping Record mid-session should show the
+                // live screen, which is what popping to the root does anyway.
+                path = []
+            }
             .onChange(of: isActive) { _, active in
                 if active {
                     recorder.warmUpSensors()
@@ -91,26 +100,6 @@ struct RecordTabView: View {
             }
             .sheet(item: $reviewing) { stored in
                 SessionReviewView(stored: stored)
-            }
-            // Ending a session saves it. There is no discard here.
-            //
-            // There used to be, one row below End & Save, behind its own second
-            // confirmation — and it was still the wrong shape. A rider walking
-            // up the beach with cold hands, salt on the screen and a phone in
-            // one hand does not read a dialog; they hit the button where the
-            // button was. Making the destructive option harder to confirm does
-            // not fix that, because they were never confirming deliberately.
-            //
-            // So the irreversible choice is simply not offered at the moment of
-            // highest haste. A session nobody wanted is deleted afterwards,
-            // from the list, where it goes to Recently Deleted and can come
-            // back. The worst case is now a stray row instead of a lost
-            // afternoon.
-            .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
-                Button("End & Save") { end() }
-                Button("Keep Recording", role: .cancel) {}
-            } message: {
-                Text("\(Format.duration(recorder.metrics.duration)) · \(Format.distance(recorder.metrics.distance, unit: settings.units.distance)) will be saved to your sessions.")
             }
         }
     }

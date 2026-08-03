@@ -29,18 +29,25 @@ public struct SessionAnalyzer: Sendable {
         /// their session.
         public var foilTakeoffSpeed: Double?
 
+        /// The rider's adjustments to this sport's defaults. Applied first;
+        /// `foilTakeoffSpeed` above still wins, because it is set on the one
+        /// session rather than on every session of the sport.
+        public var overrides: SportThresholds.Overrides?
+
         public init(
             sport: Sport,
             categories: [SpeedCategory] = SpeedCategory.standard,
             wind: Wind? = nil,
             quickMode: Bool = false,
-            foilTakeoffSpeed: Double? = nil
+            foilTakeoffSpeed: Double? = nil,
+            overrides: SportThresholds.Overrides? = nil
         ) {
             self.sport = sport
             self.categories = categories
             self.wind = wind
             self.quickMode = quickMode
             self.foilTakeoffSpeed = foilTakeoffSpeed
+            self.overrides = overrides
         }
     }
 
@@ -58,7 +65,7 @@ public struct SessionAnalyzer: Sendable {
 
     public func analyse(_ track: Track) -> SessionSummary {
         let sport = configuration.sport
-        var thresholds = sport.thresholds
+        var thresholds = configuration.overrides?.applied(to: sport.thresholds) ?? sport.thresholds
         if let override = configuration.foilTakeoffSpeed, override > 0, sport.isFoiling {
             thresholds.foilTakeoffSpeed = override
         }
@@ -74,7 +81,9 @@ public struct SessionAnalyzer: Sendable {
         let speedResults = speedAnalyzer.evaluate(configuration.categories, on: track)
 
         // --- Runs
-        var runs = RunSegmenter.forSport(sport).segment(track)
+        var segmenter = RunSegmenter.forSport(sport)
+        segmenter.minimumSpeed = max(1.0, thresholds.movingSpeed)
+        var runs = segmenter.segment(track)
 
         // --- Flights. Non-foiling sports return an empty list rather than a
         // pile of false positives.
@@ -91,7 +100,9 @@ public struct SessionAnalyzer: Sendable {
             ?? (sport.isWindPowered ? WindEstimator().estimate(from: track) : nil)
 
         // --- Maneuvers, classified against the wind and the flights.
-        let maneuvers = ManeuverDetector.forSport(sport)
+        var maneuverDetector = ManeuverDetector.forSport(sport)
+        maneuverDetector.thresholds = thresholds
+        let maneuvers = maneuverDetector
             .detect(in: track, wind: wind, flights: flights)
         let maneuverSummary = ManeuverSummary(maneuvers: maneuvers)
 

@@ -87,6 +87,13 @@ final class AppSettings {
     /// the averages people care about.
     var autoPauseWhileRecording: Bool { didSet { persist() } }
 
+    /// Per-sport adjustments to the detection defaults.
+    ///
+    /// Keyed by sport, and only sports the rider has actually changed appear —
+    /// so a default that improves later still reaches everyone who never
+    /// touched it.
+    var sportOverrides: [Sport: SportThresholds.Overrides] { didSet { persist() } }
+
     private let defaults = UserDefaults.standard
 
     init() {
@@ -101,6 +108,19 @@ final class AppSettings {
         mapStyle = defaults.string(forKey: "mapStyle").flatMap(MapStyleOption.init(rawValue:)) ?? .standard
         lastSport = defaults.string(forKey: "lastSport").flatMap(Sport.init(rawValue:)) ?? .wingfoil
         autoPauseWhileRecording = defaults.bool(forKey: "autoPauseWhileRecording")
+        sportOverrides = defaults.data(forKey: "sportOverrides")
+            .flatMap { try? JSONDecoder().decode([Sport: SportThresholds.Overrides].self, from: $0) }
+            ?? [:]
+    }
+
+    /// What this sport's detection actually uses, defaults plus any changes.
+    func thresholds(for sport: Sport) -> SportThresholds {
+        sportOverrides[sport]?.applied(to: sport.thresholds) ?? sport.thresholds
+    }
+
+    func overrides(for sport: Sport) -> SportThresholds.Overrides? {
+        guard let o = sportOverrides[sport], !o.isEmpty else { return nil }
+        return o
     }
 
     /// Every category to evaluate: the standards plus whatever the rider added.
@@ -121,6 +141,9 @@ final class AppSettings {
         defaults.set(autoPauseWhileRecording, forKey: "autoPauseWhileRecording")
         if let data = try? JSONEncoder().encode(sharingPrivacy) {
             defaults.set(data, forKey: "sharingPrivacy")
+        }
+        if let data = try? JSONEncoder().encode(sportOverrides) {
+            defaults.set(data, forKey: "sportOverrides")
         }
     }
 }

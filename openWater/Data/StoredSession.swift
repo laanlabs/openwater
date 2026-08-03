@@ -201,9 +201,13 @@ final class StoredSession {
     }
 
     /// The full session, re-analysed if it was produced by an older engine.
-    func currentSession() -> Session? {
+    ///
+    /// - Parameter overrides: the rider's settings for this session's sport, so
+    ///   a recompute picks up a threshold they changed rather than quietly
+    ///   reproducing the numbers they were trying to correct.
+    func currentSession(overrides: SportThresholds.Overrides? = nil) -> Session? {
         guard !archiveData.isEmpty else { return nil }
-        return try? SessionArchive.decode(archiveData).upToDateSession()
+        return try? SessionArchive.decode(archiveData).upToDateSession(overrides: overrides)
     }
 
     /// Whether the cached numbers came from the engine that is running now.

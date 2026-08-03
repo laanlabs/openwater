@@ -163,11 +163,14 @@ final class SessionLibrary {
     ///
     /// Explicit rather than automatic: a rider's numbers should not change under
     /// them without being told, so the app offers this and reports what moved.
-    func recomputeStaleSessions() async -> Int {
+    func recomputeStaleSessions(
+        overrides: [Sport: SportThresholds.Overrides] = [:]
+    ) async -> Int {
         let stale = staleSessions()
         var updated = 0
         for stored in stale {
-            guard let session = stored.currentSession() else { continue }
+            let sportOverrides = overrides[stored.sport].flatMap { $0.isEmpty ? nil : $0 }
+            guard let session = stored.currentSession(overrides: sportOverrides) else { continue }
             stored.update(with: session)
             updated += 1
         }

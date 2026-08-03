@@ -204,6 +204,52 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         }
     }
 
+    /// A rider's own adjustments to a sport's defaults.
+    ///
+    /// The defaults are averages, and the things they average over — board,
+    /// wing, foil, rider weight — vary more between two people on the same
+    /// discipline than between two disciplines. A 90 kg rider on a small front
+    /// wing does not take off where the wingfoil default says, so their "time
+    /// on foil" is a number about openWater's assumptions rather than about
+    /// their session.
+    ///
+    /// Every field is optional and nil means "use the default", so a rider who
+    /// changes one thing is not silently opted out of improvements to the rest.
+    public struct Overrides: Hashable, Sendable, Codable {
+
+        /// Speed at or above which this rider is flying, m/s.
+        public var foilTakeoffSpeed: Double?
+
+        /// Speed at or above which they count as moving, m/s. Everything
+        /// below it is "stopped", which sets moving time and the averages.
+        public var movingSpeed: Double?
+
+        /// Degrees of heading change that counts as a turn.
+        public var maneuverHeadingChange: Double?
+
+        public init(
+            foilTakeoffSpeed: Double? = nil,
+            movingSpeed: Double? = nil,
+            maneuverHeadingChange: Double? = nil
+        ) {
+            self.foilTakeoffSpeed = foilTakeoffSpeed
+            self.movingSpeed = movingSpeed
+            self.maneuverHeadingChange = maneuverHeadingChange
+        }
+
+        public var isEmpty: Bool {
+            foilTakeoffSpeed == nil && movingSpeed == nil && maneuverHeadingChange == nil
+        }
+
+        public func applied(to base: SportThresholds) -> SportThresholds {
+            var t = base
+            if let v = foilTakeoffSpeed, v > 0 { t.foilTakeoffSpeed = v }
+            if let v = movingSpeed, v > 0 { t.movingSpeed = v }
+            if let v = maneuverHeadingChange, v > 0 { t.maneuverHeadingChange = v }
+            return t
+        }
+    }
+
     public static func forSport(_ sport: Sport) -> SportThresholds {
         var t = SportThresholds(
             movingSpeed: 1.0,

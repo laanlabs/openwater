@@ -213,15 +213,17 @@ struct SessionReviewView: View {
             .map { settings.units.speed.toMetresPerSecond($0) }
 
         guard session.requiresReanalysis(for: edited) else {
-            library.save(session.applying(edited, categories: settings.categories))
+            library.save(session.applying(edited, categories: settings.categories,
+                                          overrides: settings.overrides(for: edited.sport)))
             dismiss()
             return
         }
 
         isSaving = true
         let categories = settings.categories
+        let overrides = settings.overrides(for: edited.sport)
         let result = await Task.detached {
-            session.applying(edited, categories: categories)
+            session.applying(edited, categories: categories, overrides: overrides)
         }.value
         library.save(result)
         isSaving = false

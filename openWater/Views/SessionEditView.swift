@@ -270,7 +270,8 @@ struct SessionEditView: View {
         let edited = currentEdits
 
         guard session.requiresReanalysis(for: edited) else {
-            library.save(session.applying(edited, categories: settings.categories))
+            library.save(session.applying(edited, categories: settings.categories,
+                                          overrides: settings.overrides(for: edited.sport)))
             dismiss()
             return
         }
@@ -279,8 +280,9 @@ struct SessionEditView: View {
         // Re-analysis on a long track is real work; keep it off the main actor
         // so the sheet stays responsive rather than freezing mid-save.
         let categories = settings.categories
+        let overrides = settings.overrides(for: edited.sport)
         let result = await Task.detached {
-            session.applying(edited, categories: categories)
+            session.applying(edited, categories: categories, overrides: overrides)
         }.value
         library.save(result)
         isSaving = false

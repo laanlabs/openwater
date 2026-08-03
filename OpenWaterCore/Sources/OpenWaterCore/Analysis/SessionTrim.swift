@@ -172,7 +172,8 @@ extension Session {
     /// recording restores the original numbers exactly.
     public func trimmed(
         to trim: SessionTrim,
-        categories: [SpeedCategory] = SpeedCategory.all
+        categories: [SpeedCategory] = SpeedCategory.all,
+        overrides: SportThresholds.Overrides? = nil
     ) -> Session {
         var result = self
         let original = rawPoints
@@ -187,7 +188,10 @@ extension Session {
 
         let track = TrackBuilder(options: .forSport(sport)).build(from: points)
         let summary = SessionAnalyzer(
-            configuration: .init(sport: sport, categories: categories, wind: effectiveWind)
+            configuration: .init(
+                sport: sport, categories: categories, wind: effectiveWind,
+                foilTakeoffSpeed: foilTakeoffSpeed, overrides: overrides
+            )
         ).analyse(track)
 
         result.track = track

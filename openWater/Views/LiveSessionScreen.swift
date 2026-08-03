@@ -10,7 +10,10 @@ import SwiftUI
 /// cold, wet hands through a sheet of plastic.
 struct LiveSessionScreen: View {
 
-    @Binding var showingEndConfirmation: Bool
+    /// Called when the rider ends the session. There is no confirmation: the
+    /// question "are you sure?" had one answer, and ending is not destructive
+    /// now that the session always saves — the debrief opens on top of it.
+    var onEnd: () -> Void
 
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(AppSettings.self) private var settings
@@ -204,9 +207,7 @@ struct LiveSessionScreen: View {
                 .tint(.orange)
             }
 
-            Button {
-                showingEndConfirmation = true
-            } label: {
+            Button(action: onEnd) {
                 Label("End", systemImage: "stop.fill")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)

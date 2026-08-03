@@ -93,7 +93,11 @@ extension Session {
 
     /// Apply edits, recomputing the analysis only when something changed that
     /// the numbers actually depend on.
-    public func applying(_ edits: Edits, categories: [SpeedCategory] = SpeedCategory.all) -> Session {
+    public func applying(
+        _ edits: Edits,
+        categories: [SpeedCategory] = SpeedCategory.all,
+        overrides: SportThresholds.Overrides? = nil
+    ) -> Session {
         var result = self
         result.title = edits.title?.trimmedOrNil
         result.spotName = edits.spotName?.trimmedOrNil
@@ -119,7 +123,8 @@ extension Session {
                 sport: edits.sport,
                 categories: categories,
                 wind: wind,
-                foilTakeoffSpeed: edits.foilTakeoffSpeed
+                foilTakeoffSpeed: edits.foilTakeoffSpeed,
+                overrides: overrides
             )
         ).analyse(track)
 

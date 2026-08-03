@@ -211,9 +211,10 @@ struct SessionDetailView: View {
         asNewActivity: Bool = false
     ) {
         let categories = settings.categories
+        let overrides = settings.overrides(for: session.sport)
         Task {
             let edited = await Task.detached {
-                session.trimmed(to: trim, categories: categories)
+                session.trimmed(to: trim, categories: categories, overrides: overrides)
             }.value
 
             if asNewActivity {

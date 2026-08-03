@@ -35,6 +35,16 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        SportSettingsView()
+                    } label: {
+                        Label("Sports", systemImage: "figure.surfing")
+                    }
+                } footer: {
+                    Text("What counts as flying, as moving, and as a turn — per sport, because a foil that lifts at eight knots for one rider lifts at eleven for another.")
+                }
+
                 customWindowsSection
 
                 Section {
@@ -65,7 +75,7 @@ struct SettingsView: View {
                     if !library.staleSessions().isEmpty {
                         Button("Recompute \(library.staleSessions().count) session(s)") {
                             Task {
-                                let count = await library.recomputeStaleSessions()
+                                let count = await library.recomputeStaleSessions(overrides: settings.sportOverrides)
                                 recomputeMessage = "Recomputed \(count) session\(count == 1 ? "" : "s")."
                             }
                         }

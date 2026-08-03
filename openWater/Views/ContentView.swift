@@ -15,6 +15,15 @@ struct ContentView: View {
     /// built, so a first launch does not pay for five screens.
     @State private var visited: Set<ScreenshotRoute.Tab> = [.sessions]
 
+    /// Bumped whenever Record is tapped, including when it is already showing.
+    ///
+    /// Record means "I want to record", not "show me that tab as I left it".
+    /// Saving a session pushes its detail onto the Record tab, so a rider who
+    /// finishes a session and then wants another one is looking at the summary
+    /// of the last — and tapping Record, the obvious thing, did nothing at all
+    /// because the tab was already selected.
+    @State private var recordTabReset = 0
+
     /// Room kept clear for the bar. The capsule is 62 points tall including its
     /// rise, and it sits 6 above the home indicator.
     private let barReservedHeight: CGFloat = 68
@@ -33,7 +42,9 @@ struct ContentView: View {
             ZStack {
                 page(.sessions) { SessionListView() }
                 page(.records) { RecordsView() }
-                page(.record) { RecordTabView(isActive: selection == .record) }
+                page(.record) {
+                    RecordTabView(isActive: selection == .record, reset: recordTabReset)
+                }
                 page(.trends) { TrendsView() }
                 page(.settings) { SettingsView() }
             }
@@ -53,7 +64,11 @@ struct ContentView: View {
 
             OpenWaterTabBar(
                 selection: $selection,
-                isRecording: recorder.state != .idle
+                isRecording: recorder.state != .idle,
+                onSelect: { tab in
+                    visited.insert(tab)
+                    if tab == .record { recordTabReset += 1 }
+                }
             )
         }
         // Published for the screens that cannot use the safe-area inset.
@@ -119,6 +134,10 @@ struct OpenWaterTabBar: View {
 
     @Binding var selection: ScreenshotRoute.Tab
     var isRecording: Bool
+
+    /// Reported for every tap, including one on the tab already showing —
+    /// which is the case the Record tab needs in order to reset itself.
+    var onSelect: (ScreenshotRoute.Tab) -> Void = { _ in }
 
     /// How far the middle of the bar rises. Deliberately small — the point is
     /// emphasis, not a floating action button.
@@ -225,6 +244,7 @@ struct OpenWaterTabBar: View {
     }
 
     private func select(_ tab: ScreenshotRoute.Tab) {
+        onSelect(tab)
         guard selection != tab else { return }
         UISelectionFeedbackGenerator().selectionChanged()
         withAnimation(.snappy(duration: 0.18)) { selection = tab }

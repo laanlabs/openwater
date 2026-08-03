@@ -74,14 +74,16 @@ public struct SessionArchive: Sendable, Codable {
     /// The session, with its cached analysis recomputed if it came from an older
     /// engine. Reading a file should never surface numbers whose provenance the
     /// running code cannot vouch for.
-    public func upToDateSession() -> Session {
+    public func upToDateSession(overrides: SportThresholds.Overrides? = nil) -> Session {
         var session = self.session
         if session.summary?.isCurrent != true {
             session.summary = SessionAnalyzer(
                 configuration: .init(
                     sport: session.sport,
                     categories: SpeedCategory.all,
-                    wind: session.wind
+                    wind: session.wind,
+                    foilTakeoffSpeed: session.foilTakeoffSpeed,
+                    overrides: overrides
                 )
             ).analyse(session.track)
         }

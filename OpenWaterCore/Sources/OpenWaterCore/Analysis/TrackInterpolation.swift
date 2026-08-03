@@ -138,6 +138,23 @@ extension Track {
         return worst
     }
 
+    /// The fastest speed the *receiver itself* reported inside a time interval.
+    ///
+    /// Raw Doppler, not the resolved channel: the resolved one falls back to
+    /// speed worked out from positions, and the whole point of asking is to
+    /// have something independent of the positions to check them against.
+    ///
+    /// Nil when no fix in the range carried a trustworthy speed, which is the
+    /// signal to caller that there is nothing to check against.
+    public func peakReportedSpeed(fromElapsed t0: TimeInterval, toElapsed t1: TimeInterval) -> Double? {
+        var peak: Double?
+        for i in 0..<count where elapsed[i] >= t0 && elapsed[i] <= t1 {
+            guard points[i].hasValidSpeed, let s = points[i].speed else { continue }
+            peak = max(peak ?? 0, s)
+        }
+        return peak
+    }
+
     /// Longest gap between consecutive fixes inside a time interval.
     public func largestGap(fromElapsed t0: TimeInterval, toElapsed t1: TimeInterval) -> TimeInterval {
         var largest: TimeInterval = 0

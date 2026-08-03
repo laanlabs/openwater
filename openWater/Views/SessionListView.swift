@@ -43,6 +43,12 @@ struct SessionListView: View {
     /// Navigation path, so a screenshot route can push a session without a tap.
     @State private var path: [UUID] = []
 
+    /// Bumped every time the Sessions tab is tapped, including when it is
+    /// already showing. Tapping the tab you are on is how anyone gets back to
+    /// the top of it, and a rider three sessions deep should not have to find
+    /// the back button.
+    var reset: Int = 0
+
     /// Sessions swiped for deletion, held until confirmed.
     ///
     /// A session is an hour on the water that cannot be recreated, and a swipe
@@ -136,6 +142,9 @@ struct SessionListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: sessions.count, initial: true) { _, _ in
                 applyScreenshotRouteIfNeeded()
+            }
+            .onChange(of: reset) { _, _ in
+                path = []
             }
             .toolbar { toolbar }
             .fileImporter(

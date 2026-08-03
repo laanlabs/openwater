@@ -23,6 +23,7 @@ struct ContentView: View {
     /// of the last — and tapping Record, the obvious thing, did nothing at all
     /// because the tab was already selected.
     @State private var recordTabReset = 0
+    @State private var sessionsTabReset = 0
 
     /// Room kept clear for the bar. The capsule is 62 points tall including its
     /// rise, and it sits 6 above the home indicator.
@@ -40,7 +41,7 @@ struct ContentView: View {
         // stuck to a wall.
         ZStack(alignment: .bottom) {
             ZStack {
-                page(.sessions) { SessionListView() }
+                page(.sessions) { SessionListView(reset: sessionsTabReset) }
                 page(.records) { RecordsView() }
                 page(.record) {
                     RecordTabView(isActive: selection == .record, reset: recordTabReset)
@@ -68,6 +69,7 @@ struct ContentView: View {
                 onSelect: { tab in
                     visited.insert(tab)
                     if tab == .record { recordTabReset += 1 }
+                    if tab == .sessions { sessionsTabReset += 1 }
                 }
             )
         }

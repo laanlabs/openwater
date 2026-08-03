@@ -69,6 +69,20 @@ struct RecordTabView: View {
             .navigationTitle(recorder.state == .idle ? "Record" : sport.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(recorder.state == .idle ? .automatic : .hidden, for: .navigationBar)
+            .toolbar {
+                if recorder.state == .idle, isActive {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.snappy) {
+                                camera = .userLocation(fallback: .automatic)
+                            }
+                        } label: {
+                            Image(systemName: "location.fill")
+                        }
+                        .accessibilityLabel("Centre on my location")
+                    }
+                }
+            }
             .navigationDestination(for: UUID.self) { id in
                 if let stored = library.session(id: id), !stored.isDeleted {
                     SessionDetailView(stored: stored)
@@ -131,10 +145,12 @@ struct RecordTabView: View {
                         UserAnnotation()
                     }
                     .mapStyle(settings.mapStyle.mapStyle)
-                    .mapControls {
-                        MapUserLocationButton()
-                        MapCompass()
-                    }
+                    // MapKit lays its own controls out inside the map's safe
+                    // area, and this map has none — it runs to the physical
+                    // edges by design, so the buttons went with it and sat up
+                    // under the status bar. Ours lives in the toolbar, which
+                    // cannot land outside the safe area whatever the map does.
+                    .mapControlVisibility(.hidden)
                 } else {
                     Color(.systemGroupedBackground)
                 }
@@ -151,7 +167,6 @@ struct RecordTabView: View {
 
     private var controls: some View {
         VStack(spacing: 10) {
-            WatchPill()
             WeatherCard(lookup: weather, units: settings.units)
 
             HStack(spacing: 10) {

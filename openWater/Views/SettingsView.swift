@@ -66,8 +66,22 @@ struct SettingsView: View {
                     Text("The start and end of a track are usually your car or your home, and they are the part of a shared file that identifies where you launch. Trimming them is on by default for anything you share, and your own copy is never changed.\n\nThis is not an exclusion zone: if you sail back over your launch point during a session, those passes stay in the track.")
                 }
 
-                Section("Apple Watch") {
-                    WatchStatusView()
+                Section {
+                    NavigationLink {
+                        ScrollView { WatchStatusView().padding() }
+                            .navigationTitle("Apple Watch")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        Label("Apple Watch", systemImage: "applewatch")
+                    }
+                }
+
+                Section {
+                    WeatherStatusView()
+                } header: {
+                    Text("Weather")
+                } footer: {
+                    Text("Apple's weather service supplies the conditions on the Record tab and the observed wind offered for a saved session. Without it a session's wind is estimated from the shape of the track, and every angle and polar figure is measured from that estimate.\n\nIt is a model on a roughly 2 km grid, not an anemometer on the beach.")
                 }
 
                 Section {

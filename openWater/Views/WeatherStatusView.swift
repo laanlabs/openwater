@@ -28,6 +28,7 @@ struct WeatherStatusView: View {
         Group {
             switch check {
             case .idle:
+                // Shown only in the instant before the automatic check starts.
                 Button("Check weather service") { Task { await runCheck() } }
 
             case .checking:
@@ -57,6 +58,14 @@ struct WeatherStatusView: View {
                         .font(.caption)
                 }
             }
+        }
+        // Runs itself rather than waiting to be asked. Somebody opening
+        // Settings after finding no wind reading has already asked the
+        // question; making them find a button to ask it again is one step too
+        // many, and the call is a few hundred bytes against a monthly
+        // allowance of half a million.
+        .task {
+            if check == .idle { await runCheck() }
         }
     }
 

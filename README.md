@@ -158,6 +158,40 @@ than fatal: the conditions strip hides itself, "Use recorded conditions" says
 so plainly, and the session keeps its estimated wind. Nothing else in the app
 touches the network.
 
+### When it fails
+
+**Settings → Weather** runs a check on its own and prints the error verbatim.
+Use it before changing anything — the failures look identical from the Record
+tab, which shows nothing at all in every one of them.
+
+`WeatherDaemon.WDSJWTAuthenticatorServiceListener.Errors Code=2` is the service
+refusing the app's token. It is *not* a missing entitlement, and as of
+2026-08-03 it is what both the simulator and a real iPhone 17 Pro return here
+while everything checkable on our side is correct:
+
+- the App ID carries the capability — a profile cannot contain an entitlement
+  the App ID does not have, and both `com.laan.labs.openWater` profiles do:
+
+  ```
+  security cms -D -i "$APP/embedded.mobileprovision" | grep weatherkit
+  ```
+
+- the device build is signed with it (`codesign -d --entitlements - "$APP"`)
+- the simulator build has it too, in `openWater.app-Simulated.xcent` rather
+  than `openWater.app.xcent` — the latter is empty for every simulator build
+  and is not a symptom of anything
+
+That leaves Apple's side. Enabling the capability registers the App ID with the
+weather service and the registration is not instant; Apple says up to thirty
+minutes, and longer is common. If it persists for more than a day, confirm in
+the portal that WeatherKit is actually ticked for the App ID — Xcode can enable
+it silently during an `-allowProvisioningUpdates` build, and a build that
+succeeded is not evidence the portal agrees.
+
+Note that a build succeeding proves nothing about WeatherKit. The entitlement
+is compile-time and the token exchange happens at the first call, on device, at
+runtime.
+
 Worth knowing:
 
 - **A paid Apple Developer account is required.** WeatherKit is not available

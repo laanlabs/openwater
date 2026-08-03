@@ -201,12 +201,29 @@ struct SessionListView: View {
 
     // MARK: - List
 
+    /// A real `List`, purely so the swipe is the system's.
+    ///
+    /// The cards were a `LazyVStack` in a `ScrollView`, which looks identical
+    /// and cost nothing until it needed a swipe. There is no way to ask a
+    /// `ScrollView` for swipe actions, so the first attempt hand-built the
+    /// gesture — a drag recognised alongside the scroll view's own and claimed
+    /// when it was more horizontal than vertical. It worked in the simulator,
+    /// where a trackpad drags in a straight line, and failed on a real thumb,
+    /// which does not.
+    ///
+    /// `List` gives it away for free, and correctly: the reveal, the rubber
+    /// banding, the full-swipe, the way it interacts with scrolling, and the
+    /// accessibility actions that come with none of the hand-built version.
+    /// The rows are then stripped back to look exactly like the stack did —
+    /// no separators, no row background, no inset.
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 16) {
+        List {
+            Section {
                 LibraryStatsCard(sessions: filtered, period: period)
+                    .modifier(PlainRow())
 
                 filterRow
+                    .modifier(PlainRow())
 
                 if filtered.isEmpty {
                     ContentUnavailableView(
@@ -215,20 +232,28 @@ struct SessionListView: View {
                         description: Text("No sessions match the filters above.")
                     )
                     .padding(.top, 30)
+                    .modifier(PlainRow())
                 }
 
                 ForEach(filtered) { session in
-                    // Touching a card does one thing: open it. There is no
-                    // destructive gesture here on purpose — deleting lives on
-                    // the session's own page, behind a confirmation, where a
-                    // rider is looking at the session they mean rather than at
-                    // a list they are scrolling.
-                    NavigationLink(value: session.id) {
+                    // A button rather than a `NavigationLink`, because a link
+                    // inside a `List` draws a disclosure chevron next to the
+                    // card and there is no supported way to turn it off. The
+                    // swipe does not care which one it is.
+                    Button {
+                        path.append(session.id)
+                    } label: {
                         SessionCard(session: session)
                     }
                     .buttonStyle(.plain)
-                    // Long-press still offers it, because that one cannot
-                    // happen by accident while scrolling.
+                    .modifier(PlainRow())
+                    .swipeActions(edge: .trailing) {
+                        Button("Delete", systemImage: "trash", role: .destructive) {
+                            pendingDeletion = [session]
+                        }
+                    }
+                    // Long-press offers the same thing, for anyone who never
+                    // discovers the swipe.
                     .contextMenu {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             pendingDeletion = [session]
@@ -236,11 +261,23 @@ struct SessionListView: View {
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 24)
+            .listRowSeparator(.hidden)
         }
+        .listStyle(.plain)
+        .listRowSpacing(16)
+        .scrollContentBackground(.hidden)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// A `List` row that looks like it was never in a list.
+    private struct PlainRow: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
     }
 
     private var filterRow: some View {

@@ -209,8 +209,14 @@ struct SessionOverview: View {
                                         decimals: 1, includeSymbol: false),
                     unit: settings.units.speed.symbol
                 )
+                // "Avg speed" unqualified reads as distance ÷ duration, and
+                // this is not that — it is distance ÷ *moving* time, which on a
+                // session with long drifts is twice the number. Another app
+                // showing 3.2 next to our 7.5 under the same word looks like
+                // one of us is broken; naming it settles which question each
+                // is answering.
                 DetailStat(
-                    title: "Avg speed",
+                    title: "Avg moving",
                     colour: .orange,
                     value: Format.speed(summary.averageMovingSpeed, unit: settings.units.speed,
                                         decimals: 1, includeSymbol: false),
@@ -233,8 +239,13 @@ struct SessionOverview: View {
                 )
             }
             HStack(alignment: .top, spacing: 0) {
+                // Not "Pause". Nobody paused anything — this is time spent
+                // below the sport's moving threshold, which on a light day is
+                // most of a session. An app that only counts explicit pauses
+                // shows zero here, and a rider comparing the two would take
+                // ours for a bug rather than for a different measurement.
                 DetailStat(
-                    title: "Pause",
+                    title: "Stopped",
                     colour: .secondary,
                     value: Format.duration(pause),
                     unit: pause >= 3600 ? "h:m:s" : "m:s"

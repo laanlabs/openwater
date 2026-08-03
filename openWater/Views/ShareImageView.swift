@@ -182,7 +182,7 @@ struct ShareImageView: View {
 
                     HStack(alignment: .top, spacing: 0) {
                         cardStat("Max Speed", Format.speed(summary.maxSpeed, unit: settings.units.speed, decimals: 2, includeSymbol: false), settings.units.speed.symbol, scale)
-                        cardStat("Avg speed", Format.speed(summary.averageMovingSpeed, unit: settings.units.speed, decimals: 2, includeSymbol: false), settings.units.speed.symbol, scale)
+                        cardStat("Avg moving", Format.speed(summary.averageMovingSpeed, unit: settings.units.speed, decimals: 2, includeSymbol: false), settings.units.speed.symbol, scale)
                         cardStat("Distance", Format.distance(summary.distance, unit: settings.units.distance, includeSymbol: false), settings.units.distance.symbol, scale)
                     }
                     .padding(.top, 22 * scale)

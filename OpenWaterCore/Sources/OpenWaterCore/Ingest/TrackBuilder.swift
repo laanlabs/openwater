@@ -64,15 +64,23 @@ public struct TrackBuilder: Sendable {
         /// Time gaps longer than this are treated as dropouts rather than as
         /// real travel, so the implied-speed check is skipped across them.
         public var dropoutGap: TimeInterval
-        /// A leg longer than this contributes no distance.
+        /// A leg spanning longer than this contributes no distance.
         ///
-        /// Across a real hole in the recording — a receiver dropout, or a
-        /// stretch the rider cut out of the middle — the straight line between
-        /// the two surviving fixes is not a path anybody took. Counting it adds
-        /// distance that was never sailed and hands the speed windows a leg at
-        /// a speed nobody did, which is worse than admitting the gap. Thirty
-        /// seconds is far beyond any normal 1 Hz interruption, so ordinary
-        /// tracks are unaffected.
+        /// This was thirty seconds, on the reasoning that a straight line
+        /// across a real hole is not a path anybody took. A session recorded
+        /// side by side in two apps showed what that costs: the receiver
+        /// reported no fixes for thirty to three hundred seconds at a time
+        /// while the rider drifted, thirty-nine times in a hundred minutes, and
+        /// throwing those legs away lost twelve percent of the distance. The
+        /// rider had not gone anywhere unrecorded — the implied speed across
+        /// those gaps was about a knot — so the straight line was very nearly
+        /// the truth, and discarding it was the larger error.
+        ///
+        /// Ten minutes now, because that is the scale of a genuine hole rather
+        /// than of a quiet receiver. The real guard is `maxImpliedSpeed` below,
+        /// which is applied to every bridged leg: a rider who drove home with
+        /// the app running is caught by needing sixty knots to get there, not
+        /// by the clock.
         public var maxBridgedGap: TimeInterval
         /// Run the Kalman filter over the speed channel.
         public var smoothSpeed: Bool
@@ -87,7 +95,7 @@ public struct TrackBuilder: Sendable {
             maxPlausibleSpeed: Double = 35,
             maxImpliedSpeed: Double = 45,
             dropoutGap: TimeInterval = 5,
-            maxBridgedGap: TimeInterval = 30,
+            maxBridgedGap: TimeInterval = 600,
             smoothSpeed: Bool = true,
             maxSpeedAccuracyForRecords: Double = 2.0
         ) {
@@ -198,10 +206,16 @@ public struct TrackBuilder: Sendable {
         for i in 1..<accepted.count {
             elapsed[i] = accepted[i].timestamp.timeIntervalSince(t0)
             let gap = accepted[i].timestamp.timeIntervalSince(accepted[i - 1].timestamp)
-            let step = gap <= options.maxBridgedGap
-                ? Geo.distance(accepted[i - 1].coordinate, accepted[i].coordinate)
-                : 0
-            cumulative[i] = cumulative[i - 1] + step
+            let straight = Geo.distance(accepted[i - 1].coordinate, accepted[i].coordinate)
+            // Bridged unless the gap is longer than any plausible hole, or
+            // getting across it would have needed a speed nothing can do. A
+            // quiet receiver over a drifting rider is the common case and its
+            // straight line is nearly exact; a drive home is the case worth
+            // refusing, and it is refused for needing sixty knots rather than
+            // for taking a while.
+            let implied = gap > 0 ? straight / gap : 0
+            let bridgeable = gap <= options.maxBridgedGap && implied <= options.maxImpliedSpeed
+            cumulative[i] = cumulative[i - 1] + (bridgeable ? straight : 0)
         }
 
         // 6 & 7. Speed channel.

@@ -209,24 +209,17 @@ struct SessionListView: View {
                 }
 
                 ForEach(filtered) { session in
-                    // A button rather than a `NavigationLink`, so the swipe can
-                    // win. A link fires on touch-up whatever the finger did in
-                    // between, which meant a swipe opened the session instead
-                    // of revealing Delete; a button's action is cancelled once
-                    // the drag moves past its own threshold.
-                    Button {
-                        path.append(session.id)
-                    } label: {
+                    // Touching a card does one thing: open it. There is no
+                    // destructive gesture here on purpose — deleting lives on
+                    // the session's own page, behind a confirmation, where a
+                    // rider is looking at the session they mean rather than at
+                    // a list they are scrolling.
+                    NavigationLink(value: session.id) {
                         SessionCard(session: session)
                     }
                     .buttonStyle(.plain)
-                    // Swipe as well as long-press. The cards are not rows in a
-                    // `List`, so the gesture has to be built: a drag that is
-                    // clearly horizontal reveals Delete, and anything more
-                    // vertical is left to the scroll view.
-                    .swipeToDelete {
-                        pendingDeletion = [session]
-                    }
+                    // Long-press still offers it, because that one cannot
+                    // happen by accident while scrolling.
                     .contextMenu {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             pendingDeletion = [session]

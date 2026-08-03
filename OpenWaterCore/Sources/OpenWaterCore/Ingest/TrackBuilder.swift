@@ -352,8 +352,22 @@ public struct TrackBuilder: Sendable {
         var course = [Double](repeating: 0, count: n)
         var lastKnown: Double = 0
 
+        // A course channel that never moves is a placeholder, not a course.
+        // Waterspeed's GPX export writes `<gpxtpx:course>0.00</gpxtpx:course>`
+        // on every point of every file, and taking it at face value pointed
+        // an entire session due north: every wind angle became 180°, the
+        // polar collapsed into a single bin and drew as nothing, and the
+        // replay heading sat on 0°. No real recording holds one bearing for
+        // hours — and if one somehow did, deriving from positions returns the
+        // same constant anyway, so ignoring the channel is safe even then.
+        let distinct = Set(points.compactMap { p -> Double? in
+            guard let c = p.course, c >= 0, c.isFinite else { return nil }
+            return (c * 100).rounded()
+        })
+        let channelIsPlaceholder = n > 30 && distinct.count <= 1
+
         for i in 0..<n {
-            if let c = points[i].course, c >= 0, c.isFinite {
+            if !channelIsPlaceholder, let c = points[i].course, c >= 0, c.isFinite {
                 course[i] = Geo.normalizeDegrees(c)
                 lastKnown = course[i]
             } else {

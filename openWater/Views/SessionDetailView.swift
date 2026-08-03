@@ -38,7 +38,10 @@ struct SessionDetailView: View {
     @State private var isPlayingBack = false
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
+    @State private var isConfirmingRemoveMax = false
     @State private var savedAsNewActivity = false
+    /// One-line receipt after a repair — what changed, in the rider's units.
+    @State private var repairMessage: String?
 
     /// Decode the stored archive into a usable session.
     ///
@@ -130,6 +133,22 @@ struct SessionDetailView: View {
                             applyTrim(.none, to: session)
                         }
                     }
+                    Divider()
+                    Button("Duplicate", systemImage: "plus.square.on.square") {
+                        duplicate(removingSpikes: false)
+                    }
+                    .disabled(session == nil)
+                    // The scrub is a heuristic, so it only ever runs on a copy
+                    // — the original recording is never the thing repaired.
+                    Button("Duplicate & Remove Spikes", systemImage: "waveform.path.badge.minus") {
+                        duplicate(removingSpikes: true)
+                    }
+                    .disabled(session == nil)
+                    Button("Remove Max Speed…", systemImage: "gauge.with.needle") {
+                        isConfirmingRemoveMax = true
+                    }
+                    .disabled(session == nil)
+                    Divider()
                     Button("Share Image…", systemImage: "photo") { isSharingImage = true }
                         .disabled(session == nil)
                     Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }
@@ -155,6 +174,20 @@ struct SessionDetailView: View {
             Button("OK") {}
         } message: {
             Text("\(newActivityTitle) is in your sessions. This one is unchanged.")
+        }
+        .confirmationDialog(
+            "Remove the current max speed?",
+            isPresented: $isConfirmingRemoveMax,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Max", role: .destructive) { removeMaxSpeed() }
+        } message: {
+            Text("Cuts the few seconds around the highest reading, and everything is recalculated without them. Nothing is deleted — Restore Full Recording brings it back.")
+        }
+        .alert("Done", isPresented: .constant(repairMessage != nil)) {
+            Button("OK") { repairMessage = nil }
+        } message: {
+            Text(repairMessage ?? "")
         }
         .confirmationDialog(
             "Delete this session?",
@@ -234,6 +267,55 @@ struct SessionDetailView: View {
     /// "Wingfoil" do not appear with no way to tell them apart.
     private var newActivityTitle: String {
         "\(stored.displayTitle) (edited)"
+    }
+
+    /// Insert a copy into the library — exact, or with the spike scrub run
+    /// over it. The session on screen is never the one changed.
+    @MainActor
+    private func duplicate(removingSpikes: Bool) {
+        guard let session else { return }
+        let categories = settings.categories
+        let overrides = settings.overrides(for: session.sport)
+        let baseTitle = stored.displayTitle
+        Task {
+            if removingSpikes {
+                let (copy, removed) = await Task.detached {
+                    session.duplicatedRemovingSpikes(
+                        titled: "\(baseTitle) (de-spiked)",
+                        categories: categories,
+                        overrides: overrides
+                    )
+                }.value
+                library.save(copy)
+                repairMessage = removed == 0
+                    ? "No spikes found — the copy is identical."
+                    : "Removed \(removed) bad fix\(removed == 1 ? "" : "es"). The copy is in your sessions list."
+            } else {
+                library.save(session.duplicated(titled: "\(baseTitle) (copy)"))
+                repairMessage = "The copy is in your sessions list."
+            }
+        }
+    }
+
+    /// Cut the stretch responsible for the current max, reversibly.
+    @MainActor
+    private func removeMaxSpeed() {
+        guard let session else { return }
+        let categories = settings.categories
+        let overrides = settings.overrides(for: session.sport)
+        let unit = settings.units.speed
+        Task {
+            let outcome = await Task.detached {
+                session.removingMaxSpeed(categories: categories, overrides: overrides)
+            }.value
+            guard let outcome else {
+                repairMessage = "Nothing to remove."
+                return
+            }
+            library.save(outcome.session)
+            await loadSession()
+            repairMessage = "Max speed \(Format.speed(outcome.previousMax, unit: unit)) → \(Format.speed(outcome.newMax, unit: unit))."
+        }
     }
 
     // MARK: - Content

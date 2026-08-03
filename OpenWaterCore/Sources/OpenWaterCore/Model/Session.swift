@@ -184,7 +184,10 @@ public struct Session: Sendable, Codable, Identifiable {
 public struct SessionSummary: Hashable, Sendable, Codable {
 
     /// Bumped whenever any analyzer's behaviour changes.
-    public static let currentVersion = 1
+    /// 2: constant course channels (Waterspeed's all-zero placeholder) are
+    /// ignored and courses derived from positions, which un-flattens the
+    /// polar and every wind angle on affected imports.
+    public static let currentVersion = 2
 
     public let analysisVersion: Int
 

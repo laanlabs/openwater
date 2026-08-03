@@ -197,18 +197,19 @@ struct SpeedChart: View {
     /// Swift Charts will not draw that smoothly — but taking every nth point
     /// would clip the peaks, which are the whole story. So each bucket keeps its
     /// *maximum*, preserving every spike while cutting the point count.
-    private var samples: [(elapsed: TimeInterval, speed: Double, state: RideState)] {
+    private var samples: [(elapsed: TimeInterval, speed: Double, state: RideState, course: Double)] {
         let target = 600
         let stride = max(1, session.track.count / target)
         guard stride > 1 else {
             return session.track.elapsed.indices.map {
                 (session.track.elapsed[$0],
                  session.track.speed[$0],
-                 summary.states[safe: $0] ?? .riding)
+                 summary.states[safe: $0] ?? .riding,
+                 session.track.course[$0])
             }
         }
 
-        var result: [(TimeInterval, Double, RideState)] = []
+        var result: [(TimeInterval, Double, RideState, Double)] = []
         var i = 0
         while i < session.track.count {
             let end = min(i + stride, session.track.count)
@@ -221,7 +222,8 @@ struct SpeedChart: View {
             result.append((
                 session.track.elapsed[peakIndex],
                 peak,
-                summary.states[safe: peakIndex] ?? .riding
+                summary.states[safe: peakIndex] ?? .riding,
+                session.track.course[peakIndex]
             ))
             i = end
         }
@@ -250,10 +252,36 @@ struct SpeedChart: View {
         ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
             LineMark(
                 x: .value("Minutes", sample.elapsed / 60),
-                y: .value("Speed", units.speed.convert(fromMetresPerSecond: sample.speed))
+                y: .value("Speed", units.speed.convert(fromMetresPerSecond: sample.speed)),
+                series: .value("Series", "Speed")
             )
             .interpolationMethod(.monotone)
             .foregroundStyle(.tint)
+        }
+    }
+
+    /// Velocity made good, as a second trace under the speed.
+    ///
+    /// The gap between the two lines is the point: it is the price of the
+    /// angle being sailed. Speed alone flatters a beam reach; VMG is what the
+    /// session was worth against the wind, and drawing them together shows
+    /// exactly where a fast line was a slow course. Magnitude rather than
+    /// signed, because a chart that dives below zero every time the rider
+    /// turns downwind reads as falling when they are working.
+    @ChartContentBuilder
+    private var vmgTrace: some ChartContent {
+        if let wind = session.effectiveWind {
+            ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
+                LineMark(
+                    x: .value("Minutes", sample.elapsed / 60),
+                    y: .value("Speed", units.speed.convert(
+                        fromMetresPerSecond: wind.vmgMagnitude(speed: sample.speed, heading: sample.course))),
+                    series: .value("Series", "VMG")
+                )
+                .interpolationMethod(.monotone)
+                .foregroundStyle(.gray.opacity(0.55))
+                .lineStyle(StrokeStyle(lineWidth: 1.2))
+            }
         }
     }
 
@@ -332,6 +360,7 @@ struct SpeedChart: View {
                 .foregroundStyle(.secondary)
 
             Chart {
+                vmgTrace
                 trace
                 laneMarks
                 fallMarks
@@ -367,6 +396,9 @@ struct SpeedChart: View {
             }
             if !summary.fallSummary.falls.isEmpty {
                 LaneKey(colour: .red, label: "Falls", isDot: true)
+            }
+            if session.effectiveWind != nil {
+                LaneKey(colour: .gray.opacity(0.55), label: "VMG")
             }
             Spacer(minLength: 0)
         }

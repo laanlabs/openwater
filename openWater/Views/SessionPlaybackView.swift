@@ -44,7 +44,19 @@ struct SessionPlaybackView: View {
 
             VStack(spacing: 0) {
                 if showChrome { topBar.transition(.move(edge: .top).combined(with: .opacity)) }
+                if showChrome {
+                    HStack {
+                        Spacer()
+                        windRose.padding(.trailing).padding(.top, 6)
+                    }
+                    .transition(.opacity)
+                }
                 Spacer()
+                if showChrome {
+                    sailingReadout
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 if showChrome { transport.transition(.move(edge: .bottom).combined(with: .opacity)) }
             }
         }
@@ -152,6 +164,24 @@ struct SessionPlaybackView: View {
         session.track.speed(atElapsed: elapsed)
     }
 
+    private var wind: Wind? { session.effectiveWind }
+
+    /// Values that only exist per-fix — course, heart rate — read at the fix
+    /// under the playhead rather than interpolated: a bearing halfway through
+    /// a gybe interpolates through headings never sailed.
+    private var indexAtPlayhead: Int? { session.track.index(atElapsed: elapsed) }
+
+    private var courseAtPlayhead: Double? {
+        guard let i = indexAtPlayhead, session.track.course.indices.contains(i) else { return nil }
+        return session.track.course[i]
+    }
+
+    private var heartRateAtPlayhead: Double? {
+        guard let i = indexAtPlayhead,
+              let bpm = session.track.points[safe: i]?.heartRate, bpm > 0 else { return nil }
+        return bpm
+    }
+
     // MARK: - Chrome
 
     private var topBar: some View {
@@ -229,6 +259,69 @@ struct SessionPlaybackView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .background(.regularMaterial, in: Capsule())
+    }
+
+    /// The sailing numbers at the playhead — what the speed cost or bought
+    /// against the wind. A separate strip rather than more figures crammed
+    /// into the capsule, and only present when the session has a wind at all.
+    @ViewBuilder
+    private var sailingReadout: some View {
+        if let wind, let course = courseAtPlayhead {
+            let twa = wind.trueWindAngle(heading: course)
+            HStack(spacing: 14) {
+                item(Format.speed(wind.vmgMagnitude(speed: currentSpeed, heading: course),
+                                  unit: settings.units.speed, decimals: 1,
+                                  includeSymbol: false),
+                     label: "VMG \(settings.units.speed.symbol)")
+                item("\(Int(abs(twa).rounded()))°", label: "TWA")
+                item("\(Int(course.rounded()))°", label: "heading")
+                item(Format.distance(session.track.distance(atElapsed: elapsed),
+                                     unit: settings.units.distance,
+                                     includeSymbol: false),
+                     label: settings.units.distance.symbol)
+                if let bpm = heartRateAtPlayhead {
+                    item("\(Int(bpm))", label: "bpm")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .background(.regularMaterial, in: Capsule())
+        }
+    }
+
+    private func item(_ value: String, label: String) -> some View {
+        VStack(spacing: 0) {
+            Text(value)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Which way the wind is blowing, on the map where the track shape is.
+    ///
+    /// The arrow points the way the wind travels — downwind — because that is
+    /// how anyone standing on the beach describes it with their arm.
+    @ViewBuilder
+    private var windRose: some View {
+        if let wind {
+            VStack(spacing: 2) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 16, weight: .semibold))
+                    .rotationEffect(.degrees(wind.directionFrom))
+                if let speed = wind.speed {
+                    Text(Format.speed(speed, unit: settings.units.speed, decimals: 0))
+                        .font(.system(size: 9, weight: .medium))
+                        .monospacedDigit()
+                }
+            }
+            .padding(10)
+            .background(.regularMaterial, in: Circle())
+            .overlay(Circle().strokeBorder(.secondary.opacity(0.3)))
+        }
     }
 
     private var stateAtPlayhead: RideState? {

@@ -74,9 +74,21 @@ public struct SessionArchive: Sendable, Codable {
     /// The session, with its cached analysis recomputed if it came from an older
     /// engine. Reading a file should never surface numbers whose provenance the
     /// running code cannot vouch for.
+    ///
+    /// The track is *rebuilt*, not just re-analysed. Half of what an engine
+    /// bump can change lives in `TrackBuilder` — which fixes are accepted, how
+    /// speed is resolved, how course is resolved — and all of it is baked into
+    /// the stored track at build time. Re-running the analyzers over the old
+    /// build would stamp the new version number on the old behaviour: version
+    /// 2 exists to ignore placeholder course channels, and without the rebuild
+    /// every affected session would recompute to exactly the same wrong polar
+    /// and then declare itself current.
     public func upToDateSession(overrides: SportThresholds.Overrides? = nil) -> Session {
         var session = self.session
         if session.summary?.isCurrent != true {
+            let track = TrackBuilder(options: .forSport(session.sport))
+                .build(from: session.track.points)
+            session.track = track
             session.summary = SessionAnalyzer(
                 configuration: .init(
                     sport: session.sport,
@@ -85,7 +97,7 @@ public struct SessionArchive: Sendable, Codable {
                     foilTakeoffSpeed: session.foilTakeoffSpeed,
                     overrides: overrides
                 )
-            ).analyse(session.track)
+            ).analyse(track)
         }
         return session
     }

@@ -437,6 +437,17 @@ public struct SpeedAnalyzer: Sendable {
     /// every finish. It collapses to O(n) once you notice the finish is
     /// determined by the start: the run is exactly `metres` long, so a single
     /// forward pointer tracks it.
+    /// Best out-and-back of at most `metres`, per the community definition.
+    ///
+    /// "At most" is the whole point, and the first version got it wrong by
+    /// requiring exactly `metres` of track. An alpha is a run that includes a
+    /// turn and finishes within the gate — the sailed path may be far shorter
+    /// than the cap, and usually is: a tight gybe covers 250 m of a 500 m
+    /// allowance, at a higher average than any full 500 m stretch. Requiring
+    /// the full distance reported 11.9 kn on a session whose own recording app
+    /// said 13.0, because the 13.0 segment was short and every 500 m window
+    /// dragged in slow water around it. It also explains why Alpha 500 m and
+    /// Alpha 1 km so often agree — the same short segment wins both.
     func bestAlpha(
         metres: Double,
         proximity: Double,
@@ -446,77 +457,113 @@ public struct SpeedAnalyzer: Sendable {
         guard track.count >= 3 else {
             return .unavailable(category, reason: .trackTooShort)
         }
-        guard track.totalDistance >= metres else {
-            return .unavailable(category, reason: .notEnoughDistance)
-        }
 
         let reported = ReportedSpeedIndex(track: track)
+        // Cumulative unwrapped heading, so "is there a turn in [i, j]" becomes
+        // a range-spread query instead of a scan per candidate. There are
+        // O(n · w) candidate segments; scanning each would be quadratic in the
+        // window width.
+        var cumHeading = [Double](repeating: 0, count: track.count)
+        for i in 1..<track.count {
+            cumHeading[i] = cumHeading[i - 1]
+                + Geo.angleDelta(from: track.course[i - 1], to: track.course[i])
+        }
+        let headingSpread = RangeSpreadIndex(values: cumHeading)
+
         var bestSpeed = -1.0
-        var bestDuration = Double.infinity
         var bestStart: TimeInterval = 0
         var bestEnd: TimeInterval = 0
+        var bestDistance = 0.0
         var sawATurn = false
         var sawAReturn = false
 
-        func consider(startDistance: Double) {
-            let endDistance = startDistance + metres
-            guard startDistance >= 0, endDistance <= track.totalDistance else { return }
+        for i in 0..<(track.count - 1) {
+            for j in (i + 1)..<track.count {
+                let path = track.cumulativeDistance[j] - track.cumulativeDistance[i]
+                if path > metres { break }
+                // An "out and back" that never leaves the gate is jitter, not
+                // a run.
+                guard path > proximity * 2 else { continue }
+                let dt = track.elapsed[j] - track.elapsed[i]
+                guard dt > 0 else { continue }
+                guard Geo.distance(track.points[i].coordinate, track.points[j].coordinate) <= proximity
+                else { continue }
+                sawAReturn = true
 
-            let startTime = track.latestTime(atDistance: startDistance)
-            let endTime = track.earliestTime(atDistance: endDistance)
-            let duration = endTime - startTime
-            guard duration > 0 else { return }
+                // Ranked on the capped speed — see the distance windows for
+                // why capping after selection picks the noisiest candidate.
+                let capped = min(path / dt, speedCeiling(reported, from: track.elapsed[i], to: track.elapsed[j]))
+                guard capped > bestSpeed else { continue }
+                guard headingSpread.spread(i...j) >= 90 else { continue }
+                sawATurn = true
 
-            // Cheap rejections first — proximity kills most candidates and
-            // costs one haversine, while the turn test costs a scan.
-            guard let startCoord = track.coordinate(atElapsed: startTime),
-                  let endCoord = track.coordinate(atElapsed: endTime) else { return }
-            guard Geo.distance(startCoord, endCoord) <= proximity else { return }
-            sawAReturn = true
-
-            // Ranked on the speed that survives the veto, not on the raw clock.
-            // Picking the quickest lap and capping it afterwards hands the prize
-            // to whichever lap had the worst position noise and then answers
-            // with the honest Doppler from inside it — a slow lap wearing a fast
-            // lap's start and finish.
-            let capped = min(metres / duration, speedCeiling(reported, from: startTime, to: endTime))
-            guard capped > bestSpeed else { return }
-            guard containsTurn(track: track, fromElapsed: startTime, toElapsed: endTime) else { return }
-            sawATurn = true
-
-            bestSpeed = capped
-            bestDuration = duration
-            bestStart = startTime
-            bestEnd = endTime
+                bestSpeed = capped
+                bestStart = track.elapsed[i]
+                bestEnd = track.elapsed[j]
+                bestDistance = path
+            }
         }
 
-        for d in track.cumulativeDistance {
-            consider(startDistance: d)            // this sample as the start
-            consider(startDistance: d - metres)   // this sample as the finish
-        }
-
-        guard bestDuration.isFinite else {
+        guard bestSpeed >= 0 else {
             let reason: SpeedResult.InvalidReason =
                 !sawAReturn ? .didNotReturnToStart :
                 !sawATurn ? .noQualifyingTurn : .notEnoughDistance
             return .unavailable(category, reason: reason)
         }
 
-        let speed = bestSpeed
         let segment = SpeedResult.Segment(
             startElapsed: bestStart, endElapsed: bestEnd,
-            distance: metres, speed: speed
+            distance: bestDistance, speed: bestSpeed
         )
         return SpeedResult(
             category: category,
-            speed: speed,
+            speed: bestSpeed,
             startElapsed: bestStart,
             endElapsed: bestEnd,
-            distance: metres,
+            distance: bestDistance,
             segments: [segment],
             isValid: true,
             confidence: confidence(for: track, from: bestStart, to: bestEnd)
         )
+    }
+
+    /// max − min over any index range, in O(1) after an O(n log n) build.
+    /// Same sparse-table idea as `ReportedSpeedIndex`, kept separate because
+    /// this one answers on both ends of the range.
+    struct RangeSpreadIndex {
+        private let mins: [[Double]]
+        private let maxes: [[Double]]
+        private let count: Int
+
+        init(values: [Double]) {
+            count = values.count
+            var minL = [values], maxL = [values]
+            var width = 1
+            while width * 2 <= values.count {
+                let pm = minL[minL.count - 1], px = maxL[maxL.count - 1]
+                let span = values.count - width * 2 + 1
+                var nm = [Double](), nx = [Double]()
+                nm.reserveCapacity(max(0, span)); nx.reserveCapacity(max(0, span))
+                for i in 0..<max(0, span) {
+                    nm.append(min(pm[i], pm[i + width]))
+                    nx.append(max(px[i], px[i + width]))
+                }
+                minL.append(nm); maxL.append(nx)
+                width *= 2
+            }
+            mins = minL; maxes = maxL
+        }
+
+        func spread(_ range: ClosedRange<Int>) -> Double {
+            let length = range.count
+            guard length > 0, range.upperBound < count else { return 0 }
+            let k = 63 - UInt64(length).leadingZeroBitCount
+            guard k < mins.count else { return 0 }
+            let second = range.upperBound - (1 << k) + 1
+            let lo = min(mins[k][range.lowerBound], mins[k][second])
+            let hi = max(maxes[k][range.lowerBound], maxes[k][second])
+            return hi - lo
+        }
     }
 
     /// Whether the heading reverses by at least 90° somewhere in the interval.

@@ -187,7 +187,10 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// 2: constant course channels (Waterspeed's all-zero placeholder) are
     /// ignored and courses derived from positions, which un-flattens the
     /// polar and every wind angle on affected imports.
-    public static let currentVersion = 2
+    /// 3: alpha takes the best segment of *at most* its cap (the community
+    /// rule) instead of exactly the cap; Alpha 1 km added; polar carries
+    /// per-tack mean headings and the both-tacks beat/run VMG.
+    public static let currentVersion = 3
 
     public let analysisVersion: Int
 

@@ -179,12 +179,14 @@ struct SpeedAnalyzerTests {
 
     // MARK: - Alpha
 
-    @Test("Alpha finds an out-and-back loop")
+    @Test("Alpha finds an out-and-back loop, and may use less than the cap")
     func alphaOnLoop() {
-        // Out 300 m, gybe, back 300 m. For an out-and-back of leg length L the
-        // 500 m window that closes on itself starts at L − 250 along the track
-        // and ends at L + 250, so L = 300 is the shortest leg that works: the
-        // window runs from 50 m out to 50 m out on the way home.
+        // Out 300 m, gybe, back 300 m. The community rule is *at most* 500 m
+        // between gates — the winning segment here is whatever out-and-back
+        // slice closes within 50 m, and the sailed path can legitimately be
+        // shorter than the cap. Requiring exactly 500 m under-reported real
+        // sessions: the fast gybe is usually short, and stretching the window
+        // to the full allowance drags in slow water around it.
         let points = SyntheticTrack.generate(legs: [
             .init(speed: 10, heading: 90, duration: 30),
             .init(speed: 10, heading: 270, duration: 30, transition: 4),
@@ -194,7 +196,8 @@ struct SpeedAnalyzerTests {
         let r = analyzer.evaluate(.alpha(metres: 500, proximity: 50), on: t)
         #expect(r.isValid, "alpha not found: \(String(describing: r.invalidReason))")
         #expect(r.speed > 5 && r.speed < 11)
-        #expect(abs(r.distance - 500) < 0.001)
+        #expect(r.distance <= 500.001, "alpha used \(r.distance) m of a 500 m cap")
+        #expect(r.distance > 100, "degenerate alpha segment: \(r.distance) m")
     }
 
     @Test("A straight line has no alpha")

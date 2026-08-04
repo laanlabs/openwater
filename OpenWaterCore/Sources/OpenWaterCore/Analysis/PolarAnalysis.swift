@@ -47,6 +47,64 @@ public struct PolarAnalysis: Hashable, Sendable, Codable {
     /// Distance sailed on each point of sail.
     public let distanceByPoint: [PointOfSail: Double]
 
+    /// Mean course held upwind on each tack, degrees true. These are the two
+    /// legs of the zig-zag; `tackingAngle` is the separation between them.
+    /// Optional twice over: a session may never go upwind on a tack, and
+    /// summaries stored before these fields existed decode without them.
+    public var portUpwindHeading: Double?
+    public var starboardUpwindHeading: Double?
+    public var portDownwindHeading: Double?
+    public var starboardDownwindHeading: Double?
+
+    /// The realistic VMG: best net progress dead upwind over a full beat.
+    ///
+    /// The per-bin VMG above answers "what could this gear do at its best
+    /// angle" — one tack, best bin, no tacking cost. This answers the question
+    /// riders actually argue about: over your best kilometre of working to
+    /// windward, gybes and wobbles included, how fast did you actually climb
+    /// the course? It is measured as net displacement along the wind axis per
+    /// unit time, over the best stretch of at least a kilometre of sailing in
+    /// which *both* tacks carry real distance — a one-tack reach with a lucky
+    /// wind shift cannot win it.
+    public var beat: BothTacksVMG?
+
+    /// The same measured dead downwind.
+    public var broadRun: BothTacksVMG?
+
+    public struct BothTacksVMG: Hashable, Sendable, Codable {
+        /// Net speed made good along the wind axis, m/s.
+        public let vmg: Double
+        /// Where the stretch sits in the session.
+        public let startElapsed: TimeInterval
+        public let endElapsed: TimeInterval
+        /// Sailed path length, metres — at least the required minimum.
+        public let distance: Double
+        /// Fraction of that distance on port tack.
+        public let portShare: Double
+
+        public init(vmg: Double, startElapsed: TimeInterval, endElapsed: TimeInterval,
+                    distance: Double, portShare: Double) {
+            self.vmg = vmg
+            self.startElapsed = startElapsed
+            self.endElapsed = endElapsed
+            self.distance = distance
+            self.portShare = portShare
+        }
+    }
+
+    /// The mean angle off the wind held upwind on a tack, degrees.
+    public func upwindAngle(_ tack: Tack) -> Double? {
+        let heading = tack == .port ? portUpwindHeading : starboardUpwindHeading
+        return heading.map { abs(Geo.angleDelta(from: wind.directionFrom, to: $0)) }
+    }
+
+    /// The mean angle short of dead downwind held on a tack, degrees from the
+    /// wind direction (so 180 is a dead run).
+    public func downwindAngle(_ tack: Tack) -> Double? {
+        let heading = tack == .port ? portDownwindHeading : starboardDownwindHeading
+        return heading.map { abs(Geo.angleDelta(from: wind.directionFrom, to: $0)) }
+    }
+
     public struct Bin: Hashable, Sendable, Codable, Identifiable {
         /// Centre of the bin in degrees. For the folded polar this is `0...180`;
         /// for the per-tack polars it is signed.
@@ -246,7 +304,7 @@ public struct PolarBuilder: Sendable {
             return portMean < starboardMean ? .port : .starboard
         }()
 
-        return PolarAnalysis(
+        var analysis = PolarAnalysis(
             wind: wind,
             bins: folded,
             portBins: portBins,
@@ -264,6 +322,94 @@ public struct PolarBuilder: Sendable {
                 : 0,
             distanceByPoint: distanceByPoint
         )
+        analysis.portUpwindHeading = portUpwind.totalWeight > minimumBinDistance ? portUpwind.mean : nil
+        analysis.starboardUpwindHeading = starboardUpwind.totalWeight > minimumBinDistance ? starboardUpwind.mean : nil
+        analysis.portDownwindHeading = portDownwind.totalWeight > minimumBinDistance ? portDownwind.mean : nil
+        analysis.starboardDownwindHeading = starboardDownwind.totalWeight > minimumBinDistance ? starboardDownwind.mean : nil
+
+        let both = BothTacksVMGFinder().find(track: track, wind: wind)
+        analysis.beat = both.beat
+        analysis.broadRun = both.run
+        return analysis
+    }
+}
+
+/// Finds the best genuine beat and run — net progress along the wind axis
+/// with both tacks carrying weight.
+///
+/// The idea comes straight from riders comparing parawing upwind numbers: a
+/// "best VMG" built from each tack's best moment separately is fiction when
+/// the wind shifts mid-session, because both tacks look brilliant against a
+/// wind neither was sailed in. Requiring one continuous stretch with real
+/// distance on both tacks makes the number survivable in an argument: it is
+/// what the rider's position actually did, tack cost and all.
+struct BothTacksVMGFinder {
+
+    /// Sailed path a stretch must cover before it counts.
+    var minimumDistance: Double = 1000
+
+    /// Least share of that path either tack may carry. Half-and-half is the
+    /// ideal beat; a quarter keeps asymmetric-but-real zig-zags eligible
+    /// while still excluding the one-gybe reach.
+    var minimumTackShare: Double = 0.25
+
+    func find(track: Track, wind: Wind) -> (beat: PolarAnalysis.BothTacksVMG?, run: PolarAnalysis.BothTacksVMG?) {
+        let n = track.count
+        guard n >= 3 else { return (nil, nil) }
+
+        // Per-step: sailed distance, distance on port, and displacement along
+        // the wind axis (positive toward where the wind comes from), all as
+        // prefix sums so any window is O(1).
+        let toWind = wind.directionFrom * Double.pi / 180
+        let axisEast = sin(toWind), axisNorth = cos(toWind)
+        let metresPerDegree = 111_320.0
+
+        var sailed = [0.0], port = [0.0], upAxis = [0.0]
+        sailed.reserveCapacity(n); port.reserveCapacity(n); upAxis.reserveCapacity(n)
+        for i in 1..<n {
+            let step = track.cumulativeDistance[i] - track.cumulativeDistance[i - 1]
+            let a = track.points[i - 1], b = track.points[i]
+            let dE = (b.longitude - a.longitude) * metresPerDegree * cos(a.latitude * .pi / 180)
+            let dN = (b.latitude - a.latitude) * metresPerDegree
+            let twa = wind.trueWindAngle(heading: track.course[i])
+            sailed.append(sailed[i - 1] + step)
+            port.append(port[i - 1] + (twa >= 0 ? step : 0))
+            upAxis.append(upAxis[i - 1] + dE * axisEast + dN * axisNorth)
+        }
+
+        var beat: PolarAnalysis.BothTacksVMG?
+        var run: PolarAnalysis.BothTacksVMG?
+
+        // For each start, the shortest window that satisfies the distance —
+        // the two-pointer never retreats, so the whole scan is O(n).
+        var j = 0
+        for i in 0..<(n - 1) {
+            if j <= i { j = i + 1 }
+            while j < n, sailed[j] - sailed[i] < minimumDistance { j += 1 }
+            guard j < n else { break }
+
+            let path = sailed[j] - sailed[i]
+            let dt = track.elapsed[j] - track.elapsed[i]
+            guard dt > 0, path > 0 else { continue }
+
+            let portShare = (port[j] - port[i]) / path
+            guard portShare >= minimumTackShare, portShare <= 1 - minimumTackShare else { continue }
+
+            let vmg = (upAxis[j] - upAxis[i]) / dt
+            let candidate = PolarAnalysis.BothTacksVMG(
+                vmg: abs(vmg),
+                startElapsed: track.elapsed[i],
+                endElapsed: track.elapsed[j],
+                distance: path,
+                portShare: portShare
+            )
+            if vmg > 0 {
+                if candidate.vmg > (beat?.vmg ?? 0) { beat = candidate }
+            } else if vmg < 0 {
+                if candidate.vmg > (run?.vmg ?? 0) { run = candidate }
+            }
+        }
+        return (beat, run)
     }
 }
 

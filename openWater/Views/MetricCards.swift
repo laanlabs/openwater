@@ -555,13 +555,28 @@ struct AngleSummary: View {
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
 
+            WindAngleRose(polar: polar)
+                .frame(height: 190)
+                .frame(maxWidth: .infinity)
+
             LazyVGrid(columns: columns, spacing: 8) {
+                if let port = polar.upwindAngle(.port) {
+                    SummaryTile(label: "Upwind · port", value: String(format: "%.0f° off wind", port))
+                }
+                if let stbd = polar.upwindAngle(.starboard) {
+                    SummaryTile(label: "Upwind · starboard", value: String(format: "%.0f° off wind", stbd))
+                }
                 if let tacking = polar.tackingAngle {
-                    SummaryTile(label: "Tacking angle", value: String(format: "%.0f°", tacking))
+                    SummaryTile(label: "Tacking through", value: String(format: "%.0f°", tacking))
                 }
                 if let gybing = polar.gybingAngle {
-                    SummaryTile(label: "Gybing angle", value: String(format: "%.0f°", gybing))
+                    SummaryTile(label: "Gybing through", value: String(format: "%.0f°", gybing))
                 }
+                // Two different VMG claims, on purpose. "Best" is the polar's
+                // single finest bin — one tack, no turning cost — which is the
+                // number that flatters gear. "Beat" is net progress dead
+                // upwind over the best full kilometre with both tacks in it,
+                // which is the number that settles arguments.
                 if let up = polar.bestUpwindVMG {
                     SummaryTile(
                         label: "Best VMG up",
@@ -574,7 +589,26 @@ struct AngleSummary: View {
                         value: Format.speed(down.vmg, unit: units.speed, decimals: 1)
                     )
                 }
+                if let beat = polar.beat {
+                    SummaryTile(
+                        label: "Beat VMG · both tacks",
+                        value: Format.speed(beat.vmg, unit: units.speed, decimals: 1)
+                    )
+                }
+                if let run = polar.broadRun {
+                    SummaryTile(
+                        label: "Run VMG · both tacks",
+                        value: Format.speed(run.vmg, unit: units.speed, decimals: 1)
+                    )
+                }
                 SummaryTile(label: "Tack symmetry", value: "\(Int(polar.symmetry * 100))%")
+            }
+
+            if polar.beat != nil {
+                Text("Beat and run VMG are measured over your best continuous kilometre with real distance on both tacks — turning cost included, single-tack wind-shift flattery excluded.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let weaker = polar.weakerTack, polar.tackSpeedDelta > 0.08 {
@@ -586,6 +620,80 @@ struct AngleSummary: View {
                 .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// The session's mean courses, drawn against the wind.
+///
+/// Wind-up rather than north-up: the wind blows straight down the page, so
+/// "how high did I point" reads directly — the closer a spoke is to vertical,
+/// the higher the angle. This is how riders sketch it on a whiteboard, and it
+/// makes two sessions comparable at a glance regardless of where the wind
+/// actually sat.
+struct WindAngleRose: View {
+
+    let polar: PolarAnalysis
+
+    var body: some View {
+        Canvas { context, size in
+            let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = min(size.width, size.height) / 2 - 26
+
+            // Rings and the wind axis.
+            for f in [0.5, 1.0] {
+                let r = radius * f
+                context.stroke(
+                    Path(ellipseIn: CGRect(x: centre.x - r, y: centre.y - r, width: 2 * r, height: 2 * r)),
+                    with: .color(.secondary.opacity(0.18)), lineWidth: 1
+                )
+            }
+            var axis = Path()
+            axis.move(to: CGPoint(x: centre.x, y: centre.y - radius))
+            axis.addLine(to: CGPoint(x: centre.x, y: centre.y + radius))
+            context.stroke(axis, with: .color(.secondary.opacity(0.3)),
+                           style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+            // The wind, arriving from the top.
+            var arrow = Path()
+            arrow.move(to: CGPoint(x: centre.x, y: centre.y - radius - 16))
+            arrow.addLine(to: CGPoint(x: centre.x, y: centre.y - radius - 2))
+            arrow.move(to: CGPoint(x: centre.x - 4, y: centre.y - radius - 7))
+            arrow.addLine(to: CGPoint(x: centre.x, y: centre.y - radius - 2))
+            arrow.addLine(to: CGPoint(x: centre.x + 4, y: centre.y - radius - 7))
+            context.stroke(arrow, with: .color(.secondary), lineWidth: 1.5)
+            context.draw(
+                Text("wind").font(.system(size: 9)).foregroundStyle(.secondary),
+                at: CGPoint(x: centre.x + 20, y: centre.y - radius - 10)
+            )
+
+            // Spokes: port drawn to the left of the axis, starboard right.
+            func spoke(offWind: Double?, port: Bool, colour: Color, label: String) {
+                guard let offWind else { return }
+                // 0° off wind is straight up; port angles open leftward.
+                let theta = (port ? -offWind : offWind) * .pi / 180
+                let dx = sin(theta) * radius
+                let dy = -cos(theta) * radius
+                let end = CGPoint(x: centre.x + dx, y: centre.y + dy)
+                var path = Path()
+                path.move(to: centre)
+                path.addLine(to: end)
+                context.stroke(path, with: .color(colour), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                let labelPoint = CGPoint(x: centre.x + dx * 1.16, y: centre.y + dy * 1.16)
+                context.draw(
+                    Text(label).font(.system(size: 10, weight: .semibold)).foregroundStyle(colour),
+                    at: labelPoint
+                )
+            }
+            spoke(offWind: polar.upwindAngle(.port), port: true, colour: .red,
+                  label: String(format: "%.0f°", polar.upwindAngle(.port) ?? 0))
+            spoke(offWind: polar.upwindAngle(.starboard), port: false, colour: .green,
+                  label: String(format: "%.0f°", polar.upwindAngle(.starboard) ?? 0))
+            spoke(offWind: polar.downwindAngle(.port), port: true, colour: .red.opacity(0.5),
+                  label: String(format: "%.0f°", polar.downwindAngle(.port) ?? 0))
+            spoke(offWind: polar.downwindAngle(.starboard), port: false, colour: .green.opacity(0.5),
+                  label: String(format: "%.0f°", polar.downwindAngle(.starboard) ?? 0))
+        }
+        .accessibilityLabel("Mean courses against the wind")
     }
 }
 

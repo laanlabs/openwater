@@ -79,6 +79,7 @@ public enum SpeedCategory: Hashable, Sendable, Codable, Identifiable {
         .distance(metres: 250),
         .distance(metres: 500),
         .alpha(metres: 500, proximity: 50),
+        .alpha(metres: 1000, proximity: 50),
         .distance(metres: 1852),
         .time(seconds: 1800),
         .time(seconds: 3600),

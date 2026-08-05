@@ -12,16 +12,28 @@ import SwiftUI
 /// those are the colours the sport already painted on every bow.
 struct UpwindDetailView: View {
 
-    let session: Session
-    let summary: SessionSummary
-    let polar: PolarAnalysis
-
     @Environment(AppSettings.self) private var settings
+    @Environment(SessionLibrary.self) private var library
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
+    /// Local copies, because the wind is editable *here*: a new direction
+    /// re-runs the analysis, the library gets the saved result, and this
+    /// screen re-derives everything it shows without asking the parent.
+    @State private var session: Session
+    @State private var summary: SessionSummary
+    @State private var polar: PolarAnalysis
 
     @State private var legs: [UpwindLeg] = []
     @State private var selectedLeg: Int?
     @State private var samples: [(elapsed: TimeInterval, vmg: Double)] = []
+    @State private var isSettingWind = false
+    @State private var isRecomputing = false
+
+    init(session: Session, summary: SessionSummary, polar: PolarAnalysis) {
+        _session = State(initialValue: session)
+        _summary = State(initialValue: summary)
+        _polar = State(initialValue: polar)
+    }
 
     private var wind: Wind { polar.wind }
 
@@ -63,6 +75,39 @@ struct UpwindDetailView: View {
             legs = UpwindLegFinder.legs(track: session.track, wind: wind)
             samples = computeVMGSamples()
         }
+        .sheet(isPresented: $isSettingWind) {
+            WindSetterView(session: session) { direction, speed in
+                applyWind(direction: direction, speed: speed)
+            }
+        }
+    }
+
+    /// Every number on this screen is measured from one direction, so
+    /// changing it re-runs the whole chain: analysis, polar, legs, samples —
+    /// and the library keeps the saved result so the rest of the app agrees.
+    private func applyWind(direction: Double, speed: Double?) {
+        isRecomputing = true
+        let categories = settings.categories
+        let overrides = settings.overrides(for: session.sport)
+        let current = session
+        Task {
+            let edited = await Task.detached {
+                var edits = Session.Edits(session: current)
+                edits.windDirection = direction
+                edits.windSpeed = speed
+                return current.applying(edits, categories: categories, overrides: overrides)
+            }.value
+            library.save(edited)
+            if let newSummary = edited.summary, let newPolar = newSummary.polar {
+                session = edited
+                summary = newSummary
+                polar = newPolar
+                legs = UpwindLegFinder.legs(track: edited.track, wind: newPolar.wind)
+                samples = computeVMGSamples()
+                selectedLeg = nil
+            }
+            isRecomputing = false
+        }
     }
 
     // MARK: - Map
@@ -73,6 +118,12 @@ struct UpwindDetailView: View {
             MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
                 .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
+            // The wind axis, dashed across the water. This is what makes the
+            // zig-zag legible as a *beat*: every leg reads against the line
+            // it is trying to climb.
+            MapPolyline(coordinates: windAxis)
+                .stroke(.indigo.opacity(0.55), style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
+
             ForEach(legs) { leg in
                 MapPolyline(coordinates: session.track.points[leg.startIndex...leg.endIndex].map(\.clCoordinate))
                     .stroke(
@@ -80,17 +131,34 @@ struct UpwindDetailView: View {
                         style: StrokeStyle(lineWidth: selectedLeg == leg.id ? 6 : 4, lineCap: .round)
                     )
 
+                // Number-only dots: eleven full "n · 54°" capsules stacked on
+                // the same stretch of river buried each other, and the angles
+                // looked missing when they were merely covered. The angle
+                // appears when a leg is chosen, and always lives in the list.
                 Annotation("", coordinate: session.track.points[leg.midIndex].clCoordinate, anchor: .center) {
                     Button {
-                        selectedLeg = selectedLeg == leg.id ? nil : leg.id
+                        withAnimation(.snappy) {
+                            selectedLeg = selectedLeg == leg.id ? nil : leg.id
+                        }
                     } label: {
-                        Text("\(leg.index + 1) · \(Int(leg.meanAngle.rounded()))°")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(colour(leg.tack).opacity(0.9), in: Capsule())
-                            .foregroundStyle(.white)
+                        if selectedLeg == leg.id {
+                            Text("\(leg.index + 1) · \(Int(leg.meanAngle.rounded()))° · \(Format.speed(leg.vmg, unit: settings.units.speed, decimals: 1)) VMG")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(colour(leg.tack), in: Capsule())
+                                .foregroundStyle(.white)
+                                .shadow(radius: 2)
+                        } else {
+                            Text("\(leg.index + 1)")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .frame(width: 18, height: 18)
+                                .background(colour(leg.tack).opacity(0.9), in: Circle())
+                                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                        }
                     }
                     .buttonStyle(.plain)
                 }
@@ -98,19 +166,67 @@ struct UpwindDetailView: View {
             }
         }
         .mapStyle(settings.mapStyle.mapStyle)
-        .overlay(alignment: .topTrailing) {
-            VStack(spacing: 2) {
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 15, weight: .semibold))
-                    .rotationEffect(.degrees(wind.directionFrom))
-                Text("\(Int(wind.directionFrom.rounded()))°")
-                    .font(.system(size: 9, weight: .medium))
-                    .monospacedDigit()
+        .overlay(alignment: .topTrailing) { windBadge }
+        .overlay {
+            if isRecomputing {
+                ZStack {
+                    Color.black.opacity(0.2)
+                    ProgressView()
+                }
             }
-            .padding(8)
-            .background(.regularMaterial, in: Circle())
-            .padding(10)
         }
+    }
+
+    /// The wind, said plainly, and the way to change it. Every angle on this
+    /// screen is measured from this one number — so it is shown large, with
+    /// its provenance, and it is a button.
+    private var windBadge: some View {
+        Button {
+            isSettingWind = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 15, weight: .bold))
+                    .rotationEffect(.degrees(wind.directionFrom))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(Format.cardinal(wind.directionFrom)) \(Int(wind.directionFrom.rounded()))°"
+                         + (wind.speed.map { " · \(Int(($0 * 1.94384).rounded())) kn" } ?? ""))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(wind.source.isEstimate ? "estimated · tap to set" : "tap to adjust")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+                Image(systemName: "pencil.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tint)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding(10)
+    }
+
+    /// A line through the middle of the track along the wind's axis, long
+    /// enough to cross the whole session.
+    private var windAxis: [CLLocationCoordinate2D] {
+        let points = session.track.points
+        guard !points.isEmpty else { return [] }
+        let midLat = points.map(\.latitude).reduce(0, +) / Double(points.count)
+        let midLon = points.map(\.longitude).reduce(0, +) / Double(points.count)
+        let lats = points.map(\.latitude)
+        let lons = points.map(\.longitude)
+        let span = max((lats.max()! - lats.min()!), (lons.max()! - lons.min()!) * cos(midLat * .pi / 180)) * 0.75
+        let radians = wind.directionFrom * .pi / 180
+        let dLat = cos(radians) * span
+        let dLon = sin(radians) * span / cos(midLat * .pi / 180)
+        return [
+            CLLocationCoordinate2D(latitude: midLat + dLat, longitude: midLon + dLon),
+            CLLocationCoordinate2D(latitude: midLat - dLat, longitude: midLon - dLon),
+        ]
     }
 
     // MARK: - Chart

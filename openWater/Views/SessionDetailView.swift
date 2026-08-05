@@ -121,6 +121,10 @@ struct SessionDetailView: View {
         .navigationTitle(stored.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadSession() }
+        // Re-read on every return to this screen: the Upwind page can change
+        // the session's wind and save it, and stale angles here would
+        // contradict the screen the rider just left.
+        .onAppear { Task { await loadSession() } }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

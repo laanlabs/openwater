@@ -19,6 +19,7 @@ struct SpotDetailScreen: View {
 
     @State private var forecast: [WindForecastHour] = []
     @State private var links: [SpotGuideStore.SpotLink] = []
+    @State private var isChoosingMapApp = false
 
     private var reading: WindReading? { guide.wind[spot.spotId] }
     private var isFavorite: Bool { guide.favoriteIds.contains(spot.spotId) }
@@ -31,39 +32,25 @@ struct SpotDetailScreen: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(spot.name)
                         .font(.title2.weight(.bold))
-                    Text("\(spot.where_) · \(String(format: "%.3f, %.3f", spot.latitude, spot.longitude))")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(spot.where_)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            isChoosingMapApp = true
+                        } label: {
+                            Image(systemName: "map")
+                                .font(.subheadline)
+                                .foregroundStyle(.tint)
+                        }
+                        .accessibilityLabel("Open in Maps")
+                    }
                     chips
                 }
                 .padding(.horizontal, 16)
 
                 windCard
                     .padding(.horizontal, 16)
-
-                HStack(spacing: 10) {
-                    Button {
-                        NotificationCenter.default.post(name: .openWaterSwitchToRecord, object: nil)
-                    } label: {
-                        Text("Record here")
-                            .font(.body.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(.tint, in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button {
-                        openDirections()
-                    } label: {
-                        Text("Directions")
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 16)
 
                 conditionsCard
                     .padding(.horizontal, 16)
@@ -73,6 +60,18 @@ struct SpotDetailScreen: View {
 
                 miniMap
                     .padding(.horizontal, 16)
+
+                Button {
+                    isChoosingMapApp = true
+                } label: {
+                    Label("Directions", systemImage: "car")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
 
                 resourcesFooter
                     .padding(.horizontal, 16)
@@ -93,6 +92,10 @@ struct SpotDetailScreen: View {
                     Image(systemName: "square.and.arrow.up")
                 }
             }
+        }
+        .confirmationDialog("Open in", isPresented: $isChoosingMapApp, titleVisibility: .visible) {
+            Button("Apple Maps") { openInAppleMaps() }
+            Button("Google Maps") { openInGoogleMaps() }
         }
         .task {
             await guide.refreshWind(for: [spot])
@@ -255,7 +258,7 @@ struct SpotDetailScreen: View {
                         Text(row.0.uppercased())
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(row.2 ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                        Text(row.1)
+                        Text(linkified(row.1))
                             .font(.subheadline)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -292,15 +295,26 @@ struct SpotDetailScreen: View {
     /// stop the five-app scavenger hunt before a session.
     @ViewBuilder
     private var linksCard: some View {
-        if !links.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("FORECASTS, CAMS & GUIDES")
+        let forecasts = links.filter { $0.kind != .guide }
+        let guides = links.filter { $0.kind == .guide }
+        if !forecasts.isEmpty {
+            linkSection("FORECASTS, TIDES & CAMS", items: forecasts)
+        }
+        if !guides.isEmpty {
+            linkSection("GUIDES", items: guides)
+                .padding(.top, 4)
+        }
+    }
+
+    private func linkSection(_ title: String, items: [SpotGuideStore.SpotLink]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+                Text(title)
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 2)
 
                 VStack(spacing: 0) {
-                    ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, link in
                         Link(destination: link.url) {
                             HStack(spacing: 12) {
                                 Image(systemName: link.kind.symbol)
@@ -327,13 +341,12 @@ struct SpotDetailScreen: View {
                             .padding(.vertical, 9)
                             .contentShape(Rectangle())
                         }
-                        if index < links.count - 1 {
+                        if index < items.count - 1 {
                             Divider().padding(.leading, 54)
                         }
                     }
                 }
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
-            }
         }
     }
 
@@ -355,16 +368,40 @@ struct SpotDetailScreen: View {
         return parts.joined(separator: " · ")
     }
 
-    private func openDirections() {
-        // The guide's own Google Maps link when it has one — it often points at
-        // the exact parking lot rather than the beach — otherwise Apple Maps
-        // at the launch coordinates.
-        if let google = spot.googleMapsURL.flatMap(URL.init) {
-            openURL(google)
+    /// Condition prose with any embedded URLs made tappable — the guide's
+    /// hazards and parking notes routinely end in "see https://…", and a URL
+    /// you can read but not tap is a small insult on a phone.
+    private func linkified(_ text: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return attributed
+        }
+        let ns = text as NSString
+        for match in detector.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            guard let url = match.url, url.scheme?.hasPrefix("http") == true,
+                  let swiftRange = Range(match.range, in: text),
+                  let attributedRange = attributed.range(of: String(text[swiftRange]))
+            else { continue }
+            attributed[attributedRange].link = url
+            attributed[attributedRange].underlineStyle = .single
+        }
+        return attributed
+    }
+
+    private func openInAppleMaps() {
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: spot.coordinate))
+        item.name = spot.name
+        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+    }
+
+    private func openInGoogleMaps() {
+        // The guide's own link when it has one — it often points at the exact
+        // parking lot rather than a pin in the water.
+        if let curated = spot.googleMapsURL.flatMap(URL.init) {
+            openURL(curated)
         } else {
-            let item = MKMapItem(placemark: MKPlacemark(coordinate: spot.coordinate))
-            item.name = spot.name
-            item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+            let query = String(format: "%.5f,%.5f", spot.latitude, spot.longitude)
+            openURL(URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(query)")!)
         }
     }
 }

@@ -381,7 +381,9 @@ final class SpotGuideStore {
                                   provider: spot.tideProvider ?? "NOAA CO-OPS"))
         }
 
-        let order: [SpotLink.Kind] = [.wind, .camera, .tide, .surf, .guide]
+        // The order riders check things: wind meter, surf forecast, tides,
+        // then cams. Guides render as their own section downstream.
+        let order: [SpotLink.Kind] = [.wind, .surf, .tide, .camera, .guide]
         links.sort {
             (order.firstIndex(of: $0.kind) ?? 9) < (order.firstIndex(of: $1.kind) ?? 9)
         }

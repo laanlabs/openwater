@@ -75,6 +75,31 @@ struct ToolsTabView: View {
                     }
                 }
 
+                Section("Find Used Gear") {
+                    Link(destination: URL(string: "https://usedwatersports.com/")!) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "cart")
+                                .font(.title3)
+                                .foregroundStyle(.tint)
+                                .frame(width: 34, height: 34)
+                                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Used Watersports")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("Second-hand wings, foils and boards — usedwatersports.com")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.forward")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         UnitsConverterView()

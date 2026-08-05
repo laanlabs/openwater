@@ -832,8 +832,20 @@ struct DownwindCard: View {
 struct ManeuverCard: View {
 
     let summary: ManeuverSummary
+    /// The maneuvers themselves, for the outcome line — outcomes are derived
+    /// per turn, not stored on the summary.
+    var maneuvers: [Maneuver] = []
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
+
+    /// Turns that cross the wind — the ones "landed" is worth saying about.
+    private var crossings: [Maneuver] {
+        maneuvers.filter { $0.kind == .gybe || $0.kind == .tack }
+    }
+
+    private func count(_ outcome: Maneuver.Outcome) -> Int {
+        crossings.filter { $0.outcome == outcome }.count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -851,6 +863,24 @@ struct ManeuverCard: View {
                 SummaryTile(label: "Best turn", value: "\(Int(summary.bestScore))")
             }
 
+            // What happened through them, in the words a rider uses. "Landed"
+            // counts clean and touchdown — coming out still sailing — against
+            // the turns whose outcome is actually known; guessing about the
+            // rest would make the number a lie.
+            if !crossings.isEmpty {
+                let known = crossings.filter { $0.outcome != .unknown }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(count(.clean)) clean · \(count(.touchdown)) touchdowns · \(count(.blown)) blown"
+                         + (count(.unknown) > 0 ? " · \(count(.unknown)) unknown" : ""))
+                    if !known.isEmpty {
+                        Text("Landed \(known.filter(\.isLanded).count) of \(known.count) \(known.count == 1 ? "turn" : "turns")")
+                            .fontWeight(.medium)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             if let port = summary.scoreByExitTack[.port],
                let starboard = summary.scoreByExitTack[.starboard],
                abs(port - starboard) > 8 {
@@ -862,6 +892,97 @@ struct ManeuverCard: View {
                 .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// The upwind story: what working to windward was actually worth.
+///
+/// Modelled on the summary every analysis tool leads with — one representative
+/// VMG with its working angle, and how it was earned (legs, distance, tack
+/// balance) — rather than a single flattering segment.
+struct UpwindCard: View {
+
+    let polar: PolarAnalysis
+    let runs: [Run]
+    let units: UnitPreferences
+
+    private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
+
+    /// Fastest upwind leg — best average speed of any run sailed above a beam
+    /// reach.
+    private var bestUpwindLeg: Run? {
+        runs.filter { run in
+            guard let twa = run.trueWindAngle else { return false }
+            return abs(twa) < 90
+        }
+        .max { $0.averageSpeed < $1.averageSpeed }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("UPWIND")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if let beat = polar.beat {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(Format.speed(beat.vmg, unit: units.speed, decimals: 1,
+                                              includeSymbol: false))
+                                .font(.system(size: 34, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                            Text("\(units.speed.symbol) VMG")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.tint)
+                        }
+                        Text("made good over your best beat")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(beatSubtitle(beat))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let angle = beat.meanAngle {
+                        Text(String(format: "@ %.0f°", angle))
+                            .font(.system(.title3, design: .monospaced).weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                if let port = polar.upwindAngle(.port), let stbd = polar.upwindAngle(.starboard) {
+                    SummaryTile(label: "Upwind angle", value: String(format: "%.0f°", (port + stbd) / 2))
+                }
+                if let tacking = polar.tackingAngle {
+                    SummaryTile(label: "Tacking through", value: String(format: "%.0f°", tacking))
+                }
+                if let leg = bestUpwindLeg {
+                    SummaryTile(
+                        label: "Best leg",
+                        value: Format.speed(leg.averageSpeed, unit: units.speed, decimals: 1)
+                    )
+                }
+                if let run = polar.broadRun {
+                    SummaryTile(
+                        label: "Run VMG down",
+                        value: Format.speed(run.vmg, unit: units.speed, decimals: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    private func beatSubtitle(_ beat: PolarAnalysis.BothTacksVMG) -> String {
+        var parts: [String] = []
+        if let legs = beat.legs { parts.append("\(legs) \(legs == 1 ? "leg" : "legs")") }
+        parts.append(Format.distance(beat.distance, unit: units.distance))
+        parts.append("both tacks \(Int(beat.portShare * 100))/\(Int((1 - beat.portShare) * 100))")
+        return parts.joined(separator: " · ")
     }
 }
 

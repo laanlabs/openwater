@@ -82,13 +82,26 @@ public struct PolarAnalysis: Hashable, Sendable, Codable {
         /// Fraction of that distance on port tack.
         public let portShare: Double
 
+        /// How many legs the stretch contains — tack changes plus one.
+        /// Optional because summaries encoded before it existed decode
+        /// without it.
+        public var legs: Int?
+
+        /// Distance-weighted mean angle off the wind across the stretch,
+        /// degrees. For a beat this is the working upwind angle; for a run,
+        /// how deep the rider sailed.
+        public var meanAngle: Double?
+
         public init(vmg: Double, startElapsed: TimeInterval, endElapsed: TimeInterval,
-                    distance: Double, portShare: Double) {
+                    distance: Double, portShare: Double,
+                    legs: Int? = nil, meanAngle: Double? = nil) {
             self.vmg = vmg
             self.startElapsed = startElapsed
             self.endElapsed = endElapsed
             self.distance = distance
             self.portShare = portShare
+            self.legs = legs
+            self.meanAngle = meanAngle
         }
     }
 
@@ -364,8 +377,11 @@ struct BothTacksVMGFinder {
         let axisEast = sin(toWind), axisNorth = cos(toWind)
         let metresPerDegree = 111_320.0
 
-        var sailed = [0.0], port = [0.0], upAxis = [0.0]
+        var sailed = [0.0], port = [0.0], upAxis = [0.0], angleWeighted = [0.0]
+        var legCount = [0]
         sailed.reserveCapacity(n); port.reserveCapacity(n); upAxis.reserveCapacity(n)
+        angleWeighted.reserveCapacity(n); legCount.reserveCapacity(n)
+        var previousTackIsPort: Bool?
         for i in 1..<n {
             let step = track.cumulativeDistance[i] - track.cumulativeDistance[i - 1]
             let a = track.points[i - 1], b = track.points[i]
@@ -375,6 +391,14 @@ struct BothTacksVMGFinder {
             sailed.append(sailed[i - 1] + step)
             port.append(port[i - 1] + (twa >= 0 ? step : 0))
             upAxis.append(upAxis[i - 1] + dE * axisEast + dN * axisNorth)
+            angleWeighted.append(angleWeighted[i - 1] + abs(twa) * step)
+            // A leg boundary is a tack change while actually moving — drifting
+            // through head-to-wind at a stop is not a new leg.
+            let isPort = twa >= 0
+            var flips = legCount[i - 1]
+            if step > 1, let previous = previousTackIsPort, previous != isPort { flips += 1 }
+            if step > 1 { previousTackIsPort = isPort }
+            legCount.append(flips)
         }
 
         var beat: PolarAnalysis.BothTacksVMG?
@@ -401,7 +425,9 @@ struct BothTacksVMGFinder {
                 startElapsed: track.elapsed[i],
                 endElapsed: track.elapsed[j],
                 distance: path,
-                portShare: portShare
+                portShare: portShare,
+                legs: legCount[j] - legCount[i] + 1,
+                meanAngle: (angleWeighted[j] - angleWeighted[i]) / path
             )
             if vmg > 0 {
                 if candidate.vmg > (beat?.vmg ?? 0) { beat = candidate }

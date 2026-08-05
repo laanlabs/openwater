@@ -79,8 +79,12 @@ struct SessionOverview: View {
 
                 BestSpeedsCard(summary: summary, units: settings.units)
 
+                if let polar = summary.polar,
+                   polar.beat != nil || polar.upwindAngle(.port) != nil || polar.upwindAngle(.starboard) != nil {
+                    UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
+                }
                 if summary.maneuverSummary.total > 0 {
-                    ManeuverCard(summary: summary.maneuverSummary)
+                    ManeuverCard(summary: summary.maneuverSummary, maneuvers: summary.maneuvers)
                 }
                 if summary.foil.flightCount > 0 {
                     FoilSummaryCard(

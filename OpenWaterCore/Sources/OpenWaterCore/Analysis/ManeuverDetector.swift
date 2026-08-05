@@ -88,6 +88,47 @@ public struct Maneuver: Hashable, Sendable, Codable, Identifiable {
     /// riders say it.
     public var isDry: Bool { stayedOnFoil == true }
 
+    /// What actually happened through the turn, in the four words a rider
+    /// would use. Derived, not stored: everything it needs is already on the
+    /// maneuver, and deriving it means every session ever recorded gets an
+    /// outcome without a recompute.
+    public enum Outcome: String, Sendable, CaseIterable {
+        /// Never came off the foil.
+        case clean
+        /// Touched down but got back up to speed.
+        case touchdown
+        /// Came off and never recovered entry speed — a blown turn.
+        case blown
+        /// No foil-state channel to judge by.
+        case unknown
+
+        public var displayName: String {
+            switch self {
+            case .clean: "Clean"
+            case .touchdown: "Touchdown"
+            case .blown: "Blown"
+            case .unknown: "Unknown"
+            }
+        }
+    }
+
+    public var outcome: Outcome {
+        switch stayedOnFoil {
+        case .none: return .unknown
+        case .some(true): return .clean
+        case .some(false): return recoveryTime != nil ? .touchdown : .blown
+        }
+    }
+
+    /// Whether the rider came out of the turn still sailing — clean or with a
+    /// touchdown, but not blown. This is the number in "landed 4 of 6 gybes".
+    public var isLanded: Bool {
+        switch outcome {
+        case .clean, .touchdown: true
+        case .blown, .unknown: false
+        }
+    }
+
     public init(
         id: Int,
         startElapsed: TimeInterval,

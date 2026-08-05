@@ -190,7 +190,8 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// 3: alpha takes the best segment of *at most* its cap (the community
     /// rule) instead of exactly the cap; Alpha 1 km added; polar carries
     /// per-tack mean headings and the both-tacks beat/run VMG.
-    public static let currentVersion = 3
+    /// 4: the beat/run carry their leg count and working angle.
+    public static let currentVersion = 4
 
     public let analysisVersion: Int
 

@@ -37,6 +37,7 @@ struct SessionDetailView: View {
     @State private var isMapFullScreen = false
     @State private var isPlayingBack = false
     @State private var isEditing = false
+    @State private var isSettingWind = false
     @State private var isConfirmingDelete = false
     @State private var isConfirmingRemoveMax = false
     @State private var savedAsNewActivity = false
@@ -212,6 +213,13 @@ struct SessionDetailView: View {
                 WebShareView(stored: stored, session: session)
             }
         }
+        .sheet(isPresented: $isSettingWind) {
+            if let session {
+                WindSetterView(session: session) { direction, speed in
+                    applyWind(direction: direction, speed: speed, to: session)
+                }
+            }
+        }
         .sheet(isPresented: $isEditing, onDismiss: reloadSession) {
             SessionEditView(stored: stored)
         }
@@ -260,6 +268,24 @@ struct SessionDetailView: View {
                 library.save(edited)
                 await loadSession()
             }
+        }
+    }
+
+    /// A manual wind, straight from the dial. Goes through `Edits` so the
+    /// reanalysis rule lives in exactly one place.
+    @MainActor
+    private func applyWind(direction: Double, speed: Double?, to session: Session) {
+        let categories = settings.categories
+        let overrides = settings.overrides(for: session.sport)
+        Task {
+            let edited = await Task.detached {
+                var edits = Session.Edits(session: session)
+                edits.windDirection = direction
+                edits.windSpeed = speed
+                return session.applying(edits, categories: categories, overrides: overrides)
+            }.value
+            library.save(edited)
+            await loadSession()
         }
     }
 
@@ -339,6 +365,7 @@ struct SessionDetailView: View {
                     session: session,
                     summary: summary,
                     onEdit: { isEditing = true },
+                    onSetWind: { isSettingWind = true },
                     onOpenMap: { isMapFullScreen = true },
                     onReplay: { isPlayingBack = true }
                 )
@@ -384,7 +411,7 @@ struct SessionDetailView: View {
                     // Silently omitting the angles section leaves a rider
                     // wondering whether the app has them and they are lost, or
                     // whether it never had them. Say which, and offer the fix.
-                    NoWindCard(session: session) { isEditing = true }
+                    NoWindCard(session: session) { isSettingWind = true }
                 } else {
                     // Same reasoning, different answer: this sport was never
                     // going to have one.

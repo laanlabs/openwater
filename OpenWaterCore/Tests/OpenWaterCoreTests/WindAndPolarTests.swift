@@ -177,3 +177,46 @@ private extension Run {
         )
     }
 }
+
+@Suite("Upwind legs")
+struct UpwindLegTests {
+
+    /// Four-beat zig-zag into a northerly, then a downwind run home.
+    private func beatTrack() -> Track {
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 7, heading: 45, duration: 90, transition: 4),   // starboard? wind 0: twa 45 → port
+            .init(speed: 7, heading: 315, duration: 90, transition: 4),  // other tack
+            .init(speed: 7, heading: 45, duration: 90, transition: 4),
+            .init(speed: 7, heading: 315, duration: 90, transition: 4),
+            .init(speed: 8, heading: 180, duration: 120, transition: 6), // run home
+        ])
+        return TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+    }
+
+    @Test("Finds the four legs of a beat and not the run home")
+    func findsBeatLegs() {
+        let wind = Wind(directionFrom: 0, speed: 8, source: .manual, confidence: 1)
+        let legs = UpwindLegFinder.legs(track: beatTrack(), wind: wind)
+
+        #expect(legs.count == 4, "found \(legs.count) legs")
+        // Alternating tacks, at the sailed angle.
+        let tacks = legs.map(\.tack)
+        #expect(Set(tacks).count == 2)
+        for (a, b) in zip(tacks, tacks.dropFirst()) { #expect(a != b) }
+        for leg in legs {
+            #expect(abs(leg.meanAngle - 45) < 6, "leg angle \(leg.meanAngle)")
+            // VMG on a clean 45° leg at 7 m/s is ~4.95 m/s.
+            #expect(abs(leg.vmg - 7 * cos(45 * .pi / 180)) < 0.8, "leg vmg \(leg.vmg)")
+        }
+    }
+
+    @Test("A drifting boat produces no legs at all")
+    func noLegsWhileDrifting() {
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 0.4, heading: 30, duration: 600),
+        ])
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let wind = Wind(directionFrom: 0, speed: 8, source: .manual, confidence: 1)
+        #expect(UpwindLegFinder.legs(track: track, wind: wind).isEmpty)
+    }
+}

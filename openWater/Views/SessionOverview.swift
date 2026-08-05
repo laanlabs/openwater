@@ -15,6 +15,7 @@ struct SessionOverview: View {
     let summary: SessionSummary
 
     var onEdit: () -> Void = {}
+    var onSetWind: () -> Void = {}
     var onOpenMap: () -> Void = {}
     var onReplay: () -> Void = {}
 
@@ -79,9 +80,48 @@ struct SessionOverview: View {
 
                 BestSpeedsCard(summary: summary, units: settings.units)
 
+                if session.effectiveWind == nil {
+                    Button(action: onSetWind) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "wind")
+                                .font(.title2)
+                                .foregroundStyle(.tint)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Which way was the wind?")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Point at it on a compass to unlock angles, VMG, the polar and your upwind legs.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 if let polar = summary.polar,
                    polar.beat != nil || polar.upwindAngle(.port) != nil || polar.upwindAngle(.starboard) != nil {
-                    UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
+                    // The card is the answer; the screen behind it is the
+                    // working — every leg on the map with its angle, and the
+                    // VMG over time.
+                    NavigationLink {
+                        UpwindDetailView(session: session, summary: summary, polar: polar)
+                    } label: {
+                        UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
+                            .overlay(alignment: .topTrailing) {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                    }
+                    .buttonStyle(.plain)
                 }
                 if summary.maneuverSummary.total > 0 {
                     ManeuverCard(summary: summary.maneuverSummary, maneuvers: summary.maneuvers)
@@ -132,7 +172,9 @@ struct SessionOverview: View {
 
             // Tappable: an estimated wind is the field riders most often want
             // to correct, and every angle on the Charts tab is measured from it.
-            Button(action: onEdit) {
+            // It opens the dial, not the edit form — pointing at a compass is
+            // the way this question should be answered.
+            Button(action: onSetWind) {
                 HStack(spacing: 8) {
                     Image(systemName: "wind")
                         .foregroundStyle(.secondary)

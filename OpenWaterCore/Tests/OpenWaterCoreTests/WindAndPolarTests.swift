@@ -285,3 +285,23 @@ struct SolarTests {
         #expect(abs(Solar.runAlignment(bearing: 90, windFrom: 0) - 90) < 0.001)
     }
 }
+
+extension UpwindLegTests {
+    @Test("A tight beat with short tacks keeps every leg")
+    func shortTacksSurvive() {
+        // Fifteen-second tacks at 7 m/s — ~105 m each, the rhythm of a real
+        // tight beat. The first minimums (150 m / 25 s) dropped all of them.
+        let points = SyntheticTrack.generate(legs: [
+            .init(speed: 7, heading: 45, duration: 15, transition: 2),
+            .init(speed: 7, heading: 315, duration: 15, transition: 2),
+            .init(speed: 7, heading: 45, duration: 15, transition: 2),
+            .init(speed: 7, heading: 315, duration: 15, transition: 2),
+            .init(speed: 7, heading: 45, duration: 15, transition: 2),
+            .init(speed: 7, heading: 315, duration: 15, transition: 2),
+        ])
+        let track = TrackBuilder(options: .forSport(.wingfoil)).build(from: points)
+        let wind = Wind(directionFrom: 0, speed: 10, source: .manual, confidence: 1)
+        let legs = UpwindLegFinder.legs(track: track, wind: wind)
+        #expect(legs.count == 6, "found \(legs.count) of 6 short tacks")
+    }
+}

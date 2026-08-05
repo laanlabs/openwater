@@ -66,16 +66,18 @@ public enum UpwindLegFinder {
     /// beam reach; the leg breaks when the tack changes, the angle falls off
     /// the wind, or the boat stops for more than a few seconds. Short scraps
     /// are dropped — a two-second luff through head-to-wind is part of a tack,
-    /// not a leg — which is also what keeps the count honest: without the
-    /// minimums, GPS heading jitter at low speed manufactures "legs" by the
-    /// dozen.
+    /// not a leg — but the floor is set by what a *short real tack* looks
+    /// like, not a comfortable one: a tight beat swaps tacks every fifteen
+    /// seconds, and stricter minimums (150 m, 25 s at first) silently
+    /// swallowed half of a real session's zig-zag. Jitter stays out on the
+    /// moving-speed floor, not on leg length.
     public static func legs(
         track: Track,
         wind: Wind,
         upwindLimit: Double = 90,
         minimumSpeed: Double = 2.0,
-        minimumDistance: Double = 150,
-        minimumDuration: TimeInterval = 25,
+        minimumDistance: Double = 80,
+        minimumDuration: TimeInterval = 12,
         maximumStop: TimeInterval = 8
     ) -> [UpwindLeg] {
         let n = track.count

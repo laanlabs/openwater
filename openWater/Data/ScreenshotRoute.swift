@@ -60,6 +60,6 @@ enum ScreenshotRoute: String {
     }
 
     enum Tab: String, Hashable {
-        case sessions, spots, record, records, trends, settings
+        case sessions, spots, record, records, trends, tools, settings
     }
 }

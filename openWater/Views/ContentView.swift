@@ -46,7 +46,7 @@ struct ContentView: View {
                 page(.record) {
                     RecordTabView(isActive: selection == .record, reset: recordTabReset)
                 }
-                page(.trends) { TrendsView() }
+                page(.tools) { ToolsTabView() }
                 page(.settings) { SettingsView() }
             }
             // No inset here. Neither `padding` nor `safeAreaPadding` at this
@@ -162,7 +162,7 @@ struct OpenWaterTabBar: View {
             item(.sessions, "Sessions", "list.bullet")
             item(.spots, "Spots", "mappin.and.ellipse")
             recordItem
-            item(.trends, "Trends", "chart.xyaxis.line")
+            item(.tools, "Tools", "wrench.and.screwdriver")
             item(.settings, "Settings", "gearshape")
         }
         .frame(height: rise + barHeight)

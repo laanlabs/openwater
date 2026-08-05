@@ -15,9 +15,31 @@ import SwiftUI
 /// turns "what bearing was the wind" into "point at the picture".
 struct WindSetterView: View {
 
-    let session: Session
+    /// The track drawn inside the dial — empty before a session exists, in
+    /// which case the dial is just a compass, which is still the right tool.
+    let trackPoints: [TrackPoint]
+    /// The wind to pre-fill and to offer a way back to.
+    let reference: Wind?
+    /// What the reference is called on the way-back button — "the estimate"
+    /// for a recorded session, "the forecast" before one.
+    let referenceLabel: String
     /// Degrees the wind comes from, and m/s (nil when the rider skips speed).
     let onApply: (Double, Double?) -> Void
+
+    init(session: Session, onApply: @escaping (Double, Double?) -> Void) {
+        self.trackPoints = session.track.points
+        self.reference = session.effectiveWind
+        self.referenceLabel = "the estimate"
+        self.onApply = onApply
+    }
+
+    init(initialWind: Wind?, referenceLabel: String = "the forecast",
+         onApply: @escaping (Double, Double?) -> Void) {
+        self.trackPoints = []
+        self.reference = initialWind
+        self.referenceLabel = referenceLabel
+        self.onApply = onApply
+    }
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
@@ -26,12 +48,14 @@ struct WindSetterView: View {
     @State private var knots: Double = 0
     @State private var hasDragged = false
 
-    private var estimate: Wind? { session.effectiveWind }
+    private var estimate: Wind? { reference }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
-                Text("Drag the arrow to point the way the wind was blowing across your track.")
+                Text(trackPoints.isEmpty
+                     ? "Drag the arrow to point the way the wind is blowing."
+                     : "Drag the arrow to point the way the wind was blowing across your track.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -53,14 +77,14 @@ struct WindSetterView: View {
 
                 speedRow
 
-                if let estimate, estimate.source.isEstimate {
+                if let estimate {
                     Button {
                         withAnimation(.snappy) {
                             direction = estimate.directionFrom
                             if let s = estimate.speed { knots = s * 1.94384 }
                         }
                     } label: {
-                        Label("Back to the estimate (\(Format.cardinal(estimate.directionFrom)) \(Int(estimate.directionFrom.rounded()))°)",
+                        Label("Back to \(referenceLabel) (\(Format.cardinal(estimate.directionFrom)) \(Int(estimate.directionFrom.rounded()))°)",
                               systemImage: "wand.and.sparkles")
                             .font(.callout)
                     }
@@ -122,9 +146,15 @@ struct WindSetterView: View {
                         .rotationEffect(.degrees(Double(degrees)))
                 }
 
-                trackShape
-                    .stroke(.tint.opacity(0.65), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .frame(width: size * 0.52, height: size * 0.52)
+                if !trackPoints.isEmpty {
+                    trackShape
+                        .stroke(.tint.opacity(0.65), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                        .frame(width: size * 0.52, height: size * 0.52)
+                } else {
+                    Circle()
+                        .fill(.tint.opacity(0.35))
+                        .frame(width: 10, height: 10)
+                }
 
                 // The wind: rides the rim at `direction` and blows through the
                 // middle of the track. One rotated group, so the arrow and its
@@ -175,7 +205,7 @@ struct WindSetterView: View {
     /// up, matching the ring around it.
     private var trackShape: some Shape {
         var thinned: [(Double, Double)] = []
-        let points = session.track.points
+        let points = trackPoints
         let stride = max(1, points.count / 300)
         var i = 0
         while i < points.count {

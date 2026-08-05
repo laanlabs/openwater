@@ -30,6 +30,7 @@ struct RecordTabView: View {
 
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(SessionLibrary.self) private var library
+    @Environment(SpotGuideStore.self) private var guide
     @Environment(AppSettings.self) private var settings
 
     /// The Start button and the live screen's controls are fixed at the bottom,
@@ -54,7 +55,9 @@ struct RecordTabView: View {
     /// Owned here, not by `WeatherCard`, because the card draws nothing until a
     /// reading arrives and SwiftUI will not run a `task` attached to a view that
     /// resolves to `EmptyView`. See the note on `WeatherCard`.
-    @State private var weather = WeatherLookup()
+    @State private var launchWind: WindReading?
+    @State private var launchSpotName: String?
+    @State private var isSettingWind = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -161,13 +164,45 @@ struct RecordTabView: View {
                 .padding(.bottom, tabBarHeight)
         }
         .task(id: WeatherCard.coordinateKey(recorder.location.lastCoordinate)) {
-            await weather.load(for: recorder.location.lastCoordinate)
+            await loadLaunchWind()
         }
+        .sheet(isPresented: $isSettingWind) {
+            WindSetterView(initialWind: recorder.wind ?? launchWind.map(windFromReading)) { direction, speed in
+                recorder.wind = Wind(directionFrom: direction, speed: speed,
+                                     source: .manual, confidence: 1)
+            }
+        }
+    }
+
+    /// The model wind at the launch, named after the nearest guide spot.
+    ///
+    /// Shown before Start and attached to the session as an external reading
+    /// unless the rider adjusts it — in which case their word wins. Either
+    /// way the session starts with a wind instead of hoping the track shape
+    /// gives one up afterwards.
+    private func loadLaunchWind() async {
+        guard recorder.state == .idle, let here = recorder.location.lastCoordinate else { return }
+        await guide.load()
+        launchSpotName = guide.nearestSpot(to: here).flatMap { spot in
+            Geo.distance(here, .init(latitude: spot.latitude, longitude: spot.longitude)) < 3000
+                ? spot.name : nil
+        }
+        guard let reading = await guide.currentWind(at: here) else { return }
+        launchWind = reading
+        // Never overwrite the rider's own setting.
+        if recorder.wind == nil || recorder.wind?.source == .external {
+            recorder.wind = windFromReading(reading)
+        }
+    }
+
+    private func windFromReading(_ reading: WindReading) -> Wind {
+        Wind(directionFrom: reading.directionDeg, speed: reading.speedKn / 1.94384,
+             source: .external, confidence: 0.6)
     }
 
     private var controls: some View {
         VStack(spacing: 10) {
-            WeatherCard(lookup: weather, units: settings.units)
+            windChip
 
             HStack(spacing: 10) {
                 Menu {
@@ -300,6 +335,55 @@ struct RecordTabView: View {
         recorder.start(sport: sport)
     }
 
+    /// The wind this session will start with, and the way to correct it.
+    @ViewBuilder
+    private var windChip: some View {
+        if let wind = recorder.wind {
+            Button {
+                isSettingWind = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down")
+                        .font(.caption.weight(.bold))
+                        .rotationEffect(.degrees(wind.directionFrom))
+                    Text("\(Format.cardinal(wind.directionFrom)) \(Int(wind.directionFrom.rounded()))°"
+                         + (wind.speed.map { " · \(Format.speed($0, unit: settings.units.speed, decimals: 0))" } ?? ""))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    Text(wind.source == .manual ? "set by you"
+                         : "forecast\(launchSpotName.map { " · \($0)" } ?? "")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.tint)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.regularMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        } else if recorder.location.lastCoordinate != nil {
+            Button {
+                isSettingWind = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "wind")
+                    Text("Set the wind")
+                        .font(.subheadline.weight(.medium))
+                    Image(systemName: "pencil.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.tint)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.regularMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func end() {
         // Landing back on an empty Record tab after an hour on the water is the
         // wrong answer to "what did I just do?" — the session opens instead,
@@ -312,5 +396,9 @@ struct RecordTabView: View {
         title = ""
         spot = ""
         showingDetails = false
+        // The next session gets a fresh forecast, not this one's leftovers —
+        // manual or otherwise.
+        recorder.wind = nil
+        launchWind = nil
     }
 }

@@ -20,6 +20,7 @@ struct SpotDetailScreen: View {
     @State private var forecast: [WindForecastHour] = []
     @State private var links: [SpotGuideStore.SpotLink] = []
     @State private var isChoosingMapApp = false
+    @State private var isSuggesting = false
 
     private var reading: WindReading? { guide.wind[spot.spotId] }
     private var isFavorite: Bool { guide.favoriteIds.contains(spot.spotId) }
@@ -58,6 +59,34 @@ struct SpotDetailScreen: View {
                 conditionsCard
                     .padding(.horizontal, 16)
 
+                Button {
+                    isSuggesting = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "camera.badge.ellipsis")
+                            .font(.title3)
+                            .foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Improve this spot")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text("Add photos, fix conditions, link a cam or meter — goes to review.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+
                 miniMap
                     .padding(.horizontal, 16)
 
@@ -92,6 +121,9 @@ struct SpotDetailScreen: View {
                     Image(systemName: "square.and.arrow.up")
                 }
             }
+        }
+        .sheet(isPresented: $isSuggesting) {
+            SuggestSpotView(mode: .correction(spot))
         }
         .confirmationDialog("Open in", isPresented: $isChoosingMapApp, titleVisibility: .visible) {
             Button("Apple Maps") { openInAppleMaps() }

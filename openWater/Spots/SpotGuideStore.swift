@@ -130,9 +130,13 @@ final class SpotGuideStore {
     private static let windTTL: TimeInterval = 10 * 60
 
     // The same public, rules-limited access the website's browser client has.
-    private static let project = "openwaterapp-2e0f7"
-    private static let apiKey = "AIzaSyD_wieknJx9-v_nRuszJrzaNvohfl0gRq8"
-    private static var firestoreBase: String {
+    // Internal, not private: the suggestion client writes through the same
+    // door (create-only, bounded by the rules) and must not grow its own copy
+    // of these to drift out of sync.
+    static let project = "openwaterapp-2e0f7"
+    static let apiKey = "AIzaSyD_wieknJx9-v_nRuszJrzaNvohfl0gRq8"
+    static let storageBucket = "openwaterapp-2e0f7.firebasestorage.app"
+    static var firestoreBase: String {
         "https://firestore.googleapis.com/v1/projects/\(project)/databases/(default)/documents"
     }
 

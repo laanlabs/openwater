@@ -66,6 +66,15 @@ struct ToolsTabView: View {
                     }
                 }
 
+                Section("Spot Guide") {
+                    NavigationLink {
+                        ImproveSpotHubView()
+                    } label: {
+                        toolRow("Add or Fix a Spot", symbol: "camera.badge.ellipsis",
+                                blurb: "Standing at a launch? Photograph it and send it to the guide.")
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         UnitsConverterView()

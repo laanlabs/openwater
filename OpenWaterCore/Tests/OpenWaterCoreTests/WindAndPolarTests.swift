@@ -220,3 +220,68 @@ struct UpwindLegTests {
         #expect(UpwindLegFinder.legs(track: track, wind: wind).isEmpty)
     }
 }
+
+@Suite("Solar")
+struct SolarTests {
+
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        utc.date(from: DateComponents(year: y, month: m, day: d, hour: 12))!
+    }
+
+    @Test("Equator equinox: sun up around 06:00, down around 18:00 local solar time")
+    func equatorEquinox() throws {
+        let day = Solar.day(latitude: 0, longitude: 0, on: date(2026, 3, 20), calendar: utc)
+        let sunrise = try #require(day.sunrise)
+        let sunset = try #require(day.sunset)
+        let f = { (d: Date) -> Double in
+            Double(self.utc.component(.hour, from: d)) + Double(self.utc.component(.minute, from: d)) / 60
+        }
+        #expect(abs(f(sunrise) - 6.0) < 0.3, "sunrise \(f(sunrise))")
+        #expect(abs(f(sunset) - 18.1) < 0.3, "sunset \(f(sunset))")
+    }
+
+    @Test("Hood River midsummer: sunset near 21:00 Pacific, dusk after it")
+    func hoodRiverSolstice() throws {
+        var pacific = Calendar(identifier: .gregorian)
+        pacific.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let noon = pacific.date(from: DateComponents(year: 2026, month: 6, day: 21, hour: 12))!
+        let day = Solar.day(latitude: 45.71, longitude: -121.51, on: noon, calendar: pacific)
+        let sunset = try #require(day.sunset)
+        let dusk = try #require(day.civilDusk)
+        let golden = try #require(day.goldenHourStart)
+        let hour = Double(pacific.component(.hour, from: sunset))
+            + Double(pacific.component(.minute, from: sunset)) / 60
+        #expect(abs(hour - 21.0) < 0.35, "sunset at \(hour)")
+        // The date too — a +24 h error keeps the clock time and passed the
+        // original version of this test while telling riders they had 36
+        // hours of light left.
+        #expect(pacific.component(.day, from: sunset) == 21,
+                "sunset landed on day \(pacific.component(.day, from: sunset))")
+        #expect(dusk > sunset)
+        #expect(golden < sunset)
+        // Golden hour is roughly the last hour of sun at this latitude.
+        #expect(sunset.timeIntervalSince(golden) > 30 * 60)
+        #expect(sunset.timeIntervalSince(golden) < 110 * 60)
+    }
+
+    @Test("Polar night returns nil rather than nonsense")
+    func polarNight() {
+        let day = Solar.day(latitude: 80, longitude: 0, on: date(2026, 12, 21), calendar: utc)
+        #expect(day.sunrise == nil)
+        #expect(day.sunset == nil)
+    }
+
+    @Test("Run alignment: dead down is zero, reaching is ninety")
+    func runAlignment() {
+        // Northerly wind blows toward 180.
+        #expect(Solar.runAlignment(bearing: 180, windFrom: 0) == 0)
+        #expect(abs(Solar.runAlignment(bearing: 150, windFrom: 0) - 30) < 0.001)
+        #expect(abs(Solar.runAlignment(bearing: 90, windFrom: 0) - 90) < 0.001)
+    }
+}

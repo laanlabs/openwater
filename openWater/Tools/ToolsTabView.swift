@@ -15,16 +15,66 @@ struct ToolsTabView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
+                Section("Logistics") {
                     NavigationLink {
                         ShareLocationView()
                     } label: {
-                        toolRow(
-                            "Share My Location",
-                            symbol: "mappin.and.ellipse",
-                            blurb: "Send a pin to your shuttle driver — Apple Maps, Google Maps, WhatsApp."
-                        )
+                        toolRow("Share My Location", symbol: "mappin.and.ellipse",
+                                blurb: "Send a pin to your shuttle driver — Apple Maps, Google Maps, WhatsApp.")
                     }
+                    NavigationLink {
+                        CallOutView()
+                    } label: {
+                        toolRow("Session Call-out", symbol: "megaphone",
+                                blurb: "Spot, wind and a time in one message. Who's in?")
+                    }
+                    NavigationLink {
+                        FloatPlanView()
+                    } label: {
+                        toolRow("Float Plan", symbol: "checkmark.shield",
+                                blurb: "Where you're going and when to worry, sent before you're out of range.")
+                    }
+                    NavigationLink {
+                        ShuttlePlannerView()
+                    } label: {
+                        toolRow("Shuttle Planner", symbol: "car.2",
+                                blurb: "Run distance, and whether today's wind actually points down it.")
+                    }
+                }
+
+                Section("Conditions") {
+                    NavigationLink {
+                        WindHereView()
+                    } label: {
+                        toolRow("Wind Here", symbol: "wind",
+                                blurb: "Model wind and the next 12 hours, at your feet.")
+                    }
+                    NavigationLink {
+                        DaylightView()
+                    } label: {
+                        toolRow("Daylight", symbol: "sunset",
+                                blurb: "Sunset, last usable light, and how long you've got.")
+                    }
+                }
+
+                Section("Instruments") {
+                    NavigationLink {
+                        BigSpeedoView()
+                    } label: {
+                        toolRow("Speedo", symbol: "gauge.with.needle",
+                                blurb: "Just the speed, huge. No recording.")
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        UnitsConverterView()
+                    } label: {
+                        toolRow("Units", symbol: "arrow.left.arrow.right",
+                                blurb: "Knots to everything, both ways.")
+                    }
+                } header: {
+                    Text("Reference")
                 } footer: {
                     Text("Your location is read only while a tool that needs it is open, and leaves this phone only when you tap share.")
                 }

@@ -56,6 +56,11 @@ public final class LocationProvider: NSObject {
     /// they start — the map, and the weather lookup.
     public private(set) var lastCoordinate: Geo.Coordinate?
 
+    /// Most recent Doppler speed, m/s, updated on every fix — recording or
+    /// not, so a live speed readout works without starting a session. `-1`
+    /// until the receiver reports one.
+    public private(set) var lastSpeed: Double = -1
+
     /// Whether the host app declares the `location` background mode.
     nonisolated static let declaresBackgroundLocationMode: Bool = {
         let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
@@ -258,6 +263,9 @@ extension LocationProvider: CLLocationManagerDelegate {
             }
             if let last = points.last, last.hasValidPosition {
                 self.lastCoordinate = last.coordinate
+            }
+            if let speed = points.last?.speed, speed >= 0 {
+                self.lastSpeed = speed
             }
             guard self.isRunning else { return }
             for point in points { self.onFix?(point) }

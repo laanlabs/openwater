@@ -164,6 +164,28 @@ final class SpotGuideStore {
         spots.filter { $0.countryId == region.id }
     }
 
+    /// The closest launch in the guide — what a call-out means by "here".
+    func nearestSpot(to coordinate: Geo.Coordinate) -> GuideSpot? {
+        spots.min { a, b in
+            Geo.distance(coordinate, .init(latitude: a.latitude, longitude: a.longitude)) <
+            Geo.distance(coordinate, .init(latitude: b.latitude, longitude: b.longitude))
+        }
+    }
+
+    /// Current model wind at an arbitrary coordinate — the tools' entry
+    /// point. Same feed, cache and honesty rules as the spot pins; cached
+    /// under a synthetic key derived from the rounded coordinate.
+    func currentWind(at coordinate: Geo.Coordinate) async -> WindReading? {
+        let key = String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)
+        if let cached = wind[key], Date().timeIntervalSince(cached.at) < Self.windTTL {
+            return cached
+        }
+        let reading = await Self.fetchCurrentWind(
+            latitude: coordinate.latitude, longitude: coordinate.longitude)
+        if let reading { wind[key] = reading }
+        return reading
+    }
+
     // MARK: Loading
 
     /// Load from disk immediately, refresh from Firestore when stale.
@@ -253,12 +275,44 @@ final class SpotGuideStore {
         }
     }
 
-    /// The 12-hour outlook for one spot, for the detail screen's bars.
-    func forecast(for spot: GuideSpot) async -> [WindForecastHour] {
+    private static func fetchCurrentWind(latitude: Double, longitude: Double) async -> WindReading? {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
-            .init(name: "latitude", value: String(format: "%.4f", spot.latitude)),
-            .init(name: "longitude", value: String(format: "%.4f", spot.longitude)),
+            .init(name: "latitude", value: String(format: "%.4f", latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", longitude)),
+            .init(name: "current", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
+            .init(name: "wind_speed_unit", value: "kn"),
+        ]
+        struct Payload: Codable {
+            struct Current: Codable {
+                let wind_speed_10m: Double?
+                let wind_gusts_10m: Double?
+                let wind_direction_10m: Double?
+            }
+            let current: Current?
+        }
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let current = (try? JSONDecoder().decode(Payload.self, from: data))?.current,
+              let speed = current.wind_speed_10m,
+              let direction = current.wind_direction_10m
+        else { return nil }
+        return WindReading(speedKn: speed, gustKn: current.wind_gusts_10m,
+                           directionDeg: direction, at: Date())
+    }
+
+    /// The 12-hour outlook for one spot, for the detail screen's bars.
+    func forecast(for spot: GuideSpot) async -> [WindForecastHour] {
+        await forecast(latitude: spot.latitude, longitude: spot.longitude)
+    }
+
+    /// The same outlook at an arbitrary coordinate, for the tools.
+    func forecast(latitude: Double, longitude: Double) async -> [WindForecastHour] {
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", longitude)),
             .init(name: "hourly", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
             .init(name: "forecast_hours", value: "12"),
             .init(name: "wind_speed_unit", value: "kn"),

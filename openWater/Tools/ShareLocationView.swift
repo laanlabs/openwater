@@ -17,10 +17,6 @@ struct ShareLocationView: View {
 
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
-
-    @State private var copied = false
-
     private var coordinate: Geo.Coordinate? { recorder.location.lastCoordinate }
     private var accuracy: Double { recorder.location.latestAccuracy }
 
@@ -53,18 +49,7 @@ struct ShareLocationView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Share My Location")
         .navigationBarTitleDisplayMode(.inline)
-        // The same lifecycle discipline as the Record tab: the receiver runs
-        // while the rider is looking, and stops the moment they are not.
-        .onAppear {
-            recorder.location.requestAuthorization()
-            recorder.warmUpSensors()
-        }
-        .onDisappear {
-            recorder.stopWarmUp()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { recorder.warmUpSensors() }
-        }
+        .toolLocation(recorder)
     }
 
     // MARK: - Pieces
@@ -112,44 +97,8 @@ struct ShareLocationView: View {
             // Direct lines for the two apps shuttle logistics actually happen
             // in, for anyone who finds the sheet a step too many with wet
             // hands.
-            HStack(spacing: 10) {
-                quickButton("WhatsApp", symbol: "bubble.left.and.bubble.right") {
-                    if let encoded = message(coordinate).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                       let url = URL(string: "https://wa.me/?text=\(encoded)") {
-                        openURL(url)
-                    }
-                }
-                quickButton("Messages", symbol: "message") {
-                    if let encoded = message(coordinate).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                       let url = URL(string: "sms:?&body=\(encoded)") {
-                        openURL(url)
-                    }
-                }
-                quickButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc") {
-                    UIPasteboard.general.string = coordinateText(coordinate)
-                    withAnimation(.snappy) { copied = true }
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        withAnimation(.snappy) { copied = false }
-                    }
-                }
-            }
+            QuickShareButtons(message: message(coordinate))
         }
-    }
-
-    private func quickButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(.body)
-                Text(title)
-                    .font(.caption.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 58)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
     }
 
     private var waitingState: some View {
@@ -179,11 +128,7 @@ struct ShareLocationView: View {
     /// The message a shuttle driver can actually use: a link for whichever
     /// maps app they have, and the raw numbers for when they have neither.
     private func message(_ c: Geo.Coordinate) -> String {
-        let lat = String(format: "%.5f", c.latitude)
-        let lon = String(format: "%.5f", c.longitude)
-        var text = "My location: https://maps.apple.com/?ll=\(lat),\(lon)&q=Pickup"
-        text += " · Google Maps: https://maps.google.com/?q=\(lat),\(lon)"
-        text += " · \(lat), \(lon)"
+        var text = "My location: " + ToolKit.mapsLinks(for: c)
         if accuracy >= 0 { text += " (±\(Int(accuracy.rounded())) m)" }
         return text
     }

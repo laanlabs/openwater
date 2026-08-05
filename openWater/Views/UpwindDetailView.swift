@@ -28,6 +28,7 @@ struct UpwindDetailView: View {
     @State private var samples: [(elapsed: TimeInterval, vmg: Double)] = []
     @State private var isSettingWind = false
     @State private var isRecomputing = false
+    @State private var isMapFullScreen = false
 
     init(session: Session, summary: SessionSummary, polar: PolarAnalysis) {
         _session = State(initialValue: session)
@@ -47,6 +48,20 @@ struct UpwindDetailView: View {
                 map
                     .frame(height: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(alignment: .bottomTrailing) {
+                        Button {
+                            isMapFullScreen = true
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 36, height: 36)
+                                .background(.regularMaterial, in: Circle())
+                                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(10)
+                        .accessibilityLabel("Expand map")
+                    }
 
                 if legs.isEmpty {
                     ContentUnavailableView(
@@ -79,6 +94,25 @@ struct UpwindDetailView: View {
             WindSetterView(session: session) { direction, speed in
                 applyWind(direction: direction, speed: speed)
             }
+        }
+        .fullScreenCover(isPresented: $isMapFullScreen) {
+            // The same map, selection and all — a leg chosen in either place
+            // is chosen in both.
+            map
+                .ignoresSafeArea()
+                .overlay(alignment: .topLeading) {
+                    Button {
+                        isMapFullScreen = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline)
+                            .frame(width: 44, height: 44)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 16)
+                    .padding(.top, 8)
+                }
         }
     }
 
@@ -167,6 +201,25 @@ struct UpwindDetailView: View {
         }
         .mapStyle(settings.mapStyle.mapStyle)
         .overlay(alignment: .topTrailing) { windBadge }
+        .overlay(alignment: .bottomLeading) {
+            // The counterpart of choosing a leg: everything else dims when one
+            // is selected, so putting it back cannot depend on the rider
+            // re-finding an 18-point dot they may have tapped by accident.
+            if selectedLeg != nil {
+                Button {
+                    withAnimation(.snappy) { selectedLeg = nil }
+                } label: {
+                    Label("Show all legs", systemImage: "xmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.regularMaterial, in: Capsule())
+                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(10)
+            }
+        }
         .overlay {
             if isRecomputing {
                 ZStack {

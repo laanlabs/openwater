@@ -52,10 +52,10 @@ struct SpotDetailScreen: View {
                 windCard
                     .padding(.horizontal, 16)
 
-                conditionsCard
+                linksCard
                     .padding(.horizontal, 16)
 
-                linksCard
+                conditionsCard
                     .padding(.horizontal, 16)
 
                 miniMap

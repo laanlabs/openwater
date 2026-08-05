@@ -22,6 +22,7 @@ struct SpotsTabView: View {
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var path: [SpotsRoute] = []
     @State private var isSearching = false
+    @State private var controlsExpanded = false
     @State private var panelMode: PanelMode = .nearby
     @State private var panelDetent: PanelDetent = .peek
     @State private var panelDrag: CGFloat = 0
@@ -154,48 +155,79 @@ struct SpotsTabView: View {
 
     // MARK: - Floating chrome
 
+    /// Collapsed by default — the map is the point, and a permanent search
+    /// bar plus a chip row was a hat brim across the top of it. One icon
+    /// expands into the bar and the filters; a dot on the icon says a filter
+    /// is quietly shaping what the map shows, because a hidden active filter
+    /// is how "where did all the spots go" tickets get written.
     private var floatingControls: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                Button { isSearching = true } label: {
-                    HStack(spacing: 9) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        Text("Search spots, places")
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(height: 44)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    withAnimation(.snappy) { camera = .userLocation(fallback: .automatic) }
-                } label: {
-                    Image(systemName: "location.fill")
-                        .frame(width: 44, height: 44)
+            if controlsExpanded {
+                HStack(spacing: 10) {
+                    Button { isSearching = true } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                            Text("Search spots, places")
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(height: 44)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
                         .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
-                }
-                .buttonStyle(.plain)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(majorDisciplines, id: \.self) { discipline in
-                        chip(shortLabel(discipline), isOn: disciplineFilter == discipline) {
-                            disciplineFilter = disciplineFilter == discipline ? nil : discipline
-                        }
                     }
-                    chip("15kn+", isOn: firingOnly) { firingOnly.toggle() }
+                    .buttonStyle(.plain)
+
+                    squareButton("xmark") {
+                        withAnimation(.snappy) { controlsExpanded = false }
+                    }
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(majorDisciplines, id: \.self) { discipline in
+                            chip(shortLabel(discipline), isOn: disciplineFilter == discipline) {
+                                disciplineFilter = disciplineFilter == discipline ? nil : discipline
+                            }
+                        }
+                        chip("15kn+", isOn: firingOnly) { firingOnly.toggle() }
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Spacer()
+                    squareButton("magnifyingglass", showsBadge: hasActiveFilter) {
+                        withAnimation(.snappy) { controlsExpanded = true }
+                    }
+                    squareButton("location.fill") {
+                        withAnimation(.snappy) { camera = .userLocation(fallback: .automatic) }
+                    }
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+
+    private var hasActiveFilter: Bool { disciplineFilter != nil || firingOnly }
+
+    private func squareButton(_ symbol: String, showsBadge: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+                .overlay(alignment: .topTrailing) {
+                    if showsBadge {
+                        Circle()
+                            .fill(.tint)
+                            .frame(width: 9, height: 9)
+                            .offset(x: -5, y: 5)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
     }
 
     /// The disciplines that earn a chip — same rule as the website: only ones

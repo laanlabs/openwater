@@ -40,11 +40,22 @@ struct GuideSpot: Identifiable, Codable, Hashable {
     let imageURL: String?
     let imageCredit: String?
 
-    let windStationCount: Int
-    let cameraCount: Int
-    let guideCount: Int
-    let surfCount: Int
-    let tideCount: Int
+    let windStationIds: [String]
+    let cameraIds: [String]
+    let guideIds: [String]
+    let surfSpotIds: [String]
+    let tideStationIds: [String]
+
+    /// The nearest-tide-station match embedded on the spot itself — the
+    /// fallback when no tideStations documents are linked.
+    let tideChartURL: String?
+    let tideProvider: String?
+
+    var windStationCount: Int { windStationIds.count }
+    var cameraCount: Int { cameraIds.count }
+    var guideCount: Int { guideIds.count }
+    var surfCount: Int { surfSpotIds.count }
+    var tideCount: Int { max(tideStationIds.count, tideChartURL != nil ? 1 : 0) }
 
     var id: String { spotId }
 
@@ -277,6 +288,138 @@ final class SpotGuideStore {
                 gustKn: hourly.wind_gusts_10m?[safe: i] ?? nil,
                 directionDeg: direction
             )
+        }
+    }
+
+    // MARK: Resource links
+
+    /// One outbound link on a spot page — a wind meter on iKitesurf, a
+    /// Surfline forecast, a tide chart, a webcam, a local guide. The guide's
+    /// whole pitch is that these live in one place instead of five apps.
+    struct SpotLink: Identifiable, Hashable {
+        enum Kind: String {
+            case wind, camera, tide, surf, guide
+
+            var label: String {
+                switch self {
+                case .wind: "Live wind"
+                case .camera: "Webcam"
+                case .tide: "Tides"
+                case .surf: "Surf forecast"
+                case .guide: "Guide"
+                }
+            }
+
+            var symbol: String {
+                switch self {
+                case .wind: "gauge.with.needle"
+                case .camera: "video"
+                case .tide: "water.waves.and.arrow.trianglehead.up"
+                case .surf: "figure.surfing"
+                case .guide: "book"
+                }
+            }
+        }
+
+        let kind: Kind
+        let name: String
+        let url: URL
+        let provider: String?
+        var id: String { url.absoluteString + name }
+
+        var providerLabel: String {
+            provider ?? url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
+        }
+    }
+
+    private var linkCache: [String: [SpotLink]] = [:]
+
+    /// Everything this spot links out to, fetched once and kept for the session.
+    func links(for spot: GuideSpot) async -> [SpotLink] {
+        if let cached = linkCache[spot.spotId] { return cached }
+
+        let main: [(String, [String], SpotLink.Kind)] = [
+            ("windStations", spot.windStationIds, .wind),
+            ("cameras", spot.cameraIds, .camera),
+            ("surfSpots", spot.surfSpotIds, .surf),
+            ("guides", spot.guideIds, .guide),
+        ]
+        let mainPaths = main.flatMap { collection, ids, _ in ids.map { "\(collection)/\($0)" } }
+        let kindByPrefix: [String: SpotLink.Kind] = [
+            "windStations": .wind, "cameras": .camera, "surfSpots": .surf,
+            "guides": .guide, "tideStations": .tide,
+        ]
+
+        // Tides go in their own batch — batchGet fails WHOLE when any one
+        // document is unreadable, and an undeployed tideStations rule must
+        // not take the wind meters and webcams down with it. The website
+        // learned this the hard way; no need to learn it twice.
+        async let mainDocs = Self.batchGet(paths: mainPaths)
+        async let tideDocs = Self.batchGet(paths: spot.tideStationIds.map { "tideStations/\($0)" })
+        let (fetchedMain, fetchedTides) = await (mainDocs, tideDocs)
+
+        var links: [SpotLink] = []
+        for doc in fetchedMain + fetchedTides {
+            guard let collection = doc.path.split(separator: "/").first.map(String.init),
+                  let kind = kindByPrefix[collection],
+                  let urlString = doc.fields["url"]?.stringValue,
+                  urlString.hasPrefix("http"),
+                  let url = URL(string: urlString)
+            else { continue }
+            links.append(SpotLink(
+                kind: kind,
+                name: doc.fields["name"]?.stringValue ?? kind.label,
+                url: url,
+                provider: doc.fields["provider"]?.stringValue
+            ))
+        }
+
+        // Inline tide fallback, exactly as the site does it.
+        if !links.contains(where: { $0.kind == .tide }),
+           let chart = spot.tideChartURL, let url = URL(string: chart), chart.hasPrefix("http") {
+            links.append(SpotLink(kind: .tide, name: "Tide predictions", url: url,
+                                  provider: spot.tideProvider ?? "NOAA CO-OPS"))
+        }
+
+        let order: [SpotLink.Kind] = [.wind, .camera, .tide, .surf, .guide]
+        links.sort {
+            (order.firstIndex(of: $0.kind) ?? 9) < (order.firstIndex(of: $1.kind) ?? 9)
+        }
+        linkCache[spot.spotId] = links
+        return links
+    }
+
+    private struct BatchDoc {
+        let path: String
+        let fields: [String: FirestoreValue]
+    }
+
+    private static func batchGet(paths: [String]) async -> [BatchDoc] {
+        guard !paths.isEmpty else { return [] }
+        let base = firestoreBase.replacingOccurrences(of: "/documents", with: "")
+        guard let url = URL(string: "\(base)/documents:batchGet?key=\(apiKey)") else { return [] }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let full = paths.map { "projects/\(project)/databases/(default)/documents/\($0)" }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["documents": full])
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
+
+        struct Row: Codable {
+            struct Found: Codable {
+                let name: String
+                let fields: [String: FirestoreValue]?
+            }
+            let found: Found?
+        }
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return [] }
+        return rows.compactMap { row in
+            guard let found = row.found,
+                  let path = found.name.components(separatedBy: "/documents/").last
+            else { return nil }
+            return BatchDoc(path: path, fields: found.fields ?? [:])
         }
     }
 
@@ -522,11 +665,13 @@ final class SpotGuideStore {
             googleMapsURL: access?["googleMapsUrl"]?.stringValue,
             imageURL: imageURL,
             imageCredit: imageCredit,
-            windStationCount: f["windStationIds"]?.strings.count ?? 0,
-            cameraCount: f["cameraIds"]?.strings.count ?? 0,
-            guideCount: f["guideIds"]?.strings.count ?? 0,
-            surfCount: f["surfSpotIds"]?.strings.count ?? 0,
-            tideCount: f["tideStationIds"]?.strings.count ?? 0
+            windStationIds: f["windStationIds"]?.strings ?? [],
+            cameraIds: f["cameraIds"]?.strings ?? [],
+            guideIds: f["guideIds"]?.strings ?? [],
+            surfSpotIds: f["surfSpotIds"]?.strings ?? [],
+            tideStationIds: f["tideStationIds"]?.strings ?? [],
+            tideChartURL: f["tides"]?["chartUrl"]?.stringValue,
+            tideProvider: f["tides"]?["provider"]?.stringValue
         )
     }
 

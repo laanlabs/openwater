@@ -18,6 +18,7 @@ struct SpotDetailScreen: View {
     @Environment(\.openURL) private var openURL
 
     @State private var forecast: [WindForecastHour] = []
+    @State private var links: [SpotGuideStore.SpotLink] = []
 
     private var reading: WindReading? { guide.wind[spot.spotId] }
     private var isFavorite: Bool { guide.favoriteIds.contains(spot.spotId) }
@@ -67,6 +68,9 @@ struct SpotDetailScreen: View {
                 conditionsCard
                     .padding(.horizontal, 16)
 
+                linksCard
+                    .padding(.horizontal, 16)
+
                 miniMap
                     .padding(.horizontal, 16)
 
@@ -92,7 +96,9 @@ struct SpotDetailScreen: View {
         }
         .task {
             await guide.refreshWind(for: [spot])
-            forecast = await guide.forecast(for: spot)
+            async let hours = guide.forecast(for: spot)
+            async let resources = guide.links(for: spot)
+            (forecast, links) = await (hours, resources)
         }
     }
 
@@ -280,24 +286,63 @@ struct SpotDetailScreen: View {
         }
     }
 
+    /// Every outbound link in one card: the iKitesurf meter, the Surfline
+    /// forecast, the tide chart, the cams, the local guides. Riders already
+    /// have their forecast apps; the job here is not to replace them but to
+    /// stop the five-app scavenger hunt before a session.
     @ViewBuilder
-    private var resourcesFooter: some View {
-        if spot.resourceCount > 0 {
-            HStack(spacing: 10) {
-                Text(resourceLine)
-                    .font(.caption)
+    private var linksCard: some View {
+        if !links.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("FORECASTS, CAMS & GUIDES")
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Link("Full guide", destination: webURL)
-                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 2)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
+                        Link(destination: link.url) {
+                            HStack(spacing: 12) {
+                                Image(systemName: link.kind.symbol)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.tint)
+                                    .frame(width: 30, height: 30)
+                                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(link.name)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text("\(link.kind.label) · \(link.providerLabel)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.forward")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                        }
+                        if index < links.count - 1 {
+                            Divider().padding(.leading, 54)
+                        }
+                    }
+                }
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
             }
-        } else {
-            HStack {
-                Spacer()
-                Link("Full guide on openwaterapp.com", destination: webURL)
-                    .font(.caption.weight(.semibold))
-                Spacer()
-            }
+        }
+    }
+
+    private var resourcesFooter: some View {
+        HStack {
+            Spacer()
+            Link("Full guide on openwaterapp.com", destination: webURL)
+                .font(.caption.weight(.semibold))
+            Spacer()
         }
     }
 

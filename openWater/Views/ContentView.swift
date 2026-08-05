@@ -42,7 +42,7 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             ZStack {
                 page(.sessions) { SessionListView(reset: sessionsTabReset) }
-                page(.records) { RecordsView() }
+                page(.spots) { SpotsTabView() }
                 page(.record) {
                     RecordTabView(isActive: selection == .record, reset: recordTabReset)
                 }
@@ -72,6 +72,11 @@ struct ContentView: View {
                     if tab == .sessions { sessionsTabReset += 1 }
                 }
             )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openWaterSwitchToRecord)) { _ in
+            visited.insert(.record)
+            recordTabReset += 1
+            withAnimation(.snappy(duration: 0.18)) { selection = .record }
         }
         // Published for the screens that cannot use the safe-area inset.
         //
@@ -155,7 +160,7 @@ struct OpenWaterTabBar: View {
         // responding to taps on its top half.
         HStack(spacing: 0) {
             item(.sessions, "Sessions", "list.bullet")
-            item(.records, "Bests", "trophy")
+            item(.spots, "Spots", "mappin.and.ellipse")
             recordItem
             item(.trends, "Trends", "chart.xyaxis.line")
             item(.settings, "Settings", "gearshape")

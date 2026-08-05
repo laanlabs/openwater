@@ -56,6 +56,8 @@ struct SessionListView: View {
     /// rider says so, and the prompt names what will go.
     @State private var pendingDeletion: [StoredSession] = []
     @State private var showingTrash = false
+    @State private var showingBests = false
+    @State private var showingTrends = false
     @State private var showingBulkExport = false
 
     /// Room to leave at the bottom for the floating tab bar. Applied as a
@@ -186,6 +188,8 @@ struct SessionListView: View {
                 // mean, and re-picking it inside the sheet would be busywork.
                 BulkExportView(sessions: filtered)
             }
+            .sheet(isPresented: $showingBests) { RecordsView() }
+            .sheet(isPresented: $showingTrends) { TrendsView() }
             .sheet(isPresented: $showingTrash) {
                 NavigationStack {
                     RecentlyDeletedView(sessions: trashed)
@@ -219,6 +223,13 @@ struct SessionListView: View {
     private var list: some View {
         List {
             Section {
+                HStack(spacing: 10) {
+                    quickLink("Bests", symbol: "trophy") { showingBests = true }
+                    quickLink("Trends", symbol: "chart.xyaxis.line") { showingTrends = true }
+                }
+                .modifier(PlainRow())
+                .padding(.bottom, 6)
+
                 LibraryStatsCard(sessions: filtered, period: period)
                     .modifier(PlainRow())
 
@@ -268,6 +279,27 @@ struct SessionListView: View {
         .scrollContentBackground(.hidden)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
+    }
+
+    private func quickLink(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .foregroundStyle(.tint)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// A `List` row that looks like it was never in a list.

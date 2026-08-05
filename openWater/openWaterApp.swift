@@ -11,6 +11,7 @@ struct openWaterApp: App {
     @State private var settings = AppSettings()
     @State private var recorder = PhoneRecorder()
     @State private var countdown = RaceCountdown()
+    @State private var spotGuide = SpotGuideStore()
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -42,6 +43,7 @@ struct openWaterApp: App {
                 .environment(settings)
                 .environment(recorder)
                 .environment(countdown)
+                .environment(spotGuide)
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
                     library.purgeExpiredTrash()

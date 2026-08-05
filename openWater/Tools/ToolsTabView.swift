@@ -11,6 +11,7 @@ import SwiftUI
 struct ToolsTabView: View {
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -76,7 +77,13 @@ struct ToolsTabView: View {
                 }
 
                 Section("Find Used Gear") {
-                    Link(destination: URL(string: "https://usedwatersports.com/")!) {
+                    // A Button, not a `Link`: Link tints its entire label and
+                    // wins against explicit foreground styles on the children,
+                    // which turned this whole row orange. The arrow and icon
+                    // carry the "external" signal; the text stays readable.
+                    Button {
+                        openURL(URL(string: "https://usedwatersports.com/")!)
+                    } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "cart")
                                 .font(.title3)
@@ -97,7 +104,9 @@ struct ToolsTabView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, 4)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
 
                 Section {

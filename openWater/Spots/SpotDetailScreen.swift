@@ -347,7 +347,11 @@ struct SpotDetailScreen: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, link in
-                        Link(destination: link.url) {
+                        // Button + openURL rather than `Link`, which tints the
+                        // whole label orange over the children's own styles.
+                        Button {
+                            openURL(link.url)
+                        } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: link.kind.symbol)
                                     .font(.subheadline)
@@ -373,6 +377,7 @@ struct SpotDetailScreen: View {
                             .padding(.vertical, 9)
                             .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         if index < items.count - 1 {
                             Divider().padding(.leading, 54)
                         }

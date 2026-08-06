@@ -71,6 +71,11 @@ final class PhoneRecorder {
         set { engine.wind = newValue }
     }
 
+    var swellHeight: Double? {
+        get { engine.swellHeight }
+        set { engine.swellHeight = newValue }
+    }
+
     var allTimeBests: [SpeedCategory: Double] {
         get { engine.allTimeBests }
         set { engine.allTimeBests = newValue }

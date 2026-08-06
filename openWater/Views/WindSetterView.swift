@@ -23,21 +23,32 @@ struct WindSetterView: View {
     /// What the reference is called on the way-back button — "the estimate"
     /// for a recorded session, "the forecast" before one.
     let referenceLabel: String
-    /// Degrees the wind comes from, and m/s (nil when the rider skips speed).
-    let onApply: (Double, Double?) -> Void
+    /// Swell to pre-fill, metres. Nil means this caller does not deal in
+    /// swell and the row stays off — the record screen is asking "what is it
+    /// doing", the session screens are asking "what was it like".
+    let initialSwell: Double?
+    let showsSwell: Bool
+    /// Degrees the wind comes from, m/s (nil when the rider skips speed), and
+    /// swell in metres (nil when not offered or left at zero).
+    let onApply: (Double, Double?, Double?) -> Void
 
-    init(session: Session, onApply: @escaping (Double, Double?) -> Void) {
+    init(session: Session, onApply: @escaping (Double, Double?, Double?) -> Void) {
         self.trackPoints = session.track.points
         self.reference = session.effectiveWind
         self.referenceLabel = "the estimate"
+        self.initialSwell = session.swellHeight
+        self.showsSwell = true
         self.onApply = onApply
     }
 
-    init(initialWind: Wind?, referenceLabel: String = "the forecast",
-         onApply: @escaping (Double, Double?) -> Void) {
+    init(initialWind: Wind?, initialSwell: Double? = nil,
+         showsSwell: Bool = false, referenceLabel: String = "the forecast",
+         onApply: @escaping (Double, Double?, Double?) -> Void) {
         self.trackPoints = []
         self.reference = initialWind
         self.referenceLabel = referenceLabel
+        self.initialSwell = initialSwell
+        self.showsSwell = showsSwell
         self.onApply = onApply
     }
 
@@ -46,13 +57,14 @@ struct WindSetterView: View {
 
     @State private var direction: Double = 0
     @State private var knots: Double = 0
+    @State private var swell: Double = 0
     @State private var hasDragged = false
 
     private var estimate: Wind? { reference }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 Text(trackPoints.isEmpty
                      ? "Drag the arrow to point the way the wind is blowing."
                      : "Drag the arrow to point the way the wind was blowing across your track.")
@@ -77,6 +89,8 @@ struct WindSetterView: View {
 
                 speedRow
 
+                if showsSwell { swellRow }
+
                 if let estimate {
                     Button {
                         withAnimation(.snappy) {
@@ -93,7 +107,7 @@ struct WindSetterView: View {
                 Spacer(minLength: 0)
             }
             .padding(.top, 12)
-            .navigationTitle("Set the Wind")
+            .navigationTitle(showsSwell ? "Conditions" : "Set the Wind")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -101,7 +115,9 @@ struct WindSetterView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onApply(direction, knots > 0.5 ? knots / 1.94384 : nil)
+                        onApply(direction,
+                                knots > 0.5 ? knots / 1.94384 : nil,
+                                showsSwell && swell > 0.05 ? swell : nil)
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -112,6 +128,7 @@ struct WindSetterView: View {
                     direction = estimate.directionFrom
                     if let s = estimate.speed { knots = s * 1.94384 }
                 }
+                if let initialSwell { swell = initialSwell }
             }
         }
         .presentationDetents([.large])
@@ -252,6 +269,40 @@ extension WindSetterView {
 
     // MARK: - Speed
 
+    /// What the water was doing, in the rider's own units.
+    ///
+    /// Nobody measures this and nothing can infer it — a rider calls it from
+    /// memory, the same way they would over a beer. Which is exactly why it
+    /// belongs next to the wind: on a downwinder it is the number that
+    /// explains the session.
+    private var swellRow: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("Swell")
+                    .font(.subheadline)
+                Spacer()
+                Text(swell > 0.05 ? swellText : "not set")
+                    .font(.subheadline.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(swell > 0.05 ? .primary : .secondary)
+            }
+            SwellWaveGraphic(metres: swell, maximum: 4)
+                .frame(height: 64)
+            Slider(value: $swell, in: 0...4, step: 0.1)
+            Text("Your call, not a measurement — nothing on the phone can see a wave.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private var swellText: String {
+        settings.units.distance == .imperial
+            ? String(format: "%.1f ft", swell * 3.28084)
+            : String(format: "%.1f m", swell)
+    }
+
     private var speedRow: some View {
         VStack(spacing: 4) {
             HStack {
@@ -270,5 +321,83 @@ extension WindSetterView {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 24)
+    }
+}
+
+
+/// Swell as a wave that grows with the slider.
+///
+/// A number in metres means little to most riders — "waist, chest, head" is
+/// how the size of a day actually gets described, so the graphic carries a
+/// head-high line and the wave climbs past it. It is a feel, not a
+/// measurement, and it should look like one.
+struct SwellWaveGraphic: View {
+
+    let metres: Double
+    let maximum: Double
+
+    /// Where a person's height sits on this scale.
+    private let headHigh: Double = 1.8
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let baseline = height - 2
+            let usable = height - 6
+            // Wave height is trough to crest, so the surface oscillates about
+            // a line half a wave up and the trough just kisses the baseline.
+            // Centring it *on* the baseline instead sent the trough clean off
+            // the bottom of the frame at four metres.
+            let waveHeight = usable * min(1, metres / maximum)
+            let amplitude = waveHeight / 2
+            let centre = baseline - amplitude
+
+            ZStack(alignment: .topLeading) {
+                wave(width: width, centre: centre, baseline: baseline,
+                     amplitude: amplitude, phase: 0)
+                    .fill(.tint.opacity(0.25))
+                wave(width: width, centre: centre, baseline: baseline,
+                     amplitude: amplitude, phase: 0)
+                    .stroke(.tint, lineWidth: 2)
+                wave(width: width, centre: centre, baseline: baseline,
+                     amplitude: amplitude * 0.5, phase: .pi / 1.5)
+                    .stroke(.tint.opacity(0.4), lineWidth: 1.5)
+
+                // The reference sits over the water, not under it, so it stays
+                // readable once the swell is bigger than a person.
+                let headY = baseline - usable * (headHigh / maximum)
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: headY))
+                    path.addLine(to: CGPoint(x: width, y: headY))
+                }
+                .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(.secondary.opacity(0.55))
+
+                Text("head high")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 3)
+                    .background(Color(.systemBackground).opacity(0.75), in: Capsule())
+                    .offset(x: 2, y: max(0, headY - 11))
+            }
+            .clipped()
+            .animation(.snappy, value: metres)
+        }
+    }
+
+    /// A sine surface closed to the baseline so it can be filled.
+    private func wave(width: CGFloat, centre: CGFloat, baseline: CGFloat,
+                      amplitude: CGFloat, phase: Double) -> Path {
+        var path = Path()
+        let wavelength = width / 1.7
+        path.move(to: CGPoint(x: 0, y: baseline))
+        for x in stride(from: 0.0, through: Double(width), by: 2) {
+            let y = centre - amplitude * CGFloat(sin(x / Double(wavelength) * 2 * .pi + phase))
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+        path.addLine(to: CGPoint(x: width, y: baseline))
+        path.closeSubpath()
+        return path
     }
 }

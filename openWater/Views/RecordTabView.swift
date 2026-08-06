@@ -167,9 +167,12 @@ struct RecordTabView: View {
             await loadLaunchWind()
         }
         .sheet(isPresented: $isSettingWind) {
-            WindSetterView(initialWind: recorder.wind ?? launchWind.map(windFromReading)) { direction, speed in
+            WindSetterView(initialWind: recorder.wind ?? launchWind.map(windFromReading),
+                           initialSwell: recorder.swellHeight,
+                           showsSwell: true) { direction, speed, swell in
                 recorder.wind = Wind(directionFrom: direction, speed: speed,
                                      source: .manual, confidence: 1)
+                recorder.swellHeight = swell
             }
         }
     }
@@ -399,6 +402,7 @@ struct RecordTabView: View {
         // The next session gets a fresh forecast, not this one's leftovers —
         // manual or otherwise.
         recorder.wind = nil
+        recorder.swellHeight = nil
         launchWind = nil
     }
 }

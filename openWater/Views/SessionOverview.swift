@@ -193,6 +193,16 @@ struct SessionOverview: View {
                         Text("Set the wind")
                             .font(.subheadline)
                     }
+                    if let swell = session.swellHeight, swell > 0.05 {
+                        Text(settings.units.distance == .imperial
+                             ? String(format: "%.1f ft swell", swell * 3.28084)
+                             : String(format: "%.1f m swell", swell))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                    }
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)

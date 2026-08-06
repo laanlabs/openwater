@@ -219,8 +219,8 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isSettingWind) {
             if let session {
-                WindSetterView(session: session) { direction, speed in
-                    applyWind(direction: direction, speed: speed, to: session)
+                WindSetterView(session: session) { direction, speed, swell in
+                    applyWind(direction: direction, speed: speed, swell: swell, to: session)
                 }
             }
         }
@@ -278,7 +278,7 @@ struct SessionDetailView: View {
     /// A manual wind, straight from the dial. Goes through `Edits` so the
     /// reanalysis rule lives in exactly one place.
     @MainActor
-    private func applyWind(direction: Double, speed: Double?, to session: Session) {
+    private func applyWind(direction: Double, speed: Double?, swell: Double?, to session: Session) {
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
         Task {
@@ -286,6 +286,7 @@ struct SessionDetailView: View {
                 var edits = Session.Edits(session: session)
                 edits.windDirection = direction
                 edits.windSpeed = speed
+                edits.swellHeight = swell
                 return session.applying(edits, categories: categories, overrides: overrides)
             }.value
             library.save(edited)
@@ -390,7 +391,8 @@ struct SessionDetailView: View {
             selectedRun: $selectedRun,
             onFullScreen: { isMapFullScreen = true },
             onReplay: { isPlayingBack = true },
-            onTrim: { trim, asNew in applyTrim(trim, to: session, asNewActivity: asNew) }
+            onTrim: { trim, asNew in applyTrim(trim, to: session, asNewActivity: asNew) },
+            onEditConditions: { isSettingWind = true }
         )
     }
 

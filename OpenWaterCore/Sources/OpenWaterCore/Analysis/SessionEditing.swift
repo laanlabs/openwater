@@ -35,6 +35,8 @@ extension Session {
         public var windDirection: Double?
         /// Wind speed in m/s, if known. Never inferred from a track.
         public var windSpeed: Double?
+        /// Swell height in metres, if the rider called it.
+        public var swellHeight: Double?
 
         public init(
             sport: Sport,
@@ -45,7 +47,8 @@ extension Session {
             feeling: Int? = nil,
             foilTakeoffSpeed: Double? = nil,
             windDirection: Double? = nil,
-            windSpeed: Double? = nil
+            windSpeed: Double? = nil,
+            swellHeight: Double? = nil
         ) {
             self.sport = sport
             self.title = title
@@ -56,6 +59,7 @@ extension Session {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.windDirection = windDirection
             self.windSpeed = windSpeed
+            self.swellHeight = swellHeight
         }
 
         public init(session: Session) {
@@ -73,6 +77,7 @@ extension Session {
             let wind = session.effectiveWind
             self.windDirection = wind?.source == .manual ? wind?.directionFrom : nil
             self.windSpeed = wind?.speed
+            self.swellHeight = session.swellHeight
         }
     }
 
@@ -104,6 +109,7 @@ extension Session {
         result.notes = edits.notes
         result.purpose = edits.purpose?.trimmedOrNil
         result.feeling = edits.feeling
+        result.swellHeight = edits.swellHeight
 
         guard requiresReanalysis(for: edits) else { return result }
 

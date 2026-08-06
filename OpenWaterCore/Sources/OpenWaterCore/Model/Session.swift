@@ -46,6 +46,15 @@ public struct Session: Sendable, Codable, Identifiable {
     public var spotID: UUID?
     public var spotName: String?
 
+    /// Significant swell height the rider reckoned, metres.
+    ///
+    /// Never measured, never inferred — GPS cannot see a wave. It is here
+    /// because on a downwinder it is the number that explains the session:
+    /// the same wind over knee-high chop and over head-high bumps are two
+    /// different days, and a season of these next to the speeds is how a
+    /// rider learns which conditions actually suit them.
+    public var swellHeight: Double?
+
     /// Wind for the session — estimated on import, overridable by the rider.
     ///
     /// Prefer `effectiveWind` when reading: the analysis carries its own copy,
@@ -148,6 +157,7 @@ public struct Session: Sendable, Codable, Identifiable {
         purpose: String? = nil,
         feeling: Int? = nil,
         foilTakeoffSpeed: Double? = nil,
+        swellHeight: Double? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -171,6 +181,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.purpose = purpose
         self.feeling = feeling
         self.foilTakeoffSpeed = foilTakeoffSpeed
+        self.swellHeight = swellHeight
         self.summary = summary
     }
 }

@@ -26,6 +26,7 @@ struct SessionReviewView: View {
     @State private var edits: Session.Edits
     @State private var windDirectionText = ""
     @State private var windSpeedText = ""
+    @State private var isSettingConditions = false
     @State private var isSaving = false
 
     init(stored: StoredSession) {
@@ -96,23 +97,41 @@ struct SessionReviewView: View {
                 }
 
                 Section {
-                    HStack {
-                        Text("Wind from")
-                        Spacer()
-                        TextField("—", text: $windDirectionText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
-                        Text("°").foregroundStyle(.secondary)
+                    // The dial, not two number fields. A rider coming off the
+                    // water knows the wind as "it was blowing down the river"
+                    // — pointing at it on a compass with their own track
+                    // underneath is the way they actually hold the answer, and
+                    // typing 287 into a box is not.
+                    Button {
+                        isSettingConditions = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.down")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.tint)
+                                .rotationEffect(.degrees(editedDirection ?? 0))
+                                .opacity(editedDirection == nil ? 0.3 : 1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Wind")
+                                    .font(.subheadline)
+                                Text(windSummary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+
                     HStack {
-                        Text("Wind speed")
+                        Text("Swell")
                         Spacer()
-                        TextField("—", text: $windSpeedText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
-                        Text(settings.units.speed.symbol).foregroundStyle(.secondary)
+                        Text(swellSummary)
+                            .foregroundStyle(edits.swellHeight == nil ? .secondary : .primary)
                     }
                     // Right where a rider is already being asked what the wind
                     // was doing, and the one moment they might not remember —
@@ -136,6 +155,17 @@ struct SessionReviewView: View {
                 Section("Notes") {
                     TextField("Gear, conditions, how it went…", text: $edits.notes, axis: .vertical)
                         .lineLimit(3...8)
+                }
+            }
+            .sheet(isPresented: $isSettingConditions) {
+                if let session {
+                    WindSetterView(session: sessionWithStagedEdits(session)) { direction, speed, swell in
+                        windDirectionText = String(Int(direction.rounded()))
+                        windSpeedText = speed.map {
+                            String(Int(settings.units.speed.convert(fromMetresPerSecond: $0).rounded()))
+                        } ?? ""
+                        edits.swellHeight = swell
+                    }
                 }
             }
             .navigationTitle("Session saved")
@@ -201,6 +231,47 @@ struct SessionReviewView: View {
         .padding(.horizontal, 4)
     }
 
+    /// The session as it would be if saved right now, so the dial opens on
+    /// the rider's own staged answer rather than the original estimate.
+    private func sessionWithStagedEdits(_ session: Session) -> Session {
+        var staged = session
+        staged.swellHeight = edits.swellHeight
+        if let direction = Double(windDirectionText.trimmingCharacters(in: .whitespaces)) {
+            let speed = Double(windSpeedText.trimmingCharacters(in: .whitespaces))
+                .map { settings.units.speed.toMetresPerSecond($0) }
+            staged.wind = Wind(directionFrom: direction, speed: speed,
+                               source: .manual, confidence: 1)
+        }
+        return staged
+    }
+
+    /// The direction currently staged for saving, whatever its provenance.
+    private var editedDirection: Double? {
+        Double(windDirectionText.trimmingCharacters(in: .whitespaces))
+            ?? session?.effectiveWind?.directionFrom
+    }
+
+    private var windSummary: String {
+        guard let direction = editedDirection else { return "Tap to set it on the dial" }
+        var text = "\(Format.cardinal(direction)) \(Int(direction.rounded()))°"
+        if let knots = Double(windSpeedText.trimmingCharacters(in: .whitespaces)) {
+            text += " · \(Int(knots.rounded())) \(settings.units.speed.symbol)"
+        } else if let speed = session?.effectiveWind?.speed {
+            text += " · \(Format.speed(speed, unit: settings.units.speed, decimals: 0))"
+        }
+        if session?.effectiveWind?.source.isEstimate == true, windDirectionText.isEmpty {
+            text += " · estimated"
+        }
+        return text
+    }
+
+    private var swellSummary: String {
+        guard let swell = edits.swellHeight, swell > 0.05 else { return "Not set" }
+        return settings.units.distance == .imperial
+            ? String(format: "%.1f ft", swell * 3.28084)
+            : String(format: "%.1f m", swell)
+    }
+
     // MARK: - Save
 
     @MainActor
@@ -211,6 +282,10 @@ struct SessionReviewView: View {
             .map { Geo.normalizeDegrees($0) }
         edited.windSpeed = Double(windSpeedText.trimmingCharacters(in: .whitespaces))
             .map { settings.units.speed.toMetresPerSecond($0) }
+        // Swell changes no computed number, so a session that only gained a
+        // swell height skips reanalysis entirely — but it still has to be
+        // written, which the guard below handles by saving either way.
+        edited.swellHeight = edits.swellHeight
 
         guard session.requiresReanalysis(for: edited) else {
             library.save(session.applying(edited, categories: settings.categories,

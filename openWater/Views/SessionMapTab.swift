@@ -28,6 +28,7 @@ struct SessionMapTab: View {
     /// Apply a trim. The detail view owns saving it, because trimming re-runs
     /// the analysis and the whole screen has to pick up the new numbers.
     var onTrim: (SessionTrim, Bool) -> Void = { _, _ in }
+    var onEditConditions: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
 
@@ -174,7 +175,22 @@ struct SessionMapTab: View {
     private var topChrome: some View {
         HStack(alignment: .top) {
             if let wind = session.effectiveWind {
-                WindDial(wind: wind, units: settings.units)
+                // Tappable, because this is where a rider is looking when
+                // they realise the wind is wrong — and every angle on the
+                // other tabs is measured from it.
+                Button(action: onEditConditions) {
+                    WindDial(wind: wind, swell: session.swellHeight, units: settings.units)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button(action: onEditConditions) {
+                    Label("Set wind", systemImage: "wind")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
 
             Spacer()
@@ -480,6 +496,7 @@ struct SessionMapTab: View {
 struct WindDial: View {
 
     let wind: Wind
+    var swell: Double? = nil
     let units: UnitPreferences
 
     var body: some View {
@@ -506,13 +523,38 @@ struct WindDial: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
+
+            Image(systemName: "pencil")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 16, height: 16)
+                .background(.tint, in: Circle())
+                .offset(x: 22, y: 22)
+        }
+        .overlay(alignment: .bottom) {
+            if let swell, swell > 0.05 {
+                Text(swellText(swell))
+                    .font(.system(size: 10, weight: .semibold))
+                    .monospacedDigit()
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(.regularMaterial, in: Capsule())
+                    .offset(y: 13)
+            }
         }
         .accessibilityLabel("Wind \(Format.cardinal(wind.directionFrom))\(wind.speed == nil ? "" : ", \(speedText)")")
+        .accessibilityHint("Edit the wind and swell")
     }
 
     private var speedText: String {
         guard let speed = wind.speed else { return Format.bearing(wind.directionFrom, includeCardinal: false) }
         return Format.speed(speed, unit: units.speed, decimals: 0)
+    }
+
+    private func swellText(_ metres: Double) -> String {
+        units.distance == .imperial
+            ? String(format: "%.1f ft swell", metres * 3.28084)
+            : String(format: "%.1f m swell", metres)
     }
 }
 

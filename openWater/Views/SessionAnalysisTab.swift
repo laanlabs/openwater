@@ -30,7 +30,7 @@ struct SessionAnalysisTab: View {
 
     var body: some View {
         List {
-            if summary.shape.isPointToPoint { routeSection }
+            if showsRoute { routeSection }
             if showsWindSection { windSection }
             speedSection
             if showsTechniqueSection { techniqueSection }
@@ -42,9 +42,15 @@ struct SessionAnalysisTab: View {
 
     // MARK: - Route
 
-    /// Only for a session that actually went somewhere. A row saying "at one
-    /// spot" on every lap session would be noise on the screen that exists to
-    /// cut noise.
+    /// Only when there is a route worth naming.
+    ///
+    /// Two gates, and the second was learned the hard way. The session has to
+    /// have gone somewhere — no "at one spot" row on every lap session, on a
+    /// screen whose whole job is cutting noise. And it has to have a *name*:
+    /// a row reading "Downwinder · 7 m" says nothing the map does not, and the
+    /// net displacement of a session that came back to its launch is not a
+    /// figure anybody wants as a headline. Names arrive asynchronously, so the
+    /// row appears when the lookup lands rather than sitting there empty.
     private var routeSection: some View {
         Section("Route") {
             HStack(spacing: 12) {
@@ -63,7 +69,7 @@ struct SessionAnalysisTab: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Text(Format.distance(summary.shape.netDisplacement, unit: settings.units.distance))
+                Text(routeDistance)
                     .font(.subheadline)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -71,11 +77,21 @@ struct SessionAnalysisTab: View {
         }
     }
 
+    private var showsRoute: Bool {
+        summary.shape.isPointToPoint && routeName != nil
+    }
+
     private var routeName: String? { stored?.routeName }
 
+    /// Distance covered, not distance displaced. On a shuttle day the net
+    /// displacement is one leg's worth and on any run it undersells the
+    /// riding; "how far did I go" is the question this answers.
+    private var routeDistance: String {
+        Format.distance(summary.distance, unit: settings.units.distance)
+    }
+
     private var routeDetail: String? {
-        var parts: [String] = []
-        if routeName != nil { parts.append(summary.shape.kind.displayName) }
+        var parts: [String] = [summary.shape.kind.displayName]
         if let alignment = summary.shape.downwindAlignment, summary.shape.kind == .downwinder {
             parts.append("\(Int(alignment.rounded()))° off dead downwind")
         }

@@ -197,13 +197,29 @@ public struct DownwindAnalyzer: Sendable {
     /// than that and the bump has passed under you.
     public var maximumDeceleration: Double   // m/s²
 
+    /// How much faster a glide has to get, as a fraction of the speed it
+    /// started at.
+    ///
+    /// The test that separates gliding from riding along. Everything else —
+    /// fast enough, downwind, not decelerating — a rider holding one speed on
+    /// a powered wing passes just as well as a rider being carried. What only
+    /// the bump does is *give* you speed: you pump up to it, it picks you up,
+    /// and you accelerate. Without a rise there is nothing to say the water
+    /// did anything.
+    ///
+    /// It matters most where the app is otherwise blind. With motion data the
+    /// pump-energy test already separates working from gliding; without it,
+    /// this is the only thing that does.
+    public var minimumSpeedGain: Double
+
     public init(
         thresholds: SportThresholds = SportThresholds.forSport(.downwindSUP),
         pumpEnergyThreshold: Double = 0.9,
         minimumGlideDuration: TimeInterval = 5,
         minimumGlideSpeed: Double = 3.0,
         glideSpeedFraction: Double = 0.9,
-        maximumDeceleration: Double = 0.35
+        maximumDeceleration: Double = 0.35,
+        minimumSpeedGain: Double = 0.05
     ) {
         self.thresholds = thresholds
         self.pumpEnergyThreshold = pumpEnergyThreshold
@@ -211,6 +227,7 @@ public struct DownwindAnalyzer: Sendable {
         self.minimumGlideSpeed = minimumGlideSpeed
         self.glideSpeedFraction = glideSpeedFraction
         self.maximumDeceleration = maximumDeceleration
+        self.minimumSpeedGain = minimumSpeedGain
     }
 
     public static func forSport(_ sport: Sport) -> DownwindAnalyzer {
@@ -292,6 +309,29 @@ public struct DownwindAnalyzer: Sendable {
         )
     }
 
+    /// The slowest the rider was in the seconds before a glide began.
+    ///
+    /// Measured against the trough rather than against the glide's own first
+    /// sample, which was the first attempt and does not work: a segment only
+    /// starts once speed is already above the floor, so entry and peak are
+    /// nearly the same number and the "rise" is whatever noise happened to be
+    /// left. Comparing to the lull before it asks the question that was
+    /// actually meant — you were going *this*, then the bump took you to
+    /// *that*.
+    func troughBefore(_ index: Int, in track: Track) -> Double {
+        let start = track.elapsed[index] - Self.riseWindow
+        var trough = track.speed[index]
+        var k = index
+        while k > 0, track.elapsed[k] >= start {
+            trough = min(trough, track.speed[k])
+            k -= 1
+        }
+        return max(trough, 0.1)
+    }
+
+    /// How far back to look for the lull before a glide, seconds.
+    public static let riseWindow: TimeInterval = 8
+
     /// The rider's own pace for the session: the median speed while moving.
     ///
     /// Median rather than mean, because a session is mostly *not* riding —
@@ -369,9 +409,12 @@ public struct DownwindAnalyzer: Sendable {
             while j + 1 < track.count, isGliding[j + 1] { j += 1 }
 
             let duration = track.elapsed[j] - track.elapsed[i]
-            if duration >= minimumGlideDuration, j > i, isDownwind(from: i, to: j, in: track, wind: wind) {
-                var peak = 0.0
-                for k in i...j { peak = max(peak, track.speed[k]) }
+            var peak = 0.0
+            for k in i...j { peak = max(peak, track.speed[k]) }
+            let rose = peak >= troughBefore(i, in: track) * (1 + minimumSpeedGain)
+
+            if duration >= minimumGlideDuration, j > i, rose,
+               isDownwind(from: i, to: j, in: track, wind: wind) {
                 let distance = track.cumulativeDistance[j] - track.cumulativeDistance[i]
 
                 // Connected if the rider never left the foil since the last glide.

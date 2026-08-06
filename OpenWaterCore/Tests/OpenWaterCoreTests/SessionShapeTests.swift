@@ -272,7 +272,8 @@ struct GlideDirectionTests {
         let summary = DownwindAnalyzer.forSport(.wingfoil)
             .analyse(track: track, flights: [], wind: wind, movingTime: track.duration)
 
-        // One long stretch at most, not a session made of glides.
-        #expect(summary.glideCount <= 1)
+        // Nothing at all: with no lull before it, there is no rise, and
+        // without a rise nothing says the water did the work.
+        #expect(summary.glideCount == 0)
     }
 }

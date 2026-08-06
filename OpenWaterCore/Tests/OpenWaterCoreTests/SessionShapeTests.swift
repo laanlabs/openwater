@@ -235,4 +235,44 @@ struct GlideDirectionTests {
     func withoutWindCandidatesStand() {
         #expect(glideCount(heading: 0, windFrom: nil) > 0)
     }
+
+    @Test("A beam reach is still not a glide at 95 degrees")
+    func justAbaftTheBeamIsNotEnough() {
+        // Riders put the line deeper than the beam: a shade below ninety is
+        // still riding across the swell rather than being carried by it.
+        #expect(glideCount(heading: 95, windFrom: 0) == 0)
+    }
+
+    @Test("Big swell in light wind still gives glides")
+    func slowGlidesInBigSwellStillCount() {
+        // The reason the speed test is relative. A fixed 6 m/s bar for a wing
+        // was rejecting real glides whenever the swell was doing the work and
+        // the wind was light — the rider is slower than usual, and every glide
+        // that day falls under an absolute threshold set for a windy one.
+        var legs: [SyntheticTrack.Leg] = []
+        for _ in 0..<8 {
+            legs.append(.init(speed: 3.0, heading: 180, duration: 6))
+            legs.append(.init(speed: 5.5, heading: 180, duration: 12, transition: 2))
+        }
+        let track = builder.build(from: SyntheticTrack.generate(legs: legs))
+        let wind = Wind(directionFrom: 0, speed: 6, source: .manual, confidence: 1)
+        let summary = DownwindAnalyzer.forSport(.wingfoil)
+            .analyse(track: track, flights: [], wind: wind, movingTime: track.duration)
+
+        #expect(summary.glideCount > 0, "5.5 m/s is fast for this day even if slow in general")
+    }
+
+    @Test("Powered riding at the day's ordinary pace is not a glide")
+    func ridingAlongIsNotGliding() {
+        // The other side of the same test: holding one speed the whole way is
+        // riding, not gliding, however fast it is. Without a rise above the
+        // rider's own pace there is nothing to say the swell did anything.
+        let track = builder.build(from: SyntheticTrack.constantSpeed(9, duration: 600, heading: 180))
+        let wind = Wind(directionFrom: 0, speed: 12, source: .manual, confidence: 1)
+        let summary = DownwindAnalyzer.forSport(.wingfoil)
+            .analyse(track: track, flights: [], wind: wind, movingTime: track.duration)
+
+        // One long stretch at most, not a session made of glides.
+        #expect(summary.glideCount <= 1)
+    }
 }

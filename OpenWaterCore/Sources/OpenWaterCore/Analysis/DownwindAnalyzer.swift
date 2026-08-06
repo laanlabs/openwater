@@ -170,10 +170,28 @@ public struct DownwindAnalyzer: Sendable {
     public var pumpEnergyThreshold: Double
 
     /// Minimum duration for a stretch to count as a glide.
+    ///
+    /// Five seconds, from riders: under that it is a nudge off a bit of chop,
+    /// not a glide. It was three, and on a choppy day that turned every small
+    /// push into an entry in the count.
     public var minimumGlideDuration: TimeInterval
 
-    /// Speed below which nothing counts.
+    /// Absolute floor — below this you are drifting, whatever else is true.
+    ///
+    /// Deliberately low, because it is only a backstop. The test that does the
+    /// work is `glideSpeedFraction`, relative to the day.
     public var minimumGlideSpeed: Double
+
+    /// A glide must reach this fraction of the rider's own typical riding
+    /// speed for the session.
+    ///
+    /// Replaces a fixed floor, which was wrong in both directions. Big swell
+    /// in light wind gives real glides at speeds a fixed bar rejects; a windy
+    /// day makes powered riding fast enough to clear it. What actually
+    /// distinguishes a glide is that the water is doing the work — so the
+    /// question is whether the rider is going at or above their own pace for
+    /// the day, not whether they have passed some absolute number.
+    public var glideSpeedFraction: Double
 
     /// A glide may lose speed at up to this rate and still be a glide; steeper
     /// than that and the bump has passed under you.
@@ -182,14 +200,16 @@ public struct DownwindAnalyzer: Sendable {
     public init(
         thresholds: SportThresholds = SportThresholds.forSport(.downwindSUP),
         pumpEnergyThreshold: Double = 0.9,
-        minimumGlideDuration: TimeInterval = 3,
-        minimumGlideSpeed: Double = 4.0,
+        minimumGlideDuration: TimeInterval = 5,
+        minimumGlideSpeed: Double = 3.0,
+        glideSpeedFraction: Double = 0.9,
         maximumDeceleration: Double = 0.35
     ) {
         self.thresholds = thresholds
         self.pumpEnergyThreshold = pumpEnergyThreshold
         self.minimumGlideDuration = minimumGlideDuration
         self.minimumGlideSpeed = minimumGlideSpeed
+        self.glideSpeedFraction = glideSpeedFraction
         self.maximumDeceleration = maximumDeceleration
     }
 
@@ -197,12 +217,15 @@ public struct DownwindAnalyzer: Sendable {
         var a = DownwindAnalyzer(thresholds: sport.thresholds)
         switch sport {
         case .downwindSUP, .prone:
-            a.minimumGlideSpeed = 3.5
+            a.minimumGlideSpeed = 2.5
         case .wingfoil, .parawing:
             // On a wing the rider is powered, so a "glide" means the wing is
-            // depowered and the swell is doing the work. That needs a higher bar.
-            a.minimumGlideSpeed = 6.0
-            a.minimumGlideDuration = 4
+            // depowered and the swell is doing the work. That used to be a
+            // fixed 6 m/s, which missed real glides whenever the swell was big
+            // and the wind light. `glideSpeedFraction` asks the better
+            // question — is this fast *for today* — so the bar here only has
+            // to keep drifting out.
+            a.glideSpeedFraction = 0.95
         default:
             break
         }
@@ -269,6 +292,18 @@ public struct DownwindAnalyzer: Sendable {
         )
     }
 
+    /// The rider's own pace for the session: the median speed while moving.
+    ///
+    /// Median rather than mean, because a session is mostly *not* riding —
+    /// water starts, drifting, sitting — and a mean drags the reference down
+    /// toward those. Taken over samples above the sport's moving threshold so
+    /// the reference describes riding, not the whole recording.
+    func typicalRidingSpeed(in track: Track) -> Double {
+        let moving = track.speed.filter { $0 >= thresholds.movingSpeed }.sorted()
+        guard !moving.isEmpty else { return 0 }
+        return moving[moving.count / 2]
+    }
+
     /// Whether a candidate glide was actually sailed downwind.
     ///
     /// The detector's other tests — flying, fast enough, not decelerating —
@@ -279,14 +314,20 @@ public struct DownwindAnalyzer: Sendable {
     /// glide put upwind legs on a screen about riding swell.
     ///
     /// The bump can only push you the way it is going, so a glide has to be
-    /// abaft the beam. Without wind there is nothing to check against and the
-    /// candidate stands — the confidence already says the call is weaker then.
+    /// well abaft the beam. Riders put the line a little deeper than 90° —
+    /// a beam reach and a shade below it is still riding across, not being
+    /// carried — so the bar is `downwindHalfAngle`. Without wind there is
+    /// nothing to check against and the candidate stands; the confidence
+    /// already says the call is weaker then.
     func isDownwind(from start: Int, to end: Int, in track: Track, wind: Wind?) -> Bool {
         guard let wind else { return true }
         let heading = Geo.bearing(from: track.points[start].coordinate,
                                   to: track.points[end].coordinate)
-        return Geo.angleSeparation(heading, wind.directionFrom) > 90
+        return Geo.angleSeparation(heading, wind.directionFrom) > Self.downwindHalfAngle
     }
+
+    /// How far off the wind a glide has to be sailed, degrees.
+    public static let downwindHalfAngle: Double = 100
 
     // MARK: - Glide segmentation
 
@@ -303,9 +344,12 @@ public struct DownwindAnalyzer: Sendable {
         }
         acceleration = smooth(acceleration, window: 3)
 
+        // What "fast" means on this day, rather than in general.
+        let floor = max(minimumGlideSpeed, glideSpeedFraction * typicalRidingSpeed(in: track))
+
         var isGliding = [Bool](repeating: false, count: track.count)
         for i in 0..<track.count {
-            guard track.speed[i] >= minimumGlideSpeed else { continue }
+            guard track.speed[i] >= floor else { continue }
             guard !requiresFlight || flyingMask[i] else { continue }
             guard acceleration[i] >= -maximumDeceleration else { continue }
             if hasMotion, let energy = track.points[i].verticalAccelSD {

@@ -17,6 +17,14 @@ struct ShareLocationView: View {
 
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(\.openURL) private var openURL
+    /// Remembered, because which maps app your people use does not change
+    /// between pins.
+    @AppStorage("tools.mapProvider") private var providerID = ToolKit.MapProvider.apple.rawValue
+
+    private var provider: ToolKit.MapProvider {
+        ToolKit.MapProvider(rawValue: providerID) ?? .apple
+    }
+
     private var coordinate: Geo.Coordinate? { recorder.location.lastCoordinate }
     private var accuracy: Double { recorder.location.latestAccuracy }
 
@@ -81,11 +89,21 @@ struct ShareLocationView: View {
     }
 
     private func shareButtons(_ coordinate: Geo.Coordinate) -> some View {
-        VStack(spacing: 10) {
+        let url = provider.url(for: coordinate)
+        return VStack(spacing: 10) {
+            Picker("Maps app", selection: $providerID) {
+                ForEach(ToolKit.MapProvider.allCases) { option in
+                    Text(option.label).tag(option.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+
             // The system sheet is the headline action: it reaches every app on
             // the phone, WhatsApp and Messages included, and it is where
-            // people expect sharing to live.
-            ShareLink(item: message(coordinate)) {
+            // people expect sharing to live. A URL rather than a sentence, so
+            // what lands in the thread is a tappable link with a map preview
+            // instead of a paragraph somebody has to read.
+            ShareLink(item: url) {
                 Label("Share Pin", systemImage: "square.and.arrow.up")
                     .font(.body.weight(.bold))
                     .foregroundStyle(.white)
@@ -97,7 +115,7 @@ struct ShareLocationView: View {
             // Direct lines for the two apps shuttle logistics actually happen
             // in, for anyone who finds the sheet a step too many with wet
             // hands.
-            QuickShareButtons(message: message(coordinate))
+            QuickShareButtons(message: url.absoluteString)
         }
     }
 
@@ -125,11 +143,5 @@ struct ShareLocationView: View {
         String(format: "%.5f, %.5f", c.latitude, c.longitude)
     }
 
-    /// The message a shuttle driver can actually use: a link for whichever
-    /// maps app they have, and the raw numbers for when they have neither.
-    private func message(_ c: Geo.Coordinate) -> String {
-        var text = "My location: " + ToolKit.mapsLinks(for: c)
-        if accuracy >= 0 { text += " (±\(Int(accuracy.rounded())) m)" }
-        return text
-    }
+
 }

@@ -5,8 +5,41 @@ import SwiftUI
 /// message leaves the phone.
 enum ToolKit {
 
-    /// The message body every location share uses: a link for whichever maps
-    /// app the recipient has, and the raw numbers for when they have neither.
+    /// Which maps app a shared pin should open in.
+    ///
+    /// A choice rather than sending both: a message carrying two links and a
+    /// coordinate pair is a wall of text in a chat thread, and the sender
+    /// knows perfectly well which app the person picking them up uses. The
+    /// selection sticks, because it is a fact about the rider's friends, not
+    /// about this particular pin.
+    enum MapProvider: String, CaseIterable, Identifiable {
+        case apple, google
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .apple: "Apple Maps"
+            case .google: "Google Maps"
+            }
+        }
+
+        func url(for c: Geo.Coordinate, label: String = "Pickup") -> URL {
+            let lat = String(format: "%.5f", c.latitude)
+            let lon = String(format: "%.5f", c.longitude)
+            switch self {
+            case .apple:
+                let q = label.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Pin"
+                return URL(string: "https://maps.apple.com/?ll=\(lat),\(lon)&q=\(q)")!
+            case .google:
+                return URL(string: "https://maps.google.com/?q=\(lat),\(lon)")!
+            }
+        }
+    }
+
+    /// The message body a share uses when it wants to cover both apps — the
+    /// shuttle plan and float plan still do, because those go to somebody
+    /// making a plan rather than following a pin right now.
     static func mapsLinks(for c: Geo.Coordinate, label: String = "Pickup") -> String {
         let lat = String(format: "%.5f", c.latitude)
         let lon = String(format: "%.5f", c.longitude)

@@ -62,11 +62,41 @@ struct ToolsTabView: View {
 
     private var list: some View {
             List {
+                Section("Find Used Gear") {
+                    // A Button, not a `Link`: Link tints its entire label and
+                    // wins against explicit foreground styles on the children,
+                    // which turned this whole row orange. The arrow and icon
+                    // carry the "external" signal; the text stays readable.
+                    Button {
+                        openURL(URL(string: "https://usedwatersports.com/")!)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "cart")
+                                .font(.title3)
+                                .foregroundStyle(.tint)
+                                .frame(width: 34, height: 34)
+                                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Used Watersports")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("Second-hand wings, foils and boards — usedwatersports.com")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.forward")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .id(Self.topAnchor)
+
                 Section("Logistics") {
-                    Color.clear
-                        .frame(height: 0)
-                        .listRowSeparator(.hidden)
-                        .id(Self.topAnchor)
                     NavigationLink(value: Tool.shareLocation) {
                         toolRow("Share My Location", symbol: "mappin.and.ellipse",
                                 blurb: "Send a pin to your shuttle driver — Apple Maps, Google Maps, WhatsApp.")
@@ -108,39 +138,6 @@ struct ToolsTabView: View {
                         toolRow("Add or Fix a Spot", symbol: "camera.badge.ellipsis",
                                 blurb: "Standing at a launch? Photograph it and send it to the guide.")
                     }
-                }
-
-                Section("Find Used Gear") {
-                    // A Button, not a `Link`: Link tints its entire label and
-                    // wins against explicit foreground styles on the children,
-                    // which turned this whole row orange. The arrow and icon
-                    // carry the "external" signal; the text stays readable.
-                    Button {
-                        openURL(URL(string: "https://usedwatersports.com/")!)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "cart")
-                                .font(.title3)
-                                .foregroundStyle(.tint)
-                                .frame(width: 34, height: 34)
-                                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Used Watersports")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                Text("Second-hand wings, foils and boards — usedwatersports.com")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "arrow.up.forward")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
                 }
 
                 Section {

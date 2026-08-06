@@ -76,29 +76,46 @@ struct CallOutView: View {
 /// The message you send before you're out of range: where you're launching,
 /// where you're landing, when to expect you — and when to actually worry.
 /// The cheapest safety gear a downwinder can carry.
+///
+/// Both ends are picked on a map. The first version guessed the launch from
+/// the nearest guide spot and took the takeout as free text, which meant the
+/// launch could be wrong with no way to fix it and the takeout was usually
+/// left empty — the drafted message then said "the takeout", which helps
+/// nobody looking for you.
 struct FloatPlanView: View {
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(PhoneRecorder.self) private var recorder
 
-    @AppStorage("floatPlan.takeout") private var takeout = ""
+    @AppStorage("floatPlan.launch") private var storedLaunch = ""
+    @AppStorage("floatPlan.takeout") private var storedTakeout = ""
+    /// Shared with Share My Location — one answer to "which maps app do my
+    /// people use", not one per screen.
+    @AppStorage("tools.mapProvider") private var providerID = ToolKit.MapProvider.google.rawValue
+
+    @State private var launch: PickedPlace?
+    @State private var takeout: PickedPlace?
+    @State private var picking: End?
     @State private var eta = FloatPlanView.defaultETA()
     @State private var message = ""
     @State private var composedFor: String?
+
+    enum End: String, Identifiable {
+        case launch = "Launch", takeout = "Takeout"
+        var id: String { rawValue }
+    }
+
+    private var provider: ToolKit.MapProvider {
+        ToolKit.MapProvider(rawValue: providerID) ?? .google
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(spacing: 0) {
-                    HStack {
-                        Text("Takeout")
-                            .font(.subheadline)
-                        TextField("Hood River Event Site", text: $takeout)
-                            .multilineTextAlignment(.trailing)
-                            .autocorrectionDisabled()
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(height: 48)
+                    placeRow(.launch, place: launch)
+                    Divider().padding(.leading, 14)
+                    placeRow(.takeout, place: takeout)
                     Divider().padding(.leading, 14)
                     DatePicker("Expect me by", selection: $eta, displayedComponents: .hourAndMinute)
                         .padding(.horizontal, 14)
@@ -106,9 +123,16 @@ struct FloatPlanView: View {
                 }
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
 
+                Picker("Maps app", selection: $providerID) {
+                    ForEach(ToolKit.MapProvider.allCases) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 MessageComposer(message: $message)
 
-                Text("The worry time is 45 minutes after your ETA. Includes your launch pin, so the message still helps if plans change and you don't.")
+                Text("The worry time is 45 minutes after your ETA. Both pins are links in whichever maps app you picked, so whoever gets this can follow them without thinking.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -118,32 +142,85 @@ struct FloatPlanView: View {
         .navigationTitle("Float Plan")
         .navigationBarTitleDisplayMode(.inline)
         .toolLocation(recorder)
-        .task(id: "\(recorder.location.lastCoordinate != nil)") { await draft() }
-        .onChange(of: eta) { _, _ in Task { await draft(force: true) } }
-        .onChange(of: takeout) { _, _ in Task { await draft(force: true) } }
+        .sheet(item: $picking) { end in
+            LocationPickerSheet(
+                title: end.rawValue,
+                initial: (end == .launch ? launch : takeout)?.coordinate
+                    ?? recorder.location.lastCoordinate
+            ) { place in
+                switch end {
+                case .launch: launch = place; storedLaunch = place.stored
+                case .takeout: takeout = place; storedTakeout = place.stored
+                }
+                draft(force: true)
+            }
+        }
+        .onAppear {
+            launch = launch ?? PickedPlace.restore(storedLaunch)
+            takeout = takeout ?? PickedPlace.restore(storedTakeout)
+            Task { await seedLaunchIfNeeded() }
+        }
+        .onChange(of: eta) { _, _ in draft(force: true) }
+    }
+
+    private func placeRow(_ end: End, place: PickedPlace?) -> some View {
+        Button { picking = end } label: {
+            HStack(spacing: 10) {
+                Image(systemName: end == .launch ? "flag" : "flag.checkered")
+                    .font(.subheadline)
+                    .foregroundStyle(.tint)
+                    .frame(width: 22)
+                Text(end.rawValue)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text(place?.name ?? "Choose on map…")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(place == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private static func defaultETA() -> Date {
         Calendar.current.date(byAdding: .minute, value: 90, to: Date()) ?? Date()
     }
 
-    private func draft(force: Bool = false) async {
-        guard force || message.isEmpty || message == composedFor else { return }
+    /// A first launch guess so the screen is useful on open — but only a
+    /// guess, and only when nothing has been chosen before.
+    private func seedLaunchIfNeeded() async {
+        guard launch == nil, let here = recorder.location.lastCoordinate else { return }
         await guide.load()
+        let name = guide.nearestSpot(to: here).flatMap { spot in
+            Geo.distance(here, .init(latitude: spot.latitude, longitude: spot.longitude)) < 2000
+                ? spot.name : nil
+        } ?? "Current location"
+        launch = PickedPlace(name: name, coordinate: here)
+        draft(force: true)
+    }
 
-        var launch = "here"
-        var pin = ""
-        if let here = recorder.location.lastCoordinate {
-            if let spot = guide.nearestSpot(to: here) { launch = spot.name }
-            pin = " Launch pin: \(ToolKit.mapsLinks(for: here, label: "Launch"))"
-        }
+    private func draft(force: Bool = false) {
+        guard force || message.isEmpty || message == composedFor else { return }
         let worry = Calendar.current.date(byAdding: .minute, value: 45, to: eta) ?? eta
         let etaText = eta.formatted(date: .omitted, time: .shortened)
         let worryText = worry.formatted(date: .omitted, time: .shortened)
-        let takeoutText = takeout.isEmpty ? "the takeout" : takeout
-        let drafted = "Heading out from \(launch), taking out at \(takeoutText). "
-            + "Expect me by \(etaText). If you haven't heard from me by \(worryText), call me — then help."
-            + pin
+
+        var lines = ["Heading out from \(launch?.name ?? "here"), taking out at \(takeout?.name ?? "the takeout")."
+            + " Expect me by \(etaText). If you haven't heard from me by \(worryText), call me — then help."]
+        if let launch {
+            lines.append("Launch: \(provider.url(for: launch.coordinate, label: launch.name).absoluteString)")
+        }
+        if let takeout {
+            lines.append("Takeout: \(provider.url(for: takeout.coordinate, label: takeout.name).absoluteString)")
+        }
+        let drafted = lines.joined(separator: "\n")
         message = drafted
         composedFor = drafted
     }

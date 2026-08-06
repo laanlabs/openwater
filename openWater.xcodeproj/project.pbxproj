@@ -501,6 +501,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-iOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = OpenWater;
+				INFOPLIST_KEY_NSCameraUsageDescription = "The camera is for photographing a spot when you submit it to the shared spot guide.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
@@ -512,7 +513,6 @@
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_NSCameraUsageDescription = "The camera is for photographing a spot when you submit it to the shared spot guide.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
@@ -551,6 +551,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Info-iOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = OpenWater;
+				INFOPLIST_KEY_NSCameraUsageDescription = "The camera is for photographing a spot when you submit it to the shared spot guide.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "openWater records your GPS track while you are on the water, including when your phone is in a pocket with the screen off.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater records your GPS track so it can measure your speed, distance and runs.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "openWater uses the motion sensors to tell when you are flying on the foil, to count pumps, and to detect jumps.";
@@ -562,7 +563,6 @@
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_NSCameraUsageDescription = "The camera is for photographing a spot when you submit it to the shared spot guide.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";

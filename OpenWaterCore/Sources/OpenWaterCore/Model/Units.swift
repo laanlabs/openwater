@@ -125,6 +125,22 @@ public enum Format {
         }
     }
 
+    /// A small vertical distance — swell, or how high a jump went.
+    ///
+    /// Separate from `distance` because that one switches denomination on
+    /// magnitude: a 1.8 m jump would come out as "1.8 m" under metric and
+    /// "6 ft" under imperial, which is right, but a 2 km run and a 2 m jump
+    /// have no business sharing a formatter. Heights stay in metres or feet
+    /// whatever the number, and keep a decimal — riders quote 1.8 m, not 2 m.
+    public static func height(_ metres: Double, unit: DistanceUnit) -> String {
+        switch unit {
+        case .metric, .nautical:
+            String(format: "%.1f m", metres)
+        case .imperial:
+            String(format: "%.1f ft", metres / DistanceUnit.metresPerFoot)
+        }
+    }
+
     /// `1:23:45` or `23:45` — compact enough for a watch face.
     public static func duration(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "--:--" }

@@ -298,9 +298,7 @@ extension WindSetterView {
     }
 
     private var swellText: String {
-        settings.units.distance == .imperial
-            ? String(format: "%.1f ft", swell * 3.28084)
-            : String(format: "%.1f m", swell)
+        Format.height(swell, unit: settings.units.distance)
     }
 
     private var speedRow: some View {

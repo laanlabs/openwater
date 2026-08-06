@@ -267,9 +267,7 @@ struct SessionReviewView: View {
 
     private var swellSummary: String {
         guard let swell = edits.swellHeight, swell > 0.05 else { return "Not set" }
-        return settings.units.distance == .imperial
-            ? String(format: "%.1f ft", swell * 3.28084)
-            : String(format: "%.1f m", swell)
+        return Format.height(swell, unit: settings.units.distance)
     }
 
     // MARK: - Save

@@ -60,6 +60,16 @@ public struct Glide: Hashable, Sendable, Codable, Identifiable {
 /// each, and how often you linked one to the next without dropping.
 public struct DownwindSummary: Hashable, Sendable, Codable {
 
+    /// Every glide, in time order.
+    ///
+    /// Kept rather than reduced away, because a glide has a *place*: the map
+    /// wants to draw where on the run the rider was catching bumps, and the
+    /// aggregates cannot answer that. Flights and jumps are held on
+    /// `SessionSummary` alongside their own aggregate structs; glides live
+    /// here instead, because this is the analyzer's whole return value and
+    /// splitting it would mean changing that for one array.
+    public let glides: [Glide]
+
     public let glideCount: Int
 
     /// Total seconds gliding.
@@ -99,6 +109,7 @@ public struct DownwindSummary: Hashable, Sendable, Codable {
     public let confidence: Double
 
     public init(
+        glides: [Glide] = [],
         glideCount: Int, glideTime: TimeInterval, glideFraction: Double,
         distanceGliding: Double, longestGlide: Glide?, fastestGlide: Glide?,
         averageGlideDuration: TimeInterval, averageGlideSpeed: Double,
@@ -106,6 +117,7 @@ public struct DownwindSummary: Hashable, Sendable, Codable {
         bumpPeriod: TimeInterval?, poweredDistance: Double?, glidedDistance: Double?,
         usedMotionData: Bool, confidence: Double
     ) {
+        self.glides = glides
         self.glideCount = glideCount
         self.glideTime = glideTime
         self.glideFraction = glideFraction
@@ -231,6 +243,7 @@ public struct DownwindAnalyzer: Sendable {
         let (powered, glided) = poweredSplit(track: track, wind: wind, glides: glides)
 
         return DownwindSummary(
+            glides: glides,
             glideCount: glides.count,
             glideTime: glideTime,
             glideFraction: movingTime > 0 ? min(1, glideTime / movingTime) : 0,

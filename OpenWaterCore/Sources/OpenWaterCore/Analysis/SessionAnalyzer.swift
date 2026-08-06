@@ -180,6 +180,7 @@ public struct SessionAnalyzer: Sendable {
             segments: segments,
             fallSummary: fallSummary,
             ribbon: ribbon,
+            shape: SessionShapeAnalyzer.analyse(track: track, runs: runs, wind: wind),
             wind: wind,
             polar: polar,
             averageHeartRate: heartRates.isEmpty

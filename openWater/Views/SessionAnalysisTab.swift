@@ -70,6 +70,28 @@ struct SessionAnalysisTab: View {
                     onSetWind: onSetWind
                 )
             }
+            if windSpeedIsMissing {
+                Button(action: onSetWind) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "gauge.with.dots.needle.33percent")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("No wind speed")
+                                .foregroundStyle(.primary)
+                            Text("Angles are right; there is nothing to compare them against")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -89,6 +111,13 @@ struct SessionAnalysisTab: View {
             return Format.cardinal(polar.wind.directionFrom)
         }
         return "tacks \(Int(tacking.rounded()))°"
+    }
+
+    /// Direction without strength — say so on the contents page rather than
+    /// making the rider open a screen to find out.
+    private var windSpeedIsMissing: Bool {
+        guard let wind = session.effectiveWind else { return false }
+        return !wind.hasSpeed
     }
 
     // MARK: - Speed
@@ -132,6 +161,7 @@ struct SessionAnalysisTab: View {
     private var showsTechniqueSection: Bool {
         summary.maneuverSummary.total > 0
             || summary.foil.flightCount > 0
+            || summary.jumpSummary.count > 0
             || summary.downwind.glideCount > 0
     }
 
@@ -149,25 +179,22 @@ struct SessionAnalysisTab: View {
             }
             if summary.foil.flightCount > 0 {
                 AnalysisRow(symbol: "airplane", title: "Foiling", value: foilValue) {
-                    AnalysisDetail(title: "Foiling") {
-                        FoilSummaryCard(
-                            foil: summary.foil,
-                            falls: summary.fallSummary,
-                            units: settings.units,
-                            totalDistance: summary.distance,
-                            takeoffThreshold: session.effectiveFoilTakeoffSpeed,
-                            onChangeThreshold: onEdit
-                        )
-                        .cardChrome()
-                    }
+                    FoilingScreen(
+                        session: session,
+                        summary: summary,
+                        units: settings.units,
+                        onEdit: onEdit
+                    )
+                }
+            }
+            if summary.jumpSummary.count > 0 {
+                AnalysisRow(symbol: "arrow.up.forward", title: "Airtime", value: airtimeValue) {
+                    AirtimeScreen(summary: summary, units: settings.units)
                 }
             }
             if summary.downwind.glideCount > 0 {
                 AnalysisRow(symbol: "water.waves", title: "Downwind", value: glideValue) {
-                    AnalysisDetail(title: "Downwind") {
-                        DownwindCard(downwind: summary.downwind, units: settings.units)
-                            .cardChrome()
-                    }
+                    DownwindDetailView(session: session, summary: summary)
                 }
             }
         }
@@ -182,6 +209,12 @@ struct SessionAnalysisTab: View {
     private var foilValue: String? {
         let foil = summary.foil
         return "\(Format.shortDuration(foil.timeOnFoil)) · \(Int((foil.foilingFraction * 100).rounded()))%"
+    }
+
+    private var airtimeValue: String? {
+        let jumps = summary.jumpSummary
+        guard jumps.count > 0 else { return nil }
+        return "\(jumps.count) · \(Format.shortDuration(jumps.bestAirtime)) best"
     }
 
     private var glideValue: String? {

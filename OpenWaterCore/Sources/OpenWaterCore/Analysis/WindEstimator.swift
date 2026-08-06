@@ -20,6 +20,18 @@ public struct Wind: Hashable, Sendable, Codable {
     /// 0–1 for an estimate; always 1 for a manual entry.
     public var confidence: Double
 
+    /// Whether a usable wind strength is known.
+    ///
+    /// A session very often has a direction and no speed: the direction can be
+    /// estimated from the track's own shape, and the strength never can. Every
+    /// screen that wants to say so was writing its own `speed == nil || speed
+    /// == 0` check, and a zero is the same absence as a nil here — nobody rides
+    /// in no wind and then records it.
+    public var hasSpeed: Bool {
+        guard let speed else { return false }
+        return speed > 0.1
+    }
+
     public enum Source: String, Sendable, Codable {
         /// Inferred from an upwind/downwind track structure. The good case.
         case estimatedBidirectional

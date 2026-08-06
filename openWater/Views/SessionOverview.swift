@@ -29,29 +29,18 @@ struct SessionOverview: View {
                 BestSpeedsCard(summary: summary, units: settings.units)
 
                 if session.effectiveWind == nil {
-                    Button(action: onSetWind) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "wind")
-                                .font(.title2)
-                                .foregroundStyle(.tint)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Which way was the wind?")
-                                    .font(.subheadline.weight(.semibold))
-                                Text("Point at it on a compass to unlock angles, VMG, the polar and your upwind legs.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.background, in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    .buttonStyle(.plain)
+                    windPrompt(
+                        title: "Which way was the wind?",
+                        detail: "Point at it on a compass to unlock angles, VMG, the polar and your upwind legs."
+                    )
+                } else if session.effectiveWind?.hasSpeed == false {
+                    // Direction without strength is the ordinary case, not a
+                    // fault: the track's shape gives one and can never give the
+                    // other. Worth one line, not a red flag.
+                    windPrompt(
+                        title: "How hard was it blowing?",
+                        detail: "We can read the direction off your track but never the strength. Add it and your speeds have something to be measured against."
+                    )
                 }
 
                 // Upwind, Turns, Foiling, Downwind, Health and GPS quality all
@@ -67,6 +56,34 @@ struct SessionOverview: View {
         .sheet(isPresented: $showingNotes) {
             MeasurementNotesView(session: session, summary: summary)
         }
+    }
+
+    // MARK: - Prompts
+
+    private func windPrompt(title: String, detail: String) -> some View {
+        Button(action: onSetWind) {
+            HStack(spacing: 12) {
+                Image(systemName: "wind")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Header
@@ -111,9 +128,7 @@ struct SessionOverview: View {
                             .font(.subheadline)
                     }
                     if let swell = session.swellHeight, swell > 0.05 {
-                        Text(settings.units.distance == .imperial
-                             ? String(format: "%.1f ft swell", swell * 3.28084)
-                             : String(format: "%.1f m swell", swell))
+                        Text("\(Format.height(swell, unit: settings.units.distance)) swell")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)

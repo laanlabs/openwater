@@ -1093,3 +1093,39 @@ struct NoWindCard: View {
         return "Your polar, VMG, tacking and gybing angles are all measured from the wind direction. openWater normally works it out from the shape of your track, but this session did not have enough upwind and downwind sailing for that to be reliable. Set it by hand and the angle sections will appear."
     }
 }
+
+/// Shown when the session knows which way the wind blew but not how hard.
+///
+/// This is the common case rather than an edge one, and it is worth saying out
+/// loud: direction can be inferred from the shape of a track, strength never
+/// can. `Wind.speed` is deliberately left nil rather than guessed, so a session
+/// often carries "WSW, 245°" and nothing else — and every angle on the Upwind
+/// and Polar screens is still correct, because those measure from the direction
+/// alone. What is missing is the context: 20 knots of VMG means one thing in
+/// twelve knots of breeze and quite another in thirty.
+struct NoWindSpeedCard: View {
+
+    var compact = false
+    let onSetWind: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("No wind speed for this session", systemImage: "gauge.with.dots.needle.33percent")
+                .font(.subheadline.weight(.medium))
+
+            Text(compact
+                 ? "Angles and VMG are measured from the direction, so they are right — but there is nothing to compare them against."
+                 : "openWater works the wind direction out from the shape of your track, but it cannot tell how hard it was blowing — no track can, without a boat polar. Your angles and VMG are measured from the direction and are unaffected. Add the strength and they gain a yardstick.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Set the wind speed", systemImage: "wind", action: onSetWind)
+                .font(.callout)
+                .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+    }
+}

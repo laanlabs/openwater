@@ -202,7 +202,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// rule) instead of exactly the cap; Alpha 1 km added; polar carries
     /// per-tack mean headings and the both-tacks beat/run VMG.
     /// 4: the beat/run carry their leg count and working angle.
-    public static let currentVersion = 4
+    public static let currentVersion = 5
 
     public let analysisVersion: Int
 
@@ -246,6 +246,10 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// The session unrolled into lanes — the readable alternative to the map.
     public let ribbon: SessionRibbon
 
+    /// Whether this was a downwind run, a crossing, or an afternoon of laps —
+    /// and, for a shuttle day, each run of it separately.
+    public let shape: SessionShape
+
     // MARK: Wind
 
     public let wind: Wind?
@@ -282,6 +286,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
         ribbon: SessionRibbon = SessionRibbon(
             lanes: [], connectors: [], maxLaneDistance: 0, maxLaneDuration: 0, maxSpeed: 0
         ),
+        shape: SessionShape = .empty,
         wind: Wind?,
         polar: PolarAnalysis?,
         averageHeartRate: Double? = nil,
@@ -310,6 +315,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
         self.segments = segments
         self.fallSummary = fallSummary
         self.ribbon = ribbon
+        self.shape = shape
         self.wind = wind
         self.polar = polar
         self.averageHeartRate = averageHeartRate

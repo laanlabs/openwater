@@ -52,6 +52,10 @@ struct UpwindDetailView: View {
                 UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
                     .cardChrome()
 
+                if !polar.wind.hasSpeed {
+                    NoWindSpeedCard(compact: true) { isSettingWind = true }
+                }
+
                 map
                     .frame(height: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 12))

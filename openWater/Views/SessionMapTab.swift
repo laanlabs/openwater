@@ -562,9 +562,7 @@ struct WindDial: View {
     }
 
     private func swellText(_ metres: Double) -> String {
-        units.distance == .imperial
-            ? String(format: "%.1f ft swell", metres * 3.28084)
-            : String(format: "%.1f m swell", metres)
+        "\(Format.height(metres, unit: units.distance)) swell"
     }
 }
 

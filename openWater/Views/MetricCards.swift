@@ -483,9 +483,12 @@ struct PolarChart: View {
             // word, and a rider who has not met it sees two curves against an
             // axis labelled in degrees and has no way in.
             Text("""
-            How fast you went at each angle to the wind. 0° is straight upwind,             90° is across it, 180° is straight downwind — so the shape shows             where this board and this wing actually work.
+            How fast you went at each angle to the wind. 0° is straight upwind, \
+            90° is across it, 180° is straight downwind — so the shape shows \
+            where this board and this wing actually work.
 
-            Solid: what you held (90th percentile). Dashed: your single best in             each band. Angles you spent less than 100 m at are left out.
+            Solid: what you held (90th percentile). Dashed: your single best in \
+            each band. Angles you spent less than 100 m at are left out.
             """)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -954,23 +957,20 @@ struct UpwindCard: View {
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
             }
 
+            // "Tacking through" and "Run VMG down" used to be here too. They
+            // are `AngleSummary`'s numbers — it shows both tacks separately
+            // rather than a mean, and both VMG directions — and printing a
+            // second, differently-worded copy of them made two cards look like
+            // they disagreed. They live on Polar & Angles; this card is the
+            // upwind answer.
             LazyVGrid(columns: columns, spacing: 8) {
                 if let port = polar.upwindAngle(.port), let stbd = polar.upwindAngle(.starboard) {
                     SummaryTile(label: "Upwind angle", value: String(format: "%.0f°", (port + stbd) / 2))
-                }
-                if let tacking = polar.tackingAngle {
-                    SummaryTile(label: "Tacking through", value: String(format: "%.0f°", tacking))
                 }
                 if let leg = bestUpwindLeg {
                     SummaryTile(
                         label: "Best leg",
                         value: Format.speed(leg.averageSpeed, unit: units.speed, decimals: 1)
-                    )
-                }
-                if let run = polar.broadRun {
-                    SummaryTile(
-                        label: "Run VMG down",
-                        value: Format.speed(run.vmg, unit: units.speed, decimals: 1)
                     )
                 }
             }

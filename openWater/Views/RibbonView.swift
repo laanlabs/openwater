@@ -19,10 +19,44 @@ struct RibbonView: View {
     let maxSpeed: Double
     let units: UnitPreferences
 
+    /// The run index of the session's fastest run, chipped so it can be found
+    /// without reading forty rows.
+    var bestRunIndex: Int?
+
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
+    @State private var order: Order = .time
+    @State private var showsManeuvers = false
+    @State private var showingKey = false
+
+    /// How the lanes are stacked.
+    ///
+    /// Time order is the default because the ribbon is meant to read like a
+    /// score. The other two exist because "which was my best run" was a
+    /// question the screen could not answer without scanning every row.
+    enum Order: String, CaseIterable, Identifiable {
+        case time = "In order"
+        case fastest = "Fastest"
+        case longest = "Longest"
+
+        var id: String { rawValue }
+    }
+
+    private var lanes: [SessionRibbon.Lane] {
+        switch order {
+        case .time: ribbon.lanes
+        case .fastest: ribbon.lanes.sorted { $0.averageSpeed > $1.averageSpeed }
+        case .longest: ribbon.lanes.sorted { $0.distance > $1.distance }
+        }
+    }
+
+    /// Maneuvers describe what joined one run to the *next one in time*, so
+    /// they are meaningless once the rows are reordered — a gybe drawn between
+    /// the fastest run and the second fastest never happened.
+    private var showsConnectors: Bool { order == .time && showsManeuvers }
 
     var body: some View {
         if ribbon.isEmpty {
@@ -34,10 +68,7 @@ struct RibbonView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    legend
-                        .padding(.bottom, 8)
-
-                    ForEach(Array(ribbon.lanes.enumerated()), id: \.element.id) { index, lane in
+                    ForEach(lanes, id: \.id) { lane in
                         LaneRow(
                             lane: lane,
                             // Lanes are scaled to the longest run so their
@@ -48,7 +79,8 @@ struct RibbonView: View {
                                 : 1,
                             maxSpeed: maxSpeed,
                             units: units,
-                            isSelected: selectedLane == lane.runIndex
+                            isSelected: selectedLane == lane.runIndex,
+                            isBest: bestRunIndex == lane.runIndex
                         )
                         .onTapGesture {
                             withAnimation(.snappy) {
@@ -56,48 +88,119 @@ struct RibbonView: View {
                             }
                         }
 
-                        if let connector = connector(after: lane.id) {
+                        if showsConnectors, let connector = connector(after: lane.id) {
                             ConnectorRow(connector: connector)
                         }
                     }
                 }
                 .padding(.horizontal)
             }
+            .safeAreaInset(edge: .top, spacing: 0) { controls }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+            .sheet(isPresented: $showingKey) {
+                RibbonKeySheet()
+                    .presentationDetents([.medium])
+            }
         }
+    }
+
+    /// Sort, maneuvers, and the key — the three things the screen needed and
+    /// did not have. The legend used to live here as a permanent line of
+    /// six-point text explaining a colour ramp most riders had already worked
+    /// out; it is behind the ⓘ now.
+    private var controls: some View {
+        HStack(spacing: 10) {
+            Picker("Order", selection: $order) {
+                ForEach(Order.allCases) { option in
+                    Text(option.rawValue).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Button {
+                withAnimation(.snappy) { showsManeuvers.toggle() }
+            } label: {
+                Image(systemName: showsManeuvers
+                      ? "arrow.triangle.swap.circle.fill"
+                      : "arrow.triangle.swap")
+                    .font(.body)
+                    .foregroundStyle(showsConnectors ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            }
+            .buttonStyle(.plain)
+            .disabled(order != .time)
+            .accessibilityLabel(showsManeuvers ? "Hide maneuvers" : "Show maneuvers")
+
+            Button {
+                showingKey = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("What the colours mean")
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+        .background(.bar)
     }
 
     private func connector(after laneID: Int) -> SessionRibbon.Connector? {
         ribbon.connectors.first { $0.fromLane == laneID }
     }
+}
 
-    /// The legend has to describe what is actually drawn.
-    ///
-    /// Colour is the *speed* ramp, not the state — a slow flight is blue and a
-    /// fast one is red. State is carried by saturation (riding is washed out
-    /// against flying) and by the two flat colours for slow and fall. Labelling
-    /// green as "flying" would be wrong and would make every lane look mislabelled.
-    private var legend: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 3) {
-                LinearGradient(
-                    colors: (0...6).map { i in
-                        Color(hue: 0.58 - 0.58 * (Double(i) / 6), saturation: 0.85, brightness: 0.95)
-                    },
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 44, height: 6)
-                .clipShape(RoundedRectangle(cornerRadius: 1))
-                Text("slow → fast")
+/// What the colours mean, on demand.
+///
+/// Colour is the *speed* ramp, not the state — a slow flight is blue and a
+/// fast one is red. State is carried by saturation (riding is washed out
+/// against flying) and by the two flat colours for slow and fall. Labelling
+/// green as "flying" would be wrong and would make every lane look mislabelled.
+struct RibbonKeySheet: View {
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 10) {
+                        LinearGradient(
+                            colors: (0...6).map { i in
+                                Color(hue: 0.58 - 0.58 * (Double(i) / 6),
+                                      saturation: 0.85, brightness: 0.95)
+                            },
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 60, height: 8)
+                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                        Text("Slow → fast")
+                    }
+                    LegendSwatch(colour: .gray.opacity(0.45), label: "Below your moving speed")
+                    LegendSwatch(colour: .red, label: "A fall")
+                } header: {
+                    Text("Colour is speed")
+                } footer: {
+                    Text("Pale is on the water, solid is flying. A slow flight is still blue and a fast one still red — the colour never means the state.")
+                }
+
+                Section {
+                    Text("Bar length is how far that run went, scaled to the longest run of the session.")
+                    Text("The dot is the tack: red for port, green for starboard.")
+                    Text("Tap a run to see its detail and isolate it on the map.")
+                } header: {
+                    Text("The rest of the row")
+                }
             }
-            LegendSwatch(colour: .gray.opacity(0.45), label: "Slow")
-            LegendSwatch(colour: .red, label: "Fall")
-            Text("· pale = on the water, solid = flying")
-                .foregroundStyle(.tertiary)
+            .navigationTitle("What you're looking at")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
     }
 }
 
@@ -110,6 +213,7 @@ struct LaneRow: View {
     let maxSpeed: Double
     let units: UnitPreferences
     let isSelected: Bool
+    var isBest: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -133,6 +237,8 @@ struct LaneRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3))
             }
             .frame(height: 16)
+
+            if isSelected { detail }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
@@ -143,6 +249,12 @@ struct LaneRow: View {
         .contentShape(Rectangle())
     }
 
+    /// Four things and a bar.
+    ///
+    /// This row used to carry eight fields. Every one of them was true and
+    /// forty rows of them were a wall — the percentage foiled and the point of
+    /// sail are what you read about *one* run you have already picked out, not
+    /// what you scan a session by. They moved below, onto the row you tapped.
     private var header: some View {
         HStack(spacing: 6) {
             Text("\(lane.runIndex + 1)")
@@ -166,29 +278,50 @@ struct LaneRow: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
 
-            if lane.foilingFraction > 0.05 {
-                Text("\(Int(lane.foilingFraction * 100))% foil")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+            if isBest {
+                Text("BEST")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
             }
 
             Spacer(minLength: 0)
+        }
+    }
 
+    /// The rest of the row, once you have picked this one out.
+    private var detail: some View {
+        HStack(spacing: 10) {
             // The compass heading, not the wind angle. On a session of matched
             // reaches every lane has the *same* |TWA| — showing it puts the
             // identical number on every row, which is noise. The heading is
             // what actually differs, and the tack dot already carries the side.
-            Text(Format.cardinal(lane.heading))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .frame(width: 26, alignment: .trailing)
-
+            detailItem("Heading", Format.cardinal(lane.heading))
             if let point = lane.pointOfSail {
-                Text(point.displayName)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 78, alignment: .trailing)
+                detailItem("Point", point.displayName)
             }
+            if lane.foilingFraction > 0.05 {
+                detailItem("On foil", "\(Int(lane.foilingFraction * 100))%")
+            }
+            detailItem("Time", Format.shortDuration(lane.duration))
+            detailItem("Top", Format.speed(lane.maxSpeed, unit: units.speed, decimals: 1))
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
+        .padding(.leading, 24)
+        .transition(.opacity)
+    }
+
+    private func detailItem(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
     }
 

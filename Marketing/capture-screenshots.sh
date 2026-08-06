@@ -14,8 +14,27 @@ set -euo pipefail
 
 UDID="${1:?usage: capture-screenshots.sh <simulator-udid> <output-dir>}"
 OUT="${2:?usage: capture-screenshots.sh <simulator-udid> <output-dir>}"
-APP="${APP_PATH:-/tmp/ow-dd/Build/Products/Debug-iphonesimulator/openWater.app}"
 BUNDLE="com.laan.labs.openWater"
+
+# Ask Xcode where the current build products are rather than hard-coding a
+# DerivedData path. The hard-coded one went stale and this script silently
+# captured a months-old build — screenshots of a tab that no longer existed,
+# with no error anywhere, because installing an old app is not a failure.
+if [[ -n "${APP_PATH:-}" ]]; then
+    APP="$APP_PATH"
+else
+    PRODUCTS=$(xcodebuild -scheme openWater \
+        -destination "platform=iOS Simulator,id=$UDID" \
+        -configuration Debug -showBuildSettings 2>/dev/null \
+        | awk -F' = ' '/ BUILT_PRODUCTS_DIR /{print $2; exit}')
+    APP="$PRODUCTS/openWater.app"
+fi
+
+if [[ ! -d "$APP" ]]; then
+    echo "No app at $APP — build the openWater scheme first, or set APP_PATH." >&2
+    exit 1
+fi
+echo "Using $APP"
 
 mkdir -p "$OUT"
 
@@ -32,9 +51,17 @@ xcrun simctl status_bar "$UDID" override \
     --cellularMode active --cellularBars 4 \
     --dataNetwork wifi --wifiMode active --wifiBars 3 >/dev/null 2>&1 || true
 
-echo "Installing"
-xcrun simctl uninstall "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
-xcrun simctl install "$UDID" "$APP"
+# A fresh install clears the location grant with it, and `simctl privacy` has
+# no working switch for location — so the first launch raises the permission
+# alert and it lands on top of whichever screen was being photographed. Grant
+# it once by hand, then re-run with SKIP_INSTALL=1 to keep that grant.
+if [[ -n "${SKIP_INSTALL:-}" ]]; then
+    echo "Reusing the installed app (SKIP_INSTALL)"
+else
+    echo "Installing"
+    xcrun simctl uninstall "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
+    xcrun simctl install "$UDID" "$APP"
+fi
 
 # Seed once, then reuse the store for every subsequent launch so the analysis
 # is not recomputed eight times.
@@ -59,7 +86,7 @@ echo "Capturing to $OUT"
 shoot 01-sessions   sessions      4
 shoot 02-map        map          10
 shoot 03-runs       runs          5
-shoot 04-charts     charts        6
+shoot 04-analysis   analysis      6
 shoot 05-playback   playback     10
 shoot 06-fullmap    fullScreenMap 10
 shoot 07-spots      spots        10

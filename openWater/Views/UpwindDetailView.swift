@@ -45,6 +45,13 @@ struct UpwindDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // The headline first, then the working. This card used to sit
+                // on Summary with this screen behind it; now that Analysis
+                // lists topics rather than stacking cards, the answer and the
+                // evidence belong together on one screen.
+                UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
+                    .cardChrome()
+
                 map
                     .frame(height: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 12))

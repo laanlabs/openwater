@@ -8,8 +8,8 @@ Watch, no account, no subscription, every feature free.
 
 | | | |
 |:--:|:--:|:--:|
-| ![Sessions](docs/screenshots/sessions.png) | ![Session map](docs/screenshots/map.png) | ![Charts](docs/screenshots/charts.png) |
-| **Sessions** — every session with its track, distance and best speeds | **Map** — speed-coloured track, editable wind, trim and replay | **Charts** — polar, wind angles, speed and VMG |
+| ![Sessions](docs/screenshots/sessions.png) | ![Session map](docs/screenshots/map.png) | ![Analysis](docs/screenshots/analysis.png) |
+| **Sessions** — every session with its track, distance and best speeds | **Map** — speed-coloured track, editable wind, trim and replay | **Analysis** — one row per topic, each with its headline |
 | ![Spots](docs/screenshots/spots.png) | ![Tools](docs/screenshots/tools.png) | ![Record](docs/screenshots/record.png) |
 | **Spots** — 1000+ launches with live wind on the pins | **Tools** — share a pin, call out a session, plan a shuttle | **Record** — start knowing the wind at your launch |
 

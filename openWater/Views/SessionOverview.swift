@@ -10,74 +10,22 @@ import SwiftUI
 /// competing for the top of the screen.
 struct SessionOverview: View {
 
-    let stored: StoredSession
     let session: Session
     let summary: SessionSummary
 
-    var onEdit: () -> Void = {}
     var onSetWind: () -> Void = {}
-    var onOpenMap: () -> Void = {}
-    var onReplay: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
     @State private var showingNotes = false
+    @State private var showsMoreNumbers = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
                 header
                 headlineNumbers
-
-                // Directly under the numbers it explains, not buried in a
-                // menu. The question "why does this not match the other app?"
-                // occurs while looking at them.
-                Button {
-                    showingNotes = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "info.circle")
-                        Text("How these numbers were measured")
-                            .font(.subheadline)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .frame(maxWidth: .infinity)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    SplitsView(session: session)
-                } label: {
-                    HStack {
-                        Text("Splits Analysis")
-                            .font(.headline)
-                        Spacer()
-                        Image(systemName: "arrow.right")
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 16)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        LinearGradient(colors: [.teal, .blue],
-                                       startPoint: .leading, endPoint: .trailing),
-                        in: Capsule()
-                    )
-                }
-
-                HStack(spacing: 12) {
-                    QuickAction(title: "Map", symbol: "map", action: onOpenMap)
-                    QuickAction(title: "Replay", symbol: "play.fill", action: onReplay)
-                }
-
                 BestSpeedsCard(summary: summary, units: settings.units)
 
                 if session.effectiveWind == nil {
@@ -106,41 +54,10 @@ struct SessionOverview: View {
                     .buttonStyle(.plain)
                 }
 
-                if let polar = summary.polar,
-                   polar.beat != nil || polar.upwindAngle(.port) != nil || polar.upwindAngle(.starboard) != nil {
-                    // The card is the answer; the screen behind it is the
-                    // working — every leg on the map with its angle, and the
-                    // VMG over time.
-                    NavigationLink {
-                        UpwindDetailView(session: session, summary: summary, polar: polar)
-                    } label: {
-                        UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
-                            .overlay(alignment: .topTrailing) {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                }
-                if summary.maneuverSummary.total > 0 {
-                    ManeuverCard(summary: summary.maneuverSummary, maneuvers: summary.maneuvers)
-                }
-                if summary.foil.flightCount > 0 {
-                    FoilSummaryCard(
-                        foil: summary.foil,
-                        falls: summary.fallSummary,
-                        units: settings.units,
-                        totalDistance: summary.distance,
-                        takeoffThreshold: session.effectiveFoilTakeoffSpeed,
-                        onChangeThreshold: onEdit
-                    )
-                }
-                if summary.downwind.glideCount > 0 {
-                    DownwindCard(downwind: summary.downwind, units: settings.units)
-                }
-                HealthCard(session: session, summary: summary)
-                QualityCard(quality: summary.quality, source: summary.speedSource, sport: session.sport)
+                // Upwind, Turns, Foiling, Downwind, Health and GPS quality all
+                // used to stack up below this point. They are good cards and
+                // they were unreadable in a column eight deep — they now have
+                // a screen each, listed on the Analysis tab.
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 28)
@@ -250,13 +167,19 @@ struct SessionOverview: View {
 
     // MARK: - Headline numbers
 
-    /// The six figures the reference app leads with, in the same order. Pause
-    /// and pace are the two people forget they want until they are missing:
-    /// pause explains a distance that looks slow, and pace is how anyone doing
-    /// a long crossing thinks about progress.
+    /// Four figures, three of them fixed.
+    ///
+    /// This was six of equal weight, copied from the app we were measuring
+    /// ourselves against. Two of them — stopped time and pace — are the
+    /// questions a runner asks, and putting them in the same typeface as top
+    /// speed said they mattered as much. They are a tap away now rather than
+    /// gone, because the rider on a long crossing really does want pace.
+    ///
+    /// The fourth tile is the one that says what kind of session this was, and
+    /// `HeadlineMetrics` in the core picks it: a foiler leads with time on
+    /// foil, a downwinder with time gliding, everyone else with average speed.
     private var headlineNumbers: some View {
-        let pause = max(0, summary.duration - summary.movingTime)
-        return VStack(spacing: 14) {
+        VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 0) {
                 DetailStat(
                     title: "Speed Max",
@@ -264,27 +187,6 @@ struct SessionOverview: View {
                     value: Format.speed(summary.maxSpeed, unit: settings.units.speed,
                                         decimals: 1, includeSymbol: false),
                     unit: settings.units.speed.symbol
-                )
-                // "Avg speed" unqualified reads as distance ÷ duration, and
-                // this is not that — it is distance ÷ *moving* time, which on a
-                // session with long drifts is twice the number. Another app
-                // showing 3.2 next to our 7.5 under the same word looks like
-                // one of us is broken; naming it settles which question each
-                // is answering.
-                DetailStat(
-                    title: "Avg moving",
-                    colour: .orange,
-                    value: Format.speed(summary.averageMovingSpeed, unit: settings.units.speed,
-                                        decimals: 1, includeSymbol: false),
-                    unit: settings.units.speed.symbol
-                )
-            }
-            HStack(alignment: .top, spacing: 0) {
-                DetailStat(
-                    title: "Duration",
-                    colour: .teal,
-                    value: Format.duration(summary.duration),
-                    unit: summary.duration >= 3600 ? "h:m:s" : "m:s"
                 )
                 DetailStat(
                     title: "Distance",
@@ -295,27 +197,130 @@ struct SessionOverview: View {
                 )
             }
             HStack(alignment: .top, spacing: 0) {
-                // Not "Pause". Nobody paused anything — this is time spent
-                // below the sport's moving threshold, which on a light day is
-                // most of a session. An app that only counts explicit pauses
-                // shows zero here, and a rider comparing the two would take
-                // ours for a bug rather than for a different measurement.
                 DetailStat(
-                    title: "Stopped",
-                    colour: .secondary,
-                    value: Format.duration(pause),
-                    unit: pause >= 3600 ? "h:m:s" : "m:s"
+                    title: "Duration",
+                    colour: .teal,
+                    value: Format.duration(summary.duration),
+                    unit: summary.duration >= 3600 ? "h:m:s" : "m:s"
                 )
-                DetailStat(
-                    title: "Pace",
-                    colour: .secondary,
-                    value: paceText,
-                    unit: "/ \(settings.units.distance.symbol)"
-                )
+                sportSlotStat
             }
+
+            moreNumbers
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var slot: HeadlineMetrics.Slot {
+        HeadlineMetrics.slot(for: session.sport, summary: summary)
+    }
+
+    /// The fourth tile. Green for the two that mean "you were riding properly"
+    /// — the same green the ribbon and the speed chart use for flying.
+    @ViewBuilder
+    private var sportSlotStat: some View {
+        switch slot {
+        case .timeOnFoil:
+            DetailStat(
+                title: slot.title,
+                colour: .green,
+                value: Format.duration(summary.foil.timeOnFoil),
+                unit: summary.foil.timeOnFoil >= 3600 ? "h:m:s" : "m:s"
+            )
+        case .timeGliding:
+            DetailStat(
+                title: slot.title,
+                colour: .green,
+                value: Format.duration(summary.downwind.glideTime),
+                unit: summary.downwind.glideTime >= 3600 ? "h:m:s" : "m:s"
+            )
+        case .averageMovingSpeed:
+            // "Avg speed" unqualified reads as distance ÷ duration, and this is
+            // not that — it is distance ÷ *moving* time, which on a session
+            // with long drifts is twice the number. Another app showing 3.2
+            // next to our 7.5 under the same word looks like one of us is
+            // broken; naming it settles which question each is answering.
+            DetailStat(
+                title: slot.title,
+                colour: .orange,
+                value: Format.speed(summary.averageMovingSpeed, unit: settings.units.speed,
+                                    decimals: 1, includeSymbol: false),
+                unit: settings.units.speed.symbol
+            )
+        }
+    }
+
+    /// The numbers that are worth keeping and not worth leading with.
+    private var moreNumbers: some View {
+        let pause = max(0, summary.duration - summary.movingTime)
+        return VStack(spacing: 0) {
+            Button {
+                withAnimation(.snappy) { showsMoreNumbers.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showsMoreNumbers ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                    Text(showsMoreNumbers ? "Fewer numbers" : "More numbers")
+                        .font(.caption)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            if showsMoreNumbers {
+                VStack(spacing: 7) {
+                    if slot != .averageMovingSpeed {
+                        minorStat("Avg moving",
+                                  Format.speed(summary.averageMovingSpeed,
+                                               unit: settings.units.speed, decimals: 1))
+                    }
+                    // Not "Pause". Nobody paused anything — this is time spent
+                    // below the sport's moving threshold, which on a light day
+                    // is most of a session. An app that only counts explicit
+                    // pauses shows zero here, and a rider comparing the two
+                    // would take ours for a bug rather than for a different
+                    // measurement.
+                    minorStat("Stopped", Format.duration(pause))
+                    minorStat("Pace", "\(paceText) / \(settings.units.distance.symbol)")
+
+                    Divider()
+
+                    // The question "why does this not match the other app?"
+                    // occurs while looking at exactly these numbers.
+                    Button {
+                        showingNotes = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                            Text("How these numbers were measured")
+                                .font(.caption)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func minorStat(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.subheadline)
+                .monospacedDigit()
+        }
     }
 
     /// Moving time per unit distance, `mm:ss`.
@@ -396,23 +401,6 @@ struct DetailStat: View {
     }
 }
 
-struct QuickAction: View {
-    let title: String
-    let symbol: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(.background, in: RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// The speed categories as a row of chips, the way a speed sailor reads them.
 struct BestSpeedsCard: View {
 
@@ -472,31 +460,45 @@ struct BestSpeedsCard: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 14))
         .sheet(isPresented: $showingList) {
             NavigationStack {
-                List(summary.speedResults, id: \.category) { result in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(result.category.displayName)
-                            Text(result.category.explanation)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                BestSpeedsList(summary: summary, units: units)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showingList = false }
                         }
-                        Spacer()
-                        Text(result.isValid
-                             ? Format.speed(result.speed, unit: units.speed)
-                             : "—")
-                        .monospacedDigit()
-                        .foregroundStyle(result.isValid ? .primary : .secondary)
                     }
-                }
-                .navigationTitle("Best Speeds")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { showingList = false }
-                    }
-                }
             }
         }
+    }
+}
+
+/// Every category, achieved or not, with what each one means.
+///
+/// Lifted out of `BestSpeedsCard`'s sheet so the Analysis tab can push the
+/// same list rather than growing a second copy of it.
+struct BestSpeedsList: View {
+
+    let summary: SessionSummary
+    let units: UnitPreferences
+
+    var body: some View {
+        List(summary.speedResults, id: \.category) { result in
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(result.category.displayName)
+                    Text(result.category.explanation)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(result.isValid
+                     ? Format.speed(result.speed, unit: units.speed)
+                     : "—")
+                .monospacedDigit()
+                .foregroundStyle(result.isValid ? .primary : .secondary)
+            }
+        }
+        .navigationTitle("Best Speeds")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

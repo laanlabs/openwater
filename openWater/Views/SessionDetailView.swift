@@ -29,8 +29,6 @@ struct SessionDetailView: View {
     @State private var session: Session?
     @State private var view: Mode = .map
     @State private var selectedRun: Int?
-    @State private var highlight: ClosedRange<TimeInterval>?
-    @State private var foilingOnly = false
     @State private var isExporting = false
     @State private var isSharingToWeb = false
     @State private var isSharingImage = false
@@ -96,7 +94,7 @@ struct SessionDetailView: View {
         case map = "Map"
         case summary = "Summary"
         case ribbon = "Runs"
-        case charts = "Charts"
+        case analysis = "Analysis"
 
         var id: String { rawValue }
         var symbol: String {
@@ -104,7 +102,7 @@ struct SessionDetailView: View {
             case .map: "map"
             case .summary: "list.bullet.rectangle"
             case .ribbon: "chart.bar.doc.horizontal"
-            case .charts: "chart.xyaxis.line"
+            case .analysis: "chart.xyaxis.line"
             }
         }
     }
@@ -159,7 +157,11 @@ struct SessionDetailView: View {
                     Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }
                         .disabled(session == nil)
                     Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
-                    Toggle("Flying only", systemImage: "airplane", isOn: $foilingOnly)
+                    // A "Flying only" toggle used to sit here. It was bound to
+                    // a variable nothing read, so it did nothing at all — while
+                    // the identically-labelled one in the full-screen map
+                    // worked. The Map tab has its own foil filter; one working
+                    // control beats two that disagree.
                     Divider()
                     // Deleting was only possible from the list, which is not
                     // where anyone looks for it after opening a session and
@@ -366,20 +368,21 @@ struct SessionDetailView: View {
             switch view {
             case .summary:
                 SessionOverview(
-                    stored: stored,
                     session: session,
                     summary: summary,
-                    onEdit: { isEditing = true },
-                    onSetWind: { isSettingWind = true },
-                    onOpenMap: { isMapFullScreen = true },
-                    onReplay: { isPlayingBack = true }
+                    onSetWind: { isSettingWind = true }
                 )
             case .map:
                 mapView(session: session, summary: summary)
             case .ribbon:
                 ribbonView(session: session, summary: summary)
-            case .charts:
-                chartsView(session: session, summary: summary)
+            case .analysis:
+                SessionAnalysisTab(
+                    session: session,
+                    summary: summary,
+                    onSetWind: { isSettingWind = true },
+                    onEdit: { isEditing = true }
+                )
             }
         }
     }
@@ -401,78 +404,10 @@ struct SessionDetailView: View {
             ribbon: summary.ribbon,
             maxSpeed: summary.maxSpeed,
             units: settings.units,
+            bestRunIndex: summary.bestRun?.index,
             selectedLane: $selectedRun
         )
     }
 
-    private func chartsView(session: Session, summary: SessionSummary) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                SpeedChart(session: session, summary: summary, units: settings.units)
-
-                if let polar = summary.polar {
-                    PolarChart(polar: polar, units: settings.units)
-                    AngleSummary(polar: polar, units: settings.units)
-                } else if session.sport.isWindPowered {
-                    // Silently omitting the angles section leaves a rider
-                    // wondering whether the app has them and they are lost, or
-                    // whether it never had them. Say which, and offer the fix.
-                    NoWindCard(session: session) { isSettingWind = true }
-                } else {
-                    // Same reasoning, different answer: this sport was never
-                    // going to have one.
-                    NoPolarCard(sport: session.sport)
-                }
-                // The foiling, turns, glide and quality cards live on the
-                // Summary tab. Repeating them here made Charts a second copy of
-                // it with two graphs on top, and neither tab was then worth
-                // scrolling to the bottom of.
-            }
-            .padding()
-        }
-        .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
-    }
-
-    /// A horizontal strip of runs, ordered by time and coloured by speed.
-    /// Tapping one isolates it on the map.
-    private func runScrubber(summary: SessionSummary) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                FilterChip(title: "All runs", isOn: selectedRun == nil) {
-                    withAnimation { selectedRun = nil; highlight = nil }
-                }
-                ForEach(summary.runs) { run in
-                    Button {
-                        withAnimation {
-                            selectedRun = selectedRun == run.index ? nil : run.index
-                            highlight = nil
-                        }
-                    } label: {
-                        VStack(spacing: 1) {
-                            Text("\(run.index + 1)")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(Format.speed(run.averageSpeed, unit: settings.units.speed,
-                                              decimals: 1, includeSymbol: false))
-                                .font(.system(size: 9, design: .rounded))
-                                .monospacedDigit()
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(
-                            selectedRun == run.index
-                                ? AnyShapeStyle(.tint)
-                                : AnyShapeStyle(.quaternary),
-                            in: RoundedRectangle(cornerRadius: 6)
-                        )
-                        .foregroundStyle(selectedRun == run.index ? .white : .primary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-        }
-        .background(.bar)
-    }
 
 }

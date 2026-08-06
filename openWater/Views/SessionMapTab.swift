@@ -500,6 +500,28 @@ struct WindDial: View {
     let units: UnitPreferences
 
     var body: some View {
+        // A column, not an overlay: hanging the swell capsule off the dial's
+        // bottom edge put it across the cardinal and the edit badge. It gets
+        // its own line under the dial, where it can never cover the numbers
+        // it is sitting next to.
+        VStack(spacing: 3) {
+            dial
+
+            if let swell, swell > 0.05 {
+                Text(swellText(swell))
+                    .font(.system(size: 10, weight: .semibold))
+                    .monospacedDigit()
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(.regularMaterial, in: Capsule())
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Wind \(Format.cardinal(wind.directionFrom))\(wind.speed == nil ? "" : ", \(speedText)")")
+        .accessibilityHint("Edit the wind and swell")
+    }
+
+    private var dial: some View {
         ZStack {
             Circle()
                 .fill(.regularMaterial)
@@ -531,19 +553,7 @@ struct WindDial: View {
                 .background(.tint, in: Circle())
                 .offset(x: 22, y: 22)
         }
-        .overlay(alignment: .bottom) {
-            if let swell, swell > 0.05 {
-                Text(swellText(swell))
-                    .font(.system(size: 10, weight: .semibold))
-                    .monospacedDigit()
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(.regularMaterial, in: Capsule())
-                    .offset(y: 13)
-            }
-        }
-        .accessibilityLabel("Wind \(Format.cardinal(wind.directionFrom))\(wind.speed == nil ? "" : ", \(speedText)")")
-        .accessibilityHint("Edit the wind and swell")
+        .frame(width: 64, height: 64)
     }
 
     private var speedText: String {

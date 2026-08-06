@@ -286,9 +286,9 @@ extension WindSetterView {
                     .monospacedDigit()
                     .foregroundStyle(swell > 0.05 ? .primary : .secondary)
             }
-            SwellWaveGraphic(metres: swell, maximum: 4)
+            SwellWaveGraphic(metres: swell, maximum: 5)
                 .frame(height: 64)
-            Slider(value: $swell, in: 0...4, step: 0.1)
+            Slider(value: $swell, in: 0...5, step: 0.1)
             Text("Your call, not a measurement — nothing on the phone can see a wave.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

@@ -24,6 +24,7 @@ struct ContentView: View {
     /// because the tab was already selected.
     @State private var recordTabReset = 0
     @State private var sessionsTabReset = 0
+    @State private var toolsTabReset = 0
 
     /// Room kept clear for the bar. The capsule is 62 points tall including its
     /// rise, and it sits 6 above the home indicator.
@@ -46,7 +47,7 @@ struct ContentView: View {
                 page(.record) {
                     RecordTabView(isActive: selection == .record, reset: recordTabReset)
                 }
-                page(.tools) { ToolsTabView() }
+                page(.tools) { ToolsTabView(reset: toolsTabReset) }
                 page(.settings) { SettingsView() }
             }
             // No inset here. Neither `padding` nor `safeAreaPadding` at this
@@ -70,6 +71,7 @@ struct ContentView: View {
                     visited.insert(tab)
                     if tab == .record { recordTabReset += 1 }
                     if tab == .sessions { sessionsTabReset += 1 }
+                    if tab == .tools { toolsTabReset += 1 }
                 }
             )
         }

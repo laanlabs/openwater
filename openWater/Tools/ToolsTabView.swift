@@ -13,64 +13,98 @@ struct ToolsTabView: View {
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
     @Environment(\.openURL) private var openURL
 
+    /// Bumped every time the Tools tab is tapped, including when it is
+    /// already showing.
+    var reset: Int = 0
+
+    /// Value-based routing, purely so the tab can pop itself: a
+    /// destination-based `NavigationLink` pushes without ever appearing in a
+    /// `NavigationStack`'s path, so there is nothing to clear.
+    @State private var path: [Tool] = []
+
+    enum Tool: Hashable {
+        case shareLocation, callOut, floatPlan, shuttle
+        case windHere, daylight, speedo, improveSpot, units
+    }
+
+    private static let topAnchor = "tools-top"
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
+            ScrollViewReader { proxy in
+                list
+                    .onChange(of: reset) { _, _ in
+                        path = []
+                        withAnimation(.snappy) {
+                            proxy.scrollTo(Self.topAnchor, anchor: .top)
+                        }
+                    }
+            }
+            .navigationDestination(for: Tool.self) { destination(for: $0) }
+            .navigationTitle("Tools")
+        }
+    }
+
+    @ViewBuilder
+    private func destination(for tool: Tool) -> some View {
+        switch tool {
+        case .shareLocation: ShareLocationView()
+        case .callOut: CallOutView()
+        case .floatPlan: FloatPlanView()
+        case .shuttle: ShuttlePlannerView()
+        case .windHere: WindHereView()
+        case .daylight: DaylightView()
+        case .speedo: BigSpeedoView()
+        case .improveSpot: ImproveSpotHubView()
+        case .units: UnitsConverterView()
+        }
+    }
+
+    private var list: some View {
             List {
                 Section("Logistics") {
-                    NavigationLink {
-                        ShareLocationView()
-                    } label: {
+                    Color.clear
+                        .frame(height: 0)
+                        .listRowSeparator(.hidden)
+                        .id(Self.topAnchor)
+                    NavigationLink(value: Tool.shareLocation) {
                         toolRow("Share My Location", symbol: "mappin.and.ellipse",
                                 blurb: "Send a pin to your shuttle driver — Apple Maps, Google Maps, WhatsApp.")
                     }
-                    NavigationLink {
-                        CallOutView()
-                    } label: {
+                    NavigationLink(value: Tool.callOut) {
                         toolRow("Session Call-out", symbol: "megaphone",
                                 blurb: "Spot, wind and a time in one message. Who's in?")
                     }
-                    NavigationLink {
-                        FloatPlanView()
-                    } label: {
+                    NavigationLink(value: Tool.floatPlan) {
                         toolRow("Float Plan", symbol: "checkmark.shield",
                                 blurb: "Where you're going and when to worry, sent before you're out of range.")
                     }
-                    NavigationLink {
-                        ShuttlePlannerView()
-                    } label: {
+                    NavigationLink(value: Tool.shuttle) {
                         toolRow("Shuttle Planner", symbol: "car.2",
                                 blurb: "Run distance, and whether today's wind actually points down it.")
                     }
                 }
 
                 Section("Conditions") {
-                    NavigationLink {
-                        WindHereView()
-                    } label: {
+                    NavigationLink(value: Tool.windHere) {
                         toolRow("Wind Here", symbol: "wind",
                                 blurb: "Model wind and the next 12 hours, at your feet.")
                     }
-                    NavigationLink {
-                        DaylightView()
-                    } label: {
+                    NavigationLink(value: Tool.daylight) {
                         toolRow("Daylight", symbol: "sunset",
                                 blurb: "Sunset, last usable light, and how long you've got.")
                     }
                 }
 
                 Section("Instruments") {
-                    NavigationLink {
-                        BigSpeedoView()
-                    } label: {
+                    NavigationLink(value: Tool.speedo) {
                         toolRow("Speedo", symbol: "gauge.with.needle",
                                 blurb: "Just the speed, huge. No recording.")
                     }
                 }
 
                 Section("Spot Guide") {
-                    NavigationLink {
-                        ImproveSpotHubView()
-                    } label: {
+                    NavigationLink(value: Tool.improveSpot) {
                         toolRow("Add or Fix a Spot", symbol: "camera.badge.ellipsis",
                                 blurb: "Standing at a launch? Photograph it and send it to the guide.")
                     }
@@ -110,9 +144,7 @@ struct ToolsTabView: View {
                 }
 
                 Section {
-                    NavigationLink {
-                        UnitsConverterView()
-                    } label: {
+                    NavigationLink(value: Tool.units) {
                         toolRow("Units", symbol: "arrow.left.arrow.right",
                                 blurb: "Knots to everything, both ways.")
                     }
@@ -123,8 +155,6 @@ struct ToolsTabView: View {
                 }
             }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
-            .navigationTitle("Tools")
-        }
     }
 
     private func toolRow(_ title: String, symbol: String, blurb: String) -> some View {

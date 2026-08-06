@@ -25,6 +25,7 @@ struct SessionDetailView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
     @Environment(\.dismiss) private var dismiss
+    @Environment(RouteNamer.self) private var routeNamer
 
     @State private var session: Session?
     @State private var view: Mode = .map
@@ -368,16 +369,19 @@ struct SessionDetailView: View {
             switch view {
             case .summary:
                 SessionOverview(
+                    stored: stored,
                     session: session,
                     summary: summary,
                     onSetWind: { isSettingWind = true }
                 )
+                .task { await routeNamer.resolve(for: stored, session: session) }
             case .map:
                 mapView(session: session, summary: summary)
             case .ribbon:
                 ribbonView(session: session, summary: summary)
             case .analysis:
                 SessionAnalysisTab(
+                    stored: stored,
                     session: session,
                     summary: summary,
                     onSetWind: { isSettingWind = true },

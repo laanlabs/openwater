@@ -10,6 +10,7 @@ import SwiftUI
 /// competing for the top of the screen.
 struct SessionOverview: View {
 
+    let stored: StoredSession
     let session: Session
     let summary: SessionSummary
 
@@ -142,6 +143,23 @@ struct SessionOverview: View {
             }
             .buttonStyle(.plain)
 
+            // "Viento → Hatchery". Only ever present when the ends really were
+            // different places, so its absence means a session at one spot
+            // rather than a lookup that has not happened.
+            if let route = stored.routeName {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: shapeSymbol)
+                        .foregroundStyle(.secondary)
+                    // Two lines, not one shrunk to fit: guide names run long
+                    // ("Berkeley Pier downwind route"), and a route with both
+                    // ends elided to "…" tells the rider nothing.
+                    Text(route)
+                        .font(.subheadline)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if session.purpose != nil || session.feeling != nil {
                 HStack {
                     if let purpose = session.purpose {
@@ -172,6 +190,14 @@ struct SessionOverview: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var shapeSymbol: String {
+        switch summary.shape.kind {
+        case .downwinder: "arrow.down.right.circle"
+        case .crossing: "arrow.right.circle"
+        case .aroundASpot: "mappin.and.ellipse"
+        }
     }
 
     private func windText(_ wind: Wind) -> String {

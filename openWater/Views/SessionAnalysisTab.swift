@@ -16,6 +16,9 @@ import SwiftUI
 /// should not be offered a glides screen.
 struct SessionAnalysisTab: View {
 
+    /// Optional so the tab can be previewed without a database row; the
+    /// route name is the only thing that needs it.
+    var stored: StoredSession?
     let session: Session
     let summary: SessionSummary
 
@@ -27,6 +30,7 @@ struct SessionAnalysisTab: View {
 
     var body: some View {
         List {
+            if summary.shape.isPointToPoint { routeSection }
             if showsWindSection { windSection }
             speedSection
             if showsTechniqueSection { techniqueSection }
@@ -34,6 +38,50 @@ struct SessionAnalysisTab: View {
         }
         .listStyle(.insetGrouped)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+    }
+
+    // MARK: - Route
+
+    /// Only for a session that actually went somewhere. A row saying "at one
+    /// spot" on every lap session would be noise on the screen that exists to
+    /// cut noise.
+    private var routeSection: some View {
+        Section("Route") {
+            HStack(spacing: 12) {
+                Image(systemName: summary.shape.kind == .downwinder
+                      ? "arrow.down.right.circle" : "arrow.right.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(.tint)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(routeName ?? summary.shape.kind.displayName)
+                        .lineLimit(2)
+                    if let detail = routeDetail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(Format.distance(summary.shape.netDisplacement, unit: settings.units.distance))
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var routeName: String? { stored?.routeName }
+
+    private var routeDetail: String? {
+        var parts: [String] = []
+        if routeName != nil { parts.append(summary.shape.kind.displayName) }
+        if let alignment = summary.shape.downwindAlignment, summary.shape.kind == .downwinder {
+            parts.append("\(Int(alignment.rounded()))° off dead downwind")
+        }
+        let legs = summary.shape.legs.count
+        if legs > 1 { parts.append("\(legs) runs") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Wind

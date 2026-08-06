@@ -12,6 +12,7 @@ struct openWaterApp: App {
     @State private var recorder = PhoneRecorder()
     @State private var countdown = RaceCountdown()
     @State private var spotGuide = SpotGuideStore()
+    @State private var routeNamer: RouteNamer
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -33,6 +34,12 @@ struct openWaterApp: App {
         let library = SessionLibrary(context: container.mainContext)
         _library = State(initialValue: library)
         _sync = State(initialValue: PhoneSyncClient(library: library))
+
+        // Shares the one guide store rather than opening a second copy of the
+        // spot database purely to name two coordinates.
+        let guide = SpotGuideStore()
+        _spotGuide = State(initialValue: guide)
+        _routeNamer = State(initialValue: RouteNamer(guide: guide))
     }
 
     var body: some Scene {
@@ -44,6 +51,7 @@ struct openWaterApp: App {
                 .environment(recorder)
                 .environment(countdown)
                 .environment(spotGuide)
+                .environment(routeNamer)
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
                     library.purgeExpiredTrash()

@@ -89,6 +89,24 @@ final class StoredSession {
     /// anybody currently has was written before this existed.
     var deviceModel: String?
 
+    /// "Viento → Hatchery", once resolved.
+    ///
+    /// A column rather than part of the analysis, on purpose. Naming the ends
+    /// of a run needs the spot guide and, failing that, Apple's geocoder — so
+    /// it needs the network, and `SessionSummary` must stay a pure function of
+    /// the track. Putting it there would also mean every rename bumped
+    /// `analysisVersion` and re-ran the maths on every session in the library.
+    ///
+    /// `CLGeocoder` is rate-limited, so this is resolved once and kept.
+    var routeName: String?
+
+    /// Set when a route lookup has been attempted, whatever the outcome.
+    ///
+    /// Distinguishes "not looked up yet" from "looked up, and there is no
+    /// route here" — a lap session has no A → B and never will, and without
+    /// this it would be re-geocoded on every appearance forever.
+    var routeResolvedAt: Date?
+
     /// Bumped when the analysis engine changes, so stale rows can be found and
     /// recomputed rather than quietly showing numbers from an older algorithm.
     var analysisVersion: Int

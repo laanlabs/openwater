@@ -220,7 +220,7 @@ public struct DownwindAnalyzer: Sendable {
         guard track.count >= 10 else { return .none }
 
         let hasMotion = track.points.contains { $0.verticalAccelSD != nil }
-        let glides = detectGlides(in: track, flights: flights, hasMotion: hasMotion)
+        let glides = detectGlides(in: track, flights: flights, wind: wind, hasMotion: hasMotion)
 
         guard !glides.isEmpty else {
             return DownwindSummary(
@@ -269,9 +269,28 @@ public struct DownwindAnalyzer: Sendable {
         )
     }
 
+    /// Whether a candidate glide was actually sailed downwind.
+    ///
+    /// The detector's other tests — flying, fast enough, not decelerating —
+    /// describe a good stretch of riding, not a glide. On a session of
+    /// upwind-downwind laps a close reach passes all three, and a real Gorge
+    /// session came back with thirty-four "glides" of which the first was
+    /// sailed forty-six degrees off the wind. That is a beat, and calling it a
+    /// glide put upwind legs on a screen about riding swell.
+    ///
+    /// The bump can only push you the way it is going, so a glide has to be
+    /// abaft the beam. Without wind there is nothing to check against and the
+    /// candidate stands — the confidence already says the call is weaker then.
+    func isDownwind(from start: Int, to end: Int, in track: Track, wind: Wind?) -> Bool {
+        guard let wind else { return true }
+        let heading = Geo.bearing(from: track.points[start].coordinate,
+                                  to: track.points[end].coordinate)
+        return Geo.angleSeparation(heading, wind.directionFrom) > 90
+    }
+
     // MARK: - Glide segmentation
 
-    func detectGlides(in track: Track, flights: [Flight], hasMotion: Bool) -> [Glide] {
+    func detectGlides(in track: Track, flights: [Flight], wind: Wind?, hasMotion: Bool) -> [Glide] {
         let flyingMask = FoilDetector(thresholds: thresholds)
             .flyingMask(flights: flights, count: track.count)
         let requiresFlight = !flights.isEmpty
@@ -306,7 +325,7 @@ public struct DownwindAnalyzer: Sendable {
             while j + 1 < track.count, isGliding[j + 1] { j += 1 }
 
             let duration = track.elapsed[j] - track.elapsed[i]
-            if duration >= minimumGlideDuration, j > i {
+            if duration >= minimumGlideDuration, j > i, isDownwind(from: i, to: j, in: track, wind: wind) {
                 var peak = 0.0
                 for k in i...j { peak = max(peak, track.speed[k]) }
                 let distance = track.cumulativeDistance[j] - track.cumulativeDistance[i]

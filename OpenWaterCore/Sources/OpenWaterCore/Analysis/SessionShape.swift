@@ -152,13 +152,22 @@ public enum SessionShapeAnalyzer {
     /// downwinder on geometry alone.
     public static let straightnessWithoutWind: Double = 0.5
 
-    /// Silence between runs that means the rider stopped riding, seconds. A
-    /// water start after a fall is thirty seconds; a shuttle is minutes.
+    /// Silence between runs that means the rider stopped riding, seconds.
+    ///
+    /// On its own this proves nothing. A real session is full of five-minute
+    /// gaps — sitting on the board, a drink, a chat, a wing swap — and an
+    /// early version split on silence alone and cut one afternoon at one spot
+    /// into five "runs", each break being 140 to 290 seconds while the rider
+    /// had moved less than 160 metres. Being stopped is not being carried.
     public static let transportGap: TimeInterval = 120
 
-    /// A jump between where one run ended and the next began that no
-    /// transition on the water produces — you were carried.
+    /// How far the rider moved between one run ending and the next beginning.
+    /// This is the signal that matters: a shuttle always *takes you somewhere*.
     public static let transportJump: Double = 800
+
+    /// With a long silence to support it, a smaller move still counts — the
+    /// rider stopped, and when they started again they were somewhere else.
+    public static let transportJumpAfterGap: Double = 400
 
     public static func analyse(track: Track, runs: [Run], wind: Wind?) -> SessionShape {
         guard let first = track.points.first?.coordinate,
@@ -176,13 +185,27 @@ public enum SessionShapeAnalyzer {
 
         let legs = self.legs(track: track, runs: runs, wind: wind)
 
+        // Where the session as a whole finished decides this, not any one leg
+        // inside it. A first version asked whether *any* leg looked downwind,
+        // and a lap session at one spot answered yes — one long reach down the
+        // river is a straight, wind-aligned kilometre, and the session got
+        // reported as a downwinder despite finishing six metres from where it
+        // launched. A rider who ends up back at their car did not do a
+        // downwinder, whatever any single stretch of it looked like.
         let kind: SessionShape.Kind
-        if legs.contains(where: \.isDownwind) {
+        let downwindLegs = legs.filter(\.isDownwind)
+        if netDisplacement < minimumLegDisplacement || straightness < 0.25 {
+            // The exception, and the only one: a shuttle day really does end
+            // near where it started, because the last drive brings you back.
+            // It needs *several* legs, each separated by a genuine transport
+            // jump, and each downwind in its own right.
+            kind = downwindLegs.count >= 2 ? .downwinder : .aroundASpot
+        } else if let alignment, alignment <= downwindTolerance {
             kind = .downwinder
-        } else if netDisplacement >= minimumLegDisplacement && straightness >= 0.4 {
-            kind = .crossing
+        } else if alignment == nil && straightness >= straightnessWithoutWind {
+            kind = .downwinder
         } else {
-            kind = .aroundASpot
+            kind = .crossing
         }
 
         return SessionShape(
@@ -213,7 +236,9 @@ public enum SessionShapeAnalyzer {
             let previous = groups[groups.count - 1][groups[groups.count - 1].count - 1]
             let silence = run.startElapsed - previous.endElapsed
             let jump = Geo.distance(previous.endCoordinate, run.startCoordinate)
-            if silence >= transportGap || jump >= transportJump {
+            let carried = jump >= transportJump
+                || (silence >= transportGap && jump >= transportJumpAfterGap)
+            if carried {
                 groups.append([run])
             } else {
                 groups[groups.count - 1].append(run)

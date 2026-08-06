@@ -210,7 +210,20 @@ struct SessionAnalysisTab: View {
         summary.maneuverSummary.total > 0
             || summary.foil.flightCount > 0
             || summary.jumpSummary.count > 0
-            || summary.downwind.glideCount > 0
+            || showsDownwind
+    }
+
+    /// Glides are only worth a screen when the session was about riding swell.
+    ///
+    /// A count above zero is not enough. An afternoon of upwind-downwind laps
+    /// turns up a handful of short glides on the downwind halves, and offering
+    /// a "Downwind" screen for them puts the session's *upwind* work on a page
+    /// about bumps — which is exactly what a rider reported. Either the shape
+    /// of the session says it was a run, or the sport says catching swell is
+    /// the point of it.
+    private var showsDownwind: Bool {
+        guard summary.downwind.glideCount > 0 else { return false }
+        return summary.shape.kind == .downwinder || session.sport.ridesSwell
     }
 
     @ViewBuilder
@@ -240,7 +253,7 @@ struct SessionAnalysisTab: View {
                     AirtimeScreen(summary: summary, units: settings.units)
                 }
             }
-            if summary.downwind.glideCount > 0 {
+            if showsDownwind {
                 AnalysisRow(symbol: "water.waves", title: "Downwind", value: glideValue) {
                     DownwindDetailView(session: session, summary: summary)
                 }

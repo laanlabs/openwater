@@ -79,10 +79,21 @@ struct DownwindDetailView: View {
                     glideList
                 }
 
-                Text("A glide is a stretch where you were flying, not pumping, and not slowing down — the bump doing the work. Colour is speed through the glide.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("A glide is a stretch where you were flying, not pumping, and not slowing down, with the bump doing the work. Only stretches sailed abaft the beam count — a bump can only push you the way it is going. Colour is speed through the glide.")
+
+                    if !summary.downwind.usedMotionData {
+                        // Said plainly rather than folded into a number. Without
+                        // the accelerometer there is no way to tell working from
+                        // gliding, so the detector is reading the speed trace and
+                        // inferring, and the rider should weigh these accordingly.
+                        Text("This session has no motion data, so glides were found from the speed trace alone. Treat them as indicative.")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 24)

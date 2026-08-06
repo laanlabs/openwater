@@ -62,8 +62,9 @@ shoot 03-runs       runs          5
 shoot 04-charts     charts        6
 shoot 05-playback   playback     10
 shoot 06-fullmap    fullScreenMap 10
-shoot 07-records    records       4
-shoot 08-trends     trends        5
+shoot 07-spots      spots        10
+shoot 08-tools      tools         4
+shoot 09-record     record        8
 
 xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 xcrun simctl status_bar "$UDID" clear >/dev/null 2>&1 || true

@@ -4,6 +4,30 @@ An open-source session tracker for wind-powered watersports — wingfoiling,
 parawinging, downwinding, windsurfing, kiting, SUP and sailing. iPhone and Apple
 Watch, no account, no subscription, every feature free.
 
+**[openwaterapp.com](https://openwaterapp.com)** · [Spot guide](https://openwaterapp.com/spots)
+
+| | | |
+|:--:|:--:|:--:|
+| ![Sessions](docs/screenshots/sessions.png) | ![Session map](docs/screenshots/map.png) | ![Charts](docs/screenshots/charts.png) |
+| **Sessions** — every session with its track, distance and best speeds | **Map** — speed-coloured track, editable wind, trim and replay | **Charts** — polar, wind angles, speed and VMG |
+| ![Spots](docs/screenshots/spots.png) | ![Tools](docs/screenshots/tools.png) | ![Record](docs/screenshots/record.png) |
+| **Spots** — 1000+ launches with live wind on the pins | **Tools** — share a pin, call out a session, plan a shuttle | **Record** — start knowing the wind at your launch |
+
+## What it does
+
+- **Speed categories** riders actually compare: 2 s, 10 s, 5×10 s, 100 m, 250 m,
+  500 m, 1 NM, 1 h, and Alpha 500/1000 to the community rule.
+- **Foiling analysis** — flights, time on foil, dry-gybe rate, touchdowns.
+- **Upwind and VMG** — per-tack angles, best beat, and every upwind leg drawn on
+  the map with the angle it was sailed at.
+- **Downwind** — glide detection, bump period, and a shuttle planner that says
+  how far off dead downwind today's wind puts your run.
+- **A spot guide** — the same published database the website serves, with live
+  model wind, cached for offline, and a camera-first way to fix a spot from the
+  beach.
+- **Your data stays yours** — no account, no server of ours, complete exports in
+  a documented format, and sharing only when you tap share.
+
 ```
 openWater/
 ├── OpenWaterCore/            Swift package: model, analysis, ingest, IO.
@@ -14,6 +38,7 @@ openWater/
 ├── openWaterTests/           iOS unit tests
 ├── openWaterUITests/         UI + screenshot tests
 ├── Marketing/                App Store screenshots and metadata
+├── docs/screenshots/         The shots used in this README
 ├── scripts/testflight.sh     Archive and upload to TestFlight
 └── docs/PLAN.md              Design notes
 ```
@@ -127,20 +152,22 @@ If any of these fail the script stops before spending an upload.
 | `Missing ASC_KEY_ID` | `~/.appstoreconnect/openwater.env` is absent or misspelled |
 | `No API key at ~/.appstoreconnect/private_keys/AuthKey_….p8` | Filename must match the Key ID exactly |
 | `403` / `not authorized` during upload | Key has the Developer role — regenerate as App Manager |
-| Signing or provisioning errors | The script passes `-allowProvisioningUpdates`; the Apple ID still has to be in the team (`34FWY7G2HB`) |
+| Signing or provisioning errors | The script passes `-allowProvisioningUpdates`; the Apple ID still has to be in the team. Forks: set `OPENWATER_TEAM_ID` to your own |
 
 ---
 
 ## Turning on WeatherKit
 
-Two things use it: the conditions strip on the Record tab, and **Use recorded
-conditions** on a session, which fills in the wind that was actually blowing
-from Apple's historical hourly data. That second one matters more than it
-sounds — without it a session's wind direction is guessed from the shape of the
-track, and every angle, VMG figure and polar in the app is measured from that
-guess.
+WeatherKit is **not currently used for the live wind** — the Record tab and the
+spot guide read Open-Meteo, which needs no entitlement and works today. What
+WeatherKit still offers is **Use recorded conditions** on a saved session: the
+wind that was actually blowing, from Apple's historical hourly data. That
+matters more than it sounds — otherwise a session's wind direction is guessed
+from the shape of the track (or set by hand on the dial), and every angle, VMG
+figure and polar is measured from that.
 
-The code side is done. The account side needs your Apple ID and has to be done
+The code side is done, and `Settings → Weather` runs a live check that prints
+the verbatim error if the service refuses. The account side needs your Apple ID and has to be done
 once:
 
 1. Go to [Certificates, Identifiers & Profiles →
@@ -227,8 +254,35 @@ the conditions. In order:
 5. If it still does not appear, check the watch's own App Store → Account →
    Installed Apps for a stalled entry and delete it before retrying.
 
+## Configuration and keys
+
+There is one credential-shaped string in this repository — the Firebase Web API
+key in `openWater/Spots/SpotGuideStore.swift` — and it is deliberately in the
+open. Firebase Web keys are project *identifiers*, not secrets: they cannot
+grant access on their own, they ship inside any client that talks to Firebase,
+and this one is already served to every browser that loads
+[openwaterapp.com](https://openwaterapp.com). Hiding it would break
+`git clone && build` and buy nothing.
+
+What actually protects the data is the rules, which are worth reading if you are
+reviewing this:
+
+- **Firestore** — spots are readable only when `status == "published"` and
+  `isTest == false`, so a query that does not filter on both is denied outright.
+  `spotSuggestions` is *create-only* with every field length-bounded; the app
+  cannot read, list, edit or delete a suggestion, including its own.
+- **Storage** — shares and suggestion photos are create-only and write-once, so
+  a link already in somebody's hands can never be swapped for different content.
+  Suggestion photos are not publicly readable at all; they are reviewed with
+  owner credentials before anything ships.
+
+The known gap, documented rather than hidden: nothing stops an unauthenticated
+client writing junk in a loop. There is no per-caller quota available in rules —
+App Check is the fix if it ever happens in practice.
+
+To build a fork against your own Apple team, set `OPENWATER_TEAM_ID` rather than
+editing `scripts/testflight.sh`.
+
 ## Licence
 
-Not chosen yet — there is no `LICENSE` file in the repository, which means the
-code is technically all-rights-reserved despite being public. Worth settling
-before anyone is invited to contribute.
+MIT — see [LICENSE](LICENSE). Use it, fork it, ship it; keep the notice.

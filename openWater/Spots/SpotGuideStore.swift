@@ -130,6 +130,11 @@ final class SpotGuideStore {
     private static let windTTL: TimeInterval = 10 * 60
 
     // The same public, rules-limited access the website's browser client has.
+    // A Firebase Web key is a project identifier, not a secret — it ships in
+    // every browser that loads openwaterapp.com, and what stops a stranger
+    // reading unpublished spots or editing a suggestion is the security rules,
+    // not the obscurity of this string. README → "Configuration and keys".
+    //
     // Internal, not private: the suggestion client writes through the same
     // door (create-only, bounded by the rules) and must not grow its own copy
     // of these to drift out of sync.

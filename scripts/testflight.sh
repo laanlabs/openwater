@@ -114,7 +114,7 @@ cat > "$EXPORT/ExportOptions.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>method</key><string>app-store-connect</string>
-  <key>teamID</key><string>34FWY7G2HB</string>
+  <key>teamID</key><string>${OPENWATER_TEAM_ID:-34FWY7G2HB}</string>
   <key>destination</key><string>upload</string>
   <key>uploadSymbols</key><true/>
   <key>manageAppVersionAndBuildNumber</key><false/>

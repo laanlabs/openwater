@@ -17,8 +17,8 @@ enum ScreenshotRoute: String {
     case charts
     case playback
     case fullScreenMap
-    case records
-    case trends
+    case spots
+    case tools
     case record
 
     static let argumentPrefix = "-openWaterScreen"
@@ -34,8 +34,8 @@ enum ScreenshotRoute: String {
     /// Which tab this route lives on.
     var tab: Tab {
         switch self {
-        case .records: .records
-        case .trends: .trends
+        case .spots: .spots
+        case .tools: .tools
         case .record: .record
         default: .sessions
         }

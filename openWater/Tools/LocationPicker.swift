@@ -60,17 +60,21 @@ struct LocationPickerSheet: View {
     @State private var name = ""
     @State private var isNaming = false
     @State private var query = ""
-    @State private var isSearching = false
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
                 map
 
-                if isSearching {
-                    searchResults
-                } else {
-                    searchBar
+                // One search field, always in the hierarchy. The first
+                // version swapped between a collapsed bar and an expanded
+                // results view, each with its own TextField — typing "Viento"
+                // registered "Vi", because the swap on the first keystroke
+                // tore down the focused field and the rest of the characters
+                // went nowhere.
+                VStack(spacing: 0) {
+                    searchField
+                    if !query.isEmpty { searchResults }
                 }
             }
             .safeAreaInset(edge: .bottom) { confirmBar }
@@ -139,15 +143,22 @@ struct LocationPickerSheet: View {
 
     // MARK: Search
 
-    private var searchBar: some View {
+    private var searchField: some View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
             TextField("Search the spot guide", text: $query)
                 .autocorrectionDisabled()
-                .onChange(of: query) { _, value in
-                    isSearching = !value.isEmpty
+                .submitLabel(.search)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -157,47 +168,41 @@ struct LocationPickerSheet: View {
         .padding(.top, 8)
     }
 
+    /// Names that *start* with what was typed come first — "Vi" should offer
+    /// Viento before Boa Vista.
     private var matches: [GuideSpot] {
         let needle = query.lowercased()
-        return guide.spots
-            .filter { $0.name.lowercased().contains(needle) }
+        let hits = guide.spots.filter { $0.name.lowercased().contains(needle) }
+        return hits
+            .sorted { a, b in
+                let aStarts = a.name.lowercased().hasPrefix(needle)
+                let bStarts = b.name.lowercased().hasPrefix(needle)
+                if aStarts != bStarts { return aStarts }
+                return a.name < b.name
+            }
             .prefix(25)
             .map { $0 }
     }
 
     private var searchResults: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search the spot guide", text: $query)
-                    .autocorrectionDisabled()
-                Button("Done") {
-                    isSearching = false
-                    query = ""
-                }
-                .font(.subheadline.weight(.semibold))
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-
-            Divider()
-
-            List(matches) { spot in
-                Button {
-                    select(spot)
-                } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(spot.name).foregroundStyle(.primary)
-                        Text(spot.where_)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+        List(matches) { spot in
+            Button {
+                select(spot)
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(spot.name).foregroundStyle(.primary)
+                    Text(spot.where_)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .listStyle(.plain)
         }
+        .listStyle(.plain)
+        .frame(maxHeight: 320)
         .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     private func select(_ spot: GuideSpot) {
@@ -209,7 +214,6 @@ struct LocationPickerSheet: View {
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
             ))
         }
-        isSearching = false
         query = ""
     }
 

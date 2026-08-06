@@ -158,7 +158,9 @@ struct FloatPlanView: View {
         .onAppear {
             launch = launch ?? PickedPlace.restore(storedLaunch)
             takeout = takeout ?? PickedPlace.restore(storedTakeout)
-            Task { await seedLaunchIfNeeded() }
+        }
+        .task(id: recorder.location.lastCoordinate == nil) {
+            await seedLaunchIfNeeded()
         }
         .onChange(of: eta) { _, _ in draft(force: true) }
     }

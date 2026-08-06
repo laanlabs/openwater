@@ -9,14 +9,23 @@ import SwiftUI
 /// and is today's wind actually pointing down it. A run 30° off the wind is a
 /// different sport from a run dead down it, and the difference is exactly
 /// what this screen puts a number on.
+///
+/// Both ends are picked on the same map picker the float plan uses — a run
+/// rarely starts and ends at two spots the guide happens to know, and a
+/// list-only picker could not express "the beach past the second bridge".
 struct ShuttlePlannerView: View {
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(AppSettings.self) private var settings
 
-    @State private var launch: GuideSpot?
-    @State private var takeout: GuideSpot?
+    @AppStorage("shuttle.launch") private var storedLaunch = ""
+    @AppStorage("shuttle.takeout") private var storedTakeout = ""
+    /// The same preference as the float plan and Share My Location.
+    @AppStorage("tools.mapProvider") private var providerID = ToolKit.MapProvider.google.rawValue
+
+    @State private var launch: PickedPlace?
+    @State private var takeout: PickedPlace?
     @State private var picking: End?
     @State private var wind: WindReading?
 
@@ -25,13 +34,8 @@ struct ShuttlePlannerView: View {
         var id: String { rawValue }
     }
 
-    private var launchCoordinate: Geo.Coordinate? {
-        launch.map { Geo.Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
-            ?? recorder.location.lastCoordinate
-    }
-
-    private var takeoutCoordinate: Geo.Coordinate? {
-        takeout.map { Geo.Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
+    private var provider: ToolKit.MapProvider {
+        ToolKit.MapProvider(rawValue: providerID) ?? .google
     }
 
     var body: some View {
@@ -42,17 +46,24 @@ struct ShuttlePlannerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18))
 
                 VStack(spacing: 0) {
-                    pickerRow(.launch, name: launch?.name ?? "Current location")
+                    placeRow(.launch, place: launch)
                     Divider().padding(.leading, 14)
-                    pickerRow(.takeout, name: takeout?.name ?? "Choose…")
+                    placeRow(.takeout, place: takeout)
                 }
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
 
-                if let from = launchCoordinate, let to = takeoutCoordinate {
+                Picker("Maps app", selection: $providerID) {
+                    ForEach(ToolKit.MapProvider.allCases) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if let from = launch?.coordinate, let to = takeout?.coordinate {
                     runCard(from: from, to: to)
                     shareButton(from: from, to: to)
                 } else {
-                    Text("Pick a takeout to see the run.")
+                    Text("Pick both ends to see the run.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
@@ -66,39 +77,66 @@ struct ShuttlePlannerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolLocation(recorder)
         .task { await guide.load() }
-        .task(id: "\(launch?.spotId ?? "here")-\(takeout?.spotId ?? "")") {
-            guard let from = launchCoordinate, let to = takeoutCoordinate else { return }
+        .task(id: "\(launch?.name ?? "")-\(takeout?.name ?? "")") {
+            guard let from = launch?.coordinate, let to = takeout?.coordinate else { return }
             let mid = Geo.Coordinate(latitude: (from.latitude + to.latitude) / 2,
                                      longitude: (from.longitude + to.longitude) / 2)
             wind = await guide.currentWind(at: mid)
         }
         .sheet(item: $picking) { end in
-            SpotPickerSheet(
-                title: "\(end.rawValue) spot",
-                near: launchCoordinate ?? recorder.location.lastCoordinate,
-                allowCurrentLocation: end == .launch
-            ) { choice in
+            LocationPickerSheet(
+                title: end.rawValue,
+                initial: (end == .launch ? launch : takeout)?.coordinate
+                    ?? recorder.location.lastCoordinate
+            ) { place in
                 switch end {
-                case .launch: launch = choice
-                case .takeout: takeout = choice
+                case .launch: launch = place; storedLaunch = place.stored
+                case .takeout: takeout = place; storedTakeout = place.stored
                 }
-                picking = nil
             }
+        }
+        .onAppear {
+            launch = launch ?? PickedPlace.restore(storedLaunch)
+            takeout = takeout ?? PickedPlace.restore(storedTakeout)
+        }
+        // Keyed on whether there is a fix yet, not fired once on appear: the
+        // receiver is still warming up when this screen opens, so a one-shot
+        // seed always read nil and gave up, leaving the map on the whole
+        // continent.
+        .task(id: recorder.location.lastCoordinate == nil) {
+            await seedLaunchIfNeeded()
         }
     }
 
-    private func pickerRow(_ end: End, name: String) -> some View {
+    /// Start from where the rider is standing, so the map opens on their
+    /// water rather than the whole continent. Only a starting point — the
+    /// row is a button and always was.
+    private func seedLaunchIfNeeded() async {
+        guard launch == nil, let here = recorder.location.lastCoordinate else { return }
+        await guide.load()
+        let name = guide.nearestSpot(to: here).flatMap { spot in
+            Geo.distance(here, .init(latitude: spot.latitude, longitude: spot.longitude)) < 2000
+                ? spot.name : nil
+        } ?? "Current location"
+        launch = PickedPlace(name: name, coordinate: here)
+    }
+
+    private func placeRow(_ end: End, place: PickedPlace?) -> some View {
         Button { picking = end } label: {
-            HStack {
+            HStack(spacing: 10) {
+                Image(systemName: end == .launch ? "flag" : "flag.checkered")
+                    .font(.subheadline)
+                    .foregroundStyle(.tint)
+                    .frame(width: 22)
                 Text(end.rawValue)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .frame(width: 70, alignment: .leading)
-                Text(name)
+                Spacer(minLength: 8)
+                Text(place?.name ?? "Choose on map…")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
+                    .foregroundStyle(place == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -111,27 +149,20 @@ struct ShuttlePlannerView: View {
 
     @ViewBuilder
     private var plannerMap: some View {
-        let from = launchCoordinate
-        let to = takeoutCoordinate
         Map(initialPosition: .automatic) {
-            if let from {
-                Marker("Launch", systemImage: "flag",
-                       coordinate: CLLocationCoordinate2D(latitude: from.latitude, longitude: from.longitude))
+            if let launch {
+                Marker("Launch", systemImage: "flag", coordinate: launch.clCoordinate)
             }
-            if let to {
-                Marker("Takeout", systemImage: "flag.checkered",
-                       coordinate: CLLocationCoordinate2D(latitude: to.latitude, longitude: to.longitude))
+            if let takeout {
+                Marker("Takeout", systemImage: "flag.checkered", coordinate: takeout.clCoordinate)
             }
-            if let from, let to {
-                MapPolyline(coordinates: [
-                    CLLocationCoordinate2D(latitude: from.latitude, longitude: from.longitude),
-                    CLLocationCoordinate2D(latitude: to.latitude, longitude: to.longitude),
-                ])
-                .stroke(.tint, style: StrokeStyle(lineWidth: 3, dash: [6, 5]))
+            if let launch, let takeout {
+                MapPolyline(coordinates: [launch.clCoordinate, takeout.clCoordinate])
+                    .stroke(.tint, style: StrokeStyle(lineWidth: 3, dash: [6, 5]))
             }
         }
         .allowsHitTesting(false)
-        .id("\(launch?.spotId ?? "here")-\(takeout?.spotId ?? "")")
+        .id("\(launch?.name ?? "")-\(takeout?.name ?? "")")
     }
 
     private func runCard(from: Geo.Coordinate, to: Geo.Coordinate) -> some View {
@@ -181,10 +212,13 @@ struct ShuttlePlannerView: View {
 
     private func shareButton(from: Geo.Coordinate, to: Geo.Coordinate) -> some View {
         let metres = Geo.distance(from, to)
-        let message = "Downwind run: \(launch?.name ?? "launch") → \(takeout?.name ?? "takeout"), "
-            + "\(Format.distance(metres, unit: settings.units.distance)). "
-            + "Launch: \(ToolKit.mapsLinks(for: from, label: "Launch")) "
-            + "Takeout: \(ToolKit.mapsLinks(for: to, label: "Takeout"))"
+        let launchName = launch?.name ?? "launch"
+        let takeoutName = takeout?.name ?? "takeout"
+        let message = """
+        Downwind run: \(launchName) → \(takeoutName), \(Format.distance(metres, unit: settings.units.distance)).
+        Launch: \(provider.url(for: from, label: launchName).absoluteString)
+        Takeout: \(provider.url(for: to, label: takeoutName).absoluteString)
+        """
         return VStack(spacing: 10) {
             ShareLink(item: message) {
                 Label("Share Shuttle Plan", systemImage: "square.and.arrow.up")
@@ -195,67 +229,6 @@ struct ShuttlePlannerView: View {
                     .background(.tint, in: RoundedRectangle(cornerRadius: 14))
             }
             QuickShareButtons(message: message)
-        }
-    }
-}
-
-/// Choose a spot from the guide, nearest first.
-struct SpotPickerSheet: View {
-    let title: String
-    let near: Geo.Coordinate?
-    var allowCurrentLocation = false
-    let onPick: (GuideSpot?) -> Void
-
-    @Environment(SpotGuideStore.self) private var guide
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-
-    private var candidates: [GuideSpot] {
-        var list = guide.spots
-        if !query.isEmpty {
-            list = list.filter { $0.name.localizedCaseInsensitiveContains(query) }
-        }
-        if let near {
-            list.sort {
-                Geo.distance(near, .init(latitude: $0.latitude, longitude: $0.longitude)) <
-                Geo.distance(near, .init(latitude: $1.latitude, longitude: $1.longitude))
-            }
-        }
-        return Array(list.prefix(40))
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if allowCurrentLocation {
-                    Button {
-                        onPick(nil)
-                    } label: {
-                        Label("Current location", systemImage: "location.fill")
-                    }
-                }
-                ForEach(candidates) { spot in
-                    Button {
-                        onPick(spot)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(spot.name)
-                                .foregroundStyle(.primary)
-                            Text(spot.where_)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
         }
     }
 }

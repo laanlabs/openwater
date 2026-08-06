@@ -19,7 +19,7 @@ struct ShareLocationView: View {
     @Environment(\.openURL) private var openURL
     /// Remembered, because which maps app your people use does not change
     /// between pins.
-    @AppStorage("tools.mapProvider") private var providerID = ToolKit.MapProvider.apple.rawValue
+    @AppStorage("tools.mapProvider") private var providerID = ToolKit.MapProvider.google.rawValue
 
     private var provider: ToolKit.MapProvider {
         ToolKit.MapProvider(rawValue: providerID) ?? .apple

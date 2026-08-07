@@ -300,3 +300,73 @@ struct GlideDirectionTests {
         #expect(summary.glideCount == 0)
     }
 }
+
+@Suite("Glide continuity")
+struct GlideContinuityTests {
+
+    let builder = TrackBuilder()
+    let wind = Wind(directionFrom: 0, speed: 9, source: .manual, confidence: 1)
+
+    /// A long downwind ride with one brief dip in the middle.
+    func rideWithADip() -> Track {
+        builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 4.0, heading: 180, duration: 10),   // the lull it rises out of
+            .init(speed: 9.0, heading: 180, duration: 30, transition: 2),
+            .init(speed: 6.5, heading: 180, duration: 3),    // a gust dropping off
+            .init(speed: 9.0, heading: 180, duration: 30, transition: 2),
+        ]))
+    }
+
+    func glides(_ track: Track, tolerance: TimeInterval, flights: [Flight] = []) -> [Glide] {
+        var a = DownwindAnalyzer.forSport(.wingfoil)
+        a.glideGapTolerance = tolerance
+        return a.analyse(track: track, flights: flights, wind: wind, movingTime: track.duration).glides
+    }
+
+    @Test("A brief dip does not end a glide")
+    func aDipDoesNotEndAGlide() {
+        // What a rider reported: one continuous downwind run drawn as a dozen
+        // separate dashes, because a single fix under the speed floor ends a
+        // glide and starts another.
+        let track = rideWithADip()
+        #expect(glides(track, tolerance: 0).count == 2, "precondition: it fragments without bridging")
+        #expect(glides(track, tolerance: 20).count == 1, "one ride, one glide")
+    }
+
+    @Test("Bridging never crosses a touchdown")
+    func aTouchdownEndsIt() {
+        // Dropping off the foil genuinely ends a glide — it is the whole point
+        // of the "linked" figure — so no tolerance may cross one.
+        let track = rideWithADip()
+        // Flights either side of the dip, so the dip is time on the water.
+        let last = track.count - 1
+        let flights = [
+            Flight(id: 0, startElapsed: 10, endElapsed: 39, startIndex: 10, endIndex: 39,
+                   distance: 270, averageSpeed: 9, maxSpeed: 9,
+                   takeoffSpeed: 9, landingSpeed: 9, confidence: 0.9),
+            Flight(id: 1, startElapsed: 43, endElapsed: 70, startIndex: 43, endIndex: last,
+                   distance: 270, averageSpeed: 9, maxSpeed: 9,
+                   takeoffSpeed: 9, landingSpeed: 9, confidence: 0.9),
+        ]
+        #expect(glides(track, tolerance: 60, flights: flights).count == 2,
+                "a touchdown is a real break, whatever the tolerance")
+    }
+
+    @Test("Bridging never crosses pumping")
+    func pumpingEndsIt() {
+        // The protection for the sport the feature was built for. On a SUP the
+        // gap between glides is work, and the accelerometer says so — so the
+        // ten glides of a pump-and-glide session stay ten however generous the
+        // tolerance is.
+        var legs: [SyntheticTrack.Leg] = []
+        for _ in 0..<10 {
+            legs.append(.init(speed: 3.0, heading: 180, duration: 6))
+            legs.append(.init(speed: 9.0, heading: 180, duration: 12, transition: 2))
+        }
+        let track = builder.build(from: SyntheticTrack.generate(legs: legs))
+        var a = DownwindAnalyzer.forSport(.downwindSUP)
+        a.glideGapTolerance = 60
+        let summary = a.analyse(track: track, flights: [], wind: wind, movingTime: track.duration)
+        #expect(summary.glideCount == 10, "pumping between bumps is not one long glide")
+    }
+}

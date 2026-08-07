@@ -197,6 +197,20 @@ public struct DownwindAnalyzer: Sendable {
     /// than that and the bump has passed under you.
     public var maximumDeceleration: Double   // m/s²
 
+    /// How long an interruption a glide can survive, seconds.
+    ///
+    /// Sample-by-sample tests fragment a continuous ride. One fix dipping under
+    /// the speed floor, or one gust-driven deceleration, ends a glide and
+    /// starts another — a rider looked at a long unbroken downwind run drawn as
+    /// a dozen separate dashes and said, correctly, that it was one glide.
+    ///
+    /// Bridging is deliberately conservative about *what* it will cross: never
+    /// a touchdown, never a stretch where the accelerometer says the rider was
+    /// working, and never a stretch sailed back up toward the wind. Those are
+    /// the three things that genuinely end a glide, and each is checked before
+    /// a gap is closed.
+    public var glideGapTolerance: TimeInterval
+
     /// How much faster a glide has to get, as a fraction of the speed it
     /// started at.
     ///
@@ -219,7 +233,8 @@ public struct DownwindAnalyzer: Sendable {
         minimumGlideSpeed: Double = 3.0,
         glideSpeedFraction: Double = 0.9,
         maximumDeceleration: Double = 0.35,
-        minimumSpeedGain: Double = 0.05
+        minimumSpeedGain: Double = 0.05,
+        glideGapTolerance: TimeInterval = 20
     ) {
         self.thresholds = thresholds
         self.pumpEnergyThreshold = pumpEnergyThreshold
@@ -228,6 +243,7 @@ public struct DownwindAnalyzer: Sendable {
         self.glideSpeedFraction = glideSpeedFraction
         self.maximumDeceleration = maximumDeceleration
         self.minimumSpeedGain = minimumSpeedGain
+        self.glideGapTolerance = glideGapTolerance
     }
 
     public static func forSport(_ sport: Sport) -> DownwindAnalyzer {
@@ -307,6 +323,65 @@ public struct DownwindAnalyzer: Sendable {
             usedMotionData: hasMotion,
             confidence: hasMotion ? 0.8 : 0.4
         )
+    }
+
+    /// Close short interruptions so one continuous ride reads as one glide.
+    ///
+    /// A gap is crossed only when nothing in it says the glide really ended:
+    /// the rider stayed on the foil, the accelerometer stayed quiet, and the
+    /// track stayed pointed downwind. Where there is no motion data the second
+    /// test cannot be applied and is skipped — which is the honest position,
+    /// and the reason a session recorded with a watch is worth more here than
+    /// an imported file.
+    func bridgeInterruptions(
+        in isGliding: inout [Bool],
+        track: Track,
+        wind: Wind?,
+        flying: [Bool],
+        requiresFlight: Bool,
+        hasMotion: Bool
+    ) {
+        guard glideGapTolerance > 0, track.count > 2 else { return }
+
+        var index = 0
+        while index < track.count {
+            guard isGliding[index] else { index += 1; continue }
+            var end = index
+            while end + 1 < track.count, isGliding[end + 1] { end += 1 }
+
+            // Find where gliding resumes.
+            var next = end + 1
+            while next < track.count, !isGliding[next] { next += 1 }
+            guard next < track.count else { break }
+
+            if track.elapsed[next] - track.elapsed[end] <= glideGapTolerance,
+               canBridge(from: end, to: next, track: track, wind: wind,
+                         flying: flying, requiresFlight: requiresFlight, hasMotion: hasMotion) {
+                for k in (end + 1)..<next { isGliding[k] = true }
+                // Carry on from the same segment, which is now longer.
+            } else {
+                index = next
+            }
+        }
+    }
+
+    private func canBridge(
+        from end: Int, to next: Int,
+        track: Track, wind: Wind?,
+        flying: [Bool], requiresFlight: Bool, hasMotion: Bool
+    ) -> Bool {
+        for k in (end + 1)..<next {
+            if requiresFlight, !flying[k] { return false }
+            if hasMotion, let energy = track.points[k].verticalAccelSD,
+               energy > pumpEnergyThreshold { return false }
+            if let wind {
+                let heading = track.course[k]
+                if Geo.angleSeparation(heading, wind.directionFrom) <= Self.downwindHalfAngle {
+                    return false
+                }
+            }
+        }
+        return true
     }
 
     /// The slowest the rider was in the seconds before a glide began.
@@ -397,6 +472,10 @@ public struct DownwindAnalyzer: Sendable {
             }
             isGliding[i] = true
         }
+
+        bridgeInterruptions(in: &isGliding, track: track, wind: wind,
+                            flying: flyingMask, requiresFlight: requiresFlight,
+                            hasMotion: hasMotion)
 
         // Extract runs.
         var glides: [Glide] = []

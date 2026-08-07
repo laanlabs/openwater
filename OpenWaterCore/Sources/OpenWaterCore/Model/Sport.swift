@@ -204,6 +204,18 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// could ever be a glide.
     public var pumpEnergyFraction: Double = 1.5
 
+    /// The smoothness bar may rise to this multiple of the session's own median
+    /// vertical acceleration, but never fall below `foilSmoothnessSD`.
+    ///
+    /// Only ever loosens, which is the safe direction: speed is the primary
+    /// test for flight and smoothness is a veto against being fast but still
+    /// in the water. A veto tuned on a quiet rig turns into a blanket ban on a
+    /// noisy one — a parawing session with a median of 1.86 against a bar of
+    /// 1.6 had more than half its samples ruled out of flying, which cut a
+    /// continuous ride into seventeen flights with sixteen "touchdowns", none
+    /// of which dropped below 8 knots.
+    public var foilSmoothnessFraction: Double = 1.5
+
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
@@ -315,6 +327,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
 
         /// See `SportThresholds.pumpEnergyFraction`.
         public var pumpEnergyFraction: Double?
+        public var foilSmoothnessFraction: Double?
 
         public init(
             foilTakeoffSpeed: Double? = nil,
@@ -331,7 +344,8 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             jumpFreeFall: Double? = nil,
             jumpLandingSpike: Double? = nil,
             jumpMinimumTakeoffSpeed: Double? = nil,
-            pumpEnergyFraction: Double? = nil
+            pumpEnergyFraction: Double? = nil,
+            foilSmoothnessFraction: Double? = nil
         ) {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.movingSpeed = movingSpeed
@@ -348,6 +362,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.jumpLandingSpike = jumpLandingSpike
             self.jumpMinimumTakeoffSpeed = jumpMinimumTakeoffSpeed
             self.pumpEnergyFraction = pumpEnergyFraction
+            self.foilSmoothnessFraction = foilSmoothnessFraction
         }
 
         public var isEmpty: Bool {
@@ -358,7 +373,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
                 && upwindLegMinimumDuration == nil
                 && jumpMinimumAirtime == nil && jumpFreeFall == nil
                 && jumpLandingSpike == nil && jumpMinimumTakeoffSpeed == nil
-                && pumpEnergyFraction == nil
+                && pumpEnergyFraction == nil && foilSmoothnessFraction == nil
         }
 
         public func applied(to base: SportThresholds) -> SportThresholds {
@@ -378,6 +393,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = jumpLandingSpike, v > 0 { t.jumpLandingSpike = v }
             if let v = jumpMinimumTakeoffSpeed, v > 0 { t.jumpMinimumTakeoffSpeed = v }
             if let v = pumpEnergyFraction, v > 0 { t.pumpEnergyFraction = v }
+            if let v = foilSmoothnessFraction, v > 0 { t.foilSmoothnessFraction = v }
             return t
         }
     }

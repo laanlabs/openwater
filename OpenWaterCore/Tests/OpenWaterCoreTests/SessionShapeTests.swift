@@ -573,3 +573,58 @@ struct ManeuverMergingTests {
             .first?.stayedOnFoil == false, "touching down in any part of it is a wet turn")
     }
 }
+
+@Suite("Smoothness adapts, but only where it should")
+struct SmoothnessBarTests {
+
+    let builder = TrackBuilder()
+
+    func track(_ legs: [SyntheticTrack.Leg], accelSD: @escaping (Double) -> Double) -> Track {
+        builder.build(from: SyntheticTrack.generate(legs: legs).map { point in
+            var p = point
+            p.verticalAccelSD = accelSD(p.speed ?? 0)
+            return p
+        })
+    }
+
+    @Test("A noisy rig that was sometimes flying gets a higher bar")
+    func bimodalLoosens() {
+        // Quiet in the air and rough on the water, but both above the sport's
+        // fixed figure — a real parawing session read a median of 1.86 against
+        // a bar of 1.6, so over half of it could not be flying whatever the
+        // speed said.
+        // Enough of each for both quarters of the distribution to be real:
+        // the test asks whether the rough quarter is well above the quiet one.
+        let t = track([
+            .init(speed: 9, heading: 90, duration: 60),
+            .init(speed: 2, heading: 90, duration: 60, transition: 3),
+            .init(speed: 9, heading: 90, duration: 60, transition: 3),
+        ], accelSD: { $0 > 4.5 ? 1.8 : 4.0 })
+
+        let detector = FoilDetector.forSport(.wingfoil)
+        #expect(detector.smoothnessBar(for: t) > detector.thresholds.foilSmoothnessSD)
+        #expect(!detector.detect(in: t).isEmpty, "the flying stretches are flights")
+    }
+
+    @Test("A rider planing the whole way gets no benefit")
+    func unimodalHolds() {
+        // One population and no quiet phase: raising the bar to meet it would
+        // call every fast sample a flight, which is the false positive the
+        // smoothness veto exists to prevent.
+        let t = track([.init(speed: 9, heading: 90, duration: 90)], accelSD: { _ in 3.0 })
+        let detector = FoilDetector.forSport(.wingfoil)
+        #expect(detector.smoothnessBar(for: t) == detector.thresholds.foilSmoothnessSD)
+        #expect(detector.detect(in: t).isEmpty, "planing is not flying")
+    }
+
+    @Test("A quiet rig is left exactly as it was")
+    func quietRigUnchanged() {
+        let t = track([
+            .init(speed: 2, heading: 90, duration: 20),
+            .init(speed: 9, heading: 90, duration: 60, transition: 3),
+        ], accelSD: { $0 > 4.5 ? 0.4 : 2.5 })
+        let detector = FoilDetector.forSport(.wingfoil)
+        #expect(detector.smoothnessBar(for: t) == detector.thresholds.foilSmoothnessSD,
+                "the bar never drops, and never rises without cause")
+    }
+}

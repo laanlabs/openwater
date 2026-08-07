@@ -202,7 +202,15 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// rule) instead of exactly the cap; Alpha 1 km added; polar carries
     /// per-tack mean headings and the both-tacks beat/run VMG.
     /// 4: the beat/run carry their leg count and working angle.
-    public static let currentVersion = 8
+    /// Bump this whenever *any* detector's behaviour changes, not only when a
+    /// field is added.
+    ///
+    /// `upToDateSession` trusts this number: a stored summary whose version
+    /// matches is returned untouched, so a detection change without a bump is
+    /// invisible on every session a rider already has. That has now happened
+    /// three times in one day — the glide floor, the pump threshold, and the
+    /// smoothness bar — each time looking like the fix had not worked.
+    public static let currentVersion = 9
 
     public let analysisVersion: Int
 

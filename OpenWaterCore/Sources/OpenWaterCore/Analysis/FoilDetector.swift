@@ -194,9 +194,11 @@ public struct FoilDetector: Sendable {
         // Per-sample flying decision.
         var flying = [Bool](repeating: false, count: track.count)
         var state = false
+        let smoothnessBar = smoothnessBar(for: track)
+
         for i in 0..<track.count {
             let speed = track.speed[i]
-            let smooth = track.points[i].verticalAccelSD.map { $0 <= thresholds.foilSmoothnessSD }
+            let smooth = track.points[i].verticalAccelSD.map { $0 <= smoothnessBar }
 
             if state {
                 // Stay up until speed drops through the lower band, or the ride
@@ -316,6 +318,40 @@ public struct FoilDetector: Sendable {
     }
 
     /// Per-sample flying flags, for shading the speed chart and the map.
+    /// How rough the ride may be and still count as flying.
+    ///
+    /// The sport's figure, or a multiple of the session's own median if that is
+    /// higher. It only ever loosens, which is the safe direction: speed is the
+    /// primary test and this is a veto against being fast but still in the
+    /// water. A veto tuned on a quiet rig becomes a blanket ban on a noisy one
+    /// — a real parawing session had a median above the bar, so more than half
+    /// of it could not be flying whatever the speed said, and one continuous
+    /// ride came back as seventeen flights with sixteen touchdowns, not one of
+    /// which dropped below eight knots.
+    func smoothnessBar(for track: Track) -> Double {
+        let energies = track.points.compactMap(\.verticalAccelSD).sorted()
+        guard energies.count >= 8 else { return thresholds.foilSmoothnessSD }
+
+        let low = energies[energies.count / 4]
+        let median = energies[energies.count / 2]
+        let high = energies[energies.count * 3 / 4]
+
+        // Only a session with both quiet and rough phases gets the benefit.
+        //
+        // This is the whole safeguard. A rider who was flying some of the time
+        // has two populations — quiet in the air, rough on the water — and the
+        // bar belongs between them wherever the rig happens to read. A rider
+        // planing the whole way has one population, and raising the bar to meet
+        // it would call every fast sample a flight, which is exactly the false
+        // positive the smoothness veto exists to prevent.
+        guard high > low * Self.bimodalSpread else { return thresholds.foilSmoothnessSD }
+        return max(thresholds.foilSmoothnessSD, median * thresholds.foilSmoothnessFraction)
+    }
+
+    /// How much wider the rough quarter has to be than the quiet quarter before
+    /// a session counts as having both.
+    static let bimodalSpread: Double = 1.5
+
     public func flyingMask(flights: [Flight], count: Int) -> [Bool] {
         var mask = [Bool](repeating: false, count: count)
         for f in flights {

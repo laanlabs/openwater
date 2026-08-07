@@ -37,6 +37,7 @@ struct DownwindDetailView: View {
     @State private var isMapFullScreen = false
     @State private var camera: MapCameraPosition = .automatic
     @State private var isRecomputing = false
+    @State private var expandedChain: Int?
 
     private var glides: [Glide] { summary.downwind.glides }
     private var legs: [SessionLeg] { summary.shape.legs }
@@ -68,6 +69,7 @@ struct DownwindDetailView: View {
 
                 if !glides.isEmpty {
                     mapCard
+                    if showsChains { chainList }
                     glideList
                 }
 
@@ -214,6 +216,33 @@ struct DownwindDetailView: View {
         glides.sorted { $0.duration > $1.duration }
     }
 
+    /// Glides you rode into one after another without dropping off the foil.
+    ///
+    /// A rider who stayed up the whole way down a river did one ride, not
+    /// twenty. The detector is right that there were twenty stretches where
+    /// the water was doing the work — between them the rider was pumping — but
+    /// the ride never stopped, and a list of twenty rows says it did. So a
+    /// chain is the ride and the glides inside it are the sections.
+    ///
+    /// `Glide.connected` already carries this: it is set when the rider
+    /// reached the next glide without touching down, which is exactly the
+    /// question being asked.
+    private var chains: [[Glide]] {
+        var result: [[Glide]] = []
+        for glide in glides {
+            if glide.connected, !result.isEmpty {
+                result[result.count - 1].append(glide)
+            } else {
+                result.append([glide])
+            }
+        }
+        return result
+    }
+
+    /// Only worth showing when the chaining actually says something: if every
+    /// glide stands alone, chains and glides are the same list twice.
+    private var showsChains: Bool { chains.count < glides.count }
+
     /// Where this glide sits in the list below, which is sorted longest-first,
     /// so the number on the map is the number on the row.
     private func position(of glide: Glide) -> Int {
@@ -331,6 +360,67 @@ struct DownwindDetailView: View {
 
     // MARK: - Glide list
 
+    /// The rides, each opening to the glides inside it.
+    private var chainList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("Linked rides") {
+                Text("stayed on the foil throughout")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(chains.enumerated()), id: \.offset) { index, chain in
+                    if index > 0 { Divider() }
+                    chainRow(index: index, chain: chain)
+                    if expandedChain == index {
+                        ForEach(chain) { glide in
+                            glideRow(glide, position: (glides.firstIndex { $0.id == glide.id } ?? 0) + 1)
+                                .padding(.leading, 16)
+                        }
+                        .transition(.opacity)
+                    }
+                }
+            }
+        }
+        .cardChrome()
+    }
+
+    private func chainRow(index: Int, chain: [Glide]) -> some View {
+        let seconds = chain.reduce(0) { $0 + $1.duration }
+        let metres = chain.reduce(0) { $0 + $1.distance }
+        return Button {
+            withAnimation(.snappy) {
+                expandedChain = expandedChain == index ? nil : index
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: expandedChain == index ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Format.shortDuration(seconds))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    Text(Format.distance(metres, unit: units.distance))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(chain.count == 1 ? "1 glide" : "\(chain.count) linked glides")
+                    .font(.caption2)
+                    .foregroundStyle(chain.count > 1 ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
+            }
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var glideList: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader("Every glide") {
@@ -342,11 +432,20 @@ struct DownwindDetailView: View {
             VStack(spacing: 0) {
                 ForEach(Array(sortedGlides.enumerated()), id: \.element.id) { index, glide in
                     if index > 0 { Divider() }
+                    glideRow(glide, position: index + 1)
+                }
+            }
+        }
+        .cardChrome()
+    }
+
+    private func glideRow(_ glide: Glide, position: Int) -> some View {
+        Group {
                     Button {
                         select(selectedGlide == glide.id ? nil : glide.id)
                     } label: {
                         HStack(spacing: 10) {
-                            Text("\(index + 1)")
+                            Text("\(position)")
                                 .font(.system(size: 10, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                                 .frame(width: 18, height: 18)
@@ -385,10 +484,7 @@ struct DownwindDetailView: View {
                     .background(selectedGlide == glide.id
                                 ? AnyShapeStyle(.tint.opacity(0.1))
                                 : AnyShapeStyle(.clear))
-                }
-            }
         }
-        .cardChrome()
     }
 
     // MARK: - Prose

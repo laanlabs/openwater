@@ -91,6 +91,24 @@ for key in ("NSLocationWhenInUseUsageDescription",
 if "location" not in (phone.get("UIBackgroundModes") or []):
     problems.append("iOS app is missing the location background mode")
 
+# Apple has required a privacy manifest since May 2024 and warns on upload
+# without one (ITMS-91053). The warning does not stop a build going out, which
+# is exactly why it went unnoticed — so it is checked here, where it costs
+# nothing, rather than discovered in App Store Connect after the upload.
+if not (app / "PrivacyInfo.xcprivacy").exists():
+    problems.append("iOS app is missing PrivacyInfo.xcprivacy")
+else:
+    manifest = plistlib.loads((app / "PrivacyInfo.xcprivacy").read_bytes())
+    used = {entry.get("NSPrivacyAccessedAPIType")
+            for entry in manifest.get("NSPrivacyAccessedAPITypes") or []}
+    # UserDefaults is the one required-reason API this app touches. If that
+    # ever stops being declared, the upload warning comes back.
+    if "NSPrivacyAccessedAPICategoryUserDefaults" not in used:
+        problems.append("privacy manifest does not declare its UserDefaults use")
+    for entry in manifest.get("NSPrivacyAccessedAPITypes") or []:
+        if not entry.get("NSPrivacyAccessedAPITypeReasons"):
+            problems.append(f"{entry.get('NSPrivacyAccessedAPIType')} has no reason code")
+
 if not watch_plists:
     problems.append("no watch app embedded in the archive")
 for plist in watch_plists:
@@ -101,6 +119,15 @@ for plist in watch_plists:
         problems.append("watch app has workout-processing in UIBackgroundModes, which upload rejects")
     if watch.get("CFBundleVersion") != phone.get("CFBundleVersion"):
         problems.append("watch and phone build numbers differ")
+    if not (plist.parent / "PrivacyInfo.xcprivacy").exists():
+        problems.append("watch app is missing PrivacyInfo.xcprivacy")
+
+# The document types are what let a rider open a track by tapping it. They are
+# easy to lose in an Info.plist edit and nothing at build time notices.
+if not phone.get("CFBundleDocumentTypes"):
+    problems.append("iOS app declares no document types — tapping a GPX will not open it")
+if not phone.get("UTExportedTypeDeclarations"):
+    problems.append("iOS app does not export the .openwater type")
 
 if problems:
     print("\n".join("  ✗ " + p for p in problems))

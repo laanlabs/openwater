@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Apple's privacy manifest. Required since May 2024, and its absence is
+	  what App Store Connect warns about on upload (ITMS-91053).
+
+	  This is a declaration about behaviour, so it is written from what the
+	  code actually does rather than from what is easy to claim:
+
+	  - There are no third-party SDKs in this app at all. Firebase is talked
+	    to over its REST API, so there is no vendored framework carrying its
+	    own manifest and nothing here is inherited.
+	  - The only required-reason API used is UserDefaults, for the rider's own
+	    settings and favourites.
+	  - The only thing that ever leaves the device is a web share, and only
+	    when the rider taps Share. It carries a reduced track and the headline
+	    numbers; notes, gear, heart rate, device identifiers and the raw fixes
+	    are excluded — see ShareSnapshot.
+	  - There is no analytics, no advertising, no accounts and no tracking.
+	-->
+
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!--
+			  Units, sport defaults, per-sport thresholds, spot favourites.
+			  CA92.1: accessed only to read and write this app's own settings,
+			  never written anywhere it could identify a device.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<!--
+			  Declared because a shared session uploads its track, and Apple
+			  counts anything transmitted off the device as collected — even
+			  when it is optional and rider-initiated. Nothing is uploaded
+			  unless Share is tapped, and the endpoints are trimmed by default
+			  so the link does not publish a launch spot.
+
+			  Not linked to identity: there are no accounts, and a share is a
+			  random code with no user attached.
+			-->
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePreciseLocation</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

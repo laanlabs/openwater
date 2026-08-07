@@ -141,6 +141,26 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// Longest a maneuver may take before it is just sailing a curve.
     public var maneuverMaxDuration: TimeInterval
 
+    // MARK: What counts as a glide
+
+    /// Shortest stretch that can be a glide, seconds.
+    public var glideMinimumDuration: TimeInterval = 5
+
+    /// How far off the wind a glide has to be sailed, degrees. A bump can only
+    /// push you the way it is going, so anything nearer the wind than this is
+    /// riding across the swell rather than being carried by it.
+    public var glideDownwindAngle: Double = 100
+
+    /// A glide must reach this fraction of the rider's own median downwind
+    /// speed. A fraction near one splits their riding in half by construction,
+    /// so this sits well below it — the job is to exclude *not riding*, not to
+    /// exclude the slower half of riding.
+    public var glideSpeedFraction: Double = 0.75
+
+    /// How much faster a glide has to get than the lull it rose out of, as a
+    /// fraction. Without a rise there is nothing to say the water did the work.
+    public var glideMinimumGain: Double = 0.05
+
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
@@ -227,18 +247,38 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         /// Degrees of heading change that counts as a turn.
         public var maneuverHeadingChange: Double?
 
+        /// What counts as a glide — see the matching fields on
+        /// `SportThresholds`. Adjustable because the honest answer to "was that
+        /// a glide?" varies with the rider, the gear and the water: a big board
+        /// in small swell holds a glide at a speed a race foil would call
+        /// slogging, and a river with current moves every ground speed.
+        public var glideMinimumDuration: TimeInterval?
+        public var glideDownwindAngle: Double?
+        public var glideSpeedFraction: Double?
+        public var glideMinimumGain: Double?
+
         public init(
             foilTakeoffSpeed: Double? = nil,
             movingSpeed: Double? = nil,
-            maneuverHeadingChange: Double? = nil
+            maneuverHeadingChange: Double? = nil,
+            glideMinimumDuration: TimeInterval? = nil,
+            glideDownwindAngle: Double? = nil,
+            glideSpeedFraction: Double? = nil,
+            glideMinimumGain: Double? = nil
         ) {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.movingSpeed = movingSpeed
             self.maneuverHeadingChange = maneuverHeadingChange
+            self.glideMinimumDuration = glideMinimumDuration
+            self.glideDownwindAngle = glideDownwindAngle
+            self.glideSpeedFraction = glideSpeedFraction
+            self.glideMinimumGain = glideMinimumGain
         }
 
         public var isEmpty: Bool {
             foilTakeoffSpeed == nil && movingSpeed == nil && maneuverHeadingChange == nil
+                && glideMinimumDuration == nil && glideDownwindAngle == nil
+                && glideSpeedFraction == nil && glideMinimumGain == nil
         }
 
         public func applied(to base: SportThresholds) -> SportThresholds {
@@ -246,6 +286,10 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = foilTakeoffSpeed, v > 0 { t.foilTakeoffSpeed = v }
             if let v = movingSpeed, v > 0 { t.movingSpeed = v }
             if let v = maneuverHeadingChange, v > 0 { t.maneuverHeadingChange = v }
+            if let v = glideMinimumDuration, v > 0 { t.glideMinimumDuration = v }
+            if let v = glideDownwindAngle, v > 0 { t.glideDownwindAngle = v }
+            if let v = glideSpeedFraction, v > 0 { t.glideSpeedFraction = v }
+            if let v = glideMinimumGain, v >= 0 { t.glideMinimumGain = v }
             return t
         }
     }

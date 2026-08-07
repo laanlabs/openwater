@@ -244,20 +244,20 @@ public struct DownwindAnalyzer: Sendable {
     public init(
         thresholds: SportThresholds = SportThresholds.forSport(.downwindSUP),
         pumpEnergyThreshold: Double = 0.9,
-        minimumGlideDuration: TimeInterval = 5,
+        minimumGlideDuration: TimeInterval? = nil,
         minimumGlideSpeed: Double = 3.0,
-        glideSpeedFraction: Double = 0.75,
+        glideSpeedFraction: Double? = nil,
         maximumDeceleration: Double = 0.35,
-        minimumSpeedGain: Double = 0.05,
+        minimumSpeedGain: Double? = nil,
         glideGapTolerance: TimeInterval = 20
     ) {
         self.thresholds = thresholds
         self.pumpEnergyThreshold = pumpEnergyThreshold
-        self.minimumGlideDuration = minimumGlideDuration
+        self.minimumGlideDuration = minimumGlideDuration ?? thresholds.glideMinimumDuration
         self.minimumGlideSpeed = minimumGlideSpeed
-        self.glideSpeedFraction = glideSpeedFraction
+        self.glideSpeedFraction = glideSpeedFraction ?? thresholds.glideSpeedFraction
         self.maximumDeceleration = maximumDeceleration
-        self.minimumSpeedGain = minimumSpeedGain
+        self.minimumSpeedGain = minimumSpeedGain ?? thresholds.glideMinimumGain
         self.glideGapTolerance = glideGapTolerance
     }
 
@@ -392,7 +392,7 @@ public struct DownwindAnalyzer: Sendable {
                energy > pumpEnergyThreshold { return false }
             if let wind {
                 let heading = track.course[k]
-                if Geo.angleSeparation(heading, wind.directionFrom) <= Self.downwindHalfAngle {
+                if Geo.angleSeparation(heading, wind.directionFrom) <= downwindHalfAngle {
                     return false
                 }
             }
@@ -446,7 +446,7 @@ public struct DownwindAnalyzer: Sendable {
         for i in 0..<track.count where track.speed[i] >= thresholds.movingSpeed {
             all.append(track.speed[i])
             if let wind,
-               Geo.angleSeparation(track.course[i], wind.directionFrom) > Self.downwindHalfAngle {
+               Geo.angleSeparation(track.course[i], wind.directionFrom) > downwindHalfAngle {
                 downwind.append(track.speed[i])
             }
         }
@@ -476,11 +476,12 @@ public struct DownwindAnalyzer: Sendable {
         guard let wind else { return true }
         let heading = Geo.bearing(from: track.points[start].coordinate,
                                   to: track.points[end].coordinate)
-        return Geo.angleSeparation(heading, wind.directionFrom) > Self.downwindHalfAngle
+        return Geo.angleSeparation(heading, wind.directionFrom) > downwindHalfAngle
     }
 
-    /// How far off the wind a glide has to be sailed, degrees.
-    public static let downwindHalfAngle: Double = 100
+    /// How far off the wind a glide has to be sailed, degrees. Comes from the
+    /// sport's thresholds so a rider can move it.
+    public var downwindHalfAngle: Double { thresholds.glideDownwindAngle }
 
     // MARK: - Glide segmentation
 

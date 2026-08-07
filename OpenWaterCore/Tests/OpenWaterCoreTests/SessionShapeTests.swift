@@ -409,3 +409,54 @@ struct ShallowDipTests {
         #expect(flightWithDip(to: 4.0, for: 30).count == 2)
     }
 }
+
+@Suite("Speed over ground and current")
+struct CurrentTests {
+
+    let builder = TrackBuilder()
+    let wind = Wind(directionFrom: 0, speed: 10, source: .manual, confidence: 1)
+
+    /// A river session: downwind is against the current and so reads slower
+    /// over the ground than upwind does, for the same effort on the water.
+    func riverLaps() -> Track {
+        var legs: [SyntheticTrack.Leg] = []
+        for _ in 0..<3 {
+            // Upwind, carried by the current.
+            legs.append(.init(speed: 7.0, heading: 0, duration: 120, transition: 4))
+            // Round up, lose speed.
+            legs.append(.init(speed: 3.0, heading: 180, duration: 8, transition: 4))
+            // Downwind, pushing into the current.
+            legs.append(.init(speed: 5.0, heading: 180, duration: 120, transition: 2))
+        }
+        return builder.build(from: SyntheticTrack.generate(legs: legs))
+    }
+
+    @Test("The downwind pace sets the bar, not the session's")
+    func referenceIsDirectional() {
+        let track = riverLaps()
+        let a = DownwindAnalyzer.forSport(.wingfoil)
+        let sessionWide = a.typicalRidingSpeed(in: track)
+        let downwindOnly = a.typicalRidingSpeed(in: track, wind: wind)
+
+        #expect(downwindOnly < sessionWide,
+                "the current makes downwind slower over the ground")
+        #expect(downwindOnly * a.glideSpeedFraction < 5.0,
+                "and the bar has to sit under the pace it is judging")
+    }
+
+    @Test("Glides are found downwind against a current")
+    func glidesSurviveTheCurrent() {
+        // The bug this came from: the floor was the whole-session median, which
+        // the current-assisted upwind legs pushed above the rider's typical
+        // downwind speed. More than half the riding a glide could happen in was
+        // below the bar it had to clear, and a long continuous run came out as
+        // a scatter of fragments.
+        let track = riverLaps()
+        let summary = DownwindAnalyzer.forSport(.wingfoil)
+            .analyse(track: track, flights: [], wind: wind, movingTime: track.duration)
+
+        #expect(summary.glideCount > 0, "the downwind legs are glides")
+        #expect((summary.longestGlide?.duration ?? 0) > 60,
+                "and each is one long one, not a scatter")
+    }
+}

@@ -407,16 +407,38 @@ public struct DownwindAnalyzer: Sendable {
     /// How far back to look for the lull before a glide, seconds.
     public static let riseWindow: TimeInterval = 8
 
-    /// The rider's own pace for the session: the median speed while moving.
+    /// The rider's own pace for the session, measured *going downwind*.
     ///
-    /// Median rather than mean, because a session is mostly *not* riding —
-    /// water starts, drifting, sitting — and a mean drags the reference down
-    /// toward those. Taken over samples above the sport's moving threshold so
-    /// the reference describes riding, not the whole recording.
-    func typicalRidingSpeed(in track: Track) -> Double {
-        let moving = track.speed.filter { $0 >= thresholds.movingSpeed }.sorted()
-        guard !moving.isEmpty else { return 0 }
-        return moving[moving.count / 2]
+    /// Median rather than mean, because a session is mostly not riding — water
+    /// starts, drifting, sitting — and a mean drags the reference toward those.
+    ///
+    /// Downwind-only, because GPS reports speed over ground and a river does
+    /// not care which way you are pointing. A rider reported a long downwind
+    /// run against a strong current, and the numbers bore it out: reciprocal
+    /// headings differed by about a knot, their median speed *downwind* was
+    /// 9.6 knots and *upwind* 11.1, and the whole-session median that set the
+    /// glide floor came out at 10.2 — above their typical downwind pace. More
+    /// than half of the riding a glide could possibly happen in was below the
+    /// bar it had to clear.
+    ///
+    /// Comparing downwind speed against a downwind reference absorbs that,
+    /// and the same correction handles the ordinary case of a rider simply
+    /// being quicker on one point of sail than another.
+    func typicalRidingSpeed(in track: Track, wind: Wind? = nil) -> Double {
+        var downwind: [Double] = []
+        var all: [Double] = []
+        for i in 0..<track.count where track.speed[i] >= thresholds.movingSpeed {
+            all.append(track.speed[i])
+            if let wind,
+               Geo.angleSeparation(track.course[i], wind.directionFrom) > Self.downwindHalfAngle {
+                downwind.append(track.speed[i])
+            }
+        }
+        // Enough downwind riding to describe a pace; otherwise fall back to the
+        // whole session rather than to a handful of samples.
+        let sample = downwind.count >= 60 ? downwind : all
+        guard !sample.isEmpty else { return 0 }
+        return sample.sorted()[sample.count / 2]
     }
 
     /// Whether a candidate glide was actually sailed downwind.
@@ -460,7 +482,7 @@ public struct DownwindAnalyzer: Sendable {
         acceleration = smooth(acceleration, window: 3)
 
         // What "fast" means on this day, rather than in general.
-        let floor = max(minimumGlideSpeed, glideSpeedFraction * typicalRidingSpeed(in: track))
+        let floor = max(minimumGlideSpeed, glideSpeedFraction * typicalRidingSpeed(in: track, wind: wind))
 
         var isGliding = [Bool](repeating: false, count: track.count)
         for i in 0..<track.count {

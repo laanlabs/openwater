@@ -152,6 +152,29 @@ struct SessionShapeTests {
                 "you finished where you started, whatever any one stretch looked like")
     }
 
+    @Test("A leg of laps is not a run, whichever way its drift points")
+    func zigzagDriftIsNotACourse() {
+        // Reported: a leg covering 6.88 km that displaced only 1.65 km was
+        // labelled a run "1° off dead downwind". It was an hour of laps whose
+        // net drift happened to point downwind. A bearing describes a course
+        // only over a line; over a zigzag it describes the drift.
+        var legs: [SyntheticTrack.Leg] = []
+        for _ in 0..<12 {
+            legs.append(.init(speed: 8, heading: 170, duration: 120, transition: 6))
+            legs.append(.init(speed: 8, heading: 355, duration: 110, transition: 6))
+        }
+        let track = builder.build(from: SyntheticTrack.generate(legs: legs))
+        let wind = Wind(directionFrom: 350, speed: 9, source: .manual, confidence: 1)
+        let result = shape(track, wind: wind)
+
+        let leg = try? #require(result.legs.first)
+        #expect(leg?.straightness ?? 1 < SessionShapeAnalyzer.straightnessWithoutWind,
+                "precondition: this drifts rather than runs")
+        #expect(leg?.isRun == false, "laps are not a run")
+        #expect(leg?.isDownwind == false, "and so cannot be a downwind one")
+        #expect(result.kind == .aroundASpot)
+    }
+
     @Test("An ordinary session is one leg")
     func ordinarySessionIsOneLeg() {
         let track = builder.build(from: SyntheticTrack.wingSession())

@@ -108,6 +108,10 @@ public struct SessionLeg: Hashable, Sendable, Codable, Identifiable {
     /// Whether this leg reads as a downwind run rather than as riding about.
     public let isDownwind: Bool
 
+    /// Whether this leg went somewhere in a straight enough line for its
+    /// bearing to describe a course rather than a drift.
+    public let isRun: Bool
+
     public var duration: TimeInterval { endElapsed - startElapsed }
 
     public var straightness: Double {
@@ -119,7 +123,7 @@ public struct SessionLeg: Hashable, Sendable, Codable, Identifiable {
         startElapsed: TimeInterval, endElapsed: TimeInterval,
         startCoordinate: Geo.Coordinate, endCoordinate: Geo.Coordinate,
         distance: Double, netDisplacement: Double, averageSpeed: Double,
-        bearing: Double, alignment: Double?, isDownwind: Bool
+        bearing: Double, alignment: Double?, isDownwind: Bool, isRun: Bool
     ) {
         self.id = id
         self.startIndex = startIndex
@@ -134,6 +138,7 @@ public struct SessionLeg: Hashable, Sendable, Codable, Identifiable {
         self.bearing = bearing
         self.alignment = alignment
         self.isDownwind = isDownwind
+        self.isRun = isRun
     }
 }
 
@@ -267,16 +272,28 @@ public enum SessionShapeAnalyzer {
         let bearing = Geo.bearing(from: startCoordinate, to: endCoordinate)
         let alignment = wind.map { Solar.runAlignment(bearing: bearing, windFrom: $0.directionFrom) }
 
+        // A leg has to be a *run* before its direction means anything.
+        //
+        // This is where a reported bug lived. A leg of 6.88 km that displaced
+        // only 1.65 km is an hour of laps, not a run — but the net drift of
+        // those laps happened to point 1° off dead downwind, so it was labelled
+        // a dead-downwind run and drawn as one. Bearing is only meaningful for
+        // a line; over a zigzag it describes the drift, which is a different
+        // thing entirely and not one anybody asked about.
+        //
+        // So straightness gates both branches, not just the one without wind.
         let straightness = distance > 0 ? min(1, netDisplacement / distance) : 0
+        let isRun = netDisplacement >= minimumLegDisplacement
+            && straightness >= straightnessWithoutWind
         let isDownwind: Bool
-        if netDisplacement < minimumLegDisplacement {
+        if !isRun {
             isDownwind = false
         } else if let alignment {
             isDownwind = alignment <= downwindTolerance
         } else {
-            // No wind to check against, so geometry has to carry it: a line
-            // this straight over this distance was not laps.
-            isDownwind = straightness >= straightnessWithoutWind
+            // No wind to check against, and being this straight over this far
+            // is the only evidence left.
+            isDownwind = true
         }
 
         return SessionLeg(
@@ -292,7 +309,8 @@ public enum SessionShapeAnalyzer {
             averageSpeed: elapsed > 0 ? distance / elapsed : 0,
             bearing: bearing,
             alignment: alignment,
-            isDownwind: isDownwind
+            isDownwind: isDownwind,
+            isRun: isRun
         )
     }
 }

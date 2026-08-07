@@ -209,22 +209,31 @@ struct DownwindDetailView: View {
 
                         Spacer(minLength: 8)
 
-                        if let alignment = leg.alignment {
+                        // Only a leg that actually ran somewhere gets a
+                        // direction. Over a zigzag the bearing describes the
+                        // drift, and "1° off dead downwind" on an hour of laps
+                        // that happened to creep downwind is a sentence about
+                        // nothing.
+                        if leg.isRun, let alignment = leg.alignment {
                             Text("\(Int(alignment.rounded()))° off")
                                 .font(.caption)
                                 .monospacedDigit()
                                 .foregroundStyle(alignment <= 20 ? .green : .secondary)
-                        } else {
+                        } else if leg.isRun {
                             Text(Format.cardinal(leg.bearing))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        } else {
+                            Text("laps")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                     .padding(.vertical, 8)
                 }
             }
 
-            if legs.contains(where: { $0.alignment != nil }) {
+            if legs.contains(where: { $0.isRun && $0.alignment != nil }) {
                 Text("\"Off\" is how far the run's line sat from dead downwind.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

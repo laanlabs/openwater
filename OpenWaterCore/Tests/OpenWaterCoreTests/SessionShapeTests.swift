@@ -370,3 +370,42 @@ struct GlideContinuityTests {
         #expect(summary.glideCount == 10, "pumping between bumps is not one long glide")
     }
 }
+
+@Suite("Shallow dips")
+struct ShallowDipTests {
+
+    let builder = TrackBuilder()
+
+    /// A flight with one dip in the middle, of a given depth and length.
+    func flightWithDip(to speed: Double, for seconds: TimeInterval) -> [Flight] {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 9.0, heading: 180, duration: 60),
+            .init(speed: speed, heading: 180, duration: seconds),
+            .init(speed: 9.0, heading: 180, duration: 60),
+        ]))
+        return FoilDetector(thresholds: SportThresholds.forSport(.wingfoil)).detect(in: track)
+    }
+
+    @Test("A shallow four-second dip is a lull, not a landing")
+    func shallowDipDoesNotLand() {
+        // Reported: a rider up for a whole downwind run had it cut into six
+        // flights by dips of three to five seconds that never fell below
+        // 7.6 knots. Takeoff is 4.5 m/s, so 4.0 is a wing going slightly soft
+        // in a lull — the board never touched.
+        #expect(flightWithDip(to: 4.0, for: 4).count == 1)
+    }
+
+    @Test("A deep four-second dip is a landing")
+    func deepDipLands() {
+        // Same length, but the speed fell away — which is what actually happens
+        // when a foil comes down, because the board is suddenly a boat.
+        #expect(flightWithDip(to: 1.5, for: 4).count == 2)
+    }
+
+    @Test("A long shallow dip is still a landing")
+    func longShallowDipLands() {
+        // Shallow only buys a few seconds. Sitting at 4.0 m/s for half a minute
+        // is displacement riding, whatever it started as.
+        #expect(flightWithDip(to: 4.0, for: 30).count == 2)
+    }
+}

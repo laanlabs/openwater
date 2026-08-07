@@ -138,18 +138,43 @@ public struct FoilDetector: Sendable {
     /// wingtip is not a landing.
     public var minimumTouchdown: TimeInterval
 
+    /// A dip may last up to this long and still not be a landing, provided it
+    /// stayed shallow.
+    ///
+    /// Depth is what tells the two apart. A foil that really comes down loses
+    /// speed hard, because the board is suddenly a boat — from flying speed it
+    /// is at walking pace within a couple of seconds and takes far longer than
+    /// this to get back up. A dip that bottoms out just under the flying
+    /// threshold and recovers within a few seconds is a lull in the wind, and
+    /// the rider never got wet.
+    ///
+    /// Found in a reported session: a rider who was up for the whole of a long
+    /// downwind run had it broken into six flights by dips of three to five
+    /// seconds that never fell below 7.6 knots. Treating those as landings cut
+    /// a twenty-two minute flight into pieces and, downstream, cut the glide
+    /// that ran alongside it into pieces too.
+    public var shallowTouchdownWindow: TimeInterval
+
+    /// How far below takeoff speed a dip may go and still count as shallow,
+    /// as a fraction of takeoff speed.
+    public var shallowTouchdownFactor: Double
+
     public init(
         thresholds: SportThresholds = SportThresholds.forSport(.wingfoil),
         entryFactor: Double = 1.0,
         exitFactor: Double = 0.88,
         minimumDuration: TimeInterval = 3,
-        minimumTouchdown: TimeInterval = 1.5
+        minimumTouchdown: TimeInterval = 1.5,
+        shallowTouchdownWindow: TimeInterval = 5,
+        shallowTouchdownFactor: Double = 0.7
     ) {
         self.thresholds = thresholds
         self.entryFactor = entryFactor
         self.exitFactor = exitFactor
         self.minimumDuration = minimumDuration
         self.minimumTouchdown = minimumTouchdown
+        self.shallowTouchdownWindow = shallowTouchdownWindow
+        self.shallowTouchdownFactor = shallowTouchdownFactor
     }
 
     public static func forSport(_ sport: Sport) -> FoilDetector {
@@ -202,7 +227,14 @@ public struct FoilDetector: Sendable {
             let gap = j < flying.count
                 ? track.elapsed[j] - track.elapsed[i]
                 : Double.infinity
-            if hasFlightBefore, hasFlightAfter, gap < minimumTouchdown {
+            // How far the dip actually went. A landing is deep; a lull is not.
+            var deepest = Double.infinity
+            if j <= flying.count { for k in i..<min(j, track.count) { deepest = min(deepest, track.speed[k]) } }
+            let stayedShallow = deepest >= thresholds.foilTakeoffSpeed * shallowTouchdownFactor
+            let isLull = gap < minimumTouchdown
+                || (gap < shallowTouchdownWindow && stayedShallow)
+
+            if hasFlightBefore, hasFlightAfter, isLull {
                 for k in i..<j { flying[k] = true }
             }
             i = j

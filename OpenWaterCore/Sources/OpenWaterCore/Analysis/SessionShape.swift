@@ -110,7 +110,11 @@ public struct SessionLeg: Hashable, Sendable, Codable, Identifiable {
 
     /// Whether this leg went somewhere in a straight enough line for its
     /// bearing to describe a course rather than a drift.
-    public let isRun: Bool
+    ///
+    /// Optional in storage for the same reason as `SessionSummary.shape`.
+    private let storedIsRun: Bool?
+
+    public var isRun: Bool { storedIsRun ?? false }
 
     public var duration: TimeInterval { endElapsed - startElapsed }
 
@@ -138,7 +142,7 @@ public struct SessionLeg: Hashable, Sendable, Codable, Identifiable {
         self.bearing = bearing
         self.alignment = alignment
         self.isDownwind = isDownwind
-        self.isRun = isRun
+        self.storedIsRun = isRun
     }
 }
 

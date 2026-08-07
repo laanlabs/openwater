@@ -202,7 +202,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// rule) instead of exactly the cap; Alpha 1 km added; polar carries
     /// per-tack mean headings and the both-tacks beat/run VMG.
     /// 4: the beat/run carry their leg count and working angle.
-    public static let currentVersion = 5
+    public static let currentVersion = 6
 
     public let analysisVersion: Int
 
@@ -248,7 +248,18 @@ public struct SessionSummary: Hashable, Sendable, Codable {
 
     /// Whether this was a downwind run, a crossing, or an afternoon of laps —
     /// and, for a shuttle day, each run of it separately.
-    public let shape: SessionShape
+    ///
+    /// Stored optional and read non-optional, and that is not a style choice.
+    /// Swift's synthesised decoder does **not** fall back to a property's
+    /// default when a key is absent — it throws — so adding a non-optional
+    /// field to this struct makes every archive a rider already has
+    /// undecodable. That shipped once: sessions written by earlier builds
+    /// failed to decode, the failure was swallowed by a `try?`, and every
+    /// session sat on "Loading session…" for ever. Anything added here from
+    /// now on is optional in storage.
+    private let storedShape: SessionShape?
+
+    public var shape: SessionShape { storedShape ?? .empty }
 
     // MARK: Wind
 
@@ -315,7 +326,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
         self.segments = segments
         self.fallSummary = fallSummary
         self.ribbon = ribbon
-        self.shape = shape
+        self.storedShape = shape
         self.wind = wind
         self.polar = polar
         self.averageHeartRate = averageHeartRate

@@ -68,7 +68,11 @@ public struct DownwindSummary: Hashable, Sendable, Codable {
     /// `SessionSummary` alongside their own aggregate structs; glides live
     /// here instead, because this is the analyzer's whole return value and
     /// splitting it would mean changing that for one array.
-    public let glides: [Glide]
+    /// Optional in storage so archives written before glides were kept still
+    /// decode — see the note on `SessionSummary.shape`.
+    private let storedGlides: [Glide]?
+
+    public var glides: [Glide] { storedGlides ?? [] }
 
     public let glideCount: Int
 
@@ -117,7 +121,7 @@ public struct DownwindSummary: Hashable, Sendable, Codable {
         bumpPeriod: TimeInterval?, poweredDistance: Double?, glidedDistance: Double?,
         usedMotionData: Bool, confidence: Double
     ) {
-        self.glides = glides
+        self.storedGlides = glides
         self.glideCount = glideCount
         self.glideTime = glideTime
         self.glideFraction = glideFraction

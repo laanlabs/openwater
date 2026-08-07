@@ -403,12 +403,26 @@ struct SessionDetailView: View {
         )
     }
 
+    /// Upwind, Reaching and Downwind are a run's angle to the wind, so the
+    /// filters are only as good as the direction they are measured from.
+    private func runsWindWarning(_ session: Session) -> String? {
+        guard session.sport.isWindPowered else { return nil }
+        guard let wind = session.effectiveWind else {
+            return "No wind direction, so runs cannot be sorted upwind from downwind. Set it."
+        }
+        guard wind.source.isEstimate else { return nil }
+        return "Wind direction estimated from your track — the upwind and downwind filters follow it."
+    }
+
     private func ribbonView(session: Session, summary: SessionSummary) -> some View {
         RibbonView(
             ribbon: summary.ribbon,
             maxSpeed: summary.maxSpeed,
             units: settings.units,
             bestRunIndex: summary.bestRun?.index,
+            thresholds: settings.thresholds(for: session.sport),
+            windWarning: runsWindWarning(session),
+            onSetWind: { isSettingWind = true },
             selectedLane: $selectedRun
         )
     }

@@ -122,11 +122,13 @@ struct SessionAnalysisTab: View {
     private var windSection: some View {
         Section("Wind") {
             if let polar = upwindPolar {
-                AnalysisRow(symbol: "arrow.up.right", title: "Upwind", value: upwindValue(polar)) {
+                AnalysisRow(symbol: "arrow.up.right", title: "Upwind",
+                            value: upwindValue(polar), warning: windWarning) {
                     UpwindDetailView(session: session, summary: summary, polar: polar)
                 }
             }
-            AnalysisRow(symbol: "chart.pie", title: "Polar & angles", value: angleValue) {
+            AnalysisRow(symbol: "chart.pie", title: "Polar & angles",
+                        value: angleValue, warning: windWarning) {
                 PolarAnglesScreen(
                     session: session,
                     summary: summary,
@@ -182,6 +184,24 @@ struct SessionAnalysisTab: View {
     private var windSpeedIsMissing: Bool {
         guard let wind = session.effectiveWind else { return false }
         return !wind.hasSpeed
+    }
+
+    /// What to say on a row whose numbers are measured from the wind.
+    ///
+    /// An estimated direction is worth flagging as loudly as a missing one.
+    /// It is a guess from the shape of the track, every angle on those screens
+    /// is measured from it, and a rider who has not been told will read the
+    /// numbers as fact.
+    private var windWarning: String? {
+        guard let wind = session.effectiveWind else {
+            return "Set a wind direction — nothing here has one to measure from"
+        }
+        if wind.source.isEstimate {
+            return wind.hasSpeed
+                ? "Wind direction estimated from your track — worth checking"
+                : "Wind estimated from your track, and no speed set"
+        }
+        return wind.hasSpeed ? nil : "No wind speed set"
     }
 
     // MARK: - Speed
@@ -262,7 +282,8 @@ struct SessionAnalysisTab: View {
                 }
             }
             if showsDownwind {
-                AnalysisRow(symbol: "water.waves", title: "Downwind", value: glideValue) {
+                AnalysisRow(symbol: "water.waves", title: "Downwind",
+                            value: glideValue, warning: windWarning) {
                     DownwindDetailView(session: session, summary: summary, onSetWind: onSetWind)
                 }
             }
@@ -337,19 +358,33 @@ private struct AnalysisRow<Destination: View>: View {
     let symbol: String
     let title: String
     let value: String?
-    @ViewBuilder let destination: () -> Destination
+
+    /// Set when this row's numbers rest on something the session has not got.
+    /// Marked here rather than only on the screen behind it, so a rider can see
+    /// from the contents page which entries are running on a guess.
+    var warning: String?
+
+    @ViewBuilder var destination: () -> Destination
 
     var body: some View {
         NavigationLink {
             destination()
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: symbol)
+                Image(systemName: warning == nil ? symbol : "exclamationmark.triangle.fill")
                     .font(.subheadline)
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(warning == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.orange))
                     .frame(width: 24)
-                Text(title)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .lineLimit(1)
+                    if let warning {
+                        Text(warning)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if let value {
                     Spacer(minLength: 8)
                     Text(value)

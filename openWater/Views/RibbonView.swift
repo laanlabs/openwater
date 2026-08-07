@@ -23,6 +23,17 @@ struct RibbonView: View {
     /// without reading forty rows.
     var bestRunIndex: Int?
 
+    /// What this session was segmented with, so the explanation quotes the
+    /// rider's own numbers rather than the defaults.
+    var thresholds: SportThresholds = SportThresholds.forSport(.wingfoil)
+
+    /// Said out loud when the point-of-sail filters rest on a guess, or cannot
+    /// exist at all. Upwind and Downwind are the run's angle to the wind, so
+    /// without one they are not there — and a rider who does not know that
+    /// reads their absence as the session having none.
+    var windWarning: String?
+    var onSetWind: () -> Void = {}
+
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
 
@@ -31,6 +42,32 @@ struct RibbonView: View {
     @State private var order: Order = .time
     @State private var showsManeuvers = false
     @State private var showingKey = false
+    @State private var filter: Leg = .all
+    @State private var showsControls = false
+
+    /// Which way a run was going, in the three groups riders actually talk in.
+    ///
+    /// `PointOfSail` has five cases and the two extremes are rare enough to be
+    /// confusing on a filter: nobody looks for their no-go runs. Close-hauled
+    /// and pinching are both "upwind", broad reach and running are both
+    /// "downwind", and everything between is a reach.
+    enum Leg: String, CaseIterable, Identifiable {
+        case all = "All"
+        case upwind = "Upwind"
+        case reaching = "Reaching"
+        case downwind = "Downwind"
+
+        var id: String { rawValue }
+
+        func matches(_ point: PointOfSail?) -> Bool {
+            switch self {
+            case .all: true
+            case .upwind: point == .noGo || point == .closeHauled
+            case .reaching: point == .reaching
+            case .downwind: point == .broadReach || point == .running
+            }
+        }
+    }
 
     /// How the lanes are stacked.
     ///
@@ -46,11 +83,22 @@ struct RibbonView: View {
     }
 
     private var lanes: [SessionRibbon.Lane] {
+        let matching = ribbon.lanes.filter { filter.matches($0.pointOfSail) }
         switch order {
-        case .time: ribbon.lanes
-        case .fastest: ribbon.lanes.sorted { $0.averageSpeed > $1.averageSpeed }
-        case .longest: ribbon.lanes.sorted { $0.distance > $1.distance }
+        case .time: return matching
+        case .fastest: return matching.sorted { $0.averageSpeed > $1.averageSpeed }
+        case .longest: return matching.sorted { $0.distance > $1.distance }
         }
+    }
+
+    /// Which filters would actually show something. A flat-water session has no
+    /// point of sail at all, and offering three empty filters is worse than
+    /// offering none.
+    private var availableFilters: [Leg] {
+        let present = Leg.allCases.filter { leg in
+            leg == .all || ribbon.lanes.contains { leg.matches($0.pointOfSail) }
+        }
+        return present.count > 1 ? present : []
     }
 
     /// Maneuvers describe what joined one run to the *next one in time*, so
@@ -68,6 +116,15 @@ struct RibbonView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    if lanes.isEmpty {
+                        ContentUnavailableView(
+                            "No \(filter.rawValue.lowercased()) runs",
+                            systemImage: "line.3.horizontal.decrease.circle",
+                            description: Text("This session has no runs on that point of sail.")
+                        )
+                        .padding(.top, 40)
+                    }
+
                     ForEach(lanes, id: \.id) { lane in
                         LaneRow(
                             lane: lane,
@@ -95,13 +152,78 @@ struct RibbonView: View {
                 }
                 .padding(.horizontal)
             }
-            .safeAreaInset(edge: .top, spacing: 0) { controls }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    summaryBar
+                    if showsControls {
+                        controls
+                        if !availableFilters.isEmpty { filterRow }
+                    }
+                    if let windWarning { windNotice(windWarning) }
+                }
+                .background(.bar)
+            }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
             .sheet(isPresented: $showingKey) {
-                RibbonKeySheet()
-                    .presentationDetents([.medium])
+                RibbonKeySheet(thresholds: thresholds)
+                    .presentationDetents([.medium, .large])
             }
         }
+    }
+
+    /// What the screen says before a rider asks it anything.
+    ///
+    /// The sort, the filters and the maneuver toggle were all on screen at
+    /// once, which is four controls above a list somebody opened to look at a
+    /// list. They are worth having and they are not worth meeting first, so
+    /// they are one tap away behind a button that says what it opens.
+    private var summaryBar: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(lanes.count) run\(lanes.count == 1 ? "" : "s")")
+                    .font(.subheadline.weight(.semibold))
+                if filter != .all || order != .time {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.tint)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                showingKey = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("How runs are worked out")
+
+            Button {
+                withAnimation(.snappy) { showsControls.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(showsControls ? "Done" : "Filter & sort")
+                        .font(.subheadline.weight(.medium))
+                    Image(systemName: showsControls ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    /// What has been narrowed, so a filtered list never looks like the session.
+    private var subtitle: String {
+        var parts: [String] = []
+        if filter != .all { parts.append(filter.rawValue.lowercased()) }
+        if order != .time { parts.append(order.rawValue.lowercased() + " first") }
+        return parts.joined(separator: " · ")
     }
 
     /// Sort, maneuvers, and the key — the three things the screen needed and
@@ -130,19 +252,65 @@ struct RibbonView: View {
             .disabled(order != .time)
             .accessibilityLabel(showsManeuvers ? "Hide maneuvers" : "Show maneuvers")
 
-            Button {
-                showingKey = true
-            } label: {
-                Image(systemName: "info.circle")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("What the colours mean")
         }
         .padding(.horizontal)
         .padding(.bottom, 8)
-        .background(.bar)
+    }
+
+    /// Four chips fit the width, so this is a plain row.
+    ///
+    /// It was a horizontal `ScrollView`, which has no intrinsic height and grew
+    /// to fill the safe-area inset — a hand's width of grey between the chips
+    /// and the runs, and then a collapsed overlap when that was pinned.
+    private var filterRow: some View {
+        HStack(spacing: 6) {
+            ForEach(availableFilters) { leg in
+                Button {
+                    withAnimation(.snappy) { filter = leg }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(leg.rawValue)
+                        if leg != .all {
+                            Text("\(ribbon.lanes.filter { leg.matches($0.pointOfSail) }.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(filter == leg ? AnyShapeStyle(.tint.opacity(0.18))
+                                              : AnyShapeStyle(.quaternary.opacity(0.5)),
+                                in: Capsule())
+                    .foregroundStyle(filter == leg ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
+    private func windNotice(_ text: String) -> some View {
+        Button(action: onSetWind) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                Text(text)
+                    .font(.caption2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9))
+            }
+            .foregroundStyle(.orange)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func connector(after laneID: Int) -> SessionRibbon.Connector? {
@@ -158,11 +326,35 @@ struct RibbonView: View {
 /// green as "flying" would be wrong and would make every lane look mislabelled.
 struct RibbonKeySheet: View {
 
+    /// The rules the segmenter actually applies, so the sheet cannot drift
+    /// from the code as the defaults move.
+    var thresholds: SportThresholds = SportThresholds.forSport(.wingfoil)
+
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Text("A run is one continuous stretch in roughly one direction. It ends when you turn — the moment your heading holds far enough off the run's own average for long enough to mean it.")
+                    Text("So a lap of the bay is two runs and a gybe, not one. Wobbles, luffs and a wave knocking you off line do not end a run; committing to a new direction does.")
+                } header: {
+                    Text("What a run is")
+                }
+
+                Section {
+                    rule("Turns at", "\(Int(thresholds.maneuverHeadingChange))° off the run's average heading",
+                         detail: "Held long enough to be a decision rather than a wobble.")
+                    rule("Riding above", Format.speed(thresholds.movingSpeed, unit: .knots, decimals: 1),
+                         detail: "Below this you are drifting, and drifting is not a run.")
+                    rule("Discards runs under", "a few seconds and a few tens of metres",
+                         detail: "Otherwise every water start becomes an entry.")
+                } header: {
+                    Text("The numbers behind it")
+                } footer: {
+                    Text("The turn angle is the one worth moving. It is on the Turns screen, under Analysis, and changing it re-reads the session.")
+                }
+
                 Section {
                     HStack(spacing: 10) {
                         LinearGradient(
@@ -188,12 +380,13 @@ struct RibbonKeySheet: View {
                 Section {
                     Text("Bar length is how far that run went, scaled to the longest run of the session.")
                     Text("The dot is the tack: red for port, green for starboard.")
+                    Text("Upwind, Reaching and Downwind are the run's average angle to the wind, so they need a wind direction to exist at all.")
                     Text("Tap a run to see its detail and isolate it on the map.")
                 } header: {
                     Text("The rest of the row")
                 }
             }
-            .navigationTitle("What you're looking at")
+            .navigationTitle("How runs are worked out")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -202,9 +395,22 @@ struct RibbonKeySheet: View {
             }
         }
     }
-}
 
-// MARK: - Lane
+    private func rule(_ title: String, _ value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title)
+                Spacer(minLength: 8)
+                Text(value)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
 
 struct LaneRow: View {
 

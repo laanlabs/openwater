@@ -398,7 +398,7 @@ public struct DownwindAnalyzer: Sendable {
         for k in (end + 1)..<next {
             if requiresFlight, !flying[k] { return false }
             if hasMotion, let energy = track.points[k].verticalAccelSD,
-               energy > pumpEnergyThreshold { return false }
+               energy > quietEnergyThreshold(in: track) { return false }
             if let wind {
                 let heading = track.course[k]
                 if Geo.angleSeparation(heading, wind.directionFrom) <= downwindHalfAngle {
@@ -431,6 +431,20 @@ public struct DownwindAnalyzer: Sendable {
 
     /// How far back to look for the lull before a glide, seconds.
     public static let riseWindow: TimeInterval = 8
+
+    /// The accelerometer reading below which this rider, on this rig, counts
+    /// as gliding rather than working.
+    ///
+    /// A multiple of the session's own median, because the absolute number
+    /// means nothing across setups: a real parawing run had a median of 1.86
+    /// against a fixed bar of 0.9, so every sample in it read as "working" and
+    /// the session reported no glides at all. Falls back to the fixed
+    /// threshold when there is nothing to measure.
+    func quietEnergyThreshold(in track: Track) -> Double {
+        let energies = track.points.compactMap(\.verticalAccelSD).sorted()
+        guard !energies.isEmpty else { return pumpEnergyThreshold }
+        return energies[energies.count / 2] * thresholds.pumpEnergyFraction
+    }
 
     /// The rider's own pace for the session, measured *going downwind*.
     ///
@@ -507,6 +521,9 @@ public struct DownwindAnalyzer: Sendable {
         }
         acceleration = smooth(acceleration, window: 3)
 
+        // What "quiet" means on this rig, rather than in general.
+        let quietEnergy = quietEnergyThreshold(in: track)
+
         // What "fast" means on this day, rather than in general.
         let floor = max(minimumGlideSpeed, glideSpeedFraction * typicalRidingSpeed(in: track, wind: wind))
 
@@ -516,7 +533,7 @@ public struct DownwindAnalyzer: Sendable {
             guard !requiresFlight || flyingMask[i] else { continue }
             guard acceleration[i] >= -maximumDeceleration else { continue }
             if hasMotion, let energy = track.points[i].verticalAccelSD {
-                guard energy <= pumpEnergyThreshold else { continue }
+                guard energy <= quietEnergy else { continue }
             }
             isGliding[i] = true
         }

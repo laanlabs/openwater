@@ -192,6 +192,18 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// You cannot jump from a standstill, m/s.
     public var jumpMinimumTakeoffSpeed: Double = 3.0
 
+    /// How much quieter than the session's own median the accelerometer has to
+    /// go before the rider counts as gliding rather than working.
+    ///
+    /// Relative, for the same reason the glide speed floor is. Vertical
+    /// acceleration depends on the board, the chop, and where the device is
+    /// strapped — a phone in a buoyancy vest reads nothing like a watch on a
+    /// wrist. An absolute bar of 0.9 m/s² was tuned on a quiet SUP session and
+    /// found *zero* glides in a real parawing run down the Columbia whose
+    /// median was 1.86: the whole session was above the line, so nothing in it
+    /// could ever be a glide.
+    public var pumpEnergyFraction: Double = 1.5
+
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
@@ -301,6 +313,9 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         public var jumpLandingSpike: Double?
         public var jumpMinimumTakeoffSpeed: Double?
 
+        /// See `SportThresholds.pumpEnergyFraction`.
+        public var pumpEnergyFraction: Double?
+
         public init(
             foilTakeoffSpeed: Double? = nil,
             movingSpeed: Double? = nil,
@@ -315,7 +330,8 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             jumpMinimumAirtime: TimeInterval? = nil,
             jumpFreeFall: Double? = nil,
             jumpLandingSpike: Double? = nil,
-            jumpMinimumTakeoffSpeed: Double? = nil
+            jumpMinimumTakeoffSpeed: Double? = nil,
+            pumpEnergyFraction: Double? = nil
         ) {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.movingSpeed = movingSpeed
@@ -331,6 +347,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.jumpFreeFall = jumpFreeFall
             self.jumpLandingSpike = jumpLandingSpike
             self.jumpMinimumTakeoffSpeed = jumpMinimumTakeoffSpeed
+            self.pumpEnergyFraction = pumpEnergyFraction
         }
 
         public var isEmpty: Bool {
@@ -341,6 +358,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
                 && upwindLegMinimumDuration == nil
                 && jumpMinimumAirtime == nil && jumpFreeFall == nil
                 && jumpLandingSpike == nil && jumpMinimumTakeoffSpeed == nil
+                && pumpEnergyFraction == nil
         }
 
         public func applied(to base: SportThresholds) -> SportThresholds {
@@ -359,6 +377,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = jumpFreeFall, v > 0 { t.jumpFreeFall = v }
             if let v = jumpLandingSpike, v > 0 { t.jumpLandingSpike = v }
             if let v = jumpMinimumTakeoffSpeed, v > 0 { t.jumpMinimumTakeoffSpeed = v }
+            if let v = pumpEnergyFraction, v > 0 { t.pumpEnergyFraction = v }
             return t
         }
     }

@@ -460,3 +460,49 @@ struct CurrentTests {
                 "and each is one long one, not a scatter")
     }
 }
+
+@Suite("Quiet is relative to the rig")
+struct PumpEnergyTests {
+
+    let builder = TrackBuilder()
+    let wind = Wind(directionFrom: 0, speed: 9, source: .manual, confidence: 1)
+
+    /// Pump-and-glide where every reading is scaled up, as a noisier board or
+    /// a differently-mounted device would produce.
+    func cycles(noiseScale: Double) -> Track {
+        var legs: [SyntheticTrack.Leg] = []
+        for _ in 0..<10 {
+            legs.append(.init(speed: 3.0, heading: 180, duration: 6))
+            legs.append(.init(speed: 9.0, heading: 180, duration: 12, transition: 2))
+        }
+        var points = SyntheticTrack.generate(legs: legs)
+        for i in points.indices {
+            if let sd = points[i].verticalAccelSD { points[i].verticalAccelSD = sd * noiseScale }
+        }
+        return builder.build(from: points)
+    }
+
+    private func glides(_ track: Track) -> Int {
+        DownwindAnalyzer.forSport(.downwindSUP, thresholds: Sport.downwindSUP.thresholds)
+            .analyse(track: track, flights: [], wind: wind, movingTime: track.duration).glideCount
+    }
+
+    @Test("A noisy rig finds the same glides as a quiet one")
+    func noiseDoesNotMatter() {
+        // A real parawing session read a median of 1.86 against a fixed bar of
+        // 0.9 and reported no glides at all — every sample was "working"
+        // because the whole recording sat above the line.
+        let quiet = glides(cycles(noiseScale: 1))
+        let noisy = glides(cycles(noiseScale: 5))
+        #expect(quiet > 0)
+        #expect(noisy == quiet, "scaling every reading must not change what was a glide")
+    }
+
+    @Test("Pumping still ends a glide however noisy the rig")
+    func pumpingStillCounts() {
+        // The guard that matters: the pump legs are five times the glide legs
+        // whatever the scale, so they stay separate glides rather than merging
+        // into one long one.
+        #expect(glides(cycles(noiseScale: 5)) == 10)
+    }
+}

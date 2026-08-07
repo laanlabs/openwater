@@ -229,18 +229,14 @@ struct SessionAnalysisTab: View {
             || showsDownwind
     }
 
-    /// Glides are only worth a screen when the session was about riding swell.
+    /// Downwind is always offered, even with nothing to show.
     ///
-    /// A count above zero is not enough. An afternoon of upwind-downwind laps
-    /// turns up a handful of short glides on the downwind halves, and offering
-    /// a "Downwind" screen for them puts the session's *upwind* work on a page
-    /// about bumps — which is exactly what a rider reported. Either the shape
-    /// of the session says it was a run, or the sport says catching swell is
-    /// the point of it.
-    private var showsDownwind: Bool {
-        guard summary.downwind.glideCount > 0 else { return false }
-        return summary.shape.kind == .downwinder || session.sport.ridesSwell
-    }
+    /// It was briefly hidden when a session had no glides worth the name, and
+    /// that reads as the app having failed rather than as the water having
+    /// been flat. A rider cannot tell an absent row from an unwritten feature.
+    /// The same reasoning already governs the no-wind and no-polar cards: say
+    /// which it is, and say why.
+    private var showsDownwind: Bool { true }
 
     @ViewBuilder
     private var techniqueSection: some View {
@@ -296,6 +292,7 @@ struct SessionAnalysisTab: View {
 
     private var glideValue: String? {
         let count = summary.downwind.glideCount
+        guard count > 0 else { return "none found" }
         return "\(count) glide\(count == 1 ? "" : "s")"
     }
 

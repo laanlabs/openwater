@@ -40,8 +40,12 @@ struct DownwindDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                DownwindCard(downwind: summary.downwind, units: units)
-                    .cardChrome()
+                if glides.isEmpty {
+                    nothingFound
+                } else {
+                    DownwindCard(downwind: summary.downwind, units: units)
+                        .cardChrome()
+                }
 
                 if showsLegs { legsCard }
 
@@ -114,6 +118,51 @@ struct DownwindDetailView: View {
                         }
                     }
             }
+        }
+    }
+
+    /// Why there is nothing here.
+    ///
+    /// An empty screen would leave a rider guessing whether the app looks for
+    /// glides at all. It does, and these are the four things it wants — said
+    /// plainly, so a session that found none is legible as a flat day rather
+    /// than as a broken feature.
+    private var nothingFound: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("No glides in this session", systemImage: "water.waves")
+                .font(.subheadline.weight(.medium))
+
+            Text("A glide is a stretch where the water carried you rather than you working for it. To count, it has to be all four of these:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                criterion("At least five seconds")
+                criterion("Sailed more than \(Int(DownwindAnalyzer.downwindHalfAngle))° off the wind — a bump can only push you the way it is going")
+                criterion("Faster than your own typical pace for the day")
+                criterion("Speed rising out of the lull before it, not held flat")
+            }
+
+            if !summary.downwind.usedMotionData {
+                Text("This session has no motion data either, which is what tells working from gliding most clearly. A watch or phone recording gives a better answer than an imported file.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .cardChrome()
+    }
+
+    private func criterion(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 4))
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

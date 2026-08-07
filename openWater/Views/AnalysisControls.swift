@@ -291,3 +291,59 @@ enum SessionReanalyser {
         return edited
     }
 }
+
+// MARK: - Nothing to show
+
+/// The screen behind a row that found nothing.
+///
+/// A row that vanishes when its count is zero is indistinguishable from a
+/// feature that was never built, so every row stays and says "none found".
+/// That only works if the screen behind it is worth the tap: it has to say
+/// what was looked for, why none was found, and what would change the answer.
+struct NothingFoundScreen: View {
+
+    let title: String
+    let headline: String
+    let detail: String
+    let session: Session
+    let summary: SessionSummary
+    var needs: Set<AnalysisFooter<EmptyView>.Requirement> = []
+    var onSetWind: () -> Void = {}
+
+    @Environment(AppSettings.self) private var settings
+    @Environment(SessionLibrary.self) private var library
+    @State private var isRecomputing = false
+    @State private var current: Session?
+
+    var body: some View {
+        AnalysisDetail(title: title) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(headline, systemImage: "magnifyingglass")
+                    .font(.subheadline.weight(.medium))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .cardChrome()
+
+            AnalysisFooter(
+                session: current ?? session,
+                summary: summary,
+                needs: needs,
+                isBusy: isRecomputing,
+                onSetWind: onSetWind,
+                onReanalyse: reanalyse
+            )
+        }
+    }
+
+    private func reanalyse() {
+        isRecomputing = true
+        Task {
+            current = await SessionReanalyser.reanalyse(current ?? session,
+                                                        settings: settings, library: library)
+            isRecomputing = false
+        }
+    }
+}

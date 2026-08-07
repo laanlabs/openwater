@@ -161,6 +161,21 @@ struct SessionListView: View {
             ) { result in
                 handleImport(result)
             }
+            // A file tapped, airdropped or shared into openWater arrives here.
+            //
+            // The document types are declared, so the system launches the app
+            // with the file — and until this existed it launched to an empty
+            // Sessions list, which looks exactly like the app ignoring you.
+            //
+            // A file handed over by the system lives outside our sandbox, so it
+            // needs the security-scoped access dance; a file already inside it
+            // (the bundled sample, a share extension's copy) has no scope to
+            // ask for and `startAccessing` returning false is not an error.
+            .onOpenURL { url in
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                handleImport(.success([url]))
+            }
             .sheet(item: $currentImport, onDismiss: advanceImportQueue) { track in
                 ImportView(imported: track) { sport in
                     // Building the session runs the full analysis, which on a

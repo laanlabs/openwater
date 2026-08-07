@@ -28,5 +28,133 @@
 	<array>
 		<string>location</string>
 	</array>
+
+	<!--
+	  The file types openWater opens, so a track arrives by tapping it rather
+	  than by remembering the app has an import button.
+
+	  A rider is sent a GPX in a message, or airdrops an export from another
+	  phone, and the natural move is to tap it. Without this the system has no
+	  idea openWater wants it: Files offers "Save", the share sheet has no entry,
+	  and the only way in is Sessions → + → Import, which nobody discovers.
+
+	  `.openwater` is ours, so it is *exported* — we define what the identifier
+	  means. GPX is a public format nobody has standardised a UTI for, so it is
+	  *imported* under a reverse-DNS name conforming to public.xml; several apps
+	  declare it this way and the system reconciles them.
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>openWater Session</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.laan.labs.openwater.session</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>GPX Track</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.topografix.gpx</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Garmin FIT Activity</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.garmin.fit</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.laan.labs.openwater.session</string>
+			<key>UTTypeDescription</key>
+			<string>openWater Session</string>
+			<!--
+			  Data rather than JSON, though the contents are JSON.
+			  Conforming to `public.json` is more truthful and makes Files
+			  *preview* the file instead of handing it over: tapping a session
+			  showed a rider a wall of raw braces. The file is only ever useful
+			  inside the app, so it declares the conformance that gets it there.
+			-->
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>openwater</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/vnd.openwater.session+json</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.topografix.gpx</string>
+			<key>UTTypeDescription</key>
+			<string>GPX Track</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gpx</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/gpx+xml</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.garmin.fit</string>
+			<key>UTTypeDescription</key>
+			<string>Garmin FIT Activity</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fit</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

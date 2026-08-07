@@ -121,10 +121,20 @@ struct SessionAnalysisTab: View {
     @ViewBuilder
     private var windSection: some View {
         Section("Wind") {
-            if let polar = upwindPolar {
-                AnalysisRow(symbol: "arrow.up.right", title: "Upwind",
-                            value: upwindValue(polar), warning: windWarning) {
+            AnalysisRow(symbol: "arrow.up.right", title: "Upwind",
+                        value: upwindValue, warning: windWarning) {
+                if let polar = upwindPolar {
                     UpwindDetailView(session: session, summary: summary, polar: polar)
+                } else {
+                    NothingFoundScreen(
+                        title: "Upwind",
+                        headline: "No upwind legs in this session",
+                        detail: upwindExplanation,
+                        session: session,
+                        summary: summary,
+                        needs: session.sport.isWindPowered ? [.windDirection, .windSpeed] : [],
+                        onSetWind: onSetWind
+                    )
                 }
             }
             AnalysisRow(symbol: "chart.pie", title: "Polar & angles",
@@ -161,14 +171,26 @@ struct SessionAnalysisTab: View {
         }
     }
 
-    private func upwindValue(_ polar: PolarAnalysis) -> String? {
+    private var upwindValue: String? {
+        guard let polar = upwindPolar else { return "none found" }
         guard let beat = polar.beat else {
-            guard let angle = polar.bestUpwindAngle else { return nil }
+            guard let angle = polar.bestUpwindAngle else { return "none found" }
             return "\(Int(angle.rounded()))°"
         }
         let vmg = Format.speed(beat.vmg, unit: settings.units.speed, decimals: 1)
         guard let angle = beat.meanAngle else { return vmg }
         return "\(vmg) @ \(Int(angle.rounded()))°"
+    }
+
+    /// Why there is nothing, in the order a rider would ask.
+    private var upwindExplanation: String {
+        guard session.sport.isWindPowered else {
+            return "Upwind legs are measured against the wind, and \(session.sport.displayName.lowercased()) is not sailed to it."
+        }
+        guard session.effectiveWind != nil else {
+            return "An upwind leg is continuous sailing on one tack above a beam reach, which needs a wind direction to measure against. Set one and this will fill in."
+        }
+        return "An upwind leg is continuous sailing on one tack above a beam reach, for long enough to mean it. Nothing in this session was — a downwind run has no upwind in it, which is not a fault. The minimums are adjustable below."
     }
 
     private var angleValue: String? {
@@ -242,12 +264,11 @@ struct SessionAnalysisTab: View {
 
     // MARK: - Technique
 
-    private var showsTechniqueSection: Bool {
-        summary.maneuverSummary.total > 0
-            || summary.foil.flightCount > 0
-            || summary.jumpSummary.count > 0
-            || showsDownwind
-    }
+    /// Always. A row that vanishes when its count is zero is indistinguishable
+    /// from a feature that does not exist, and a rider who jumped and sees no
+    /// Airtime row cannot tell whether we failed to detect it or they never
+    /// left the water.
+    private var showsTechniqueSection: Bool { true }
 
     /// Downwind is always offered, even with nothing to show.
     ///
@@ -261,12 +282,10 @@ struct SessionAnalysisTab: View {
     @ViewBuilder
     private var techniqueSection: some View {
         Section("Technique") {
-            if summary.maneuverSummary.total > 0 {
-                AnalysisRow(symbol: "arrow.triangle.2.circlepath", title: "Turns", value: turnValue) {
-                    TurnsScreen(session: session, summary: summary, onSetWind: onSetWind)
-                }
+            AnalysisRow(symbol: "arrow.triangle.2.circlepath", title: "Turns", value: turnValue) {
+                TurnsScreen(session: session, summary: summary, onSetWind: onSetWind)
             }
-            if summary.foil.flightCount > 0 {
+            if session.sport.isFoiling {
                 AnalysisRow(symbol: "airplane", title: "Foiling", value: foilValue) {
                     FoilingScreen(
                         session: session,
@@ -275,8 +294,6 @@ struct SessionAnalysisTab: View {
                         onEdit: onEdit
                     )
                 }
-            }
-            if summary.jumpSummary.count > 0 {
                 AnalysisRow(symbol: "arrow.up.forward", title: "Airtime", value: airtimeValue) {
                     AirtimeScreen(session: session, summary: summary, units: settings.units)
                 }
@@ -292,18 +309,20 @@ struct SessionAnalysisTab: View {
 
     private var turnValue: String? {
         let turns = summary.maneuverSummary
+        guard turns.total > 0 else { return "none found" }
         guard let dry = turns.dryGybeRate else { return "\(turns.total)" }
         return "\(turns.total) · \(Int((dry * 100).rounded()))% dry"
     }
 
     private var foilValue: String? {
         let foil = summary.foil
+        guard foil.flightCount > 0 else { return "none found" }
         return "\(Format.shortDuration(foil.timeOnFoil)) · \(Int((foil.foilingFraction * 100).rounded()))%"
     }
 
     private var airtimeValue: String? {
         let jumps = summary.jumpSummary
-        guard jumps.count > 0 else { return nil }
+        guard jumps.count > 0 else { return "none found" }
         return "\(jumps.count) · \(Format.shortDuration(jumps.bestAirtime)) best"
     }
 

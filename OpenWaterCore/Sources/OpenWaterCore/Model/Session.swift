@@ -202,7 +202,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// rule) instead of exactly the cap; Alpha 1 km added; polar carries
     /// per-tack mean headings and the both-tacks beat/run VMG.
     /// 4: the beat/run carry their leg count and working angle.
-    public static let currentVersion = 7
+    public static let currentVersion = 8
 
     public let analysisVersion: Int
 

@@ -506,3 +506,70 @@ struct PumpEnergyTests {
         #expect(glides(cycles(noiseScale: 5)) == 10)
     }
 }
+
+@Suite("One turn is one turn")
+struct ManeuverMergingTests {
+
+    let builder = TrackBuilder()
+
+    /// Laps: each one ends in a turn, so the turn count should track the run
+    /// count. Two independent parts of the analysis describing the same events
+    /// have to agree, and before merging they disagreed by a factor of two.
+    @Test("The turn count agrees with the run count")
+    func turnsMatchRuns() {
+        let track = builder.build(from: SyntheticTrack.wingSession(runs: 20))
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(track)
+
+        let runs = summary.runs.count
+        let turns = summary.maneuverSummary.total
+        #expect(runs > 1, "precondition: this session has laps")
+        #expect(turns <= runs + 2,
+                "\(turns) turns for \(runs) runs — one turn is being counted more than once")
+        #expect(turns >= runs / 2, "\(turns) turns for \(runs) runs — turns are being missed")
+    }
+
+    @Test("Detections a moment apart are one turn")
+    func adjacentDetectionsMerge() {
+        let detector = ManeuverDetector.forSport(.parawing)
+        func turn(id: Int, start: Double, end: Double, change: Double) -> Maneuver {
+            Maneuver(id: id, startElapsed: start, endElapsed: end,
+                     startIndex: Int(start), endIndex: Int(end), kind: .gybe,
+                     exitTack: .port, headingChange: change,
+                     entrySpeed: 10, exitSpeed: 9, minimumSpeed: 8,
+                     recoveryTime: nil, radius: nil, stayedOnFoil: true,
+                     score: 80, confidence: 0.9)
+        }
+        // Three detections a second apart: a rider carving out of one turn and
+        // straight into the exit of it.
+        let clustered = [turn(id: 0, start: 10, end: 14, change: 40),
+                         turn(id: 1, start: 15, end: 18, change: 35),
+                         turn(id: 2, start: 19, end: 22, change: 20)]
+        let one = detector.merged(clustered)
+        #expect(one.count == 1)
+        #expect(one[0].startElapsed == 10 && one[0].endElapsed == 22, "it spans the whole turn")
+        #expect(one[0].headingChange == 95, "and turned through all of it")
+
+        // The same three, a minute apart: three turns.
+        let separate = [turn(id: 0, start: 10, end: 14, change: 40),
+                        turn(id: 1, start: 80, end: 84, change: 35),
+                        turn(id: 2, start: 150, end: 154, change: 20)]
+        #expect(detector.merged(separate).count == 3)
+    }
+
+    @Test("A merged turn is dry only if the rider stayed up throughout")
+    func drynessSurvivesMerging() {
+        let detector = ManeuverDetector.forSport(.parawing)
+        func part(_ start: Double, _ end: Double, dry: Bool?) -> Maneuver {
+            Maneuver(id: 0, startElapsed: start, endElapsed: end,
+                     startIndex: Int(start), endIndex: Int(end), kind: .gybe,
+                     exitTack: .port, headingChange: 30,
+                     entrySpeed: 10, exitSpeed: 9, minimumSpeed: 8,
+                     recoveryTime: nil, radius: nil, stayedOnFoil: dry,
+                     score: 80, confidence: 0.9)
+        }
+        #expect(detector.merged([part(10, 12, dry: true), part(13, 15, dry: true)])
+            .first?.stayedOnFoil == true)
+        #expect(detector.merged([part(10, 12, dry: true), part(13, 15, dry: false)])
+            .first?.stayedOnFoil == false, "touching down in any part of it is a wet turn")
+    }
+}

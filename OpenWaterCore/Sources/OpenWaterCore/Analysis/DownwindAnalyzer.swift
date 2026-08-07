@@ -182,8 +182,23 @@ public struct DownwindAnalyzer: Sendable {
     /// work is `glideSpeedFraction`, relative to the day.
     public var minimumGlideSpeed: Double
 
-    /// A glide must reach this fraction of the rider's own typical riding
+    /// A glide must reach this fraction of the rider's own typical downwind
     /// speed for the session.
+    ///
+    /// Three quarters, and the number matters more than it looks. The
+    /// reference is a *median*, so a fraction near one splits the rider's
+    /// riding in half by construction — half of every run is below its own
+    /// median, and a continuous glide would be chopped wherever it dipped
+    /// under. The floor's job is to exclude stretches where the rider was not
+    /// being carried at all: slogging, a water start, drifting. Those sit far
+    /// below the median, not just under it.
+    ///
+    /// Measured against a reported session: at 0.95 a four-kilometre downwind
+    /// run came out as 2.8 km of glide, at 0.85 as 3.1 km, and at 0.75 the
+    /// whole run. Below 0.75 nothing further changes, and the pump-and-glide
+    /// of a SUP downwinder stays ten separate glides throughout, because
+    /// pumping happens at about a third of glide speed rather than just under
+    /// it.
     ///
     /// Replaces a fixed floor, which was wrong in both directions. Big swell
     /// in light wind gives real glides at speeds a fixed bar rejects; a windy
@@ -231,7 +246,7 @@ public struct DownwindAnalyzer: Sendable {
         pumpEnergyThreshold: Double = 0.9,
         minimumGlideDuration: TimeInterval = 5,
         minimumGlideSpeed: Double = 3.0,
-        glideSpeedFraction: Double = 0.9,
+        glideSpeedFraction: Double = 0.75,
         maximumDeceleration: Double = 0.35,
         minimumSpeedGain: Double = 0.05,
         glideGapTolerance: TimeInterval = 20
@@ -252,13 +267,14 @@ public struct DownwindAnalyzer: Sendable {
         case .downwindSUP, .prone:
             a.minimumGlideSpeed = 2.5
         case .wingfoil, .parawing:
-            // On a wing the rider is powered, so a "glide" means the wing is
-            // depowered and the swell is doing the work. That used to be a
-            // fixed 6 m/s, which missed real glides whenever the swell was big
-            // and the wind light. `glideSpeedFraction` asks the better
-            // question — is this fast *for today* — so the bar here only has
-            // to keep drifting out.
-            a.glideSpeedFraction = 0.95
+            // A wing used to need a fixed 6 m/s, then a stricter fraction than
+            // other sports, both on the reasoning that a powered rider is fast
+            // anyway. Neither survived contact with real sessions: the fixed
+            // bar missed glides in big swell and light wind, and the stricter
+            // fraction cut a continuous run into pieces. Measuring the rider
+            // against their own downwind pace already answers what those were
+            // reaching for, so there is nothing to override here.
+            break
         default:
             break
         }

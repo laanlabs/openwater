@@ -46,13 +46,11 @@ struct BulkExportView: View {
                 } header: {
                     Text("Format")
                 } footer: {
-                    if settings.sharingPrivacy.maskEndpoints {
-                        Label(
-                            "The first and last \(Int(settings.sharingPrivacy.endpointMaskRadius)) m are trimmed from every file. Turn that off in Settings if you are backing up your own data.",
-                            systemImage: "lock.shield"
-                        )
-                        .font(.caption)
-                    }
+                    Label(
+                        "Complete data — nothing is trimmed. These files are your backup.",
+                        systemImage: "checkmark.shield"
+                    )
+                    .font(.caption)
                 }
 
                 Section {

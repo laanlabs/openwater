@@ -359,8 +359,8 @@ struct SessionListView: View {
                 Button("Import…", systemImage: "square.and.arrow.down") {
                     isImporting = true
                 }
-                Button("Add Demo Session", systemImage: "wand.and.stars") {
-                    addDemoSession()
+                Button("Add Sample Session", systemImage: "wand.and.stars") {
+                    addSampleSession()
                 }
                 if !sessions.isEmpty {
                     Button("Export Sessions…", systemImage: "square.and.arrow.up.on.square") {
@@ -453,9 +453,14 @@ struct SessionListView: View {
         path = [first.id]
     }
 
-    /// A synthetic session, so the app is explorable without getting wet.
-    private func addDemoSession() {
-        library.save(DemoData.wingSession(categories: settings.categories))
+    /// A real session, so the app is explorable without getting wet.
+    ///
+    /// Falls back to a generated one if the bundled recording cannot be read —
+    /// an empty library and a menu item that silently does nothing is a worse
+    /// first impression than a synthetic track.
+    private func addSampleSession() {
+        library.save(DemoData.sampleSession(categories: settings.categories)
+                     ?? DemoData.wingSession(categories: settings.categories))
     }
 }
 

@@ -8,6 +8,23 @@ cold without re-deriving the reasoning.
 
 ---
 
+## 0. Done since this was written
+
+**Privacy manifest** (`13a46f6`+). The upload warning was Apple's
+ITMS-91053: the app had no `PrivacyInfo.xcprivacy`, which has been required
+since May 2024. Added for both the phone and the watch, declaring the one
+required-reason API this app touches (UserDefaults, reason CA92.1) and the
+precise location a web share transmits. `scripts/testflight.sh` now fails
+before upload if either manifest is missing or a declared API has no reason
+code — the warning never blocked a build, which is why it went unnoticed.
+
+Not verified against Apple's own validator: `altool --validate-app` needs the
+App Store Connect key, which is not on this machine. A clean archive, export
+and local verification all pass. **Confirm the warning is actually gone on
+the next real upload.**
+
+---
+
 ## 1. Ship a TestFlight build
 
 **Riders on the current TestFlight cannot open any session.** They see

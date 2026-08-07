@@ -88,6 +88,8 @@ struct UpwindDetailView: View {
                 Text("A leg is continuous sailing on one tack above a beam reach. VMG is measured as ground actually made toward the wind over the leg's time — wandering costs it, so these are honest numbers, not speed × cos(angle).")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                footer
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 24)
@@ -98,7 +100,7 @@ struct UpwindDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             guard legs.isEmpty else { return }
-            legs = UpwindLegFinder.legs(track: session.track, wind: wind)
+            legs = upwindLegs(track: session.track, wind: wind)
             samples = computeVMGSamples()
         }
         .sheet(isPresented: $isSettingWind) {
@@ -148,12 +150,84 @@ struct UpwindDetailView: View {
                 session = edited
                 summary = newSummary
                 polar = newPolar
-                legs = UpwindLegFinder.legs(track: edited.track, wind: newPolar.wind)
+                legs = upwindLegs(track: edited.track, wind: newPolar.wind)
                 samples = computeVMGSamples()
                 selectedLeg = nil
             }
             isRecomputing = false
         }
+    }
+
+    // MARK: - Thresholds
+
+    private var footer: some View {
+        AnalysisFooter(
+            session: session,
+            summary: summary,
+            // Every angle on this screen is measured from the direction; the
+            // strength only adds context, but its absence is worth saying.
+            needs: [.windDirection, .windSpeed],
+            isBusy: isRecomputing,
+            onSetWind: { isSettingWind = true },
+            onReanalyse: reanalyse
+        ) {
+            ThresholdSlider(
+                title: "Counts as upwind up to",
+                value: settings.thresholdBinding(for: session.sport, \.upwindLegAngle,
+                                                 default: session.sport.thresholds.upwindLegAngle),
+                range: 50...100, step: 5,
+                format: { "\(Int($0))° off the wind" },
+                note: "Ninety is a beam reach — beyond it you are no longer climbing. Lower it if reaches are being counted as beats.",
+                onCommit: reanalyse
+            )
+            ThresholdSlider(
+                title: "Shortest leg by distance",
+                value: settings.thresholdBinding(for: session.sport, \.upwindLegMinimumDistance,
+                                                 default: session.sport.thresholds.upwindLegMinimumDistance),
+                range: 20...400, step: 10,
+                format: { "\(Int($0)) m" },
+                note: "A real zig-zag is made of short tacks, so this sits low on purpose. Raise it if the list is full of scraps.",
+                onCommit: reanalyse
+            )
+            ThresholdSlider(
+                title: "Shortest leg by time",
+                value: settings.thresholdBinding(for: session.sport, \.upwindLegMinimumDuration,
+                                                 default: session.sport.thresholds.upwindLegMinimumDuration),
+                range: 4...60, step: 2,
+                format: { "\(Int($0)) s" },
+                note: "Same idea in seconds — a fifteen-second tack is a real tack.",
+                onCommit: reanalyse
+            )
+        }
+    }
+
+    /// Re-run everything from the track, then rebuild the legs and the chart.
+    private func reanalyse() {
+        isRecomputing = true
+        Task {
+            if let edited = await SessionReanalyser.reanalyse(session, settings: settings, library: library),
+               let newSummary = edited.summary, let newPolar = newSummary.polar {
+                session = edited
+                summary = newSummary
+                polar = newPolar
+                legs = upwindLegs(track: edited.track, wind: newPolar.wind)
+                samples = computeVMGSamples()
+                selectedLeg = nil
+            }
+            isRecomputing = false
+        }
+    }
+
+    /// The rider's own idea of what an upwind leg is.
+    private func upwindLegs(track: Track, wind: Wind) -> [UpwindLeg] {
+        let t = settings.thresholds(for: session.sport)
+        return UpwindLegFinder.legs(
+            track: track,
+            wind: wind,
+            upwindLimit: t.upwindLegAngle,
+            minimumDistance: t.upwindLegMinimumDistance,
+            minimumDuration: t.upwindLegMinimumDuration
+        )
     }
 
     // MARK: - Map

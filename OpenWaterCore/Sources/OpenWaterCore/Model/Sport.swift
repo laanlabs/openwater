@@ -161,6 +161,19 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// fraction. Without a rise there is nothing to say the water did the work.
     public var glideMinimumGain: Double = 0.05
 
+    // MARK: What counts as an upwind leg
+
+    /// How far off the wind you may point and still be working upwind,
+    /// degrees. Ninety is a beam reach — beyond it you are no longer climbing.
+    public var upwindLegAngle: Double = 90
+
+    /// Shortest leg worth measuring, metres. Low on purpose: a real session's
+    /// zig-zag is made of short tacks, and a high floor swallows half of it.
+    public var upwindLegMinimumDistance: Double = 80
+
+    /// Shortest leg worth measuring, seconds.
+    public var upwindLegMinimumDuration: TimeInterval = 12
+
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
@@ -257,6 +270,12 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         public var glideSpeedFraction: Double?
         public var glideMinimumGain: Double?
 
+        /// What counts as an upwind leg — see the matching fields on
+        /// `SportThresholds`.
+        public var upwindLegAngle: Double?
+        public var upwindLegMinimumDistance: Double?
+        public var upwindLegMinimumDuration: TimeInterval?
+
         public init(
             foilTakeoffSpeed: Double? = nil,
             movingSpeed: Double? = nil,
@@ -264,7 +283,10 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             glideMinimumDuration: TimeInterval? = nil,
             glideDownwindAngle: Double? = nil,
             glideSpeedFraction: Double? = nil,
-            glideMinimumGain: Double? = nil
+            glideMinimumGain: Double? = nil,
+            upwindLegAngle: Double? = nil,
+            upwindLegMinimumDistance: Double? = nil,
+            upwindLegMinimumDuration: TimeInterval? = nil
         ) {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.movingSpeed = movingSpeed
@@ -273,12 +295,17 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.glideDownwindAngle = glideDownwindAngle
             self.glideSpeedFraction = glideSpeedFraction
             self.glideMinimumGain = glideMinimumGain
+            self.upwindLegAngle = upwindLegAngle
+            self.upwindLegMinimumDistance = upwindLegMinimumDistance
+            self.upwindLegMinimumDuration = upwindLegMinimumDuration
         }
 
         public var isEmpty: Bool {
             foilTakeoffSpeed == nil && movingSpeed == nil && maneuverHeadingChange == nil
                 && glideMinimumDuration == nil && glideDownwindAngle == nil
                 && glideSpeedFraction == nil && glideMinimumGain == nil
+                && upwindLegAngle == nil && upwindLegMinimumDistance == nil
+                && upwindLegMinimumDuration == nil
         }
 
         public func applied(to base: SportThresholds) -> SportThresholds {
@@ -290,6 +317,9 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = glideDownwindAngle, v > 0 { t.glideDownwindAngle = v }
             if let v = glideSpeedFraction, v > 0 { t.glideSpeedFraction = v }
             if let v = glideMinimumGain, v >= 0 { t.glideMinimumGain = v }
+            if let v = upwindLegAngle, v > 0 { t.upwindLegAngle = v }
+            if let v = upwindLegMinimumDistance, v > 0 { t.upwindLegMinimumDistance = v }
+            if let v = upwindLegMinimumDuration, v > 0 { t.upwindLegMinimumDuration = v }
             return t
         }
     }

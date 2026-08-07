@@ -21,9 +21,12 @@ struct DownwindDetailView: View {
     @State private var session: Session
     @State private var summary: SessionSummary
 
-    init(session: Session, summary: SessionSummary) {
+    var onSetWind: () -> Void = {}
+
+    init(session: Session, summary: SessionSummary, onSetWind: @escaping () -> Void = {}) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
+        self.onSetWind = onSetWind
     }
 
     @Environment(AppSettings.self) private var settings
@@ -34,7 +37,6 @@ struct DownwindDetailView: View {
     @State private var isMapFullScreen = false
     @State private var camera: MapCameraPosition = .automatic
     @State private var isRecomputing = false
-    @State private var showsThresholds = false
 
     private var glides: [Glide] { summary.downwind.glides }
     private var legs: [SessionLeg] { summary.shape.legs }
@@ -70,7 +72,7 @@ struct DownwindDetailView: View {
                 }
 
                 explanation
-                thresholdCard
+                footer
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 24)
@@ -459,129 +461,57 @@ struct DownwindDetailView: View {
 
     // MARK: - Thresholds
 
-    private var overrides: SportThresholds.Overrides {
-        settings.sportOverrides[session.sport] ?? .init()
+    private var footer: some View {
+        AnalysisFooter(
+            session: session,
+            summary: summary,
+            // Glides are direction-tested, so without wind every stretch of
+            // fast riding qualifies whichever way it was pointing.
+            needs: [.windDirection, .motionData],
+            isBusy: isRecomputing,
+            onSetWind: onSetWind,
+            onReanalyse: recompute
+        ) {
+            ThresholdSlider(
+                title: "Off the wind",
+                value: settings.thresholdBinding(for: session.sport, \.glideDownwindAngle,
+                                                 default: defaults.glideDownwindAngle),
+                range: 90...150, step: 5,
+                format: { "\(Int($0))°" },
+                note: "How far off the wind you have to be pointing. A bump can only push you the way it is going, so riding across the swell does not count.",
+                onCommit: recompute
+            )
+            ThresholdSlider(
+                title: "At least this long",
+                value: settings.thresholdBinding(for: session.sport, \.glideMinimumDuration,
+                                                 default: defaults.glideMinimumDuration),
+                range: 2...20, step: 1,
+                format: { "\(Int($0)) s" },
+                note: "Below this it is a nudge off a bit of chop rather than a glide.",
+                onCommit: recompute
+            )
+            ThresholdSlider(
+                title: "Share of your downwind pace",
+                value: settings.thresholdBinding(for: session.sport, \.glideSpeedFraction,
+                                                 default: defaults.glideSpeedFraction),
+                range: 0.5...1.0, step: 0.05,
+                format: { "\(Int($0 * 100))%" },
+                note: "Measured against your median speed going downwind, so a current that slows every downwind leg does not raise the bar. Near 100% splits your riding in half, since half of it is below its own median by definition.",
+                onCommit: recompute
+            )
+            ThresholdSlider(
+                title: "Speed rise out of the lull",
+                value: settings.thresholdBinding(for: session.sport, \.glideMinimumGain,
+                                                 default: defaults.glideMinimumGain),
+                range: 0...0.3, step: 0.01,
+                format: { "\(Int($0 * 100))%" },
+                note: "The bump gives you speed. Without a rise there is nothing to separate gliding from riding along at one speed.",
+                onCommit: recompute
+            )
+        }
     }
 
     private var defaults: SportThresholds { session.sport.thresholds }
-
-    private func binding(
-        _ key: WritableKeyPath<SportThresholds.Overrides, Double?>,
-        default fallback: Double
-    ) -> Binding<Double> {
-        Binding(
-            get: { overrides[keyPath: key] ?? fallback },
-            set: { newValue in
-                var o = overrides
-                // Back at the default means back to *following* the default,
-                // not pinned to today's value of it.
-                o[keyPath: key] = abs(newValue - fallback) < 0.0001 ? nil : newValue
-                settings.sportOverrides[session.sport] = o.isEmpty ? nil : o
-            }
-        )
-    }
-
-    private var thresholdCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy) { showsThresholds.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: showsThresholds ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                    Text("What counts as a glide")
-                        .font(.subheadline.weight(.medium))
-                    Spacer(minLength: 0)
-                    if !overrides.isEmpty {
-                        Text("adjusted")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                }
-                .foregroundStyle(.primary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if showsThresholds {
-                VStack(alignment: .leading, spacing: 16) {
-                    slider(
-                        "Off the wind",
-                        binding(\.glideDownwindAngle, default: defaults.glideDownwindAngle),
-                        range: 90...150, step: 5,
-                        format: { "\(Int($0))°" },
-                        note: "How far off the wind you have to be pointing. A bump can only push you the way it is going, so riding across the swell does not count."
-                    )
-                    slider(
-                        "At least this long",
-                        binding(\.glideMinimumDuration, default: defaults.glideMinimumDuration),
-                        range: 2...20, step: 1,
-                        format: { "\(Int($0)) s" },
-                        note: "Below this it is a nudge off a bit of chop rather than a glide."
-                    )
-                    slider(
-                        "Share of your downwind pace",
-                        binding(\.glideSpeedFraction, default: defaults.glideSpeedFraction),
-                        range: 0.5...1.0, step: 0.05,
-                        format: { "\(Int($0 * 100))%" },
-                        note: "Measured against your median speed going downwind, so a current that slows every downwind leg does not raise the bar. Near 100% splits your riding in half, since half of it is below its own median by definition."
-                    )
-                    slider(
-                        "Speed rise out of the lull",
-                        binding(\.glideMinimumGain, default: defaults.glideMinimumGain),
-                        range: 0...0.3, step: 0.01,
-                        format: { "\(Int($0 * 100))%" },
-                        note: "The bump gives you speed. Without a rise there is nothing to separate gliding from riding along at one speed."
-                    )
-
-                    if !overrides.isEmpty {
-                        Button("Reset to the defaults for \(session.sport.displayName)", role: .destructive) {
-                            settings.sportOverrides[session.sport] = nil
-                            recompute()
-                        }
-                        .font(.callout)
-                    }
-
-                    Text("These apply to every \(session.sport.displayName.lowercased()) session as it is analysed, not only this one.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, 14)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .cardChrome()
-    }
-
-    private func slider(
-        _ title: String,
-        _ value: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double,
-        format: @escaping (Double) -> String,
-        note: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                Spacer(minLength: 8)
-                Text(format(value.wrappedValue))
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-            }
-            // Re-reading a session is half a second of work on a long track, so
-            // it happens when the drag ends rather than on every frame of it.
-            Slider(value: value, in: range, step: step) { editing in
-                if !editing { recompute() }
-            }
-            Text(note)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
 
     /// Re-run the analysis with the rider's thresholds and keep the result.
     ///
@@ -590,16 +520,9 @@ struct DownwindDetailView: View {
     /// screen follows when the wind is changed.
     private func recompute() {
         isRecomputing = true
-        let categories = settings.categories
-        let overrides = settings.overrides(for: session.sport)
-        let current = session
         Task {
-            let edited = await Task.detached {
-                current.applying(Session.Edits(session: current),
-                                 categories: categories, overrides: overrides)
-            }.value
-            library.save(edited)
-            if let newSummary = edited.summary {
+            if let edited = await SessionReanalyser.reanalyse(session, settings: settings, library: library),
+               let newSummary = edited.summary {
                 session = edited
                 summary = newSummary
                 select(nil)

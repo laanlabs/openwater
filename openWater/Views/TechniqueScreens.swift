@@ -106,13 +106,37 @@ struct AirtimeScreen: View {
 /// on the speed chart. The ticks say *when*; this says what each one was.
 struct FoilingScreen: View {
 
-    let session: Session
-    let summary: SessionSummary
+    @State private var session: Session
+    @State private var summary: SessionSummary
     let units: UnitPreferences
     var onEdit: () -> Void = {}
 
+    init(session: Session, summary: SessionSummary, units: UnitPreferences,
+         onEdit: @escaping () -> Void = {}) {
+        _session = State(initialValue: session)
+        _summary = State(initialValue: summary)
+        self.units = units
+        self.onEdit = onEdit
+    }
+
+    @Environment(AppSettings.self) private var settings
+    @Environment(SessionLibrary.self) private var library
+    @State private var isRecomputing = false
+
     private var flights: [Flight] {
         summary.flights.sorted { $0.duration > $1.duration }
+    }
+
+    private func reanalyse() {
+        isRecomputing = true
+        Task {
+            if let edited = await SessionReanalyser.reanalyse(session, settings: settings, library: library),
+               let newSummary = edited.summary {
+                session = edited
+                summary = newSummary
+            }
+            isRecomputing = false
+        }
     }
 
     var body: some View {
@@ -143,6 +167,25 @@ struct FoilingScreen: View {
                     }
                 }
                 .cardChrome()
+            }
+
+            AnalysisFooter(
+                session: session,
+                summary: summary,
+                // Without the accelerometer a flight is a speed inference.
+                needs: [.motionData],
+                isBusy: isRecomputing,
+                onReanalyse: reanalyse
+            ) {
+                ThresholdSlider(
+                    title: "Flying above",
+                    value: settings.thresholdBinding(for: session.sport, \.foilTakeoffSpeed,
+                                                     default: session.sport.thresholds.foilTakeoffSpeed),
+                    range: 2...12, step: 0.1,
+                    format: { Format.speed($0, unit: units.speed, decimals: 1) },
+                    note: "The speed at which your foil is carrying you. It decides time on foil, the flight count and the dry-gybe rate. Raise it if the app thinks you are flying while you are still taxiing; lower it if long glides are being missed.",
+                    onCommit: reanalyse
+                )
             }
         }
     }

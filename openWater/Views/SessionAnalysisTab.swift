@@ -129,7 +129,7 @@ struct SessionAnalysisTab: View {
             AnalysisRow(symbol: "chart.pie", title: "Polar & angles", value: angleValue) {
                 PolarAnglesScreen(
                     session: session,
-                    polar: summary.polar,
+                    summary: summary,
                     units: settings.units,
                     onSetWind: onSetWind
                 )
@@ -243,11 +243,7 @@ struct SessionAnalysisTab: View {
         Section("Technique") {
             if summary.maneuverSummary.total > 0 {
                 AnalysisRow(symbol: "arrow.triangle.2.circlepath", title: "Turns", value: turnValue) {
-                    AnalysisDetail(title: "Turns") {
-                        ManeuverCard(summary: summary.maneuverSummary,
-                                     maneuvers: summary.maneuvers)
-                            .cardChrome()
-                    }
+                    TurnsScreen(session: session, summary: summary, onSetWind: onSetWind)
                 }
             }
             if summary.foil.flightCount > 0 {
@@ -267,7 +263,7 @@ struct SessionAnalysisTab: View {
             }
             if showsDownwind {
                 AnalysisRow(symbol: "water.waves", title: "Downwind", value: glideValue) {
-                    DownwindDetailView(session: session, summary: summary)
+                    DownwindDetailView(session: session, summary: summary, onSetWind: onSetWind)
                 }
             }
         }
@@ -399,30 +395,117 @@ struct AnalysisDetail<Content: View>: View {
 /// of being wedged between the two charts they explain.
 struct PolarAnglesScreen: View {
 
-    let session: Session
-    let polar: PolarAnalysis?
+    @State private var session: Session
+    @State private var summary: SessionSummary
     let units: UnitPreferences
     var onSetWind: () -> Void = {}
 
+    init(session: Session, summary: SessionSummary, units: UnitPreferences,
+         onSetWind: @escaping () -> Void = {}) {
+        _session = State(initialValue: session)
+        _summary = State(initialValue: summary)
+        self.units = units
+        self.onSetWind = onSetWind
+    }
+
+    @Environment(AppSettings.self) private var settings
+    @Environment(SessionLibrary.self) private var library
+    @State private var isRecomputing = false
+
     var body: some View {
         AnalysisDetail(title: "Polar & Angles") {
-            if let polar {
+            if let polar = summary.polar {
                 PolarChart(polar: polar, units: units)
                     .cardChrome()
                 AngleSummary(polar: polar, units: units)
                     .cardChrome()
-            } else if session.sport.isWindPowered {
-                // Silently omitting the angles leaves a rider wondering whether
-                // the app has them and they are lost, or whether it never had
-                // them. Say which, and offer the fix.
-                NoWindCard(session: session, onSetWind: onSetWind)
-                    .cardChrome()
-            } else {
-                // Same reasoning, different answer: this sport was never going
-                // to have one.
+            } else if !session.sport.isWindPowered {
+                // This sport was never going to have one.
                 NoPolarCard(sport: session.sport)
                     .cardChrome()
             }
+
+            AnalysisFooter(
+                session: session,
+                summary: summary,
+                // The whole screen is measured from the wind. Without a
+                // direction there is nothing here at all, which the notice
+                // says rather than leaving a blank page.
+                needs: session.sport.isWindPowered ? [.windDirection, .windSpeed] : [],
+                isBusy: isRecomputing,
+                onSetWind: onSetWind,
+                onReanalyse: reanalyse
+            )
+        }
+    }
+
+    private func reanalyse() {
+        isRecomputing = true
+        Task {
+            if let edited = await SessionReanalyser.reanalyse(session, settings: settings, library: library),
+               let newSummary = edited.summary {
+                session = edited
+                summary = newSummary
+            }
+            isRecomputing = false
+        }
+    }
+}
+
+/// Turns, and how sharp a change of direction has to be to be one.
+struct TurnsScreen: View {
+
+    @State private var session: Session
+    @State private var summary: SessionSummary
+    var onSetWind: () -> Void = {}
+
+    init(session: Session, summary: SessionSummary, onSetWind: @escaping () -> Void = {}) {
+        _session = State(initialValue: session)
+        _summary = State(initialValue: summary)
+        self.onSetWind = onSetWind
+    }
+
+    @Environment(AppSettings.self) private var settings
+    @Environment(SessionLibrary.self) private var library
+    @State private var isRecomputing = false
+
+    var body: some View {
+        AnalysisDetail(title: "Turns") {
+            ManeuverCard(summary: summary.maneuverSummary, maneuvers: summary.maneuvers)
+                .cardChrome()
+
+            AnalysisFooter(
+                session: session,
+                summary: summary,
+                // Telling a tack from a gybe is the one thing here that needs
+                // the wind; the count and the scores do not.
+                needs: session.sport.isWindPowered ? [.windDirection] : [],
+                isBusy: isRecomputing,
+                onSetWind: onSetWind,
+                onReanalyse: reanalyse
+            ) {
+                ThresholdSlider(
+                    title: "A turn changes heading by",
+                    value: settings.thresholdBinding(for: session.sport, \.maneuverHeadingChange,
+                                                     default: session.sport.thresholds.maneuverHeadingChange),
+                    range: 40...170, step: 5,
+                    format: { "\(Int($0))°" },
+                    note: "Below this it is a course correction rather than a turn. Raise it if wobbles are being counted; lower it if real gybes are being missed.",
+                    onCommit: reanalyse
+                )
+            }
+        }
+    }
+
+    private func reanalyse() {
+        isRecomputing = true
+        Task {
+            if let edited = await SessionReanalyser.reanalyse(session, settings: settings, library: library),
+               let newSummary = edited.summary {
+                session = edited
+                summary = newSummary
+            }
+            isRecomputing = false
         }
     }
 }

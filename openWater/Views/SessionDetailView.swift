@@ -423,6 +423,8 @@ struct SessionDetailView: View {
             thresholds: settings.thresholds(for: session.sport),
             windWarning: runsWindWarning(session),
             onSetWind: { isSettingWind = true },
+            legs: summary.shape.legs,
+            isPointToPoint: summary.shape.isPointToPoint,
             selectedLane: $selectedRun
         )
     }

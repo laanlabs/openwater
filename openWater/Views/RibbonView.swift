@@ -34,6 +34,11 @@ struct RibbonView: View {
     var windWarning: String?
     var onSetWind: () -> Void = {}
 
+    /// The session's own runs — the whole way down a river, rather than the
+    /// stretches between turns. Empty unless the session went somewhere.
+    var legs: [SessionLeg] = []
+    var isPointToPoint = false
+
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
 
@@ -44,6 +49,7 @@ struct RibbonView: View {
     @State private var showingKey = false
     @State private var filter: Leg = .all
     @State private var showsControls = false
+    @State private var expandedLeg: Int?
 
     /// Which way a run was going, in the three groups riders actually talk in.
     ///
@@ -101,6 +107,27 @@ struct RibbonView: View {
         return present.count > 1 ? present : []
     }
 
+    /// Whether to show the session's runs rather than every stretch between
+    /// turns.
+    ///
+    /// A rider who trimmed a recording down to one run down the river means
+    /// *one run*. The segmenter is not wrong to find eighteen — a parawinger
+    /// weaves across the bumps and each weave really is a change of direction —
+    /// but eighteen rows is an answer to a question nobody asked. So the top
+    /// level is the run, and the stretches inside it are one tap down.
+    ///
+    /// Only when the session actually went somewhere: an afternoon of laps has
+    /// exactly one leg, which is the whole session, and collapsing fifty-two
+    /// laps into one row would be the same mistake in the other direction.
+    private var showsLegs: Bool {
+        isPointToPoint && !legs.isEmpty && order == .time && filter == .all
+    }
+
+    private func lanes(in leg: SessionLeg) -> [SessionRibbon.Lane] {
+        ribbon.lanes.filter { $0.startElapsed >= leg.startElapsed - 1
+                           && $0.endElapsed <= leg.endElapsed + 1 }
+    }
+
     /// Maneuvers describe what joined one run to the *next one in time*, so
     /// they are meaningless once the rows are reordered — a gybe drawn between
     /// the fastest run and the second fastest never happened.
@@ -125,7 +152,20 @@ struct RibbonView: View {
                         .padding(.top, 40)
                     }
 
-                    ForEach(lanes, id: \.id) { lane in
+                    if showsLegs {
+                        ForEach(legs) { leg in
+                            legRow(leg)
+                            if expandedLeg == leg.id {
+                                ForEach(lanes(in: leg), id: \.id) { lane in
+                                    laneRow(lane)
+                                        .padding(.leading, 14)
+                                }
+                                .transition(.opacity)
+                            }
+                        }
+                    }
+
+                    ForEach(showsLegs ? [] : lanes, id: \.id) { lane in
                         LaneRow(
                             lane: lane,
                             // Lanes are scaled to the longest run so their
@@ -180,7 +220,9 @@ struct RibbonView: View {
     private var summaryBar: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(lanes.count) run\(lanes.count == 1 ? "" : "s")")
+                Text(showsLegs
+                     ? "\(legs.count) run\(legs.count == 1 ? "" : "s")"
+                     : "\(lanes.count) stretch\(lanes.count == 1 ? "" : "es")")
                     .font(.subheadline.weight(.semibold))
                 if filter != .all || order != .time {
                     Text(subtitle)
@@ -291,6 +333,64 @@ struct RibbonView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 8)
+    }
+
+    /// One run of the session: how far, how long, how fast, and the stretches
+    /// inside it on request.
+    private func legRow(_ leg: SessionLeg) -> some View {
+        let inside = lanes(in: leg)
+        return Button {
+            withAnimation(.snappy) {
+                expandedLeg = expandedLeg == leg.id ? nil : leg.id
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: expandedLeg == leg.id ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(legs.count > 1 ? "Run \(leg.id + 1)" : "The run")
+                            .font(.subheadline.weight(.semibold))
+                        if let alignment = leg.alignment, leg.isRun {
+                            Text("\(Int(alignment.rounded()))° off downwind")
+                                .font(.caption2)
+                                .foregroundStyle(alignment <= 20 ? .green : .secondary)
+                        }
+                    }
+                    Text("\(Format.distance(leg.distance, unit: units.distance)) · \(Format.shortDuration(leg.duration)) · \(Format.speed(leg.averageSpeed, unit: units.speed, decimals: 1)) avg")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Text("\(inside.count) stretch\(inside.count == 1 ? "" : "es")")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func laneRow(_ lane: SessionRibbon.Lane) -> some View {
+        LaneRow(
+            lane: lane,
+            widthFraction: ribbon.maxLaneDistance > 0 ? lane.distance / ribbon.maxLaneDistance : 1,
+            maxSpeed: maxSpeed,
+            units: units,
+            isSelected: selectedLane == lane.runIndex,
+            isBest: bestRunIndex == lane.runIndex
+        )
+        .onTapGesture {
+            withAnimation(.snappy) {
+                selectedLane = selectedLane == lane.runIndex ? nil : lane.runIndex
+            }
+        }
     }
 
     private func windNotice(_ text: String) -> some View {

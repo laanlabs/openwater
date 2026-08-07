@@ -26,23 +26,9 @@ struct SessionOverview: View {
         ScrollView {
             VStack(spacing: 14) {
                 header
+                conditionsCard
                 headlineNumbers
                 BestSpeedsCard(summary: summary, units: settings.units)
-
-                if session.effectiveWind == nil {
-                    windPrompt(
-                        title: "Which way was the wind?",
-                        detail: "Point at it on a compass to unlock angles, VMG, the polar and your upwind legs."
-                    )
-                } else if session.effectiveWind?.hasSpeed == false {
-                    // Direction without strength is the ordinary case, not a
-                    // fault: the track's shape gives one and can never give the
-                    // other. Worth one line, not a red flag.
-                    windPrompt(
-                        title: "How hard was it blowing?",
-                        detail: "We can read the direction off your track but never the strength. Add it and your speeds have something to be measured against."
-                    )
-                }
 
                 // Upwind, Turns, Foiling, Downwind, Health and GPS quality all
                 // used to stack up below this point. They are good cards and
@@ -59,32 +45,92 @@ struct SessionOverview: View {
         }
     }
 
-    // MARK: - Prompts
+    // MARK: - Conditions
 
-    private func windPrompt(title: String, detail: String) -> some View {
+    /// Wind and swell, on their own, always one tap from being set.
+    ///
+    /// This was a line inside the header card, and it is the single most
+    /// corrected field in the app: the direction is usually a guess read off
+    /// the shape of the track, the strength can never be inferred at all, and
+    /// every angle, VMG figure, polar and glide is measured from one or both.
+    /// A rider who wants to fix it should not have to notice that a line of
+    /// text happens to be a button.
+    private var conditionsCard: some View {
         Button(action: onSetWind) {
-            HStack(spacing: 12) {
-                Image(systemName: "wind")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 8) {
+                SectionHeader("Conditions") {
+                    if let wind = session.effectiveWind, wind.source.isEstimate {
+                        Text("estimated")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "wind")
+                        .font(.title3)
+                        .foregroundStyle(conditionsAreComplete ? AnyShapeStyle(.tint)
+                                                              : AnyShapeStyle(.orange))
+                        .frame(width: 26)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let wind = session.effectiveWind {
+                            Text(windText(wind))
+                                .font(.headline)
+                            if let note = conditionsNote {
+                                Text(note)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Text("No wind set")
+                                .font(.headline)
+                                .foregroundStyle(.orange)
+                            Text("Angles, VMG, the polar and your glides are all measured from the wind. Tap to point at it.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if let swell = session.swellHeight, swell > 0.05 {
+                            Text("\(Format.height(swell, unit: settings.units.distance)) swell")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+            .cardChrome()
         }
         .buttonStyle(.plain)
+    }
+
+    private var conditionsAreComplete: Bool {
+        guard let wind = session.effectiveWind else { return false }
+        return wind.hasSpeed && !wind.source.isEstimate
+    }
+
+    /// What is still missing or still a guess, said on the card rather than
+    /// left for the rider to infer from an absent number.
+    private var conditionsNote: String? {
+        guard let wind = session.effectiveWind else { return nil }
+        switch (wind.hasSpeed, wind.source.isEstimate) {
+        case (false, true):
+            return "No wind speed set, and the direction is estimated from your track"
+        case (false, false):
+            return "No wind speed set — tap to add it"
+        case (true, true):
+            return "Direction estimated from your track — tap to check it"
+        case (true, false):
+            return nil
+        }
     }
 
     // MARK: - Header
@@ -104,44 +150,6 @@ struct SessionOverview: View {
                         .foregroundStyle(.secondary)
                 }
             }
-
-            // Tappable: an estimated wind is the field riders most often want
-            // to correct, and every angle on the Charts tab is measured from it.
-            // It opens the dial, not the edit form — pointing at a compass is
-            // the way this question should be answered.
-            Button(action: onSetWind) {
-                HStack(spacing: 8) {
-                    Image(systemName: "wind")
-                        .foregroundStyle(.secondary)
-                    if let wind = session.effectiveWind {
-                        Text(windText(wind))
-                            .font(.subheadline)
-                        if wind.source != .manual {
-                            Text("estimated")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.quaternary, in: Capsule())
-                        }
-                    } else {
-                        Text("Set the wind")
-                            .font(.subheadline)
-                    }
-                    if let swell = session.swellHeight, swell > 0.05 {
-                        Text("\(Format.height(swell, unit: settings.units.distance)) swell")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .buttonStyle(.plain)
 
             // "Viento → Hatchery". Only ever present when the ends really were
             // different places, so its absence means a session at one spot

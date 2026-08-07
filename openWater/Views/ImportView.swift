@@ -155,7 +155,7 @@ struct ExportOption: Identifiable {
             title: "openWater archive",
             detail: "Everything, losslessly. Use this to back up or move to another device.",
             symbol: "shippingbox",
-            make: { s, l, a in try l.export(s, as: .openwater, privacy: a.sharingPrivacy) },
+            make: { s, l, a in try l.export(s, as: .openwater, privacy: .none) },
             fileExtension: "openwater"
         ),
         ExportOption(
@@ -163,7 +163,7 @@ struct ExportOption: Identifiable {
             title: "GPX",
             detail: "Understood by almost everything — Strava, Garmin Connect, Google Earth. Keeps speed and heart rate in extensions.",
             symbol: "point.topleft.down.to.point.bottomright.curvepath",
-            make: { s, l, a in try l.export(s, as: .gpx, privacy: a.sharingPrivacy) },
+            make: { s, l, a in try l.export(s, as: .gpx, privacy: .none) },
             fileExtension: "gpx"
         ),
         ExportOption(
@@ -171,7 +171,7 @@ struct ExportOption: Identifiable {
             title: "TCX",
             detail: "Garmin's training format. Speed is part of the standard schema.",
             symbol: "doc.text",
-            make: { s, l, a in try l.export(s, as: .tcx, privacy: a.sharingPrivacy) },
+            make: { s, l, a in try l.export(s, as: .tcx, privacy: .none) },
             fileExtension: "tcx"
         ),
         ExportOption(
@@ -179,7 +179,7 @@ struct ExportOption: Identifiable {
             title: "CSV",
             detail: "One row per sample, every channel. For spreadsheets and your own analysis.",
             symbol: "tablecells",
-            make: { s, l, a in try l.export(s, as: .csv, privacy: a.sharingPrivacy, units: a.units) },
+            make: { s, l, a in try l.export(s, as: .csv, privacy: .none, units: a.units) },
             fileExtension: "csv"
         ),
         ExportOption(
@@ -187,7 +187,7 @@ struct ExportOption: Identifiable {
             title: "GeoJSON",
             detail: "For mapping tools. Includes a separate feature per flight and fall.",
             symbol: "map",
-            make: { s, l, a in try l.exportGeoJSON(s, privacy: a.sharingPrivacy) },
+            make: { s, l, a in try l.exportGeoJSON(s, privacy: .none) },
             fileExtension: "geojson"
         ),
     ]
@@ -238,13 +238,17 @@ struct ExportView: View {
                         .buttonStyle(.plain)
                     }
                 } footer: {
-                    if settings.sharingPrivacy.maskEndpoints {
-                        Label(
-                            "The first and last \(Int(settings.sharingPrivacy.endpointMaskRadius)) m will be trimmed from anything you export here. Turn that off in Settings if you are backing up your own data.",
-                            systemImage: "lock.shield"
-                        )
-                        .font(.caption)
-                    }
+                    // Exports used to apply the sharing trim, on the theory
+                    // that anything leaving the phone deserved it. In practice
+                    // an export is the rider's own backup or their own analysis
+                    // in another tool, and silently cutting 400 m out of their
+                    // data is the opposite of a backup. Sharing keeps the trim;
+                    // exporting does not, and both say so.
+                    Label(
+                        "Complete data — nothing is trimmed or hidden. Web sharing is where the launch point gets masked.",
+                        systemImage: "checkmark.shield"
+                    )
+                    .font(.caption)
                 }
 
                 if let url = exportURL {

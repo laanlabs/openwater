@@ -396,13 +396,20 @@ public struct ManeuverDetector: Sendable {
             // their course and ends where they settled on the new one, so the
             // speed it cost is measured across all of it.
             let biggest = group.max { abs($0.headingChange) < abs($1.headingChange) } ?? first
+            let net = group.reduce(0) { $0 + $1.headingChange }
+            // A cluster that nets out to nearly nothing is an S-turn: the
+            // rider swung out and came back to their course. Its biggest
+            // component may have looked like a gybe, but no gybe was
+            // completed — a real file showed "Gybe −2°", which is absurd on
+            // its face. Anything netting under the turn threshold is a carve.
+            let kind: Maneuver.Kind = abs(net) < minimumHeadingChange ? .carve : biggest.kind
             result.append(Maneuver(
                 id: result.count,
                 startElapsed: first.startElapsed, endElapsed: last.endElapsed,
                 startIndex: first.startIndex, endIndex: last.endIndex,
-                kind: biggest.kind,
+                kind: kind,
                 exitTack: last.exitTack,
-                headingChange: group.reduce(0) { $0 + $1.headingChange },
+                headingChange: net,
                 entrySpeed: first.entrySpeed,
                 exitSpeed: last.exitSpeed,
                 minimumSpeed: group.map(\.minimumSpeed).min() ?? first.minimumSpeed,

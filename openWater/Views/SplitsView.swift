@@ -15,6 +15,17 @@ struct SplitsView: View {
 
     @State private var interval: Interval = .one
 
+    /// This screen's own idea of a distance unit.
+    ///
+    /// A split is the one place the unit *is* the analysis — "best km" and
+    /// "best nautical mile" are different questions, and a rider comparing
+    /// against a friend's app should not have to leave for Settings to ask
+    /// the other one. Starts on the app-wide unit and moves freely; nothing
+    /// here writes back to Settings.
+    @State private var unitOverride: DistanceUnit?
+
+    private var unit: DistanceUnit { unitOverride ?? settings.units.distance }
+
     enum Interval: Double, CaseIterable, Identifiable {
         case quarter = 0.25
         case half = 0.5
@@ -36,10 +47,15 @@ struct SplitsView: View {
     }
 
     private var splits: [Split] {
-        session.splits(every: interval.metres(settings.units.distance))
+        session.splits(every: interval.metres(unit))
     }
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
+
+    /// The fastest full split. Partials stay out: a 200 m tail is not a km.
+    private var best: Split? {
+        splits.filter(\.isComplete).min { $0.duration < $1.duration }
+    }
 
     var body: some View {
         ScrollView {
@@ -60,18 +76,53 @@ struct SplitsView: View {
 
     private var chart: some View {
         VStack(spacing: 12) {
-            Menu {
-                Picker("Interval", selection: $interval) {
-                    ForEach(Interval.allCases) { option in
-                        Text(option.label(settings.units.distance)).tag(option)
+            HStack(spacing: 8) {
+                Menu {
+                    Picker("Interval", selection: $interval) {
+                        ForEach(Interval.allCases) { option in
+                            Text(option.label(unit)).tag(option)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(interval.label(unit))
+                            .font(.headline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
                     }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(interval.label(settings.units.distance))
-                        .font(.headline)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
+
+                Spacer(minLength: 8)
+
+                // km · NM · mi, right here. The one screen where the unit is
+                // the question being asked.
+                Picker("Unit", selection: Binding(
+                    get: { unit },
+                    set: { unitOverride = $0 }
+                )) {
+                    ForEach(DistanceUnit.allCases, id: \.self) { u in
+                        Text(u.symbol).tag(u)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 170)
+            }
+
+            if let best {
+                HStack(spacing: 6) {
+                    Text("BEST")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                    Text("\(interval.label(unit)) in \(Format.duration(best.duration))")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    Text("· \(Format.speed(best.averageSpeed, unit: settings.units.speed, decimals: 1)) avg")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
             }
 
@@ -86,7 +137,11 @@ struct SplitsView: View {
                         x: .value("Split", split.number),
                         y: .value("Time", split.duration)
                     )
-                    .foregroundStyle(split.isComplete ? Color.accentColor : Color.accentColor.opacity(0.45))
+                    .foregroundStyle(
+                        split.number == best?.number ? Color.orange
+                        : split.isComplete ? Color.accentColor
+                        : Color.accentColor.opacity(0.45)
+                    )
                     .cornerRadius(3)
                 }
                 .chartXAxis {
@@ -126,8 +181,18 @@ struct SplitsView: View {
             ForEach(splits) { split in
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(settings.units.distance.symbol) \(split.number)")
-                            .font(.title3.weight(.bold))
+                        HStack(spacing: 6) {
+                            Text("\(unit.symbol) \(split.number)")
+                                .font(.title3.weight(.bold))
+                            if split.number == best?.number {
+                                Text("BEST")
+                                    .font(.system(size: 8, weight: .heavy))
+                                    .foregroundStyle(.orange)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                            }
+                        }
                         if let heartRate = split.averageHeartRate {
                             HStack(spacing: 4) {
                                 Image(systemName: "heart.fill")
@@ -139,7 +204,7 @@ struct SplitsView: View {
                             }
                         }
                         if !split.isComplete {
-                            Text(Format.distance(split.distance, unit: settings.units.distance))
+                            Text(Format.distance(split.distance, unit: unit))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }

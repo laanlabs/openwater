@@ -100,19 +100,18 @@ public struct SessionAnalyzer: Sendable {
             ?? (sport.isWindPowered ? WindEstimator().estimate(from: track) : nil)
 
         // --- Maneuvers, classified against the wind and the flights.
-        var maneuverDetector = ManeuverDetector.forSport(sport)
-        maneuverDetector.thresholds = thresholds
+        let maneuverDetector = ManeuverDetector.forSport(sport, thresholds: thresholds)
         let maneuvers = maneuverDetector
             .detect(in: track, wind: wind, flights: flights)
         let maneuverSummary = ManeuverSummary(maneuvers: maneuvers)
 
         // --- Jumps. Silent without motion data, by design.
-        let jumps = configuration.quickMode ? [] : JumpDetector.forSport(sport).detect(in: track)
+        let jumps = configuration.quickMode ? [] : JumpDetector.forSport(sport, thresholds: thresholds).detect(in: track)
 
         // --- Downwind glides.
         let downwind = configuration.quickMode
             ? DownwindSummary.none
-            : DownwindAnalyzer.forSport(sport)
+            : DownwindAnalyzer.forSport(sport, thresholds: thresholds)
                 .analyse(track: track, flights: flights, wind: wind, movingTime: movingTime)
 
         // --- Polar, and back-fill the per-run wind figures.

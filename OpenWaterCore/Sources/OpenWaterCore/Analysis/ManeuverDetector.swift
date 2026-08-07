@@ -278,8 +278,15 @@ public struct ManeuverDetector: Sendable {
         self.thresholds = thresholds
     }
 
-    public static func forSport(_ sport: Sport) -> ManeuverDetector {
-        let t = sport.thresholds
+    /// The detector for a sport, honouring the rider's own thresholds.
+    ///
+    /// The thresholds have to arrive here rather than being assigned to
+    /// `thresholds` afterwards: that property is only consulted for the on-foil
+    /// test, while `minimumHeadingChange` is copied out at construction. An
+    /// override assigned later changed nothing, which is how the turn setting
+    /// came to be inert.
+    public static func forSport(_ sport: Sport, thresholds: SportThresholds? = nil) -> ManeuverDetector {
+        let t = thresholds ?? sport.thresholds
         return ManeuverDetector(
             minimumHeadingChange: t.maneuverHeadingChange,
             maximumDuration: t.maneuverMaxDuration,

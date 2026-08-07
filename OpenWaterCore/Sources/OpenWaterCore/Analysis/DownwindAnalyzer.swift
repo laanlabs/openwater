@@ -265,8 +265,13 @@ public struct DownwindAnalyzer: Sendable {
         self.glideGapTolerance = glideGapTolerance
     }
 
-    public static func forSport(_ sport: Sport) -> DownwindAnalyzer {
-        var a = DownwindAnalyzer(thresholds: sport.thresholds)
+    /// The analyzer for a sport, honouring the rider's own thresholds.
+    ///
+    /// See the note on `JumpDetector.forSport`: the glide settings did nothing
+    /// for a day because this took the sport's defaults and the caller's
+    /// overrides never arrived.
+    public static func forSport(_ sport: Sport, thresholds: SportThresholds? = nil) -> DownwindAnalyzer {
+        var a = DownwindAnalyzer(thresholds: thresholds ?? sport.thresholds)
         switch sport {
         case .downwindSUP, .prone:
             a.minimumGlideSpeed = 2.5

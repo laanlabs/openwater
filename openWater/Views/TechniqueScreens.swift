@@ -17,11 +17,34 @@ import SwiftUI
 /// the same reason the detector's own comment says so.
 struct AirtimeScreen: View {
 
-    let summary: SessionSummary
+    @State private var session: Session
+    @State private var summary: SessionSummary
     let units: UnitPreferences
+
+    init(session: Session, summary: SessionSummary, units: UnitPreferences) {
+        _session = State(initialValue: session)
+        _summary = State(initialValue: summary)
+        self.units = units
+    }
+
+    @Environment(AppSettings.self) private var settings
+    @Environment(SessionLibrary.self) private var library
+    @State private var isRecomputing = false
 
     private var jumps: [Jump] {
         summary.jumps.sorted { $0.airtime > $1.airtime }
+    }
+
+    private func reanalyse() {
+        isRecomputing = true
+        Task {
+            if let edited = await SessionReanalyser.reanalyse(session, settings: settings, library: library),
+               let newSummary = edited.summary {
+                session = edited
+                summary = newSummary
+            }
+            isRecomputing = false
+        }
     }
 
     var body: some View {
@@ -62,6 +85,55 @@ struct AirtimeScreen: View {
                     }
                 }
                 .cardChrome()
+            }
+
+            AnalysisFooter(
+                session: session,
+                summary: summary,
+                // Jumps are found from free-fall in the accelerometer. Without
+                // it there are none, and there is no threshold that will help —
+                // which the notice says rather than leaving a rider tuning
+                // sliders against a track that cannot answer.
+                needs: [.motionData],
+                isBusy: isRecomputing,
+                onReanalyse: reanalyse
+            ) {
+                ThresholdSlider(
+                    title: "Shortest jump that counts",
+                    value: settings.thresholdBinding(for: session.sport, \.jumpMinimumAirtime,
+                                                     default: session.sport.thresholds.jumpMinimumAirtime),
+                    range: 0.3...3, step: 0.1,
+                    format: { String(format: "%.1f s", $0) },
+                    note: "Airtime, not height. Under half a second is usually the board skipping rather than leaving.",
+                    onCommit: reanalyse
+                )
+                ThresholdSlider(
+                    title: "How still the board goes",
+                    value: settings.thresholdBinding(for: session.sport, \.jumpFreeFall,
+                                                     default: session.sport.thresholds.jumpFreeFall),
+                    range: 1...6, step: 0.25,
+                    format: { String(format: "%.2f m/s²", $0) },
+                    note: "In the air the only force on the board is gravity, so the acceleration it reports collapses toward zero. Raise this to find more jumps — and more things that were not jumps.",
+                    onCommit: reanalyse
+                )
+                ThresholdSlider(
+                    title: "How hard the landing is",
+                    value: settings.thresholdBinding(for: session.sport, \.jumpLandingSpike,
+                                                     default: session.sport.thresholds.jumpLandingSpike),
+                    range: 4...25, step: 1,
+                    format: { String(format: "%.0f m/s²", $0) },
+                    note: "The spike that ends a jump. A kite lands softly under canopy and wants a lower bar; a wing drops you.",
+                    onCommit: reanalyse
+                )
+                ThresholdSlider(
+                    title: "Slowest takeoff",
+                    value: settings.thresholdBinding(for: session.sport, \.jumpMinimumTakeoffSpeed,
+                                                     default: session.sport.thresholds.jumpMinimumTakeoffSpeed),
+                    range: 0...10, step: 0.5,
+                    format: { Format.speed($0, unit: units.speed, decimals: 1) },
+                    note: "You cannot jump from a standstill, and this keeps a bobbing board out of the count.",
+                    onCommit: reanalyse
+                )
             }
         }
     }

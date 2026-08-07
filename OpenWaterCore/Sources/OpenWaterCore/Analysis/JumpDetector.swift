@@ -137,13 +137,24 @@ public struct JumpDetector: Sendable {
         self.minimumTakeoffSpeed = minimumTakeoffSpeed
     }
 
-    public static func forSport(_ sport: Sport) -> JumpDetector {
-        var d = JumpDetector()
+    /// The detector for a sport, honouring the rider's own thresholds.
+    ///
+    /// `thresholds` is passed in rather than read from the sport, because the
+    /// rider's overrides live on top of the sport's defaults and only the
+    /// caller has them. Forgetting to pass them is the bug that made the
+    /// glide settings inert for a day.
+    public static func forSport(_ sport: Sport, thresholds: SportThresholds? = nil) -> JumpDetector {
+        let t = thresholds ?? sport.thresholds
+        var d = JumpDetector(
+            freeFallThreshold: t.jumpFreeFall,
+            landingThreshold: t.jumpLandingSpike,
+            minimumAirtime: t.jumpMinimumAirtime,
+            minimumTakeoffSpeed: t.jumpMinimumTakeoffSpeed
+        )
         switch sport {
         case .kitesurf, .kitefoil:
             // Kites boost properly and land softly under canopy.
             d.maximumAirtime = 12
-            d.landingThreshold = 9
         case .windsurf:
             d.maximumAirtime = 6
         case .wingfoil, .parawing:

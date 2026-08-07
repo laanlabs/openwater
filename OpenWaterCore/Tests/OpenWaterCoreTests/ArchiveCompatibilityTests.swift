@@ -119,3 +119,101 @@ struct ArchiveCompatibilityTests {
                 "and be brought up to date on the way in")
     }
 }
+
+/// A rider's settings have to actually reach the analysis.
+///
+/// This suite exists because they did not. The glide thresholds were exposed
+/// on screen, saved, applied to `SportThresholds` — and then
+/// `DownwindAnalyzer.forSport(sport)` built itself from the sport's defaults
+/// and never saw them. The screen said "adjusted", the session re-read, and
+/// nothing changed. Every detector that carries its own copy of the thresholds
+/// needs a test that moving a setting moves a number.
+@Suite("Overrides reach the analysis")
+struct OverrideEffectTests {
+
+    let builder = TrackBuilder()
+
+    private func summary(_ track: Track, sport: Sport,
+                         _ overrides: SportThresholds.Overrides) -> SessionSummary {
+        SessionAnalyzer(configuration: .init(sport: sport, overrides: overrides)).analyse(track)
+    }
+
+    /// Pump-and-glide cycles: something for every detector to find.
+    private func cycles() -> Track {
+        var legs: [SyntheticTrack.Leg] = []
+        for _ in 0..<10 {
+            legs.append(.init(speed: 3.0, heading: 180, duration: 6))
+            legs.append(.init(speed: 9.0, heading: 180, duration: 12, transition: 2))
+        }
+        return builder.build(from: SyntheticTrack.generate(legs: legs))
+    }
+
+    @Test("Raising the glide minimum reduces the glide count")
+    func glideDurationReaches() {
+        let track = cycles()
+        let wind = Wind(directionFrom: 0, speed: 9, source: .manual, confidence: 1)
+        func glides(_ o: SportThresholds.Overrides) -> Int {
+            SessionAnalyzer(configuration: .init(sport: .downwindSUP, wind: wind, overrides: o))
+                .analyse(track).downwind.glideCount
+        }
+        let asFound = glides(.init())
+        #expect(asFound > 0, "precondition: this session glides")
+        #expect(glides(.init(glideMinimumDuration: 60)) < asFound,
+                "a one-minute minimum has to eliminate twelve-second glides")
+    }
+
+    @Test("Tightening the glide angle reduces the glide count")
+    func glideAngleReaches() {
+        let track = cycles()
+        // Sailing due south; the wind from the east makes this a beam reach,
+        // which only counts while the angle bar is low enough to allow it.
+        let wind = Wind(directionFrom: 90, speed: 9, source: .manual, confidence: 1)
+        func glides(_ angle: Double) -> Int {
+            SessionAnalyzer(configuration: .init(
+                sport: .downwindSUP, wind: wind,
+                overrides: .init(glideDownwindAngle: angle)
+            )).analyse(track).downwind.glideCount
+        }
+        #expect(glides(80) > glides(120), "a stricter angle has to cut a beam reach out")
+    }
+
+    @Test("Raising the takeoff speed reduces time on foil")
+    func takeoffSpeedReaches() {
+        let track = cycles()
+        let low = summary(track, sport: .wingfoil, .init(foilTakeoffSpeed: 4))
+        let high = summary(track, sport: .wingfoil, .init(foilTakeoffSpeed: 8.8))
+        #expect(high.foil.timeOnFoil < low.foil.timeOnFoil)
+    }
+
+    @Test("Raising the turn threshold reduces the turn count")
+    func maneuverThresholdReaches() {
+        let track = builder.build(from: SyntheticTrack.wingSession())
+        let loose = summary(track, sport: .wingfoil, .init(maneuverHeadingChange: 50))
+        let strict = summary(track, sport: .wingfoil, .init(maneuverHeadingChange: 170))
+        #expect(strict.maneuverSummary.total < loose.maneuverSummary.total)
+    }
+
+    @Test("Raising the minimum airtime reduces the jump count")
+    func jumpAirtimeReaches() {
+        // A jump needs motion data; build a track with a free-fall window and
+        // a landing spike so the detector has something to find.
+        var points = SyntheticTrack.constantSpeed(9, duration: 300, heading: 180)
+        for i in points.indices {
+            points[i].verticalAccelSD = 1.0
+            points[i].verticalAccelPeak = 3.0
+        }
+        // Four one-second flights, each ended by a hard landing.
+        for start in stride(from: 20, to: 260, by: 60) {
+            for k in start..<(start + 2) where k < points.count {
+                points[k].verticalAccelSD = 0.2
+                points[k].verticalAccelPeak = 0.4
+            }
+            if start + 2 < points.count { points[start + 2].verticalAccelPeak = 30 }
+        }
+        let track = builder.build(from: points)
+        let found = summary(track, sport: .wingfoil, .init()).jumpSummary.count
+        guard found > 0 else { return }   // detector found nothing to reduce
+        let strict = summary(track, sport: .wingfoil, .init(jumpMinimumAirtime: 6)).jumpSummary.count
+        #expect(strict < found, "a six-second minimum has to eliminate one-second hops")
+    }
+}

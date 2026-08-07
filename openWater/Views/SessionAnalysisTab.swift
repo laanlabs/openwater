@@ -258,7 +258,7 @@ struct SessionAnalysisTab: View {
             }
             if summary.jumpSummary.count > 0 {
                 AnalysisRow(symbol: "arrow.up.forward", title: "Airtime", value: airtimeValue) {
-                    AirtimeScreen(summary: summary, units: settings.units)
+                    AirtimeScreen(session: session, summary: summary, units: settings.units)
                 }
             }
             if showsDownwind {

@@ -174,6 +174,24 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// Shortest leg worth measuring, seconds.
     public var upwindLegMinimumDuration: TimeInterval = 12
 
+    // MARK: What counts as a jump
+
+    /// Shortest airtime worth reporting, seconds.
+    public var jumpMinimumAirtime: TimeInterval = 0.6
+
+    /// User acceleration below which the board is in free fall, m/s². In the
+    /// air the only force on it is gravity, so the acceleration the device
+    /// reports — gravity already removed — collapses toward zero. Raising this
+    /// finds more jumps and more things that were not jumps.
+    public var jumpFreeFall: Double = 2.5
+
+    /// How hard the landing spike has to be, m/s². A kite lands softly under
+    /// canopy; a wing drops you.
+    public var jumpLandingSpike: Double = 12
+
+    /// You cannot jump from a standstill, m/s.
+    public var jumpMinimumTakeoffSpeed: Double = 3.0
+
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 
@@ -276,6 +294,13 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         public var upwindLegMinimumDistance: Double?
         public var upwindLegMinimumDuration: TimeInterval?
 
+        /// What counts as a jump — see the matching fields on
+        /// `SportThresholds`.
+        public var jumpMinimumAirtime: TimeInterval?
+        public var jumpFreeFall: Double?
+        public var jumpLandingSpike: Double?
+        public var jumpMinimumTakeoffSpeed: Double?
+
         public init(
             foilTakeoffSpeed: Double? = nil,
             movingSpeed: Double? = nil,
@@ -286,7 +311,11 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             glideMinimumGain: Double? = nil,
             upwindLegAngle: Double? = nil,
             upwindLegMinimumDistance: Double? = nil,
-            upwindLegMinimumDuration: TimeInterval? = nil
+            upwindLegMinimumDuration: TimeInterval? = nil,
+            jumpMinimumAirtime: TimeInterval? = nil,
+            jumpFreeFall: Double? = nil,
+            jumpLandingSpike: Double? = nil,
+            jumpMinimumTakeoffSpeed: Double? = nil
         ) {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.movingSpeed = movingSpeed
@@ -298,6 +327,10 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.upwindLegAngle = upwindLegAngle
             self.upwindLegMinimumDistance = upwindLegMinimumDistance
             self.upwindLegMinimumDuration = upwindLegMinimumDuration
+            self.jumpMinimumAirtime = jumpMinimumAirtime
+            self.jumpFreeFall = jumpFreeFall
+            self.jumpLandingSpike = jumpLandingSpike
+            self.jumpMinimumTakeoffSpeed = jumpMinimumTakeoffSpeed
         }
 
         public var isEmpty: Bool {
@@ -306,6 +339,8 @@ public struct SportThresholds: Hashable, Sendable, Codable {
                 && glideSpeedFraction == nil && glideMinimumGain == nil
                 && upwindLegAngle == nil && upwindLegMinimumDistance == nil
                 && upwindLegMinimumDuration == nil
+                && jumpMinimumAirtime == nil && jumpFreeFall == nil
+                && jumpLandingSpike == nil && jumpMinimumTakeoffSpeed == nil
         }
 
         public func applied(to base: SportThresholds) -> SportThresholds {
@@ -320,6 +355,10 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = upwindLegAngle, v > 0 { t.upwindLegAngle = v }
             if let v = upwindLegMinimumDistance, v > 0 { t.upwindLegMinimumDistance = v }
             if let v = upwindLegMinimumDuration, v > 0 { t.upwindLegMinimumDuration = v }
+            if let v = jumpMinimumAirtime, v > 0 { t.jumpMinimumAirtime = v }
+            if let v = jumpFreeFall, v > 0 { t.jumpFreeFall = v }
+            if let v = jumpLandingSpike, v > 0 { t.jumpLandingSpike = v }
+            if let v = jumpMinimumTakeoffSpeed, v > 0 { t.jumpMinimumTakeoffSpeed = v }
             return t
         }
     }

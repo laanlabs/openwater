@@ -210,7 +210,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// invisible on every session a rider already has. That has now happened
     /// three times in one day — the glide floor, the pump threshold, and the
     /// smoothness bar — each time looking like the fix had not worked.
-    public static let currentVersion = 9
+    public static let currentVersion = 10
 
     public let analysisVersion: Int
 

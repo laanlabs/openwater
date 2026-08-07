@@ -233,7 +233,22 @@ public struct FoilDetector: Sendable {
             var deepest = Double.infinity
             if j <= flying.count { for k in i..<min(j, track.count) { deepest = min(deepest, track.speed[k]) } }
             let stayedShallow = deepest >= thresholds.foilTakeoffSpeed * shallowTouchdownFactor
+
+            // Coming off the foil costs speed. If it never fell through the
+            // exit band, the rider did not come down, whatever the
+            // accelerometer made of it.
+            //
+            // This is what the roughness veto gets wrong on its own. A landing
+            // from a jump, or a hard chop hit, reads 7 to 10 m/s² — three times
+            // the bar — for a few seconds while the rider carries on at ten
+            // knots. Six such spikes cut one continuous ride into seven
+            // flights, and not one of the gaps had a single sample below
+            // flying speed. Roughness is good evidence for *starting* a flight
+            // and poor evidence for ending one.
+            let neverSlowed = deepest >= thresholds.foilTakeoffSpeed * exitFactor
+
             let isLull = gap < minimumTouchdown
+                || neverSlowed
                 || (gap < shallowTouchdownWindow && stayedShallow)
 
             if hasFlightBefore, hasFlightAfter, isLull {

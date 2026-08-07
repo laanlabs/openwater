@@ -628,3 +628,45 @@ struct SmoothnessBarTests {
                 "the bar never drops, and never rises without cause")
     }
 }
+
+
+@Suite("Coming down costs speed")
+struct RoughnessDoesNotLandTests {
+
+    let builder = TrackBuilder()
+
+    func track(_ legs: [SyntheticTrack.Leg], accelSD: @escaping (Int, Double) -> Double) -> Track {
+        var raw = SyntheticTrack.generate(legs: legs)
+        for i in raw.indices { raw[i].verticalAccelSD = accelSD(i, raw[i].speed ?? 0) }
+        return builder.build(from: raw)
+    }
+
+    @Test("A bang at full speed does not end a flight")
+    func roughnessSpikeIsNotALanding() {
+        // The reported case: a rider up for the whole run had it cut into
+        // seven flights by six roughness spikes — landings from jumps and hard
+        // chop — reading three times the smoothness bar for a few seconds
+        // while they carried on at ten knots. Not one gap held a single sample
+        // below flying speed.
+        let t = track([.init(speed: 9, heading: 180, duration: 200)]) { index, _ in
+            (60...66).contains(index) || (130...136).contains(index) ? 9.0 : 0.5
+        }
+        let flights = FoilDetector.forSport(.parawing).detect(in: t)
+        #expect(flights.count == 1, "came back as \(flights.count) flights")
+        #expect((flights.first?.duration ?? 0) > 180, "and it should span nearly the whole run")
+    }
+
+    @Test("Actually coming down still ends it")
+    func realLandingStillSplits() {
+        // Speed falls away, which is what happens when the board becomes a
+        // boat — and it takes far longer than a spike to get going again.
+        let t = track([
+            .init(speed: 9, heading: 180, duration: 80),
+            .init(speed: 1.5, heading: 180, duration: 40, transition: 2),
+            .init(speed: 9, heading: 180, duration: 80, transition: 2),
+        ]) { _, speed in speed > 4.5 ? 0.5 : 3.0 }
+
+        #expect(FoilDetector.forSport(.parawing).detect(in: t).count == 2,
+                "a real landing is a real break")
+    }
+}

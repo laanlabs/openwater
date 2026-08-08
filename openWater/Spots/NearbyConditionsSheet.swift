@@ -299,7 +299,7 @@ struct NearbyConditionsSheet: View {
     private var outlookCard: some View {
         if !outlook.isEmpty {
             NavigationLink {
-                ForecastScreen(title: title, detail: full, outlook: outlook, waves: waves)
+                ForecastScreen(title: title, coordinate: coordinate, detail: full, outlook: outlook, waves: waves)
             } label: {
                 outlookCardBody
             }

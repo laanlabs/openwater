@@ -56,8 +56,68 @@ struct DownwindDetailView: View {
     /// Glides are still detected, still archived, still adjustable from the
     /// thresholds below. They are simply not what a downwind rider opens this
     /// screen to read.
-    private var hasRun: Bool {
-        summary.shape.isPointToPoint || !glides.isEmpty
+    private var hasRun: Bool { !downwindRuns.isEmpty }
+
+    /// One downwind run: a leg of a point-to-point day, or a downwind lap.
+    struct DownwindRun: Identifiable {
+        let id: Int
+        let distance: Double
+        let duration: TimeInterval
+        let averageSpeed: Double
+        let maxSpeed: Double
+        /// Degrees off dead downwind, where the wind is known.
+        let alignment: Double?
+        let startIndex: Int
+        let endIndex: Int
+    }
+
+    /// Every downwind run in the session.
+    ///
+    /// This is what the screen is for, in the rider's words: "there may be
+    /// sessions with multiple upwind and downwind runs — this is so we can see
+    /// all our downwind runs in one place." A point-to-point day is one run
+    /// down the river; an afternoon of laps is a handful of downwind legs among
+    /// the upwind ones.
+    ///
+    /// Split the same way the Runs tab splits, so the two screens never
+    /// disagree about what a run is: legs when the session went somewhere,
+    /// individual passes when it did not.
+    private var downwindRuns: [DownwindRun] {
+        if summary.shape.isPointToPoint {
+            return legs.filter(\.isRun).enumerated().map { index, leg in
+                DownwindRun(id: index, distance: leg.distance, duration: leg.duration,
+                            averageSpeed: leg.averageSpeed,
+                            maxSpeed: maxSpeed(from: leg.startIndex, to: leg.endIndex),
+                            alignment: leg.alignment,
+                            startIndex: leg.startIndex, endIndex: leg.endIndex)
+            }
+        }
+        return summary.ribbon.lanes
+            .filter { $0.pointOfSail == .broadReach || $0.pointOfSail == .running }
+            .enumerated()
+            .map { index, lane in
+                DownwindRun(
+                    id: index,
+                    distance: lane.distance,
+                    duration: lane.endElapsed - lane.startElapsed,
+                    averageSpeed: lane.averageSpeed,
+                    maxSpeed: lane.maxSpeed,
+                    // A run dead downwind has a true wind angle of 180.
+                    alignment: lane.trueWindAngle.map { abs(180 - abs($0)) },
+                    startIndex: runIndex(of: lane).lower,
+                    endIndex: runIndex(of: lane).upper
+                )
+            }
+    }
+
+    private func maxSpeed(from start: Int, to end: Int) -> Double {
+        guard start <= end, end < session.track.count else { return 0 }
+        return (start...end).reduce(0.0) { max($0, session.track.speed[$1]) }
+    }
+
+    private func runIndex(of lane: SessionRibbon.Lane) -> (lower: Int, upper: Int) {
+        guard let run = summary.runs[safe: lane.runIndex] else { return (0, 0) }
+        return (run.startIndex, run.endIndex)
     }
 
     private var units: UnitPreferences { settings.units }
@@ -72,13 +132,7 @@ struct DownwindDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if hasRun {
-                    DownwindRideCard(foil: summary.foil, downwind: summary.downwind,
-                                     movingTime: summary.movingTime,
-                                     distance: summary.distance, units: units,
-                                     shape: summary.shape)
-                        .cardChrome()
-
-                    if showsLegs { legsCard }
+                    runsCard
                     mapCard
                 } else {
                     nothingFound
@@ -116,6 +170,65 @@ struct DownwindDetailView: View {
     }
 
     // MARK: - Map
+
+    /// Every downwind run, one row each.
+    ///
+    /// The same shape as a Runs tab row on purpose — a rider moving between
+    /// the two screens should not have to re-learn how to read a line.
+    private var runsCard: some View {
+        let runs = downwindRuns
+        let totalDistance = runs.reduce(0) { $0 + $1.distance }
+        let totalTime = runs.reduce(0) { $0 + $1.duration }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(runs.count == 1 ? "1 downwind run" : "\(runs.count) downwind runs")
+                    .font(.subheadline.weight(.bold))
+                Spacer(minLength: 8)
+                if runs.count > 1 {
+                    Text("\(Format.distance(totalDistance, unit: units.distance)) · \(Format.shortDuration(totalTime))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .padding(.bottom, 10)
+
+            ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
+                if index > 0 { Divider().padding(.vertical, 2) }
+                HStack(spacing: 10) {
+                    if runs.count > 1 {
+                        Text("\(index + 1)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(width: 20, height: 20)
+                            .background(.tint, in: Circle())
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                        Text("\(Format.speed(run.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(run.maxSpeed, unit: units.speed, decimals: 1)) max")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if let alignment = run.alignment {
+                        Text("\(Int(alignment.rounded()))° off")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(alignment <= 20 ? .green : .secondary)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+        }
+        .cardChrome()
+    }
 
     private var mapCard: some View {
         map

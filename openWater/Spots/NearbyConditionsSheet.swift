@@ -51,6 +51,7 @@ struct NearbyConditionsSheet: View {
     @State private var waves: [WaveHour] = []
     @State private var full = WeatherDetail()
     @State private var surf: SurfConditions?
+    @State private var tide = TideCurve(points: [])
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -70,7 +71,7 @@ struct NearbyConditionsSheet: View {
     }
 
     enum Tab: String, CaseIterable {
-        case conditions = "Weather", water = "Water", cams = "Cams", surf = "Surf"
+        case conditions = "Weather", water = "Tide", surf = "Surf", cams = "Cams"
     }
 
     var body: some View {
@@ -82,9 +83,9 @@ struct NearbyConditionsSheet: View {
                     radiusSlider
                     switch tab {
                     case .conditions: conditionsTab
-                    case .water: waterTab
+                    case .water: tideTab
+                    case .surf: surfTab
                     case .cams: list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
-                    case .surf: list(of: .surf, empty: "No surf or marine forecasts this close in the guide. Widen the search to look further.")
                     }
                 }
                 .padding(16)
@@ -522,19 +523,19 @@ struct NearbyConditionsSheet: View {
     /// water temperature decides what a rider puts on, which in a lot of the
     /// places this app is used is a safety question rather than a comfort one.
     @ViewBuilder
-    private var waterTab: some View {
-        if let surf {
-            SurfCard(surf: surf, windDirectionDeg: reading?.directionDeg)
+    private var tideTab: some View {
+        if !tide.isEmpty {
+            TideChart(curve: tide)
+        } else if isSearching {
+            note("Reading the tide…")
         }
 
-        waveCard
-
-        section("TIDE") {
+        section("TIDE STATIONS") {
             let shownTides = tides.filter { $0.metres <= radius }
             if shownTides.isEmpty {
                 note(isSearching
                      ? "Looking for tide stations…"
-                     : "No NOAA tide station within reach. Predictions are United States only.")
+                     : "No NOAA tide station within reach. Their harmonic predictions are United States only — the curve above is the worldwide model, and stands in everywhere else.")
             } else {
                 card {
                     ForEach(Array(shownTides.enumerated()), id: \.element.id) { index, station in
@@ -545,6 +546,29 @@ struct NearbyConditionsSheet: View {
                 note("NOAA CO-OPS predictions, heights above MLLW. Predicted, not measured — wind and pressure move real water levels around the forecast.")
             }
         }
+
+        let tideLinks = within(resources.filter { $0.kind == .tide })
+        if !tideLinks.isEmpty {
+            section("TIDE CHARTS IN THE GUIDE") {
+                card {
+                    ForEach(Array(tideLinks.enumerated()), id: \.element.id) { index, link in
+                        resourceRow(link)
+                        if index < tideLinks.count - 1 { Divider().padding(.leading, 14) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Everything about waves: what is running now, what is forecast, the
+    /// buoys measuring it, and the surf pages for this stretch of coast.
+    @ViewBuilder
+    private var surfTab: some View {
+        if let surf {
+            SurfCard(surf: surf, windDirectionDeg: reading?.directionDeg)
+        }
+
+        waveCard
 
         section("BUOYS") {
             let shownBuoys = buoys.filter { $0.metres <= radius }
@@ -565,13 +589,15 @@ struct NearbyConditionsSheet: View {
             }
         }
 
-        let tideLinks = within(resources.filter { $0.kind == .tide })
-        if !tideLinks.isEmpty {
-            section("TIDE CHARTS IN THE GUIDE") {
+        let surfLinks = within(resources.filter { $0.kind == .surf })
+        section("SURF FORECASTS IN THE GUIDE") {
+            if surfLinks.isEmpty {
+                note(isSearching ? "Looking…" : "No surf or marine forecasts this close in the guide. Widen the search to look further.")
+            } else {
                 card {
-                    ForEach(Array(tideLinks.enumerated()), id: \.element.id) { index, link in
+                    ForEach(Array(surfLinks.enumerated()), id: \.element.id) { index, link in
                         resourceRow(link)
-                        if index < tideLinks.count - 1 { Divider().padding(.leading, 14) }
+                        if index < surfLinks.count - 1 { Divider().padding(.leading, 14) }
                     }
                 }
             }
@@ -881,10 +907,11 @@ struct NearbyConditionsSheet: View {
         async let sea = OpenMeteo.waves(at: here)
         async let everything = OpenMeteo.detail(at: here)
         async let sea2 = OpenMeteo.surf(at: here)
+        async let water = OpenMeteo.tide(at: here)
         (resources, stations, weather, reading) = await (nearby, found, air, blowing)
         (alerts, tides, buoys) = await (warnings, tideList, buoyList)
         (outlook, waves, full) = await (ahead, sea, everything)
-        surf = await sea2
+        (surf, tide) = await (sea2, water)
         isSearching = false
 
         // Predictions and buoy rows come second, for the same reason station

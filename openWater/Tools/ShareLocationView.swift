@@ -15,11 +15,6 @@ import SwiftUI
 /// rider taps a share button. Nothing here is passive.
 struct ShareLocationView: View {
 
-    /// Shorter when this is a sheet over the Spots map: the share button has
-    /// to be above the fold at the medium detent, and the little map is
-    /// reassurance rather than the point — there is a full one behind it.
-    var mapHeight: CGFloat = 240
-
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(\.openURL) private var openURL
     /// Remembered, because which maps app your people use does not change
@@ -89,7 +84,7 @@ struct ShareLocationView: View {
                 }
             }
         }
-        .frame(height: mapHeight)
+        .frame(height: 240)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -162,13 +157,17 @@ struct ShareLocationSheet: View {
 
     var body: some View {
         NavigationStack {
-            ShareLocationView(mapHeight: 170)
+            ShareLocationView()
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
         }
-        .presentationDetents([.medium, .large])
+        // Full height, not medium. Half a sheet cut the quick-share row in
+        // two, and those buttons are the whole point for anyone doing this
+        // with cold hands at the end of a run — nothing here should need a
+        // scroll to find.
+        .presentationDetents([.large])
     }
 }

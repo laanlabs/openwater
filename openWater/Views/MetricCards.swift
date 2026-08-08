@@ -1153,6 +1153,8 @@ struct DownwindRideCard: View {
     let movingTime: TimeInterval
     let distance: Double
     let units: UnitPreferences
+    /// The session's shape, for the thing a downwind rider counts: runs.
+    var shape: SessionShape = .empty
 
     /// One flight and no touchdowns is the thing worth calling out — it is the
     /// whole ambition of a downwinder and most sessions do not manage it.
@@ -1191,9 +1193,30 @@ struct DownwindRideCard: View {
         }
     }
 
+    /// How many downwind runs this session held.
+    ///
+    /// The unit a downwind rider counts in. Glides are what happens inside a
+    /// run and the rider this was rebuilt with does not count them: "this one
+    /// session has 1 downwind run — other sessions may have multiple." A
+    /// shuttle day is three runs; this is one.
+    private var runCount: Int {
+        let runs = shape.legs.filter(\.isRun).count
+        if runs > 0 { return runs }
+        return shape.kind == .aroundASpot ? 0 : 1
+    }
+
     private var supportingLine: String {
-        var parts = [Format.distance(distance, unit: units.distance)]
-        parts.append("\(Int(foil.foilingFraction * 100))% of the session on foil")
+        var parts: [String] = []
+        switch runCount {
+        case 0: break
+        case 1: parts.append("one downwind run")
+        default: parts.append("\(runCount) downwind runs")
+        }
+        parts.append(Format.distance(distance, unit: units.distance))
+        if let alignment = shape.downwindAlignment, runCount == 1 {
+            parts.append("\(Int(alignment.rounded()))° off dead downwind")
+        }
+        parts.append("\(Int(foil.foilingFraction * 100))% on foil")
         if isUnbroken {
             parts.append("never touched down")
         } else if foil.touchdownCount > 0 {

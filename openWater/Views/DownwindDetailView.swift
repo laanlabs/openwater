@@ -73,25 +73,28 @@ struct DownwindDetailView: View {
                 } else {
                     DownwindRideCard(foil: summary.foil, downwind: summary.downwind,
                                      movingTime: summary.movingTime,
-                                     distance: summary.distance, units: units)
+                                     distance: summary.distance, units: units,
+                                     shape: summary.shape)
                         .cardChrome()
                 }
 
                 if showsLegs { legsCard }
 
-                if !glides.isEmpty {
-                    mapCard
-                    glideDetailButton
+                if !glides.isEmpty { mapCard }
 
+                // Last, and closed. Glides are what happens inside a run, and
+                // the run is what a downwind rider counts.
+                if !glides.isEmpty {
+                    glideDetailButton
                     if showsGlideDetail {
                         DownwindCard(downwind: summary.downwind, units: units)
                             .cardChrome()
                         if showsChains { chainList }
                         glideList
+                        explanation
                     }
                 }
 
-                explanation
                 footer
             }
             .padding(.horizontal, 14)

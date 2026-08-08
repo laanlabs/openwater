@@ -43,6 +43,28 @@
 	  *imported* under a reverse-DNS name conforming to public.xml; several apps
 	  declare it this way and the system reconciles them.
 	-->
+
+	<!--
+	  Yes, we can read a file where it lies.
+
+	  Declaring CFBundleDocumentTypes without this is what App Store Connect
+	  warns about ("Missing Document Configuration"): having said the app opens
+	  documents, it has to say whether it opens the original or wants a copy.
+
+	  YES is the honest answer here, not just the recommended one. `onOpenURL`
+	  takes the security-scoped URL, parses the track and builds a session from
+	  it; nothing is written back to the file and nothing refers to it
+	  afterwards. NO would have the system duplicate every incoming GPX into
+	  our Inbox first — a pointless copy of a file we read once, and on a
+	  three-hour FIT not a small one.
+
+	  UISupportsDocumentBrowser is the other way to satisfy the warning and is
+	  deliberately absent: it is for apps built around
+	  UIDocumentBrowserViewController, which this is not.
+	-->
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

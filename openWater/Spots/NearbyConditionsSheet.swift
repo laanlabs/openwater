@@ -44,21 +44,45 @@ struct NearbyConditionsSheet: View {
     @State private var resources: [SpotGuideStore.GuideResource] = []
     @State private var reading: WindReading?
     @State private var weather: SpotWeather?
+    @State private var alerts: [WeatherAlert] = []
+    @State private var tides: [TideStation] = []
+    @State private var buoys: [Buoy] = []
+    @State private var outlook = WindOutlook(hours: [], models: [])
+    @State private var waves: [WaveHour] = []
     @State private var isSearching = true
 
+    /// How far out to look. Persisted, because a rider in a thin part of the
+    /// guide widens it once and means it for every spot after that.
+    @AppStorage("spots.conditionsRadiusKm") private var radiusKm: Double = 40
+
+    /// Everything is fetched once at `maxRadius` and filtered on the way to
+    /// the screen, so dragging the slider costs nothing and never re-hits an
+    /// API. Only the widening beyond this would need a refetch, and this is
+    /// further than anybody drives for a session.
+    private static let maxRadius: Double = 250_000
+
+    private var radius: Double { radiusKm * 1000 }
+
+    private func within(_ items: [SpotGuideStore.GuideResource]) -> [SpotGuideStore.GuideResource] {
+        items.filter { $0.metres <= radius }
+    }
+
     enum Tab: String, CaseIterable {
-        case conditions = "Wind & weather", cams = "Cams", surf = "Surf"
+        case conditions = "Weather", water = "Water", cams = "Cams", surf = "Surf"
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    alertBanner
                     picker
+                    radiusSlider
                     switch tab {
                     case .conditions: conditionsTab
-                    case .cams: list(of: .camera, empty: "No webcams within 40 km in the guide.")
-                    case .surf: list(of: .surf, empty: "No surf or marine forecasts within 40 km in the guide.")
+                    case .water: waterTab
+                    case .cams: list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
+                    case .surf: list(of: .surf, empty: "No surf or marine forecasts this close in the guide. Widen the search to look further.")
                     }
                 }
                 .padding(16)
@@ -83,32 +107,103 @@ struct NearbyConditionsSheet: View {
         .pickerStyle(.segmented)
     }
 
+    /// How far to look.
+    ///
+    /// Forty kilometres is right at a well-covered coast and useless in the
+    /// places the guide is thin — a rider in rural Oregon or anywhere outside
+    /// the app's strongest regions wants to know what is an hour away, not
+    /// what is next door. Everything is already fetched wide, so this only
+    /// decides how much of it to show.
+    private var radiusLabel: String {
+        switch settings.units.distance {
+        case .imperial: "\(Int((radius / DistanceUnit.metresPerStatuteMile).rounded())) mi"
+        case .nautical: "\(Int((radius / DistanceUnit.metresPerNauticalMile).rounded())) NM"
+        case .metric: "\(Int(radiusKm)) km"
+        }
+    }
+
+    private var radiusSlider: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Within")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(value: $radiusKm, in: 10...250, step: 10)
+                // Whole units. `Format.distance` carries two decimals, which
+                // is right for a session's distance and reads as a bug on a
+                // slider that only stops at multiples of ten.
+                Text(radiusLabel)
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .frame(width: 56, alignment: .trailing)
+            }
+            Text("Stations, cams and forecasts within this far. Widen it where the guide is thin.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
     // MARK: Wind & weather
 
     @ViewBuilder
     private var conditionsTab: some View {
         modelCard
 
+        NavigationLink {
+            RadarScreen(centre: coordinate, title: "Radar · \(title)")
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "cloud.rain.fill")
+                    .font(.subheadline)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.blue)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Radar")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("NOAA reflectivity over the map")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        outlookCard
+
         section("REAL STATIONS NEARBY, FREE") {
-            if stations.isEmpty {
+            let shown = stations.filter { $0.metres <= radius }
+            if shown.isEmpty {
                 note(isSearching
                      ? "Looking for public stations…"
-                     : "No free public stations here. NOAA's network is United States only — outside it the model above and the meters below are what there is.")
+                     : stations.isEmpty
+                       ? "No free public stations here. NOAA's network is United States only — outside it the model above and the meters below are what there is."
+                       : "Nearest free station is \(Format.distance(stations[0].metres, unit: settings.units.distance)) away. Widen the search above to reach it.")
             } else {
                 card {
-                    ForEach(Array(stations.enumerated()), id: \.element.id) { index, station in
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, station in
                         stationRow(station)
-                        if index < stations.count - 1 { Divider().padding(.leading, 14) }
+                        if index < shown.count - 1 { Divider().padding(.leading, 14) }
                     }
                 }
                 note("NOAA airfield, road and marine sensors. Free to read, no account. They are wherever NOAA put them, not at the launch — check the distance before you trust one.")
             }
         }
 
-        let meters = resources.filter { $0.kind == .wind }
+        let meters = within(resources.filter { $0.kind == .wind })
         section("WIND METERS IN THE GUIDE") {
             if meters.isEmpty {
-                note(isSearching ? "Looking…" : "No wind meters within 40 km in the guide. If you know one, add it from Improve this spot.")
+                note(isSearching ? "Looking…" : "No wind meters this close in the guide. Widen the search, or add one from Improve this spot.")
             } else {
                 card {
                     ForEach(Array(meters.enumerated()), id: \.element.id) { index, meter in
@@ -173,6 +268,120 @@ struct NearbyConditionsSheet: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// The next 24 hours, and how much the models argue about them.
+    ///
+    /// Drawn as one bar per hour at the consensus, with a whisker showing the
+    /// range across models — so the eye reads the shape of the day first and
+    /// the confidence second, which is the order a rider thinks in.
+    @ViewBuilder
+    private var outlookCard: some View {
+        if !outlook.isEmpty {
+            let consensus = outlook.consensus
+            let peak = max(consensus.compactMap { $0 }.max() ?? 1, 1)
+            let agreement = outlook.agreement
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("NEXT 24 HOURS")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(agreement.label)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(outlook.spreadKn < 8 ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.orange))
+                }
+
+                HStack(alignment: .bottom, spacing: 3) {
+                    ForEach(outlook.hours.indices, id: \.self) { hour in
+                        let values = outlook.models.compactMap { $0.speeds[safe: hour] ?? nil }
+                        VStack(spacing: 0) {
+                            // The whisker: everything between the slowest and
+                            // fastest model at this hour.
+                            if let low = values.min(), let high = values.max(), high > low {
+                                Capsule()
+                                    .fill(Color.orange.opacity(0.35))
+                                    .frame(width: 3, height: max(2, 62 * (high - low) / peak))
+                            }
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill((consensus[safe: hour] ?? nil).map { $0 >= 15 }
+                                      == true ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.accentColor.opacity(0.32)))
+                                .frame(height: max(2, 62 * ((consensus[safe: hour] ?? nil) ?? 0) / peak))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .bottom)
+                    }
+                }
+                .frame(height: 78, alignment: .bottom)
+
+                HStack {
+                    Text("now")
+                    Spacer()
+                    if let middle = outlook.hours[safe: outlook.hours.count / 2] {
+                        Text(middle.formatted(.dateTime.hour()))
+                    }
+                    Spacer()
+                    if let last = outlook.hours.last {
+                        Text(last.formatted(.dateTime.hour()))
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+                Text(agreement.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Consensus of \(outlook.models.map(\.label).joined(separator: ", ")) — the major global models, free from Open-Meteo. The bar is their average, the shading how far apart they are.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        }
+    }
+
+    /// Sea state ahead, where there is any sea.
+    @ViewBuilder
+    private var waveCard: some View {
+        if !waves.isEmpty {
+            let peak = max(waves.compactMap(\.heightM).max() ?? 1, 0.3)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("WAVES, NEXT 24 HOURS")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let now = waves.first {
+                        Text(String(format: "%.1f m", now.heightM ?? 0)
+                             + (now.periodS.map { " @ \(Int($0.rounded()))s" } ?? ""))
+                            .font(.caption.weight(.bold))
+                            .monospacedDigit()
+                    }
+                }
+
+                HStack(alignment: .bottom, spacing: 3) {
+                    ForEach(waves) { hour in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.teal.opacity(0.5))
+                            .frame(height: max(2, 50 * (hour.heightM ?? 0) / peak))
+                            .frame(maxWidth: .infinity, alignment: .bottom)
+                    }
+                }
+                .frame(height: 50, alignment: .bottom)
+
+                Text("Open-Meteo's marine model — significant wave height, worldwide and free. A forecast, not a buoy.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        }
     }
 
     private func stationRow(_ station: FreeStation) -> some View {
@@ -245,11 +454,222 @@ struct NearbyConditionsSheet: View {
         return parts.joined(separator: " · ")
     }
 
+    // MARK: Water
+
+    /// Tide and sea state — measured, not modelled.
+    ///
+    /// Both of these matter more here than in most weather apps. A downwinder
+    /// against an ebb is a different run from the same one on a flood, and
+    /// water temperature decides what a rider puts on, which in a lot of the
+    /// places this app is used is a safety question rather than a comfort one.
+    @ViewBuilder
+    private var waterTab: some View {
+        waveCard
+
+        section("TIDE") {
+            let shownTides = tides.filter { $0.metres <= radius }
+            if shownTides.isEmpty {
+                note(isSearching
+                     ? "Looking for tide stations…"
+                     : "No NOAA tide station within reach. Predictions are United States only.")
+            } else {
+                card {
+                    ForEach(Array(shownTides.enumerated()), id: \.element.id) { index, station in
+                        tideRow(station)
+                        if index < shownTides.count - 1 { Divider().padding(.leading, 14) }
+                    }
+                }
+                note("NOAA CO-OPS predictions, heights above MLLW. Predicted, not measured — wind and pressure move real water levels around the forecast.")
+            }
+        }
+
+        section("BUOYS") {
+            let shownBuoys = buoys.filter { $0.metres <= radius }
+            if shownBuoys.isEmpty {
+                note(isSearching
+                     ? "Looking for buoys…"
+                     : buoys.isEmpty
+                       ? "No NOAA buoy reporting nearby. Waves and water temperature come from NDBC, which is United States coastal — and its sensors go down often enough that a quiet stretch of coast is normal."
+                       : "Nearest reporting buoy is \(Format.distance(buoys[0].metres, unit: settings.units.distance)) away. Widen the search above to reach it.")
+            } else {
+                card {
+                    ForEach(Array(shownBuoys.enumerated()), id: \.element.id) { index, buoy in
+                        buoyRow(buoy)
+                        if index < shownBuoys.count - 1 { Divider().padding(.leading, 14) }
+                    }
+                }
+                note("NOAA's National Data Buoy Center. Wave height, period and water temperature, measured on the water.")
+            }
+        }
+
+        let tideLinks = within(resources.filter { $0.kind == .tide })
+        if !tideLinks.isEmpty {
+            section("TIDE CHARTS IN THE GUIDE") {
+                card {
+                    ForEach(Array(tideLinks.enumerated()), id: \.element.id) { index, link in
+                        resourceRow(link)
+                        if index < tideLinks.count - 1 { Divider().padding(.leading, 14) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func tideRow(_ station: TideStation) -> some View {
+        Button {
+            openURL(station.url)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "water.waves.and.arrow.trianglehead.up")
+                    .font(.subheadline)
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(station.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(tideSubtitle(station))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                if let next = station.next {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(next.isHigh ? "HIGH" : "LOW")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(next.isHigh ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        Text(next.at.formatted(date: .omitted, time: .shortened))
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                    }
+                }
+                Image(systemName: "arrow.up.forward")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Distance, then the whole day's turns — a rider planning a downwinder
+    /// wants the shape of the tide, not only the next event.
+    private func tideSubtitle(_ station: TideStation) -> String {
+        var parts = [near(station.metres)]
+        if station.events.isEmpty {
+            parts.append("no predictions")
+        } else {
+            parts.append(station.events.map {
+                "\($0.isHigh ? "H" : "L") \($0.at.formatted(date: .omitted, time: .shortened))"
+            }.joined(separator: "  "))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func buoyRow(_ buoy: Buoy) -> some View {
+        Button {
+            openURL(buoy.url)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "dot.radiowaves.up.forward")
+                    .font(.subheadline)
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(buoy.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(buoySubtitle(buoy))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                if let water = buoy.reading?.waterTempC {
+                    Text("\(Int(water.rounded()))°")
+                        .font(.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                Image(systemName: "arrow.up.forward")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func buoySubtitle(_ buoy: Buoy) -> String {
+        var parts = [near(buoy.metres)]
+        if let reading = buoy.reading {
+            if let wave = reading.waveHeightM {
+                parts.append(String(format: "%.1f m", wave)
+                             + (reading.dominantPeriodS.map { " @ \(Int($0))s" } ?? ""))
+            }
+            if let wind = reading.windKn { parts.append("\(Int(wind.rounded())) kn") }
+            if let at = reading.at {
+                parts.append(at.formatted(date: .omitted, time: .shortened))
+            }
+        } else {
+            parts.append("no recent reading")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Alerts
+
+    /// Above everything, on every tab.
+    ///
+    /// A Small Craft Advisory is not a detail to find under a heading — it is
+    /// the answer to the question the whole screen exists for, and it should
+    /// not be possible to miss it by being on the wrong tab.
+    @ViewBuilder
+    private var alertBanner: some View {
+        if !alerts.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(alerts.prefix(3)) { alert in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: alert.isSevere ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(alert.isSevere ? Color.orange : Color.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(alert.event)
+                                .font(.subheadline.weight(.semibold))
+                            Text(alert.headline ?? "In force now")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                Text("National Weather Service, in force at this point.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
     // MARK: Cams and surf
 
     @ViewBuilder
     private func list(of kind: SpotGuideStore.SpotLink.Kind, empty: String) -> some View {
-        let items = resources.filter { $0.kind == kind }
+        let items = within(resources.filter { $0.kind == kind })
         if items.isEmpty {
             note(isSearching ? "Looking…" : empty)
                 .padding(.top, 4)
@@ -369,8 +789,8 @@ struct NearbyConditionsSheet: View {
     // `async` closure.
 
     private func findResources(_ here: Geo.Coordinate) async -> [SpotGuideStore.GuideResource] {
-        if let spot { return await guide.nearbyResources(to: spot) }
-        return await guide.nearbyResources(near: here)
+        if let spot { return await guide.nearbyResources(to: spot, radius: Self.maxRadius) }
+        return await guide.nearbyResources(near: here, radius: Self.maxRadius)
     }
 
     private func findWeather(_ here: Geo.Coordinate) async -> SpotWeather? {
@@ -388,11 +808,44 @@ struct NearbyConditionsSheet: View {
         let here = coordinate
 
         async let nearby = findResources(here)
-        async let found = NationalWeatherService.stations(near: here)
+        async let found = NationalWeatherService.stations(near: here, limit: 15)
         async let air = findWeather(here)
         async let blowing = findWind(here)
+        async let warnings = NationalWeatherService.alerts(at: here)
+        async let tideList = TidesAndCurrents.stations(near: here)
+        async let buoyList = DataBuoyCenter.buoys(near: here, limit: 14, radius: Self.maxRadius)
+        async let ahead = OpenMeteo.outlook(at: here)
+        async let sea = OpenMeteo.waves(at: here)
         (resources, stations, weather, reading) = await (nearby, found, air, blowing)
+        (alerts, tides, buoys) = await (warnings, tideList, buoyList)
+        (outlook, waves) = await (ahead, sea)
         isSearching = false
+
+        // Predictions and buoy rows come second, for the same reason station
+        // readings do: the lists are useful the moment they exist, and half a
+        // dozen sequential fetches would hold the whole tab blank.
+        await withTaskGroup(of: (String, [TideEvent]).self) { group in
+            for station in tides {
+                group.addTask { (station.id, await TidesAndCurrents.today(for: station.id)) }
+            }
+            for await (id, events) in group {
+                guard let at = tides.firstIndex(where: { $0.id == id }) else { continue }
+                tides[at].events = events
+            }
+        }
+        await withTaskGroup(of: (String, BuoyReading?).self) { group in
+            for buoy in buoys {
+                group.addTask { (buoy.id, await DataBuoyCenter.latest(for: buoy.id)) }
+            }
+            for await (id, reading) in group {
+                guard let at = buoys.firstIndex(where: { $0.id == id }) else { continue }
+                buoys[at].reading = reading
+            }
+        }
+        // Keep the nearest few that are actually reporting. Asking for more
+        // than we show is the point: a buoy whose sensors are down should not
+        // cost the list a slot.
+        buoys = Array(buoys.filter { $0.reading != nil }.prefix(3))
 
         await withTaskGroup(of: (String, StationObservation?).self) { group in
             for station in stations {

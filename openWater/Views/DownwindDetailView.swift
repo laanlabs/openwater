@@ -37,17 +37,6 @@ struct DownwindDetailView: View {
     @State private var isMapFullScreen = false
     @State private var camera: MapCameraPosition = .automatic
     @State private var isRecomputing = false
-    @State private var expandedChain: Int?
-
-    /// Whether to open the glide-by-glide breakdown.
-    ///
-    /// Closed by default, and it stays closed between sessions. The rider this
-    /// screen was rebuilt for put it plainly: "It's one unbroken ride. I don't
-    /// really care about breaking it up into 20 chunks. Would mainly just
-    /// glance at it to see how long the total ride was." So the glance is the
-    /// screen, and the chunks are behind a button — the same call already made
-    /// on the Runs tab, for the same reason.
-    @AppStorage("downwind.showsGlideDetail") private var showsGlideDetail = false
 
     private var glides: [Glide] { summary.downwind.glides }
     private var legs: [SessionLeg] { summary.shape.legs }
@@ -56,6 +45,20 @@ struct DownwindDetailView: View {
     /// ordinary session the single leg is the whole track, and outlining it
     /// says nothing the track has not already said.
     private var showsLegs: Bool { legs.count > 1 }
+
+    /// Was there a downwind run at all?
+    ///
+    /// This screen is about the run — where you went and how long you were up
+    /// for. It used to be about glides, and was three rounds of feedback in
+    /// being told so: "we don't want all this glide detail, it should be on
+    /// the DW run, that's all."
+    ///
+    /// Glides are still detected, still archived, still adjustable from the
+    /// thresholds below. They are simply not what a downwind rider opens this
+    /// screen to read.
+    private var hasRun: Bool {
+        summary.shape.isPointToPoint || !glides.isEmpty
+    }
 
     private var units: UnitPreferences { settings.units }
 
@@ -68,31 +71,17 @@ struct DownwindDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if glides.isEmpty {
-                    nothingFound
-                } else {
+                if hasRun {
                     DownwindRideCard(foil: summary.foil, downwind: summary.downwind,
                                      movingTime: summary.movingTime,
                                      distance: summary.distance, units: units,
                                      shape: summary.shape)
                         .cardChrome()
-                }
 
-                if showsLegs { legsCard }
-
-                if !glides.isEmpty { mapCard }
-
-                // Last, and closed. Glides are what happens inside a run, and
-                // the run is what a downwind rider counts.
-                if !glides.isEmpty {
-                    glideDetailButton
-                    if showsGlideDetail {
-                        DownwindCard(downwind: summary.downwind, units: units)
-                            .cardChrome()
-                        if showsChains { chainList }
-                        glideList
-                        explanation
-                    }
+                    if showsLegs { legsCard }
+                    mapCard
+                } else {
+                    nothingFound
                 }
 
                 footer
@@ -127,35 +116,6 @@ struct DownwindDetailView: View {
     }
 
     // MARK: - Map
-
-    /// The way in to the breakdown, saying what is behind it so the tap is
-    /// informed rather than exploratory.
-    private var glideDetailButton: some View {
-        Button {
-            withAnimation(.snappy) { showsGlideDetail.toggle() }
-            if !showsGlideDetail { select(nil) }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: showsGlideDetail ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(showsGlideDetail ? "Hide glide detail" : "Glide detail")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text("\(summary.downwind.glideCount) glides · \(Int(summary.downwind.glideFraction * 100))% of the ride gliding")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .cardChrome()
-    }
 
     private var mapCard: some View {
         map
@@ -205,40 +165,6 @@ struct DownwindDetailView: View {
                 }
             }
 
-            // A tap target per glide, because a `MapPolyline` cannot take one.
-            // Small and numbered so a session with a dozen stays legible; the
-            // chosen one grows and says how long it lasted.
-            ForEach(showsGlideDetail ? glides : []) { glide in
-                if glide.endIndex < session.track.count {
-                    Annotation("", coordinate: midpoint(of: glide), anchor: .center) {
-                        Button {
-                            select(selectedGlide == glide.id ? nil : glide.id)
-                        } label: {
-                            if selectedGlide == glide.id {
-                                Text("\(position(of: glide)) · \(Format.shortDuration(glide.duration))")
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .monospacedDigit()
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(speedColour(glide.averageSpeed), in: Capsule())
-                                    .foregroundStyle(.white)
-                                    .shadow(radius: 2)
-                            } else {
-                                Text("\(position(of: glide))")
-                                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.white)
-                                    .frame(width: 18, height: 18)
-                                    .background(speedColour(glide.averageSpeed).opacity(0.9), in: Circle())
-                                    .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .annotationTitles(.hidden)
-                }
-            }
-
             // A shuttle day's separate runs, ringed at each end.
             if showsLegs {
                 ForEach(legs) { leg in
@@ -265,33 +191,6 @@ struct DownwindDetailView: View {
     private var sortedGlides: [Glide] {
         glides.sorted { $0.duration > $1.duration }
     }
-
-    /// Glides you rode into one after another without dropping off the foil.
-    ///
-    /// A rider who stayed up the whole way down a river did one ride, not
-    /// twenty. The detector is right that there were twenty stretches where
-    /// the water was doing the work — between them the rider was pumping — but
-    /// the ride never stopped, and a list of twenty rows says it did. So a
-    /// chain is the ride and the glides inside it are the sections.
-    ///
-    /// `Glide.connected` already carries this: it is set when the rider
-    /// reached the next glide without touching down, which is exactly the
-    /// question being asked.
-    private var chains: [[Glide]] {
-        var result: [[Glide]] = []
-        for glide in glides {
-            if glide.connected, !result.isEmpty {
-                result[result.count - 1].append(glide)
-            } else {
-                result.append([glide])
-            }
-        }
-        return result
-    }
-
-    /// Only worth showing when the chaining actually says something: if every
-    /// glide stands alone, chains and glides are the same list twice.
-    private var showsChains: Bool { chains.count < glides.count }
 
     /// Where this glide sits in the list below, which is sorted longest-first,
     /// so the number on the map is the number on the row.
@@ -410,151 +309,7 @@ struct DownwindDetailView: View {
 
     // MARK: - Glide list
 
-    /// The rides, each opening to the glides inside it.
-    private var chainList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader("Linked rides") {
-                Text("stayed on the foil throughout")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            VStack(spacing: 0) {
-                ForEach(Array(chains.enumerated()), id: \.offset) { index, chain in
-                    if index > 0 { Divider() }
-                    chainRow(index: index, chain: chain)
-                    if expandedChain == index {
-                        ForEach(chain) { glide in
-                            glideRow(glide, position: (glides.firstIndex { $0.id == glide.id } ?? 0) + 1)
-                                .padding(.leading, 16)
-                        }
-                        .transition(.opacity)
-                    }
-                }
-            }
-        }
-        .cardChrome()
-    }
-
-    private func chainRow(index: Int, chain: [Glide]) -> some View {
-        let seconds = chain.reduce(0) { $0 + $1.duration }
-        let metres = chain.reduce(0) { $0 + $1.distance }
-        return Button {
-            withAnimation(.snappy) {
-                expandedChain = expandedChain == index ? nil : index
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: expandedChain == index ? "chevron.down" : "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(Format.shortDuration(seconds))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                    Text(Format.distance(metres, unit: units.distance))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 8)
-
-                Text(chain.count == 1 ? "1 glide" : "\(chain.count) linked glides")
-                    .font(.caption2)
-                    .foregroundStyle(chain.count > 1 ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
-            }
-            .padding(.vertical, 9)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var glideList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader("Every glide") {
-                Text("longest first")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            VStack(spacing: 0) {
-                ForEach(Array(sortedGlides.enumerated()), id: \.element.id) { index, glide in
-                    if index > 0 { Divider() }
-                    glideRow(glide, position: index + 1)
-                }
-            }
-        }
-        .cardChrome()
-    }
-
-    private func glideRow(_ glide: Glide, position: Int) -> some View {
-        Group {
-                    Button {
-                        select(selectedGlide == glide.id ? nil : glide.id)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("\(position)")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .frame(width: 18, height: 18)
-                                .background(speedColour(glide.averageSpeed).opacity(0.9), in: Circle())
-
-                            Text(Format.shortDuration(glide.duration))
-                                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                                .monospacedDigit()
-                                .frame(width: 56, alignment: .leading)
-
-                            Text(Format.distance(glide.distance, unit: units.distance))
-                                .font(.subheadline)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-
-                            Spacer(minLength: 4)
-
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text("\(Format.speed(glide.entrySpeed, unit: units.speed, decimals: 1, includeSymbol: false)) → \(Format.speed(glide.peakSpeed, unit: units.speed, decimals: 1))")
-                                    .font(.caption)
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
-                                if glide.connected {
-                                    Text("linked")
-                                        .font(.caption2)
-                                        .foregroundStyle(.green)
-                                }
-                            }
-
-                            ConfidenceMark(confidence: glide.confidence)
-                        }
-                        .padding(.vertical, 7)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(selectedGlide == glide.id
-                                ? AnyShapeStyle(.tint.opacity(0.1))
-                                : AnyShapeStyle(.clear))
-        }
-    }
-
     // MARK: - Prose
-
-    private var explanation: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("A glide is a stretch where you were flying, not pumping, and not slowing down, with the bump doing the work. Colour is speed through the glide; tap one to frame it on the map.")
-
-            if !summary.downwind.usedMotionData {
-                // Said plainly rather than folded into a number. Without the
-                // accelerometer there is no way to tell working from gliding,
-                // so the detector is reading the speed trace and inferring.
-                Text("This session has no motion data, so glides were found from the speed trace alone. Treat them as indicative.")
-                    .foregroundStyle(.orange)
-            }
-        }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-    }
 
     /// Why there is nothing here.
     ///
@@ -564,10 +319,10 @@ struct DownwindDetailView: View {
     /// legible as a flat day rather than as a broken feature.
     private var nothingFound: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("No glides in this session", systemImage: "water.waves")
+            Label("No downwind run in this session", systemImage: "water.waves")
                 .font(.subheadline.weight(.medium))
 
-            Text("A glide is a stretch where the water carried you rather than you working for it. To count, it has to be all four of these:")
+            Text("This session ends about where it started, so there is no run to describe — a downwinder goes somewhere. If it was one and this is wrong, the wind direction is the usual reason; the glides that make up a run have to be all four of these:")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

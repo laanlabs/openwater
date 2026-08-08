@@ -326,10 +326,15 @@ struct SessionAnalysisTab: View {
         return "\(jumps.count) · \(Format.shortDuration(jumps.bestAirtime)) best"
     }
 
+    /// The row says what the screen behind it is about: the run, not the
+    /// glides inside it.
     private var glideValue: String? {
-        let count = summary.downwind.glideCount
-        guard count > 0 else { return "none found" }
-        return "\(count) glide\(count == 1 ? "" : "s")"
+        let runs = summary.shape.legs.filter(\.isRun).count
+        if runs > 1 { return "\(runs) runs" }
+        if summary.shape.isPointToPoint {
+            return Format.distance(summary.distance, unit: settings.units.distance)
+        }
+        return summary.downwind.glideCount > 0 ? "no run" : "none found"
     }
 
     // MARK: - Session

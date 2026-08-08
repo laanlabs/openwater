@@ -67,8 +67,10 @@ enum RadarSource: Hashable {
         switch self {
         case .noaa(let region, let product):
             "\(product.explanation) Showing \(region.label) — NOAA also covers Hawaii, Alaska, the Caribbean and Guam, and nowhere else on earth."
-        case .rainViewer:
-            "Global, though thin outside radar-covered countries."
+        case .rainViewer(let frame):
+            frame.isForecast
+            ? "Nowcast — where the radar echo is projected to be, not an observation."
+            : "Global, though thin outside radar-covered countries. Observations only: RainViewer's free feed is not publishing a forecast."
         }
     }
 
@@ -202,6 +204,8 @@ struct RainViewerFrame: Hashable, Identifiable {
     let host: String
     let path: String
     let time: Date
+    /// A nowcast frame rather than an observation.
+    var isForecast: Bool = false
     var id: String { path }
 }
 
@@ -221,11 +225,19 @@ enum RainViewer {
             let radar: Radar?
         }
         guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else { return [] }
-        let all = (payload.radar?.past ?? []) + (payload.radar?.nowcast ?? [])
-        return all.map {
+        // Observations, then the nowcast — which RainViewer publishes as its
+        // own array and, on the free endpoint, has been returning empty. The
+        // key is there and the frames are not, so this stays wired up and
+        // simply lights up if they appear.
+        let past = (payload.radar?.past ?? []).map {
             RainViewerFrame(host: payload.host, path: $0.path,
                             time: Date(timeIntervalSince1970: $0.time))
         }
+        let ahead = (payload.radar?.nowcast ?? []).map {
+            RainViewerFrame(host: payload.host, path: $0.path,
+                            time: Date(timeIntervalSince1970: $0.time), isForecast: true)
+        }
+        return past + ahead
     }
 }
 
@@ -643,10 +655,17 @@ struct RadarScreen: View {
             )
 
             if let frame = frames[safe: index] {
-                Text(frame.time.formatted(date: .omitted, time: .shortened))
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .frame(width: 62, alignment: .trailing)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(frame.time.formatted(date: .omitted, time: .shortened))
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                    if frame.isForecast {
+                        Text("forecast")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .frame(width: 62, alignment: .trailing)
             }
         }
     }

@@ -825,9 +825,13 @@ struct DownwindCard: View {
                 }
             }
 
-            Text("\"Linked\" is how often you reached the next glide without dropping off the foil.")
+            // Two things that look contradictory until they are explained:
+            // a count of long glides beside a percentage that includes short
+            // ones, and a high linked rate beside a share well under 100.
+            Text("\"Glides\" counts the ones long enough to name; \"time gliding\" includes the short ones too, so the two do not divide evenly. The rest of the time you were working the wing or between bumps. \"Linked\" is how often you reached the next glide without dropping off the foil.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -301,7 +301,8 @@ public struct DownwindAnalyzer: Sendable {
         guard track.count >= 10 else { return .none }
 
         let hasMotion = track.points.contains { $0.verticalAccelSD != nil }
-        let glides = detectGlides(in: track, flights: flights, wind: wind, hasMotion: hasMotion)
+        let detection = detectGlides(in: track, flights: flights, wind: wind, hasMotion: hasMotion)
+        let glides = detection.glides
 
         guard !glides.isEmpty else {
             return DownwindSummary(
@@ -314,7 +315,10 @@ public struct DownwindAnalyzer: Sendable {
             )
         }
 
-        let glideTime = glides.reduce(0) { $0 + $1.duration }
+        // Every second gliding, not only the seconds inside a nameable glide.
+        let glideTime = detection.glidingTime
+        // The named glides' own total, which is what an average over them means.
+        let namedTime = glides.reduce(0) { $0 + $1.duration }
         let glideDistance = glides.reduce(0) { $0 + $1.distance }
         let connected = glides.filter(\.connected).count
 
@@ -331,8 +335,8 @@ public struct DownwindAnalyzer: Sendable {
             distanceGliding: glideDistance,
             longestGlide: glides.max { $0.duration < $1.duration },
             fastestGlide: glides.max { $0.peakSpeed < $1.peakSpeed },
-            averageGlideDuration: glideTime / Double(glides.count),
-            averageGlideSpeed: glideTime > 0 ? glideDistance / glideTime : 0,
+            averageGlideDuration: namedTime / Double(glides.count),
+            averageGlideSpeed: namedTime > 0 ? glideDistance / namedTime : 0,
             // The first glide had nothing to connect from, so it is excluded
             // from the denominator rather than counted as a failure.
             connectionRate: glides.count > 1
@@ -508,7 +512,24 @@ public struct DownwindAnalyzer: Sendable {
 
     // MARK: - Glide segmentation
 
-    func detectGlides(in track: Track, flights: [Flight], wind: Wind?, hasMotion: Bool) -> [Glide] {
+    /// The glides, and the total time spent gliding.
+    ///
+    /// These are deliberately not the same quantity. `glides` are the ones
+    /// worth naming — long enough to point at on a map, count, and compare.
+    /// `glidingTime` is every second the rider was actually gliding, including
+    /// the short ones.
+    ///
+    /// Conflating them cost this analyzer its credibility on a real parawing
+    /// run: 76 of 311 seconds of genuine, rising, downwind gliding fell under
+    /// the five-second bar and were discarded *with their time*, so a session
+    /// that was 59% gliding reported 44%. A four-second glide is not a glide
+    /// worth a row in a list. It is still four seconds of gliding.
+    struct Detection {
+        var glides: [Glide] = []
+        var glidingTime: TimeInterval = 0
+    }
+
+    func detectGlides(in track: Track, flights: [Flight], wind: Wind?, hasMotion: Bool) -> Detection {
         let flyingMask = FoilDetector(thresholds: thresholds)
             .flyingMask(flights: flights, count: track.count)
         let requiresFlight = !flights.isEmpty
@@ -543,6 +564,7 @@ public struct DownwindAnalyzer: Sendable {
                             hasMotion: hasMotion)
 
         // Extract runs.
+        var detection = Detection()
         var glides: [Glide] = []
         var i = 0
         var previousEndIndex: Int?
@@ -556,9 +578,16 @@ public struct DownwindAnalyzer: Sendable {
             var peak = 0.0
             for k in i...j { peak = max(peak, track.speed[k]) }
             let rose = peak >= troughBefore(i, in: track) * (1 + minimumSpeedGain)
+            let downwind = isDownwind(from: i, to: j, in: track, wind: wind)
 
-            if duration >= minimumGlideDuration, j > i, rose,
-               isDownwind(from: i, to: j, in: track, wind: wind) {
+            // Real gliding, whatever its length. The rise and direction tests
+            // still have to pass — a stretch sailed across the wind, or one
+            // that never accelerated, was not a glide however long it ran.
+            if j > i, rose, downwind {
+                detection.glidingTime += duration
+            }
+
+            if duration >= minimumGlideDuration, j > i, rose, downwind {
                 let distance = track.cumulativeDistance[j] - track.cumulativeDistance[i]
 
                 // Connected if the rider never left the foil since the last glide.
@@ -590,7 +619,8 @@ public struct DownwindAnalyzer: Sendable {
             i = j + 1
         }
 
-        return glides
+        detection.glides = glides
+        return detection
     }
 
     /// Counts pump strokes in the run-up to a glide.

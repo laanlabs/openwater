@@ -124,9 +124,19 @@ struct RealSessionConsistencyTests {
         // The downwind aggregates describe the glide list they ship with.
         let listed = s.downwind.glides
         #expect(s.downwind.glideCount == listed.count, "\(name): glide count disagrees with the list")
+        // Time gliding covers every second of gliding; the list holds only
+        // the glides long enough to be worth naming. So the total is at least
+        // the sum of the list, and never more than the time spent moving.
+        //
+        // This used to demand equality, which is what let a real defect hide:
+        // 76 seconds of genuine rising downwind gliding on the Rufus parawing
+        // run fell under the five-second bar and were discarded with their
+        // time, reporting 44% for a session that glided 57% of the way.
         let summedTime = listed.reduce(0) { $0 + $1.duration }
-        #expect(abs(s.downwind.glideTime - summedTime) < 2,
-                "\(name): glide time \(Int(s.downwind.glideTime))s vs summed \(Int(summedTime))s")
+        #expect(s.downwind.glideTime >= summedTime - 2,
+                "\(name): glide time \(Int(s.downwind.glideTime))s is under its own list's \(Int(summedTime))s")
+        #expect(s.downwind.glideTime <= s.movingTime + 2,
+                "\(name): glide time \(Int(s.downwind.glideTime))s exceeds moving time \(Int(s.movingTime))s")
 
         // A linked glide's whole approach was flown, so a session with no
         // touchdowns at all cannot have unlinked glides after its first.

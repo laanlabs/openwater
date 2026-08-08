@@ -21,8 +21,10 @@ struct SpotDetailScreen: View {
     @State private var links: [SpotGuideStore.SpotLink] = []
     @State private var isChoosingMapApp = false
     @State private var isSuggesting = false
+    @State private var isShowingConditions = false
 
     private var reading: WindReading? { guide.wind[spot.spotId] }
+    private var weather: SpotWeather? { guide.weatherReading(for: spot) }
     private var isFavorite: Bool { guide.favoriteIds.contains(spot.spotId) }
 
     var body: some View {
@@ -125,6 +127,9 @@ struct SpotDetailScreen: View {
         .sheet(isPresented: $isSuggesting) {
             SuggestSpotView(mode: .correction(spot))
         }
+        .sheet(isPresented: $isShowingConditions) {
+            NearbyConditionsSheet(spot: spot)
+        }
         .confirmationDialog("Open in", isPresented: $isChoosingMapApp, titleVisibility: .visible) {
             Button("Apple Maps") { openInAppleMaps() }
             Button("Google Maps") { openInGoogleMaps() }
@@ -133,7 +138,8 @@ struct SpotDetailScreen: View {
             await guide.refreshWind(for: [spot])
             async let hours = guide.forecast(for: spot)
             async let resources = guide.links(for: spot)
-            (forecast, links) = await (hours, resources)
+            async let sky = guide.weather(for: spot)
+            (forecast, links, _) = await (hours, resources, sky)
         }
     }
 
@@ -238,6 +244,7 @@ struct SpotDetailScreen: View {
                         .rotationEffect(.degrees(reading.directionDeg))
                         .foregroundStyle(.secondary)
                 }
+                weatherButton
             }
 
             if !forecast.isEmpty {
@@ -271,6 +278,44 @@ struct SpotDetailScreen: View {
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// The sky, and the way into every other source.
+    ///
+    /// A model estimate is the weakest reading there is, and until now it was
+    /// the only one the page offered without scrolling to the links. This
+    /// says what the weather is doing — the half of "conditions" the wind
+    /// number leaves out — and, tapped, opens the sources that can do better:
+    /// the free NOAA stations, the guide's meters, the cams.
+    private var weatherButton: some View {
+        Button {
+            isShowingConditions = true
+        } label: {
+            VStack(spacing: 1) {
+                if let weather {
+                    Image(systemName: weather.symbol)
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(weather.tint)
+                    Text("\(Int(weather.temperatureC.rounded()))°")
+                        .font(.caption2.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: "cloud.sun")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                    Text("more")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 52, height: 46)
+            .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Weather and nearby stations")
     }
 
     @ViewBuilder

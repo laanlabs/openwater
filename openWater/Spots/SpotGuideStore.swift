@@ -454,6 +454,227 @@ final class SpotGuideStore {
         return links
     }
 
+    // MARK: Nearby resources
+
+    /// A meter, camera or forecast page somewhere near a spot — not
+    /// necessarily attached to it.
+    ///
+    /// The spot page shows what somebody linked to *this* launch. That is the
+    /// curated answer and it is often thin: a new spot has nothing, and a
+    /// spot two hundred metres up the beach may have the meter you want. The
+    /// guide's resources all carry their own coordinates, so the uncurated
+    /// answer — everything within a few kilometres, nearest first — is a
+    /// query away and frequently more useful.
+    struct GuideResource: Identifiable, Hashable {
+        let kind: SpotLink.Kind
+        let name: String
+        let url: URL
+        let provider: String?
+        let detail: String?
+        let coordinate: Geo.Coordinate
+        /// From the spot it was asked about — filled in per query, not stored,
+        /// because the same regional cache serves every spot in the region.
+        var metres: Double = 0
+
+        var id: String { url.absoluteString + name }
+
+        var providerLabel: String {
+            provider ?? url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
+        }
+
+        /// A name a rider can read.
+        ///
+        /// The guide names a lot of these after the provider's internal id —
+        /// "5842041F4E65Fad6A770896F — Surfline", "708136 — WX" — which is
+        /// fine as a key and useless as a label, especially in a list where
+        /// every row then looks identical. Two rescues, in order:
+        ///
+        /// 1. The URL usually carries the human name the provider gave it:
+        ///    `/surf-report/bolinas-jetty/5842…` is Bolinas Jetty.
+        /// 2. Failing that, say what it is and keep a short tail of the id, so
+        ///    three stations from one provider stay tellable apart.
+        var displayName: String {
+            let head = name.components(separatedBy: " — ").first ?? name
+            guard Self.isOpaque(head) else { return name }
+            if let fromPath = Self.nameFromPath(url) { return fromPath }
+            let tail = head.count > 10 ? String(head.suffix(6)) : head
+            return "\(Self.brand(providerLabel)) \(tail)"
+        }
+
+        /// An id pretending to be a name: no spaces, and either all digits or
+        /// a long hex run. Real names — "Rincon Point", "Golden Gate Bridge" —
+        /// fail every clause.
+        private static func isOpaque(_ text: String) -> Bool {
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
+            if trimmed.allSatisfy(\.isNumber) { return true }
+            if trimmed.count >= 16, trimmed.allSatisfy(\.isHexDigit) { return true }
+            // Escaped coordinates, which the map links use: "%4033.78278%2C…"
+            return trimmed.hasPrefix("%")
+        }
+
+        /// The longest hyphenated path segment — "bolinas-jetty" beats
+        /// "surf-report", which is identical on every row.
+        private static func nameFromPath(_ url: URL) -> String? {
+            let ignored: Set<String> = ["surf-report", "surf-reports-forecasts-cams-map",
+                                        "live-cams", "livecams", "spot", "station"]
+            let best = url.pathComponents
+                .filter { $0.contains("-") && !ignored.contains($0) && !$0.contains("%") }
+                .max { $0.count < $1.count }
+            guard let best, best.count > 3 else { return nil }
+            return best
+                .split(separator: "-")
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
+        }
+
+        /// Providers whose own capitalisation is not what a hostname gives you.
+        private static func brand(_ host: String) -> String {
+            let lower = host.lowercased()
+            if lower.contains("ikitesurf") { return "iKitesurf" }
+            if lower.contains("surfline") { return "Surfline" }
+            if lower.contains("weather.gov") || lower.contains("noaa") { return "NOAA" }
+            if lower.contains("windy") { return "Windy" }
+            return host
+        }
+
+        /// What it costs to read, when that is knowable from the provider.
+        ///
+        /// Stated because it is the first thing a rider wants to know and the
+        /// last thing a link tells them. Anything not recognised gets no
+        /// badge rather than a guess.
+        enum Access { case free, account, unknown }
+
+        var access: Access {
+            let host = (provider ?? url.host ?? "").lowercased()
+            if host.contains("weather.gov") || host.contains("noaa.gov")
+                || host.contains("ndbc") || host.contains("open-meteo") { return .free }
+            if host.contains("ikitesurf") || host.contains("weatherflow") { return .account }
+            return .unknown
+        }
+    }
+
+    private var nearbyCache: [String: [GuideResource]] = [:]
+
+    /// Everything in the guide within `radius` of a spot, nearest first.
+    ///
+    /// Scoped to the spot's admin region — a query the rules already allow,
+    /// bounded at a few dozen documents, and geographically a superset of
+    /// anything within a sensible drive. Falls back to the country when a
+    /// spot has no region, and caches per region because the second spot a
+    /// rider opens in the same place should cost nothing.
+    func nearbyResources(to spot: GuideSpot, radius: Double = 40_000) async -> [GuideResource] {
+        let (field, value): (String, String) = spot.adminRegionId.map { ("adminRegionId", $0) }
+            ?? ("countryId", spot.countryId ?? "")
+        guard !value.isEmpty else { return [] }
+
+        let here = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
+        let cacheKey = "\(field)=\(value)"
+        if let cached = nearbyCache[cacheKey] {
+            return Self.rank(cached, from: here, radius: radius)
+        }
+
+        let collections: [(String, SpotLink.Kind)] = [
+            ("windStations", .wind), ("cameras", .camera), ("surfSpots", .surf),
+        ]
+        var found: [GuideResource] = []
+        await withTaskGroup(of: [GuideResource].self) { group in
+            for (collection, kind) in collections {
+                group.addTask {
+                    let docs = (try? await Self.runQuery(
+                        collection: collection, publishedOnly: false,
+                        where: field, equals: value
+                    )) ?? []
+                    return docs.compactMap { doc -> GuideResource? in
+                        guard let urlString = doc.fields["url"]?.stringValue,
+                              urlString.hasPrefix("http"),
+                              let url = URL(string: urlString),
+                              let at = doc.fields["location"]?.coordinate
+                        else { return nil }
+                        return GuideResource(
+                            kind: kind,
+                            name: doc.fields["name"]?.stringValue ?? kind.label,
+                            url: url,
+                            provider: doc.fields["provider"]?.stringValue,
+                            detail: doc.fields["description"]?.stringValue,
+                            coordinate: at
+                        )
+                    }
+                }
+            }
+            for await batch in group { found += batch }
+        }
+
+        nearbyCache[cacheKey] = found
+        return Self.rank(found, from: here, radius: radius)
+    }
+
+    /// Measure and order for one spot. Distance is never cached — the region's
+    /// resources are shared by every spot in it, and the second spot a rider
+    /// opens is somewhere else. A few dozen rows and no network.
+    private static func rank(
+        _ resources: [GuideResource], from origin: Geo.Coordinate, radius: Double
+    ) -> [GuideResource] {
+        resources
+            .map { resource in
+                var measured = resource
+                measured.metres = Geo.distance(origin, resource.coordinate)
+                return measured
+            }
+            .filter { $0.metres <= radius }
+            .sorted { $0.metres < $1.metres }
+    }
+
+    // MARK: Weather
+
+    /// Observed, like `wind`, so a card can read it during body evaluation
+    /// rather than carrying its own copy of state that has to be threaded
+    /// through every view that wants it.
+    private(set) var weatherBySpot: [String: SpotWeather] = [:]
+
+    func weatherReading(for spot: GuideSpot) -> SpotWeather? { weatherBySpot[spot.spotId] }
+
+    /// Temperature and sky for a spot, alongside the wind the card already
+    /// shows. Same free model, same TTL.
+    @discardableResult
+    func weather(for spot: GuideSpot) async -> SpotWeather? {
+        if let cached = weatherBySpot[spot.spotId],
+           Date().timeIntervalSince(cached.at) < Self.windTTL {
+            return cached
+        }
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", spot.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", spot.longitude)),
+            .init(name: "current", value: "temperature_2m,apparent_temperature,weather_code,is_day"),
+        ]
+        struct Payload: Decodable {
+            struct Current: Decodable {
+                let temperature_2m: Double?
+                let apparent_temperature: Double?
+                let weather_code: Int?
+                let is_day: Int?
+            }
+            let current: Current?
+        }
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let current = (try? JSONDecoder().decode(Payload.self, from: data))?.current,
+              let temperature = current.temperature_2m
+        else { return nil }
+
+        let reading = SpotWeather(
+            temperatureC: temperature,
+            apparentC: current.apparent_temperature,
+            code: current.weather_code ?? 0,
+            isDay: (current.is_day ?? 1) == 1,
+            at: Date()
+        )
+        weatherBySpot[spot.spotId] = reading
+        return reading
+    }
+
     private struct BatchDoc {
         let path: String
         let fields: [String: FirestoreValue]
@@ -606,12 +827,23 @@ final class SpotGuideStore {
         var booleanValue: Bool?
         var mapValue: MapValue?
         var arrayValue: ArrayValue?
+        var geoPointValue: GeoPoint?
         struct MapValue: Codable { var fields: [String: FirestoreValue]? }
         struct ArrayValue: Codable { var values: [FirestoreValue]? }
+        struct GeoPoint: Codable { var latitude: Double?; var longitude: Double? }
 
         var number: Double? { doubleValue ?? integerValue.flatMap(Double.init) }
         var strings: [String] { arrayValue?.values?.compactMap(\.stringValue) ?? [] }
         subscript(key: String) -> FirestoreValue? { mapValue?.fields?[key] }
+
+        /// Every wind meter, camera and surf link carries its own geopoint,
+        /// which is what makes "what else is near here" answerable at all.
+        var coordinate: Geo.Coordinate? {
+            guard let point = geoPointValue,
+                  let latitude = point.latitude, let longitude = point.longitude
+            else { return nil }
+            return Geo.Coordinate(latitude: latitude, longitude: longitude)
+        }
     }
 
     private struct FirestoreDoc {
@@ -619,8 +851,19 @@ final class SpotGuideStore {
         let fields: [String: FirestoreValue]
     }
 
-    private static func runQuery(collection: String, publishedOnly: Bool) async throws -> [FirestoreDoc] {
+    private static func runQuery(
+        collection: String,
+        publishedOnly: Bool,
+        where field: String? = nil,
+        equals match: String? = nil
+    ) async throws -> [FirestoreDoc] {
         var query: [String: Any] = ["from": [["collectionId": collection]]]
+        if let field, let match {
+            query["where"] = ["fieldFilter": [
+                "field": ["fieldPath": field], "op": "EQUAL",
+                "value": ["stringValue": match],
+            ]]
+        }
         if publishedOnly {
             // The rules deny any spots query that does not filter on both.
             query["where"] = ["compositeFilter": [

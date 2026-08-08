@@ -249,14 +249,17 @@ struct SpotDetailScreen: View {
 
             if !forecast.isEmpty {
                 VStack(spacing: 4) {
-                    HStack(alignment: .bottom, spacing: 5) {
-                        ForEach(forecast) { hour in
-                            let peak = max(forecast.map(\.speedKn).max() ?? 1, 1)
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(hour.speedKn >= 15 ? AnyShapeStyle(.tint)
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.3)))
-                                .frame(height: max(4, 44 * hour.speedKn / peak))
-                                .frame(maxWidth: .infinity)
+                    let peak = max(forecast.map(\.speedKn).max() ?? 1, 1)
+                    ZStack(alignment: .bottom) {
+                        ChartGrid(peak: peak)
+                        HStack(alignment: .bottom, spacing: 5) {
+                            ForEach(forecast) { hour in
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(hour.speedKn >= 15 ? AnyShapeStyle(.tint)
+                                          : AnyShapeStyle(Color.accentColor.opacity(0.3)))
+                                    .frame(height: max(4, 44 * hour.speedKn / peak))
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
                     }
                     .frame(height: 44, alignment: .bottom)

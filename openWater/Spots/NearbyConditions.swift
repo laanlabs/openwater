@@ -145,6 +145,218 @@ struct WindOutlook {
     var isEmpty: Bool { models.isEmpty || hours.isEmpty }
 }
 
+// MARK: - The full picture
+
+/// Everything the free model will say about one point, in one request.
+///
+/// The cards on the conditions sheet are deliberately a glance — a number and
+/// a shape. This is what sits behind them when a rider wants the workings:
+/// humidity and dew point, pressure, cloud, UV, visibility, the hour-by-hour
+/// run and the next five days.
+struct WeatherDetail {
+
+    struct Now {
+        let at: Date
+        let temperatureC: Double?
+        let apparentC: Double?
+        let humidity: Double?
+        let dewPointC: Double?
+        let pressureHPa: Double?
+        let cloudCover: Double?
+        let precipitationMm: Double?
+        let visibilityM: Double?
+        let uvIndex: Double?
+        let windKn: Double?
+        let gustKn: Double?
+        let directionDeg: Double?
+        let code: Int
+        let isDay: Bool
+    }
+
+    struct Hour: Identifiable {
+        let at: Date
+        let temperatureC: Double?
+        let dewPointC: Double?
+        let windKn: Double?
+        let gustKn: Double?
+        let directionDeg: Double?
+        let precipitationChance: Double?
+        let visibilityM: Double?
+        let uvIndex: Double?
+        let code: Int
+        var id: Date { at }
+    }
+
+    struct Day: Identifiable {
+        let date: Date
+        let code: Int
+        let highC: Double?
+        let lowC: Double?
+        let sunrise: Date?
+        let sunset: Date?
+        let uvMax: Double?
+        let precipitationChance: Double?
+        let windMaxKn: Double?
+        let gustMaxKn: Double?
+        let directionDeg: Double?
+        var id: Date { date }
+    }
+
+    var now: Now?
+    var hours: [Hour] = []
+    var days: [Day] = []
+
+    /// The spot's own timezone, not the phone's.
+    ///
+    /// Sunset at a launch in Maui is a fact about Maui. Formatted in the
+    /// timezone of a rider sitting in Maine it reads three hours wrong, which
+    /// is exactly the kind of quiet error that gets someone off the water
+    /// late. Every time on the detail screens is rendered in this.
+    var timeZone: TimeZone?
+
+    var isEmpty: Bool { now == nil && hours.isEmpty }
+}
+
+extension OpenMeteo {
+
+    /// One request for the lot. Splitting current, hourly and daily into three
+    /// calls would triple the round trips for data the API is happy to return
+    /// together.
+    static func detail(at coordinate: Geo.Coordinate) async -> WeatherDetail {
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "current", value: "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m"),
+            .init(name: "hourly", value: "temperature_2m,dew_point_2m,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,visibility,uv_index"),
+            .init(name: "daily", value: "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"),
+            .init(name: "wind_speed_unit", value: "kn"),
+            .init(name: "forecast_days", value: "5"),
+            .init(name: "timeformat", value: "unixtime"),
+            // Without this the model answers in GMT and a rider in California
+            // sees yesterday's date on today's row.
+            .init(name: "timezone", value: "auto"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return WeatherDetail() }
+
+        var detail = WeatherDetail()
+
+        // Open-Meteo's own caveat: with `unixtime`, hourly stamps are true
+        // instants but *daily* ones are local midnight written as though it
+        // were GMT. Subtracting the offset turns them back into the instant
+        // they mean, which is what makes "Today" say Today.
+        let offset = (root["utc_offset_seconds"] as? Double) ?? 0
+        detail.timeZone = (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
+            ?? TimeZone(secondsFromGMT: Int(offset))
+
+        if let current = root["current"] as? [String: Any],
+           let time = current["time"] as? Double {
+            func number(_ key: String) -> Double? { current[key] as? Double }
+            detail.now = WeatherDetail.Now(
+                at: Date(timeIntervalSince1970: time),
+                temperatureC: number("temperature_2m"),
+                apparentC: number("apparent_temperature"),
+                humidity: number("relative_humidity_2m"),
+                dewPointC: nil,           // hourly only; filled in below
+                pressureHPa: number("pressure_msl"),
+                cloudCover: number("cloud_cover"),
+                precipitationMm: number("precipitation"),
+                visibilityM: nil,         // hourly only
+                uvIndex: nil,             // hourly only
+                windKn: number("wind_speed_10m"),
+                gustKn: number("wind_gusts_10m"),
+                directionDeg: number("wind_direction_10m"),
+                code: Int(number("weather_code") ?? 0),
+                isDay: (number("is_day") ?? 1) == 1
+            )
+        }
+
+        if let hourly = root["hourly"] as? [String: Any],
+           let times = hourly["time"] as? [Double] {
+            func series(_ key: String) -> [Double?] {
+                (hourly[key] as? [Any])?.map { $0 as? Double } ?? []
+            }
+            let temperature = series("temperature_2m")
+            let dew = series("dew_point_2m")
+            let wind = series("wind_speed_10m")
+            let gust = series("wind_gusts_10m")
+            let direction = series("wind_direction_10m")
+            let chance = series("precipitation_probability")
+            let visibility = series("visibility")
+            let uv = series("uv_index")
+            let codes = series("weather_code")
+
+            detail.hours = times.indices.map { index in
+                WeatherDetail.Hour(
+                    at: Date(timeIntervalSince1970: times[index]),
+                    temperatureC: temperature[safe: index] ?? nil,
+                    dewPointC: dew[safe: index] ?? nil,
+                    windKn: wind[safe: index] ?? nil,
+                    gustKn: gust[safe: index] ?? nil,
+                    directionDeg: direction[safe: index] ?? nil,
+                    precipitationChance: chance[safe: index] ?? nil,
+                    visibilityM: visibility[safe: index] ?? nil,
+                    uvIndex: uv[safe: index] ?? nil,
+                    code: Int((codes[safe: index] ?? nil) ?? 0)
+                )
+            }
+
+            // The three fields the `current` block does not carry, taken from
+            // whichever hour we are actually in.
+            if let now = detail.now,
+               let hour = detail.hours.last(where: { $0.at <= now.at }) {
+                detail.now = WeatherDetail.Now(
+                    at: now.at, temperatureC: now.temperatureC, apparentC: now.apparentC,
+                    humidity: now.humidity, dewPointC: hour.dewPointC,
+                    pressureHPa: now.pressureHPa, cloudCover: now.cloudCover,
+                    precipitationMm: now.precipitationMm, visibilityM: hour.visibilityM,
+                    uvIndex: hour.uvIndex, windKn: now.windKn, gustKn: now.gustKn,
+                    directionDeg: now.directionDeg, code: now.code, isDay: now.isDay
+                )
+            }
+        }
+
+        if let daily = root["daily"] as? [String: Any],
+           let times = daily["time"] as? [Double] {
+            func series(_ key: String) -> [Double?] {
+                (daily[key] as? [Any])?.map { $0 as? Double } ?? []
+            }
+            let codes = series("weather_code")
+            let high = series("temperature_2m_max")
+            let low = series("temperature_2m_min")
+            let sunrise = series("sunrise")
+            let sunset = series("sunset")
+            let uv = series("uv_index_max")
+            let chance = series("precipitation_probability_max")
+            let wind = series("wind_speed_10m_max")
+            let gust = series("wind_gusts_10m_max")
+            let direction = series("wind_direction_10m_dominant")
+
+            detail.days = times.indices.map { index in
+                WeatherDetail.Day(
+                    date: Date(timeIntervalSince1970: times[index] - offset),
+                    code: Int((codes[safe: index] ?? nil) ?? 0),
+                    highC: high[safe: index] ?? nil,
+                    lowC: low[safe: index] ?? nil,
+                    sunrise: (sunrise[safe: index] ?? nil).map { Date(timeIntervalSince1970: $0) },
+                    sunset: (sunset[safe: index] ?? nil).map { Date(timeIntervalSince1970: $0) },
+                    uvMax: uv[safe: index] ?? nil,
+                    precipitationChance: chance[safe: index] ?? nil,
+                    windMaxKn: wind[safe: index] ?? nil,
+                    gustMaxKn: gust[safe: index] ?? nil,
+                    directionDeg: direction[safe: index] ?? nil
+                )
+            }
+        }
+
+        return detail
+    }
+}
+
 /// One hour of the sea-state forecast.
 struct WaveHour: Identifiable, Hashable {
     let at: Date

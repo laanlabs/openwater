@@ -176,11 +176,17 @@ enum RadarProduct: String, CaseIterable, Hashable {
         }
     }
 
+    /// Short enough to fit five segments on the narrowest phone.
+    ///
+    /// "Storm cores" and "Storm tops" were being truncated to "Storm co…"
+    /// and "Storm to…", which are indistinguishable from each other — the
+    /// one thing a label must never be. The caption underneath carries the
+    /// full meaning, so these only have to tell the four apart.
     var label: String {
         switch self {
         case .base: "Rain"
-        case .composite: "Storm cores"
-        case .echoTops: "Storm tops"
+        case .composite: "Cores"
+        case .echoTops: "Tops"
         case .precipitationType: "Type"
         }
     }

@@ -231,6 +231,50 @@ enum RainViewer {
 
 // MARK: - The overlay
 
+/// One cache, shared by the overlay that draws tiles and the prefetcher that
+/// warms them.
+///
+/// Both have to go through the same store or the prefetch is wasted work: the
+/// loop was flashing frames because each one began downloading only as it was
+/// shown, and a 260 ms step is not long enough to fetch a screen of tiles.
+enum RadarTiles {
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        // Radar frames are small and there are at most a few hundred of them
+        // in a session; this is comfortably enough to hold a whole loop.
+        configuration.urlCache = URLCache(memoryCapacity: 32 << 20,
+                                          diskCapacity: 256 << 20,
+                                          diskPath: "radar-tiles")
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: configuration)
+    }()
+
+    /// Every tile covering a region at a zoom — the set a frame needs before
+    /// it can be shown whole.
+    static func tiles(covering region: MKCoordinateRegion, zoom: Int) -> [(x: Int, y: Int)] {
+        func x(_ longitude: Double) -> Int {
+            Int((longitude + 180) / 360 * Double(1 << zoom))
+        }
+        func y(_ latitude: Double) -> Int {
+            let clamped = min(max(latitude, -85.05), 85.05) * .pi / 180
+            let value = (1 - log(tan(clamped) + 1 / cos(clamped)) / .pi) / 2
+            return Int(value * Double(1 << zoom))
+        }
+        let west = region.center.longitude - region.span.longitudeDelta / 2
+        let east = region.center.longitude + region.span.longitudeDelta / 2
+        let north = region.center.latitude + region.span.latitudeDelta / 2
+        let south = region.center.latitude - region.span.latitudeDelta / 2
+        let limit = (1 << zoom) - 1
+        var out: [(Int, Int)] = []
+        for tx in max(0, x(west))...min(limit, x(east)) {
+            for ty in max(0, y(north))...min(limit, y(south)) {
+                out.append((tx, ty))
+            }
+        }
+        return out
+    }
+}
+
 /// `MKTileOverlay` whose URLs are computed rather than templated, because
 /// NOAA's WMS needs a bounding box rather than z/x/y substitution.
 ///
@@ -270,7 +314,7 @@ final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
         result: @escaping @Sendable (Data?, (any Error)?) -> Void
     ) {
         guard path.z > nativeZoom else {
-            super.loadTile(at: path, result: result)
+            fetch(url(forTilePath: path), result)
             return
         }
         let step = path.z - nativeZoom
@@ -279,7 +323,7 @@ final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
             x: path.x / scale, y: path.y / scale, z: nativeZoom,
             contentScaleFactor: path.contentScaleFactor
         )
-        super.loadTile(at: ancestor) { data, error in
+        fetch(url(forTilePath: ancestor)) { data, error in
             guard let data, let source = UIImage(data: data)?.cgImage else {
                 result(data, error)
                 return
@@ -301,6 +345,15 @@ final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
             }
             result(scaled.pngData(), nil)
         }
+    }
+
+    /// Through the shared cache, so a prefetched frame draws instantly.
+    private nonisolated func fetch(
+        _ url: URL, _ result: @escaping @Sendable (Data?, (any Error)?) -> Void
+    ) {
+        RadarTiles.session.dataTask(with: url) { data, _, error in
+            result(data, error)
+        }.resume()
     }
 
     override nonisolated func url(forTilePath path: MKTileOverlayPath) -> URL {
@@ -337,7 +390,11 @@ struct RadarMapView: UIViewRepresentable {
         return map
     }
 
+    /// Reported back so the screen knows which tiles a loop would need.
+    var onRegionChange: ((MKCoordinateRegion) -> Void)?
+
     func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.onRegionChange = onRegionChange
         map.preferredConfiguration = switch style {
         case .standard: MKStandardMapConfiguration(elevationStyle: .flat)
         case .hybrid: MKHybridMapConfiguration(elevationStyle: .flat)
@@ -352,6 +409,11 @@ struct RadarMapView: UIViewRepresentable {
 
         private var showing: RadarSource?
         private var overlay: MKTileOverlay?
+        var onRegionChange: ((MKCoordinateRegion) -> Void)?
+
+        func mapView(_ map: MKMapView, regionDidChangeAnimated: Bool) {
+            onRegionChange?(map.region)
+        }
 
         /// Swap the layer only when the source actually changed — scrubbing
         /// frames re-enters this on every slider tick, and removing and adding
@@ -401,6 +463,10 @@ struct RadarScreen: View {
     }
 
     @State private var layer: Layer = .still(.base)
+    /// Fraction of the loop's tiles already in the cache, 0–1.
+    @State private var loaded: Double = 0
+    @State private var isPreloading = false
+    @State private var visible: MKCoordinateRegion?
 
     private var product: RadarProduct {
         if case .still(let product) = layer { return product }
@@ -425,8 +491,58 @@ struct RadarScreen: View {
     /// Only the animated source gets a scrubber.
     private var isAnimated: Bool { showsLoop && frames.count > 1 }
 
+    private var isReady: Bool { loaded >= 1 }
+
+    private var preloadKey: String {
+        guard showsLoop, let visible else { return "" }
+        return String(format: "%.2f,%.2f,%.2f,%d", visible.center.latitude,
+                      visible.center.longitude, visible.span.latitudeDelta, frames.count)
+    }
+
+    /// Warm every frame's tiles before the loop can run.
+    ///
+    /// Playing straight away is what produced the flashes: each frame began
+    /// downloading only as it was shown, and a quarter of a second is not
+    /// enough to fetch a screenful. So the whole loop is fetched first, with
+    /// the progress on screen, and play stays disabled until it is there.
+    private func preload() async {
+        guard showsLoop, frames.count > 1, let region = visible else { return }
+        isPreloading = true
+        loaded = 0
+        defer { isPreloading = false }
+
+        let zoom = min(RadarSource.rainViewer(frame: frames[0]).maximumZoom,
+                       Self.zoom(for: region))
+        let tiles = RadarTiles.tiles(covering: region, zoom: zoom)
+        guard !tiles.isEmpty else { loaded = 1; return }
+
+        let total = frames.count * tiles.count
+        var done = 0
+        for frame in frames {
+            let source = RadarSource.rainViewer(frame: frame)
+            await withTaskGroup(of: Void.self) { group in
+                for tile in tiles {
+                    guard let url = source.tileURL(x: tile.x, y: tile.y, z: zoom) else { continue }
+                    group.addTask { _ = try? await RadarTiles.session.data(from: url) }
+                }
+                for await _ in group { }
+            }
+            done += tiles.count
+            loaded = Double(done) / Double(total)
+            if Task.isCancelled { return }
+        }
+        loaded = 1
+    }
+
+    /// The slippy-map zoom that best matches a region on screen.
+    private static func zoom(for region: MKCoordinateRegion) -> Int {
+        let fraction = max(region.span.longitudeDelta, 0.01) / 360
+        return max(3, min(12, Int((log2(1 / fraction)).rounded())))
+    }
+
     var body: some View {
-        RadarMapView(centre: centre, source: source, style: settings.mapStyle)
+        RadarMapView(centre: centre, source: source, style: settings.mapStyle,
+                     onRegionChange: { visible = $0 })
             .ignoresSafeArea(edges: Edge.Set.bottom)
             .safeAreaInset(edge: VerticalEdge.bottom) { footer }
             .navigationTitle(title)
@@ -441,11 +557,12 @@ struct RadarScreen: View {
             // Restarting from the beginning when play is pressed at the end
             // matters: the last frame is now, and a rider who taps play there
             // wants to watch the last two hours arrive, not sit on a still.
+            .task(id: preloadKey) { await preload() }
             .task(id: isPlaying) {
-                guard isPlaying, frames.count > 1 else { return }
+                guard isPlaying, isReady, frames.count > 1 else { return }
                 if index >= frames.count - 1 { index = 0 }
                 while !Task.isCancelled, isPlaying {
-                    try? await Task.sleep(for: .milliseconds(index == frames.count - 1 ? 900 : 260))
+                    try? await Task.sleep(for: .milliseconds(index == frames.count - 1 ? 1200 : 420))
                     guard !Task.isCancelled, isPlaying else { return }
                     index = index >= frames.count - 1 ? 0 : index + 1
                 }
@@ -463,7 +580,13 @@ struct RadarScreen: View {
                 if case .still = layer { isPlaying = false }
             }
 
-            if isAnimated { scrubber }
+            if isAnimated {
+                if isReady {
+                    scrubber
+                } else {
+                    loadingBar
+                }
+            }
             Text(source.attribution)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -475,6 +598,27 @@ struct RadarScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(.regularMaterial)
+    }
+
+    /// What the loop is doing before it can run.
+    private var loadingBar: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(frames.isEmpty
+                     ? "Finding frames…"
+                     : "Loading \(frames.count) frames — \(Int(loaded * 100))%")
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+            }
+            ProgressView(value: loaded)
+                .tint(.orange)
+            Text("The whole loop is fetched before it plays, so it runs smoothly instead of flashing frames as they arrive.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder

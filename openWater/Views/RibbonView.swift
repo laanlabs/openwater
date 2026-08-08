@@ -123,6 +123,28 @@ struct RibbonView: View {
         isPointToPoint && !legs.isEmpty && order == .time && filter == .all
     }
 
+    /// What kind of run a leg is, from the point of sail its stretches were
+    /// mostly sailed on.
+    private func type(of leg: SessionLeg) -> Leg {
+        let inside = lanes(in: leg)
+        let upwind = inside.filter { Leg.upwind.matches($0.pointOfSail) }.count
+        let downwind = inside.filter { Leg.downwind.matches($0.pointOfSail) }.count
+        if downwind > upwind, downwind > 0 { return .downwind }
+        if upwind > 0 { return .upwind }
+        return .reaching
+    }
+
+    /// Whether the pieces inside a leg are worth showing.
+    ///
+    /// On an upwind leg they are tacks — each one a real, deliberate change of
+    /// side, and the thing a rider wants to count. On a downwind leg they are
+    /// weaves across the bumps, which the segmenter is right to notice and
+    /// nobody asked to see: eighteen rows under a single river crossing was
+    /// the noise this screen kept being told about.
+    private func hasTacks(_ leg: SessionLeg) -> Bool {
+        type(of: leg) == .upwind && lanes(in: leg).count > 1
+    }
+
     private func lanes(in leg: SessionLeg) -> [SessionRibbon.Lane] {
         ribbon.lanes.filter { $0.startElapsed >= leg.startElapsed - 1
                            && $0.endElapsed <= leg.endElapsed + 1 }
@@ -153,14 +175,29 @@ struct RibbonView: View {
                     }
 
                     if showsLegs {
-                        ForEach(legs) { leg in
-                            legRow(leg)
-                            if expandedLeg == leg.id {
-                                ForEach(lanes(in: leg), id: \.id) { lane in
-                                    laneRow(lane)
-                                        .padding(.leading, 14)
+                        // Grouped by type, because that is how a rider thinks
+                        // about a mixed day: these were my downwind runs,
+                        // those were the beats back up.
+                        ForEach([Leg.downwind, .reaching, .upwind], id: \.self) { kind in
+                            let group = legs.filter { type(of: $0) == kind }
+                            if !group.isEmpty {
+                                if legs.count > group.count {
+                                    Text(kind == .downwind ? "Downwind"
+                                         : kind == .upwind ? "Upwind" : "Reaching")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.top, 12)
                                 }
-                                .transition(.opacity)
+                                ForEach(Array(group.enumerated()), id: \.element.id) { index, leg in
+                                    legRow(leg, number: index + 1, of: group.count)
+                                    if expandedLeg == leg.id, hasTacks(leg) {
+                                        ForEach(lanes(in: leg), id: \.id) { lane in
+                                            laneRow(lane)
+                                                .padding(.leading, 14)
+                                        }
+                                        .transition(.opacity)
+                                    }
+                                }
                             }
                         }
                     }
@@ -335,26 +372,31 @@ struct RibbonView: View {
         .padding(.bottom, 8)
     }
 
-    /// One run of the session: how far, how long, how fast, and the stretches
-    /// inside it on request.
-    private func legRow(_ leg: SessionLeg) -> some View {
-        let inside = lanes(in: leg)
+    /// One run: how far, how long, how fast — and its tacks, when it has any.
+    private func legRow(_ leg: SessionLeg, number: Int, of total: Int) -> some View {
+        let kind = type(of: leg)
+        let tacks = hasTacks(leg) ? lanes(in: leg).count : 0
         return Button {
+            guard tacks > 0 else { return }
             withAnimation(.snappy) {
                 expandedLeg = expandedLeg == leg.id ? nil : leg.id
             }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: expandedLeg == leg.id ? "chevron.down" : "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
+                if tacks > 0 {
+                    Image(systemName: expandedLeg == leg.id ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                } else {
+                    Color.clear.frame(width: 12)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(legs.count > 1 ? "Run \(leg.id + 1)" : "The run")
+                        Text(title(kind, number: number, of: total))
                             .font(.subheadline.weight(.semibold))
-                        if let alignment = leg.alignment, leg.isRun {
+                        if let alignment = leg.alignment, leg.isRun, kind == .downwind {
                             Text("\(Int(alignment.rounded()))° off downwind")
                                 .font(.caption2)
                                 .foregroundStyle(alignment <= 20 ? .green : .secondary)
@@ -367,14 +409,29 @@ struct RibbonView: View {
 
                 Spacer(minLength: 8)
 
-                Text("\(inside.count) stretch\(inside.count == 1 ? "" : "es")")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                // Only tacks are worth counting. A downwind run's stretches
+                // are weaves, and saying "18" about one river crossing told
+                // the rider nothing they wanted.
+                if tacks > 0 {
+                    Text("\(tacks) tacks")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(tacks == 0)
+    }
+
+    private func title(_ kind: Leg, number: Int, of total: Int) -> String {
+        let name = switch kind {
+        case .downwind: "Downwind run"
+        case .upwind: "Upwind run"
+        default: "Run"
+        }
+        return total > 1 ? "\(name) \(number)" : name
     }
 
     private func laneRow(_ lane: SessionRibbon.Lane) -> some View {

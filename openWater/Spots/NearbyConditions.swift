@@ -99,6 +99,9 @@ struct WindOutlook {
         let label: String
         /// Hourly wind in knots, aligned to `hours`.
         let speeds: [Double?]
+        var gusts: [Double?] = []
+        /// Degrees the wind comes from, aligned to `hours`.
+        var directions: [Double?] = []
     }
 
     let hours: [Date]
@@ -118,6 +121,37 @@ struct WindOutlook {
             let values = chosen.compactMap { $0.speeds[safe: hour] ?? nil }
             guard !values.isEmpty else { return nil }
             return values.reduce(0, +) / Double(values.count)
+        }
+    }
+
+    /// Gusts, blended the same way as the speeds.
+    func blendGusts(of enabled: Set<String>) -> [Double?] {
+        let chosen = models.filter { enabled.contains($0.id) }
+        guard !chosen.isEmpty else { return [] }
+        return hours.indices.map { hour in
+            let values = chosen.compactMap { $0.gusts[safe: hour] ?? nil }
+            guard !values.isEmpty else { return nil }
+            return values.reduce(0, +) / Double(values.count)
+        }
+    }
+
+    /// Direction, averaged the only way a direction can be.
+    ///
+    /// A plain mean of 350° and 10° is 180° — due south, the exact opposite
+    /// of the northerly both models actually forecast. Averaging the unit
+    /// vectors and taking the angle back off avoids that, and also degrades
+    /// sensibly: models pointing every which way produce a short resultant,
+    /// which is honestly what disagreement about direction looks like.
+    func blendDirections(of enabled: Set<String>) -> [Double?] {
+        let chosen = models.filter { enabled.contains($0.id) }
+        guard !chosen.isEmpty else { return [] }
+        return hours.indices.map { hour in
+            let values = chosen.compactMap { $0.directions[safe: hour] ?? nil }
+            guard !values.isEmpty else { return nil }
+            let x = values.reduce(0.0) { $0 + cos($1 * .pi / 180) }
+            let y = values.reduce(0.0) { $0 + sin($1 * .pi / 180) }
+            let mean = atan2(y, x) * 180 / .pi
+            return mean < 0 ? mean + 360 : mean
         }
     }
 
@@ -410,7 +444,7 @@ enum OpenMeteo {
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
             .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
-            .init(name: "hourly", value: "wind_speed_10m"),
+            .init(name: "hourly", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
             .init(name: "models", value: models.map(\.id).joined(separator: ",")),
             .init(name: "wind_speed_unit", value: "kn"),
             .init(name: "forecast_days", value: String(days)),
@@ -428,11 +462,17 @@ enum OpenMeteo {
         // Each model comes back on its own suffixed key, and a model with no
         // data for this point is simply absent — so build from what arrived
         // rather than from what was asked for.
+        func series(_ field: String, _ model: String) -> [Double?] {
+            (hourly["\(field)_\(model)"] as? [Any])?.map { $0 as? Double } ?? []
+        }
         let series = models.compactMap { model -> WindOutlook.Model? in
-            guard let raw = hourly["wind_speed_10m_\(model.id)"] as? [Any] else { return nil }
-            let speeds = raw.map { $0 as? Double }
+            let speeds = series("wind_speed_10m", model.id)
             guard speeds.contains(where: { $0 != nil }) else { return nil }
-            return WindOutlook.Model(id: model.id, label: model.label, speeds: speeds)
+            return WindOutlook.Model(
+                id: model.id, label: model.label, speeds: speeds,
+                gusts: series("wind_gusts_10m", model.id),
+                directions: series("wind_direction_10m", model.id)
+            )
         }
         return WindOutlook(
             hours: times.map { Date(timeIntervalSince1970: $0) },

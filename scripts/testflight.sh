@@ -129,6 +129,15 @@ if not phone.get("CFBundleDocumentTypes"):
 if not phone.get("UTExportedTypeDeclarations"):
     problems.append("iOS app does not export the .openwater type")
 
+# Having declared document types, Apple requires the app to say whether it
+# opens the original or wants a copy. Omitting it is the "Missing Document
+# Configuration" warning on upload — which, like the privacy manifest before
+# it, never failed a build and so went unnoticed until the upload dialog.
+if "LSSupportsOpeningDocumentsInPlace" not in phone and not phone.get("UISupportsDocumentBrowser"):
+    problems.append("iOS app declares document types but neither "
+                    "LSSupportsOpeningDocumentsInPlace nor UISupportsDocumentBrowser "
+                    "— upload will warn")
+
 if problems:
     print("\n".join("  ✗ " + p for p in problems))
     sys.exit(1)

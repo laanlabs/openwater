@@ -41,6 +41,7 @@ struct CurrentConditionsScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 headline
+                if let now { windCard(now) }
                 if let now { grid(now) }
                 if let station { comparison(station) }
                 sunCard
@@ -77,21 +78,15 @@ struct CurrentConditionsScreen: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if let wind = now?.windKn {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        (Text("\(Int(wind.rounded()))").font(.system(size: 30, weight: .heavy, design: .rounded))
-                         + Text(" kn").font(.subheadline.weight(.semibold)))
-                            .foregroundStyle(wind >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                        if let direction = now?.directionDeg {
-                            Text("from \(Format.cardinal(direction)) · \(Int(direction))°")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let gust = now?.gustKn {
-                            Text("gusting \(Int(gust.rounded()))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                if let apparent = now?.apparentC, let actual = now?.temperatureC,
+                   abs(apparent - actual) >= 1 {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("\(Int(apparent.rounded()))°")
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                        Text("FEELS LIKE")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -101,12 +96,65 @@ struct CurrentConditionsScreen: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
 
+    @ViewBuilder
+    private func windCard(_ now: WeatherDetail.Now) -> some View {
+        if let direction = now.directionDeg, let speed = now.windKn {
+            HStack(alignment: .center, spacing: 18) {
+                WindCompass(directionDeg: direction, speedKn: speed, gustKn: now.gustKn)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text("\(Int(speed.rounded()))")
+                            .font(.system(size: 40, weight: .heavy, design: .rounded))
+                            .foregroundStyle(speed >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                            .monospacedDigit()
+                        Text("kn")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Text(Format.cardinal(direction))
+                            .font(.system(size: 26, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.bottom, 6)
+
+                    windRow("Gusting", now.gustKn.map { "to \(Int($0.rounded())) kn" } ?? "—",
+                            "wind", divided: true)
+                    windRow("Humidity", now.humidity.map { "\(Int($0.rounded()))%" } ?? "—",
+                            "humidity", divided: true)
+                    windRow("Pressure", now.pressureHPa.map { "\(Int($0.rounded())) hPa" } ?? "—",
+                            "barometer", divided: false)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        }
+    }
+
+    private func windRow(_ label: String, _ value: String, _ symbol: String, divided: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 15)
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Text(value)
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+            }
+            .padding(.vertical, 6)
+            if divided { Divider() }
+        }
+    }
+
     private func grid(_ now: WeatherDetail.Now) -> some View {
         let cells: [(String, String, String)] = [
-            ("Feels like", now.apparentC.map { "\(Int($0.rounded()))°" } ?? "—", "thermometer.medium"),
-            ("Humidity", now.humidity.map { "\(Int($0.rounded()))%" } ?? "—", "humidity"),
             ("Dew point", now.dewPointC.map { "\(Int($0.rounded()))°" } ?? "—", "drop"),
-            ("Pressure", now.pressureHPa.map { "\(Int($0.rounded())) hPa" } ?? "—", "barometer"),
             ("Cloud", now.cloudCover.map { "\(Int($0.rounded()))%" } ?? "—", "cloud"),
             ("UV index", now.uvIndex.map { String(format: "%.1f", $0) } ?? "—", "sun.max"),
             ("Visibility", now.visibilityM.map { visibility($0) } ?? "—", "eye"),
@@ -247,6 +295,7 @@ struct ForecastScreen: View {
 
     @Environment(AppSettings.self) private var settings
     @State private var day = 0
+    @State private var span: Span = .day
 
     private var zone: TimeZone { detail.timeZone ?? .current }
 
@@ -267,6 +316,7 @@ struct ForecastScreen: View {
             VStack(alignment: .leading, spacing: 14) {
                 agreementCard
                 modelLines
+                spanPicker
                 dayPicker
                 hourlyTable
                 dailyCard
@@ -383,9 +433,19 @@ struct ForecastScreen: View {
 
     // MARK: Hour by hour
 
+    enum Span: String, CaseIterable { case day = "Day", week = "Week" }
+
+    @ViewBuilder
+    private var spanPicker: some View {
+        Picker("Span", selection: $span) {
+            ForEach(Span.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+    }
+
     @ViewBuilder
     private var dayPicker: some View {
-        if detail.days.count > 1 {
+        if detail.days.count > 1, span == .day {
             Picker("Day", selection: $day) {
                 ForEach(detail.days.indices.prefix(5), id: \.self) { index in
                     Text(label(for: detail.days[index].date)).tag(index)
@@ -407,16 +467,10 @@ struct ForecastScreen: View {
     /// scrolling past the point of usefulness.
     @ViewBuilder
     private var hourlyTable: some View {
-        let rows = hours(for: day)
+        let rows = span == .day ? hours(for: day) : detail.hours
         if !rows.isEmpty {
-            VStack(spacing: 0) {
-                header
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, hour in
-                    row(hour)
-                    if index < rows.count - 1 { Divider() }
-                }
-            }
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            ForecastTable(hours: rows, waves: waves, zone: zone,
+                          step: span == .day ? 1 : 3)
         }
     }
 
@@ -487,11 +541,9 @@ struct ForecastScreen: View {
 
     private func hours(for index: Int) -> [WeatherDetail.Hour] {
         guard let date = detail.days[safe: index]?.date else { return [] }
-        return detail.hours
-            .filter { calendar.isDate($0.at, inSameDayAs: date) }
-            .enumerated()
-            .filter { $0.offset % 3 == 0 }
-            .map(\.element)
+        // Every hour. The three-hour thinning that used to live here is now
+        // the table's job, and only in the week view.
+        return detail.hours.filter { calendar.isDate($0.at, inSameDayAs: date) }
     }
 
     // MARK: The week
@@ -604,15 +656,21 @@ struct ChartGrid: View {
                 let isKey = highlight.map { abs($0 - level) < 0.01 } ?? false
                 ZStack(alignment: .topLeading) {
                     Rectangle()
-                        .fill(isKey ? AnyShapeStyle(Color.accentColor.opacity(0.4))
-                              : AnyShapeStyle(Color(.systemGray4).opacity(0.6)))
-                        .frame(height: isKey ? 1 : 0.5)
+                        .fill(isKey ? AnyShapeStyle(Color.accentColor.opacity(0.75))
+                              : AnyShapeStyle(Color(.systemGray2).opacity(0.55)))
+                        .frame(height: isKey ? 2 : 1)
                     // Below the rule rather than above it: the topmost line
                     // sits at y = 0 and a label above it would be clipped.
+                    // On a chip, because the traces cross straight through
+                    // where the label sits and bare text became unreadable
+                    // wherever a line happened to pass.
                     Text(label(level))
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(isKey ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                        .offset(y: 1)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(isKey ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                        .offset(x: 2, y: 2)
                 }
                 .frame(width: geometry.size.width, alignment: .leading)
                 .offset(y: geometry.size.height * (1 - level / peak))
@@ -760,13 +818,19 @@ struct ModelCompareScreen: View {
     // MARK: The chart
 
     private var chart: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            let width = CGFloat(outlook.hours.count) * Self.hourWidth
+        let width = CGFloat(outlook.hours.count) * Self.hourWidth
 
+        // The grid sits outside the scroll view: a y-axis that slides off the
+        // left edge with the traces labels nothing. Its bottom padding clears
+        // the weekday strip so the rules line up with the plot, not the axis.
+        return ZStack(alignment: .topLeading) {
+            ChartGrid(peak: peak)
+                .padding(.top, 12)
+                .padding(.bottom, 28)
+
+            ScrollView(.horizontal, showsIndicators: true) {
             VStack(spacing: 0) {
                 ZStack(alignment: .topLeading) {
-                    ChartGrid(peak: peak)
-
                     // Midnight rules, so a week of wind reads as days rather
                     // than as one long wobble.
                     ForEach(midnights, id: \.self) { hour in
@@ -814,8 +878,9 @@ struct ModelCompareScreen: View {
                 axis(width: width)
             }
             .padding(.vertical, 12)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 
     private var midnights: [Int] {
@@ -890,5 +955,275 @@ struct ModelCompareScreen: View {
         return "The heavy line is the blend of whatever is switched on. Models run to different horizons — "
             + horizons.joined(separator: ", ")
             + ". Free from Open-Meteo."
+    }
+}
+
+// MARK: - Which way it is blowing
+
+/// A compass dial for the wind.
+///
+/// A bearing in degrees is precise and almost nobody reads it as a direction
+/// — "315°" needs a moment's arithmetic that "NW, and the arrow points at the
+/// far shore" does not. The dart points the way the wind is *going*, which is
+/// the way you will drift; the label says where it is coming *from*, which is
+/// how every forecast states it. Both, because riders think in both and
+/// conflating them is how people end up downwind of the car.
+struct WindCompass: View {
+
+    /// Meteorological convention: the direction the wind blows *from*.
+    let directionDeg: Double
+    let speedKn: Double
+    var gustKn: Double?
+    var diameter: CGFloat = 128
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(Color(.systemGray6))
+                Circle()
+                    .strokeBorder(Color(.systemGray3), lineWidth: 5)
+
+                ForEach(Array(["N", "E", "S", "W"].enumerated()), id: \.offset) { index, letter in
+                    Text(letter)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        // Counter-rotated so the glyph stays upright: the
+                        // outer rotation is what puts it at its point of the
+                        // compass, and without this E and W lie on their side.
+                        .rotationEffect(.degrees(Double(index) * -90))
+                        .offset(y: -diameter / 2 + 13)
+                        .rotationEffect(.degrees(Double(index) * 90))
+                }
+
+                // Drawn pointing down, so a wind *from* north (0°) needs no
+                // rotation to point south, which is where it is going.
+                Dart()
+                    .fill(speedKn >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary.opacity(0.8)))
+                    .frame(width: diameter * 0.52, height: diameter * 0.72)
+                    .rotationEffect(.degrees(directionDeg))
+                    .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+            }
+            .frame(width: diameter, height: diameter)
+
+            Text("from \(Format.cardinal(directionDeg)) · \(Int(directionDeg.rounded()))°")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+}
+
+/// The pointer: a long head with a swallowed tail, pointing down.
+private struct Dart: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+        var path = Path()
+        path.move(to: point(0.5, 1))
+        path.addLine(to: point(0.94, 0.10))
+        path.addLine(to: point(0.5, 0.34))
+        path.addLine(to: point(0.06, 0.10))
+        path.closeSubpath()
+        return path
+    }
+}
+
+// MARK: - The forecast table
+
+/// The grid every wind forecast site converged on, because it works.
+///
+/// A row per quantity, a column per hour, colour carrying the magnitude so
+/// the eye finds the windy afternoon before it reads a single number. It is
+/// dense on purpose: a rider planning a week wants to compare Tuesday
+/// afternoon against Saturday morning, and a chart makes that a memory test
+/// while a table makes it a glance.
+///
+/// The labels stay pinned while the hours scroll — a table whose row names
+/// slide off is a wall of numbers.
+struct ForecastTable: View {
+
+    let hours: [WeatherDetail.Hour]
+    let waves: [WaveHour]
+    var zone: TimeZone = .current
+    /// Hours between columns. Every hour for a day, every three for a week.
+    var step: Int = 1
+
+    private static let columnWidth: CGFloat = 44
+    private static let labelWidth: CGFloat = 62
+
+    private var columns: [WeatherDetail.Hour] {
+        stride(from: 0, to: hours.count, by: max(1, step)).compactMap { hours[safe: $0] }
+    }
+
+    private var wavesByHour: [Date: WaveHour] {
+        Dictionary(waves.map { ($0.at, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private var hasWaves: Bool { !waves.isEmpty }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            labels
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: 0) {
+                    ForEach(Array(columns.enumerated()), id: \.element.id) { index, hour in
+                        column(hour, isDayStart: isDayStart(index))
+                    }
+                }
+            }
+        }
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func isDayStart(_ index: Int) -> Bool {
+        guard index > 0, let current = columns[safe: index], let previous = columns[safe: index - 1]
+        else { return false }
+        var calendar = Calendar.current
+        calendar.timeZone = zone
+        return !calendar.isDate(current.at, inSameDayAs: previous.at)
+    }
+
+    // MARK: Rows
+
+    private var labels: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            cell("") // day
+            cell("")  // hour
+            cell("WIND", tall: true)
+            cell("GUST")
+            cell("SKY")
+            cell("TEMP")
+            if hasWaves {
+                cell("WAVE")
+                cell("PERIOD")
+            }
+            cell("RAIN")
+        }
+        .frame(width: Self.labelWidth)
+        .background(Color(.secondarySystemGroupedBackground))
+    }
+
+    private func cell(_ text: String, tall: Bool = false) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(height: tall ? 58 : 24)
+            .padding(.trailing, 8)
+    }
+
+    private func column(_ hour: WeatherDetail.Hour, isDayStart: Bool) -> some View {
+        let wave = wavesByHour[hour.at]
+        return VStack(spacing: 0) {
+            Text(isDayStart || hour.at == columns.first?.at
+                 ? hour.at.formatted(Date.FormatStyle(timeZone: zone).weekday(.abbreviated))
+                 : "")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(height: 24)
+
+            Text(hour.at.formatted(Date.FormatStyle(timeZone: zone).hour()))
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .frame(height: 24)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            windCell(hour)
+            value(hour.gustKn, tint: Self.windColour(hour.gustKn ?? 0))
+            skyCell(hour)
+            value(hour.temperatureC, suffix: "°", tint: Self.temperatureColour(hour.temperatureC))
+
+            if hasWaves {
+                value(wave?.heightM, decimals: 1, tint: Color.blue.opacity(0.45))
+                value(wave?.periodS, tint: Color.blue.opacity(0.28))
+            }
+
+            value(hour.precipitationChance, suffix: "%",
+                  tint: Color.blue.opacity(min(0.6, (hour.precipitationChance ?? 0) / 140)))
+        }
+        .frame(width: Self.columnWidth)
+        .overlay(alignment: .leading) {
+            // A heavier rule where the day turns over.
+            if isDayStart {
+                Rectangle().fill(Color(.systemGray2)).frame(width: 1)
+            }
+        }
+    }
+
+    /// Speed, an arrow for direction, and the bearing — the three things the
+    /// iKitesurf grid gets right and a bar chart cannot say at once.
+    private func windCell(_ hour: WeatherDetail.Hour) -> some View {
+        VStack(spacing: 1) {
+            Text(hour.windKn.map { "\(Int($0.rounded()))" } ?? "—")
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+            if let direction = hour.directionDeg {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .rotationEffect(.degrees(direction))
+                Text("\(Int(direction.rounded()))")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .background(Self.windColour(hour.windKn ?? 0))
+    }
+
+    private func skyCell(_ hour: WeatherDetail.Hour) -> some View {
+        Image(systemName: SpotWeather.symbol(for: hour.code, isDay: true))
+            .font(.system(size: 11))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 24)
+            .background(Color(.systemGray6))
+    }
+
+    private func value(_ number: Double?, suffix: String = "", decimals: Int = 0,
+                       tint: Color) -> some View {
+        Text(number.map { decimals > 0 ? String(format: "%.\(decimals)f", $0)
+                          : "\(Int($0.rounded()))" }.map { $0 + suffix } ?? "—")
+            .font(.system(size: 10, weight: .semibold))
+            .monospacedDigit()
+            .frame(maxWidth: .infinity)
+            .frame(height: 24)
+            .background(tint)
+    }
+
+    // MARK: Colour
+
+    /// The wind ramp, in the units this sport argues in.
+    ///
+    /// Deliberately not a smooth gradient: the steps are where the decisions
+    /// are. Under 8 is not happening, 12 is the small-gear line, 18 is
+    /// getting serious, 25+ is a different day entirely.
+    static func windColour(_ knots: Double) -> Color {
+        switch knots {
+        case ..<5: Color(.systemGray6)
+        case ..<8: Color.cyan.opacity(0.22)
+        case ..<12: Color.green.opacity(0.30)
+        case ..<15: Color.green.opacity(0.55)
+        case ..<18: Color.yellow.opacity(0.65)
+        case ..<22: Color.orange.opacity(0.70)
+        case ..<28: Color.red.opacity(0.65)
+        default: Color.purple.opacity(0.60)
+        }
+    }
+
+    static func temperatureColour(_ celsius: Double?) -> Color {
+        guard let celsius else { return Color(.systemGray6) }
+        return switch celsius {
+        case ..<0: Color.indigo.opacity(0.30)
+        case ..<10: Color.blue.opacity(0.22)
+        case ..<18: Color.teal.opacity(0.20)
+        case ..<25: Color.orange.opacity(0.25)
+        default: Color.red.opacity(0.35)
+        }
     }
 }

@@ -239,16 +239,68 @@ enum RainViewer {
 final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
 
     private let build: @Sendable (Int, Int, Int) -> URL?
+    /// The deepest zoom this provider actually publishes.
+    private let nativeZoom: Int
 
     init(source: RadarSource) {
         self.build = { x, y, z in source.tileURL(x: x, y: y, z: z) }
+        self.nativeZoom = source.maximumZoom
         super.init(urlTemplate: nil)
         tileSize = CGSize(width: 256, height: 256)
         // The radar sits on top of the map, it does not replace it — a radar
         // sweep with no coastline under it tells a rider nothing.
         canReplaceMapContent = false
         minimumZ = 3
-        maximumZ = source.maximumZoom
+        // Deliberately past the provider's own ceiling. `maximumZ` only stops
+        // MapKit *asking* for deeper tiles — it does not scale the shallow
+        // ones up, so capping it left the map simply blank when zoomed in.
+        // `loadTile` below serves those requests from the deepest real tile.
+        maximumZ = 12
+    }
+
+    /// Serve a zoomed-in tile by cropping the deepest real one.
+    ///
+    /// RainViewer publishes to zoom 7. Asked for zoom 10 it returns a grey
+    /// "Zoom Level Not Supported" placeholder, and refusing to ask returns
+    /// nothing at all — so above its ceiling this fetches the ancestor tile
+    /// that contains the requested one and cuts out the right quadrant.
+    /// Coarser as you zoom, which is honest: that is all the data there is.
+    override nonisolated func loadTile(
+        at path: MKTileOverlayPath,
+        result: @escaping @Sendable (Data?, (any Error)?) -> Void
+    ) {
+        guard path.z > nativeZoom else {
+            super.loadTile(at: path, result: result)
+            return
+        }
+        let step = path.z - nativeZoom
+        let scale = 1 << step
+        let ancestor = MKTileOverlayPath(
+            x: path.x / scale, y: path.y / scale, z: nativeZoom,
+            contentScaleFactor: path.contentScaleFactor
+        )
+        super.loadTile(at: ancestor) { data, error in
+            guard let data, let source = UIImage(data: data)?.cgImage else {
+                result(data, error)
+                return
+            }
+            let side = CGFloat(source.width) / CGFloat(scale)
+            let crop = CGRect(
+                x: CGFloat(path.x % scale) * side,
+                y: CGFloat(path.y % scale) * side,
+                width: side, height: side
+            )
+            guard let piece = source.cropping(to: crop) else {
+                result(data, nil)
+                return
+            }
+            let size = CGSize(width: 256, height: 256)
+            let scaled = UIGraphicsImageRenderer(size: size).image { context in
+                context.cgContext.interpolationQuality = .high
+                UIImage(cgImage: piece).draw(in: CGRect(origin: .zero, size: size))
+            }
+            result(scaled.pngData(), nil)
+        }
     }
 
     override nonisolated func url(forTilePath path: MKTileOverlayPath) -> URL {

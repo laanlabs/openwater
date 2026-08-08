@@ -35,6 +35,14 @@ struct SpotsTabView: View {
     @State private var localWeather: SpotWeather?
     @State private var localWind: WindReading?
 
+    /// A point the rider chose by holding a finger on the map.
+    ///
+    /// The chip has always followed the GPS, which is right when you are
+    /// standing at the launch and useless when you are on the sofa deciding
+    /// where to drive. Long-press anywhere and everything — the weather, the
+    /// wind, the conditions sheet — is about that point instead.
+    @State private var pickedPoint: Geo.Coordinate?
+
     enum PanelMode: String, CaseIterable {
         case nearby = "Nearby", favorites = "Favorites", destinations = "Destinations"
     }
@@ -112,7 +120,8 @@ struct SpotsTabView: View {
         }
         .sheet(isPresented: $isShowingConditions) {
             if let here = localCoordinate {
-                NearbyConditionsSheet(title: "Conditions here", coordinate: here)
+                NearbyConditionsSheet(title: pickedPoint == nil ? "Conditions here" : "Conditions there",
+                                      coordinate: here)
             }
         }
         .task(id: localWeatherKey) {
@@ -176,7 +185,8 @@ struct SpotsTabView: View {
         // readings. Capturing the dictionary up front both registers the
         // dependency and hands the closures a stable copy.
         let readings = guide.wind
-        return Map(position: $camera) {
+        return MapReader { proxy in
+            Map(position: $camera) {
             UserAnnotation()
             ForEach(pinSpots) { spot in
                 Annotation("", coordinate: spot.coordinate, anchor: .bottom) {
@@ -188,11 +198,40 @@ struct SpotsTabView: View {
                 }
                 .annotationTitles(.hidden)
             }
+
+            if let picked = pickedPoint {
+                Annotation("", coordinate: .init(latitude: picked.latitude,
+                                                 longitude: picked.longitude),
+                           anchor: .bottom) {
+                    Button { isShowingConditions = true } label: {
+                        PickedPointPin()
+                    }
+                    .buttonStyle(.plain)
+                }
+                .annotationTitles(.hidden)
+            }
         }
         .mapStyle(settings.mapStyle.mapStyle)
         .mapControlVisibility(.hidden)
         .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
+        }
+        // A long press rather than a tap: a tap on a map is how you dismiss
+        // things and hit pins, and stealing it would make the map feel broken.
+        .gesture(
+            LongPressGesture(minimumDuration: 0.4)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                .onEnded { value in
+                    guard case .second(true, let drag?) = value,
+                          let coordinate = proxy.convert(drag.location, from: .local)
+                    else { return }
+                    withAnimation(.snappy) {
+                        pickedPoint = Geo.Coordinate(latitude: coordinate.latitude,
+                                                     longitude: coordinate.longitude)
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+        )
         }
     }
 
@@ -289,6 +328,17 @@ struct SpotsTabView: View {
                         .foregroundStyle(reading.isFiring ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                         .monospacedDigit()
                 }
+                if pickedPoint != nil {
+                    Divider().frame(height: 18)
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.snappy) { pickedPoint = nil }
+                        }
+                        .accessibilityLabel("Back to my location")
+                }
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
@@ -297,12 +347,14 @@ struct SpotsTabView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Weather here, and nearby stations")
+        .accessibilityLabel(pickedPoint == nil
+                            ? "Weather here, and nearby stations"
+                            : "Weather at the point you picked")
     }
 
     /// Where "here" is: the rider, or what they are looking at.
     private var localCoordinate: Geo.Coordinate? {
-        recorder.location.lastCoordinate ?? mapCentre
+        pickedPoint ?? recorder.location.lastCoordinate ?? mapCentre
     }
 
     /// Rounded to about a kilometre so panning the map does not refetch on
@@ -680,6 +732,28 @@ struct SpotsTabView: View {
 }
 
 // MARK: - Pieces
+
+/// The point a rider held a finger on.
+///
+/// Deliberately unlike `WindPin`: those are places in the guide, this is a
+/// scratch mark that goes away when they are done with it.
+struct PickedPointPin: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "cloud.sun.fill")
+                .font(.caption)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Color.primary.opacity(0.85), in: Circle())
+                .overlay(Circle().stroke(.white, lineWidth: 2))
+                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+            Rectangle()
+                .fill(Color.primary.opacity(0.85))
+                .frame(width: 2, height: 8)
+        }
+    }
+}
 
 /// A map pin that answers "is it on?" before it answers "what is here?".
 struct WindPin: View {

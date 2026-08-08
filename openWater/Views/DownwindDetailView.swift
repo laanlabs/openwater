@@ -61,6 +61,11 @@ struct DownwindDetailView: View {
                 if glides.isEmpty {
                     nothingFound
                 } else {
+                    DownwindRideCard(foil: summary.foil, downwind: summary.downwind,
+                                     movingTime: summary.movingTime,
+                                     distance: summary.distance, units: units)
+                        .cardChrome()
+
                     DownwindCard(downwind: summary.downwind, units: units)
                         .cardChrome()
                 }

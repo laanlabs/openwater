@@ -1034,3 +1034,132 @@ enum DataBuoyCenter {
         return reading
     }
 }
+
+// MARK: - Surf
+
+/// What the sea is doing, split the way surfers split it.
+///
+/// "Waves" is two different things stacked on top of each other: swell, which
+/// travelled here from a storm days ago and arrives with long periods and
+/// clean lines, and wind wave, which is being made right now by the wind on
+/// your face and is just chop. A single significant-height number adds them
+/// together and tells you neither. The free marine model separates them, and
+/// carries a second swell train besides — which is exactly the breakdown the
+/// surf apps show, because it is the one that decides whether it is worth
+/// paddling out.
+struct SurfConditions {
+
+    struct Train {
+        let heightM: Double
+        let periodS: Double?
+        let directionDeg: Double?
+
+        var heightFt: Double { heightM * 3.28084 }
+    }
+
+    let at: Date
+    /// Combined sea: swell and wind wave together, which is the number that
+    /// matches "surf height" on a report.
+    let waveHeightM: Double?
+    let wavePeriodS: Double?
+    let waveDirectionDeg: Double?
+
+    let primarySwell: Train?
+    let secondarySwell: Train?
+    let windWave: Train?
+
+    let seaTemperatureC: Double?
+    /// Set and drift. The one thing here that also matters to the analysis:
+    /// a knot of current is the difference between speed over ground and
+    /// speed through water.
+    let currentKn: Double?
+    let currentDirectionDeg: Double?
+
+    var hasAnything: Bool { waveHeightM != nil || primarySwell != nil }
+
+    /// Surf height as a range, the way every report states it — a single
+    /// number implies a precision the ocean does not have.
+    var surfRangeFt: (low: Int, high: Int)? {
+        guard let waveHeightM else { return nil }
+        let feet = waveHeightM * 3.28084
+        let low = max(0, Int((feet * 0.8).rounded(.down)))
+        return (low, max(low + 1, Int((feet * 1.25).rounded(.up))))
+    }
+
+    /// The body-part scale, which is how surfers actually talk about size.
+    var sizeDescription: String? {
+        guard let range = surfRangeFt else { return nil }
+        return switch range.high {
+        case ...1: "Ankle to knee"
+        case 2: "Knee to thigh"
+        case 3: "Thigh to waist"
+        case 4: "Waist to chest"
+        case 5, 6: "Chest to head"
+        case 7, 8: "Head to overhead"
+        case 9...12: "Well overhead"
+        default: "Double overhead and up"
+        }
+    }
+
+    /// What to wear. A judgement, and stated as one — thresholds vary by
+    /// person by a good few degrees, and nobody should take this over their
+    /// own experience of being cold.
+    var wetsuit: String? {
+        guard let seaTemperatureC else { return nil }
+        return switch seaTemperatureC {
+        case 24...: "Boardshorts weather"
+        case 21..<24: "Shorty or 2 mm"
+        case 18..<21: "2 mm full"
+        case 15..<18: "3/2 mm"
+        case 12..<15: "4/3 mm, maybe boots"
+        case 9..<12: "5/4 mm, boots and hood"
+        default: "5/4 hooded, boots and gloves"
+        }
+    }
+}
+
+extension OpenMeteo {
+
+    /// One call for the sea state, including the swell breakdown.
+    static func surf(at coordinate: Geo.Coordinate) async -> SurfConditions? {
+        var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "current", value: "wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,secondary_swell_wave_height,secondary_swell_wave_direction,secondary_swell_wave_period,sea_surface_temperature,ocean_current_velocity,ocean_current_direction"),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let current = root["current"] as? [String: Any]
+        else { return nil }
+
+        func number(_ key: String) -> Double? { current[key] as? Double }
+
+        func train(_ prefix: String) -> SurfConditions.Train? {
+            guard let height = number("\(prefix)height"), height > 0.01 else { return nil }
+            return SurfConditions.Train(heightM: height,
+                                        periodS: number("\(prefix)period"),
+                                        directionDeg: number("\(prefix)direction"))
+        }
+
+        let conditions = SurfConditions(
+            at: (current["time"] as? Double).map { Date(timeIntervalSince1970: $0) } ?? Date(),
+            waveHeightM: number("wave_height"),
+            wavePeriodS: number("wave_period"),
+            waveDirectionDeg: number("wave_direction"),
+            primarySwell: train("swell_wave_"),
+            secondarySwell: train("secondary_swell_wave_"),
+            windWave: train("wind_wave_"),
+            seaTemperatureC: number("sea_surface_temperature"),
+            // Reported in km/h; knots is what the rest of the app speaks.
+            currentKn: number("ocean_current_velocity").map { $0 / 1.852 },
+            currentDirectionDeg: number("ocean_current_direction")
+        )
+        // Inland points answer with a full set of nulls rather than an error.
+        return conditions.hasAnything ? conditions : nil
+    }
+}

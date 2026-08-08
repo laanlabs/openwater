@@ -326,15 +326,15 @@ struct SessionAnalysisTab: View {
         return "\(jumps.count) · \(Format.shortDuration(jumps.bestAirtime)) best"
     }
 
-    /// The row says what the screen behind it is about: the run, not the
-    /// glides inside it.
+    /// The row says what the screen behind it is about: downwind runs, from
+    /// the same grouping the screen and the Runs tab use.
     private var glideValue: String? {
-        let runs = summary.shape.legs.filter(\.isRun).count
-        if runs > 1 { return "\(runs) runs" }
-        if summary.shape.isPointToPoint {
-            return Format.distance(summary.distance, unit: settings.units.distance)
+        let runs = GroupedRun.group(summary.ribbon.lanes).filter { $0.kind == .downwind }
+        guard !runs.isEmpty else { return "none found" }
+        if runs.count == 1 {
+            return Format.distance(runs[0].distance, unit: settings.units.distance)
         }
-        return summary.downwind.glideCount > 0 ? "no run" : "none found"
+        return "\(runs.count) runs"
     }
 
     // MARK: - Session

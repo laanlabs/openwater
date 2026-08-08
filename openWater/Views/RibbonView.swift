@@ -65,6 +65,16 @@ struct RibbonView: View {
 
         var id: String { rawValue }
 
+        /// The filter, applied to a whole run rather than one stretch.
+        func matchesKind(_ kind: GroupedRun.Kind) -> Bool {
+            switch self {
+            case .all: true
+            case .upwind: kind == .upwind
+            case .reaching: kind == .reaching
+            case .downwind: kind == .downwind
+            }
+        }
+
         func matches(_ point: PointOfSail?) -> Bool {
             switch self {
             case .all: true
@@ -121,6 +131,21 @@ struct RibbonView: View {
     /// laps into one row would be the same mistake in the other direction.
     private var showsLegs: Bool {
         isPointToPoint && !legs.isEmpty && order == .time && filter == .all
+    }
+
+    /// The session as a rider counts it: consecutive stretches on the same
+    /// point of sail merged into one run.
+    ///
+    /// Sixty-seven stretches on a lapping afternoon is the segmenter being
+    /// accurate and the screen being useless. Grouped, the same session is six
+    /// downwinders and five beats back — which is what a rider would say if
+    /// you asked them about it.
+    private var groupedRuns: [GroupedRun] {
+        GroupedRun.group(ribbon.lanes)
+    }
+
+    private var showsGrouped: Bool {
+        !showsLegs && order == .time && groupedRuns.count < ribbon.lanes.count
     }
 
     /// What kind of run a leg is, from the point of sail its stretches were
@@ -202,7 +227,22 @@ struct RibbonView: View {
                         }
                     }
 
-                    ForEach(showsLegs ? [] : lanes, id: \.id) { lane in
+                    if showsGrouped {
+                        ForEach(GroupedRun.Kind.allCases, id: \.self) { kind in
+                            let group = groupedRuns.filter { $0.kind == kind && filter.matchesKind(kind) }
+                            if !group.isEmpty {
+                                Text("\(kind.title) · \(group.count)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 12)
+                                ForEach(group) { run in
+                                    groupedRow(run)
+                                }
+                            }
+                        }
+                    }
+
+                    ForEach(showsLegs || showsGrouped ? [] : lanes, id: \.id) { lane in
                         LaneRow(
                             lane: lane,
                             // Lanes are scaled to the longest run so their
@@ -257,7 +297,9 @@ struct RibbonView: View {
     private var summaryBar: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(showsLegs
+                Text(showsGrouped
+                     ? summaryLine
+                     : showsLegs
                      ? "\(legs.count) run\(legs.count == 1 ? "" : "s")"
                      : "\(lanes.count) stretch\(lanes.count == 1 ? "" : "es")")
                     .font(.subheadline.weight(.semibold))
@@ -432,6 +474,75 @@ struct RibbonView: View {
         default: "Run"
         }
         return total > 1 ? "\(name) \(number)" : name
+    }
+
+    /// How many of each, which is the whole question a rider brings here.
+    private var summaryLine: String {
+        let counts = GroupedRun.Kind.allCases.compactMap { kind -> String? in
+            let n = groupedRuns.filter { $0.kind == kind }.count
+            return n > 0 ? "\(n) \(kind.title.lowercased())" : nil
+        }
+        return counts.joined(separator: " · ")
+    }
+
+    /// One grouped run. Upwind runs open to their tacks; nothing else does,
+    /// because nothing else has pieces worth counting.
+    private func groupedRow(_ run: GroupedRun) -> some View {
+        let tacks = run.kind == .upwind ? run.lanes.count : 0
+        return Button {
+            guard tacks > 1 else { return }
+            withAnimation(.snappy) {
+                expandedLeg = expandedLeg == run.id ? nil : run.id
+            }
+        } label: {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    if tacks > 1 {
+                        Image(systemName: expandedLeg == run.id ? "chevron.down" : "chevron.right")
+                            .font(.caption2).foregroundStyle(.secondary).frame(width: 12)
+                    } else {
+                        Color.clear.frame(width: 12)
+                    }
+
+                    Text("\(run.number)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(.tint, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                        Text("\(Format.speed(run.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(run.maxSpeed, unit: units.speed, decimals: 1)) max"
+                             + (tacks > 1 ? " · \(tacks) tacks" : ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if run.kind == .downwind, let alignment = run.alignment {
+                        Text("\(Int(alignment.rounded()))° off")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(alignment <= 20 ? .green : .secondary)
+                    }
+                }
+                .padding(.vertical, 9)
+
+                if expandedLeg == run.id, tacks > 1 {
+                    ForEach(run.lanes, id: \.id) { lane in
+                        laneRow(lane).padding(.leading, 28)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(tacks <= 1)
     }
 
     private func laneRow(_ lane: SessionRibbon.Lane) -> some View {

@@ -58,56 +58,31 @@ struct DownwindDetailView: View {
     /// screen to read.
     private var hasRun: Bool { !downwindRuns.isEmpty }
 
-    /// One downwind run: a leg of a point-to-point day, or a downwind lap.
-    struct DownwindRun: Identifiable {
-        let id: Int
-        let distance: Double
-        let duration: TimeInterval
-        let averageSpeed: Double
-        let maxSpeed: Double
-        /// Degrees off dead downwind, where the wind is known.
-        let alignment: Double?
-        let startIndex: Int
-        let endIndex: Int
-    }
-
     /// Every downwind run in the session.
     ///
-    /// This is what the screen is for, in the rider's words: "there may be
-    /// sessions with multiple upwind and downwind runs — this is so we can see
-    /// all our downwind runs in one place." A point-to-point day is one run
-    /// down the river; an afternoon of laps is a handful of downwind legs among
-    /// the upwind ones.
-    ///
-    /// Split the same way the Runs tab splits, so the two screens never
-    /// disagree about what a run is: legs when the session went somewhere,
-    /// individual passes when it did not.
-    private var downwindRuns: [DownwindRun] {
-        if summary.shape.isPointToPoint {
-            return legs.filter(\.isRun).enumerated().map { index, leg in
-                DownwindRun(id: index, distance: leg.distance, duration: leg.duration,
-                            averageSpeed: leg.averageSpeed,
-                            maxSpeed: maxSpeed(from: leg.startIndex, to: leg.endIndex),
-                            alignment: leg.alignment,
-                            startIndex: leg.startIndex, endIndex: leg.endIndex)
-            }
+    /// Grouped, not raw. The segmenter finds every weave across the bumps, and
+    /// on a lapping day that was thirty-four "runs" for an afternoon a rider
+    /// would describe as six. `GroupedRun` merges consecutive stretches on the
+    /// same point of sail, and the Runs tab uses the same grouping so the two
+    /// screens always agree.
+    private var downwindRuns: [GroupedRun] {
+        GroupedRun.group(summary.ribbon.lanes).filter { $0.kind == .downwind }
+    }
+
+    /// The track between a run's first and last stretch.
+    private func coordinates(of run: GroupedRun) -> [CLLocationCoordinate2D] {
+        let points = session.track.points
+        let inside = points.indices.filter {
+            session.track.elapsed[$0] >= run.startElapsed
+                && session.track.elapsed[$0] <= run.endElapsed
         }
-        return summary.ribbon.lanes
-            .filter { $0.pointOfSail == .broadReach || $0.pointOfSail == .running }
-            .enumerated()
-            .map { index, lane in
-                DownwindRun(
-                    id: index,
-                    distance: lane.distance,
-                    duration: lane.endElapsed - lane.startElapsed,
-                    averageSpeed: lane.averageSpeed,
-                    maxSpeed: lane.maxSpeed,
-                    // A run dead downwind has a true wind angle of 180.
-                    alignment: lane.trueWindAngle.map { abs(180 - abs($0)) },
-                    startIndex: runIndex(of: lane).lower,
-                    endIndex: runIndex(of: lane).upper
-                )
-            }
+        return inside.map { points[$0].clCoordinate }
+    }
+
+    private func midpoint(of run: GroupedRun) -> CLLocationCoordinate2D? {
+        let line = coordinates(of: run)
+        guard !line.isEmpty else { return nil }
+        return line[line.count / 2]
     }
 
     private func maxSpeed(from start: Int, to end: Int) -> Double {
@@ -198,7 +173,7 @@ struct DownwindDetailView: View {
                 if index > 0 { Divider().padding(.vertical, 2) }
                 HStack(spacing: 10) {
                     if runs.count > 1 {
-                        Text("\(index + 1)")
+                        Text("\(run.number)")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .frame(width: 20, height: 20)
@@ -262,31 +237,30 @@ struct DownwindDetailView: View {
 
     private var map: some View {
         Map(position: $camera) {
-            // The whole session as context, faded — same as Upwind, so the two
+            // The whole session, faded, as context — same as Upwind so the two
             // screens read as the same kind of picture.
             MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
-                .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .stroke(.gray.opacity(0.3), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
-            ForEach(glides) { glide in
-                if glide.endIndex < session.track.count {
-                    MapPolyline(coordinates: coordinates(of: glide))
-                        .stroke(
-                            speedColour(glide.averageSpeed)
-                                .opacity(selectedGlide == nil || selectedGlide == glide.id ? 0.95 : 0.2),
-                            style: StrokeStyle(lineWidth: selectedGlide == glide.id ? 7 : 4, lineCap: .round)
-                        )
-                }
+            // Each downwind run drawn whole and numbered, the way the upwind
+            // screen draws its beats.
+            ForEach(downwindRuns) { run in
+                MapPolyline(coordinates: coordinates(of: run))
+                    .stroke(.tint, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
             }
 
-            // A shuttle day's separate runs, ringed at each end.
-            if showsLegs {
-                ForEach(legs) { leg in
-                    Marker("Run \(leg.id + 1)", systemImage: "flag",
-                           coordinate: leg.startCoordinate.clCoordinate)
-                        .tint(.teal)
-                    Marker("End \(leg.id + 1)", systemImage: "flag.checkered",
-                           coordinate: leg.endCoordinate.clCoordinate)
-                        .tint(.indigo)
+            ForEach(downwindRuns) { run in
+                if let start = midpoint(of: run) {
+                    Annotation("", coordinate: start, anchor: .center) {
+                        Text("\(run.number)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(width: 22, height: 22)
+                            .background(.tint, in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    }
+                    .annotationTitles(.hidden)
                 }
             }
         }

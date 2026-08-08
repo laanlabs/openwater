@@ -439,7 +439,8 @@ enum OpenMeteo {
         ("gem_seamless", "GEM"),
     ]
 
-    static func outlook(at coordinate: Geo.Coordinate, days: Int = 1) async -> WindOutlook {
+    static func outlook(at coordinate: Geo.Coordinate, days: Int = 1,
+                        pastDays: Int = 0) async -> WindOutlook {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -450,7 +451,7 @@ enum OpenMeteo {
             .init(name: "forecast_days", value: String(days)),
             .init(name: "timeformat", value: "unixtime"),
             .init(name: "timezone", value: "auto"),
-        ]
+        ] + (pastDays > 0 ? [URLQueryItem(name: "past_days", value: String(pastDays))] : [])
         guard let url = components.url,
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200,

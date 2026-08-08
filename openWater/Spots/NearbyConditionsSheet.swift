@@ -49,6 +49,7 @@ struct NearbyConditionsSheet: View {
     @State private var buoys: [Buoy] = []
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var waves: [WaveHour] = []
+    @State private var full = WeatherDetail()
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -219,10 +220,29 @@ struct NearbyConditionsSheet: View {
     /// provenance spelled out — this sheet exists to rank sources, so the
     /// weakest one has to say what it is.
     private var modelCard: some View {
+        NavigationLink {
+            CurrentConditionsScreen(title: title, coordinate: coordinate,
+                                    detail: full, station: stations.first)
+        } label: {
+            modelCardBody
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var modelCardBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("MODEL ESTIMATE, HERE")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("MODEL ESTIMATE, HERE")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("All readings")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tint)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
 
             HStack(alignment: .center, spacing: 14) {
                 if let weather = weather {
@@ -278,6 +298,18 @@ struct NearbyConditionsSheet: View {
     @ViewBuilder
     private var outlookCard: some View {
         if !outlook.isEmpty {
+            NavigationLink {
+                ForecastScreen(title: title, detail: full, outlook: outlook, waves: waves)
+            } label: {
+                outlookCardBody
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var outlookCardBody: some View {
+        if !outlook.isEmpty {
             let consensus = outlook.consensus
             let peak = max(consensus.compactMap { $0 }.max() ?? 1, 1)
             let agreement = outlook.agreement
@@ -291,28 +323,30 @@ struct NearbyConditionsSheet: View {
                     Text(agreement.label)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(outlook.spreadKn < 8 ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.orange))
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
 
-                HStack(alignment: .bottom, spacing: 3) {
-                    ForEach(outlook.hours.indices, id: \.self) { hour in
-                        let values = outlook.models.compactMap { $0.speeds[safe: hour] ?? nil }
-                        VStack(spacing: 0) {
-                            // The whisker: everything between the slowest and
-                            // fastest model at this hour.
-                            if let low = values.min(), let high = values.max(), high > low {
-                                Capsule()
-                                    .fill(Color.orange.opacity(0.35))
-                                    .frame(width: 3, height: max(2, 62 * (high - low) / peak))
-                            }
+                // Consensus only. The first version drew a whisker above every
+                // bar for the spread between models, which was accurate and
+                // unreadable — twenty-four thin spikes over twenty-four bars.
+                // The disagreement is now one sentence below, and the per-model
+                // lines live on the detail screen where there is room for them.
+                ZStack(alignment: .bottom) {
+                    ChartGrid(peak: peak)
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(outlook.hours.indices, id: \.self) { hour in
+                            let speed = (consensus[safe: hour] ?? nil) ?? 0
                             RoundedRectangle(cornerRadius: 2)
-                                .fill((consensus[safe: hour] ?? nil).map { $0 >= 15 }
-                                      == true ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.accentColor.opacity(0.32)))
-                                .frame(height: max(2, 62 * ((consensus[safe: hour] ?? nil) ?? 0) / peak))
+                                .fill(speed >= 15 ? AnyShapeStyle(.tint)
+                                      : AnyShapeStyle(Color.accentColor.opacity(0.35)))
+                                .frame(height: max(2, 62 * speed / peak))
+                                .frame(maxWidth: .infinity, alignment: .bottom)
                         }
-                        .frame(maxWidth: .infinity, alignment: .bottom)
                     }
                 }
-                .frame(height: 78, alignment: .bottom)
+                .frame(height: 62, alignment: .bottom)
 
                 HStack {
                     Text("now")
@@ -333,7 +367,7 @@ struct NearbyConditionsSheet: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Consensus of \(outlook.models.map(\.label).joined(separator: ", ")) — the major global models, free from Open-Meteo. The bar is their average, the shading how far apart they are.")
+                Text("Average of \(outlook.models.count) global models — tap for each of them, the hour by hour, and the week.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -363,12 +397,17 @@ struct NearbyConditionsSheet: View {
                     }
                 }
 
-                HStack(alignment: .bottom, spacing: 3) {
-                    ForEach(waves) { hour in
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.teal.opacity(0.5))
-                            .frame(height: max(2, 50 * (hour.heightM ?? 0) / peak))
-                            .frame(maxWidth: .infinity, alignment: .bottom)
+                ZStack(alignment: .bottom) {
+                    // Metres, and small ones — half-metre rules, and no
+                    // "firing" line because there is no such threshold here.
+                    ChartGrid(peak: peak, step: peak > 3 ? 1 : 0.5, unit: "m", highlight: nil)
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(waves) { hour in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.teal.opacity(0.5))
+                                .frame(height: max(2, 50 * (hour.heightM ?? 0) / peak))
+                                .frame(maxWidth: .infinity, alignment: .bottom)
+                        }
                     }
                 }
                 .frame(height: 50, alignment: .bottom)
@@ -816,9 +855,10 @@ struct NearbyConditionsSheet: View {
         async let buoyList = DataBuoyCenter.buoys(near: here, limit: 14, radius: Self.maxRadius)
         async let ahead = OpenMeteo.outlook(at: here)
         async let sea = OpenMeteo.waves(at: here)
+        async let everything = OpenMeteo.detail(at: here)
         (resources, stations, weather, reading) = await (nearby, found, air, blowing)
         (alerts, tides, buoys) = await (warnings, tideList, buoyList)
-        (outlook, waves) = await (ahead, sea)
+        (outlook, waves, full) = await (ahead, sea, everything)
         isSearching = false
 
         // Predictions and buoy rows come second, for the same reason station

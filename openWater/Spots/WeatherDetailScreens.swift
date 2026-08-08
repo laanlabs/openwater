@@ -40,6 +40,11 @@ struct CurrentConditionsScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                if let now {
+                    ConditionsCard(weather: nil, windKn: now.windKn, gustKn: now.gustKn,
+                                   directionDeg: now.directionDeg,
+                                   temperatureC: now.temperatureC, pressureHPa: now.pressureHPa)
+                }
                 headline
                 if let now { windCard(now) }
                 if let now { grid(now) }
@@ -296,6 +301,7 @@ struct ForecastScreen: View {
     @Environment(AppSettings.self) private var settings
     @State private var day = 0
     @State private var span: Span = .day
+    @AppStorage("spots.forecastDetailed") private var detailed = false
 
     private var zone: TimeZone { detail.timeZone ?? .current }
 
@@ -437,10 +443,18 @@ struct ForecastScreen: View {
 
     @ViewBuilder
     private var spanPicker: some View {
-        Picker("Span", selection: $span) {
-            ForEach(Span.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        HStack(spacing: 10) {
+            Picker("Span", selection: $span) {
+                ForEach(Span.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
+            Picker("Detail", selection: $detailed) {
+                Text("Basic").tag(false)
+                Text("More").tag(true)
+            }
+            .pickerStyle(.segmented)
         }
-        .pickerStyle(.segmented)
     }
 
     @ViewBuilder
@@ -470,7 +484,7 @@ struct ForecastScreen: View {
         let rows = span == .day ? hours(for: day) : detail.hours
         if !rows.isEmpty {
             ForecastTable(hours: rows, waves: waves, zone: zone,
-                          step: span == .day ? 1 : 3)
+                          step: span == .day ? 1 : 3, detailed: detailed)
         }
     }
 
@@ -1157,9 +1171,14 @@ struct ForecastTable: View {
     var zone: TimeZone = .current
     /// Hours between columns. Every hour for a day, every three for a week.
     var step: Int = 1
+    /// Pressure and cloud, which matter to some riders and are clutter to the
+    /// rest — the same Basic/Detailed split iKitesurf offers.
+    var detailed: Bool = false
 
-    private static let columnWidth: CGFloat = 44
-    private static let labelWidth: CGFloat = 62
+    private static let columnWidth: CGFloat = 46
+    private static let labelWidth: CGFloat = 64
+    private static let rowHeight: CGFloat = 26
+    private static let windHeight: CGFloat = 74
 
     private var columns: [WeatherDetail.Hour] {
         stride(from: 0, to: hours.count, by: max(1, step)).compactMap { hours[safe: $0] }
@@ -1172,7 +1191,7 @@ struct ForecastTable: View {
     private var hasWaves: Bool { !waves.isEmpty }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             labels
             ScrollView(.horizontal, showsIndicators: true) {
                 HStack(spacing: 0) {
@@ -1182,6 +1201,7 @@ struct ForecastTable: View {
                 }
             }
         }
+        .padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
@@ -1193,34 +1213,43 @@ struct ForecastTable: View {
         return !calendar.isDate(current.at, inSameDayAs: previous.at)
     }
 
-    // MARK: Rows
+    // MARK: Row names
 
+    /// Left-aligned and in words, the way a table of numbers wants them —
+    /// tiny uppercase reads as a header, and these are labels.
     private var labels: some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            cell("") // day
-            cell("")  // hour
-            cell("WIND", tall: true)
-            cell("GUST")
-            cell("SKY")
-            cell("TEMP")
+        VStack(alignment: .leading, spacing: 0) {
+            label("", height: 20)                       // day
+            label("Hour")
+            label("Wind\n(kn)", height: Self.windHeight)
+            label("Gust")
+            label("Sky")
+            label("°C")
             if hasWaves {
-                cell("WAVE")
-                cell("PERIOD")
+                label("Wave\n(m)", height: Self.rowHeight * 2)
             }
-            cell("RAIN")
+            if detailed {
+                label("Cloud")
+                label("Rain")
+                label("Pressure")
+            } else {
+                label("Rain")
+            }
         }
-        .frame(width: Self.labelWidth)
-        .background(Color(.secondarySystemGroupedBackground))
+        .frame(width: Self.labelWidth, alignment: .leading)
+        .padding(.leading, 12)
     }
 
-    private func cell(_ text: String, tall: Bool = false) -> some View {
+    private func label(_ text: String, height: CGFloat? = nil) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .bold))
+            .font(.system(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .frame(height: tall ? 58 : 24)
-            .padding(.trailing, 8)
+            .lineSpacing(-2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: height ?? Self.rowHeight)
     }
+
+    // MARK: One hour
 
     private func column(_ hour: WeatherDetail.Hour, isDayStart: Bool) -> some View {
         let wave = wavesByHour[hour.at]
@@ -1228,79 +1257,95 @@ struct ForecastTable: View {
             Text(isDayStart || hour.at == columns.first?.at
                  ? hour.at.formatted(Date.FormatStyle(timeZone: zone).weekday(.abbreviated))
                  : "")
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.secondary)
-                .frame(height: 24)
+                .frame(height: 20)
 
             Text(hour.at.formatted(Date.FormatStyle(timeZone: zone).hour()))
-                .font(.system(size: 9))
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-                .frame(height: 24)
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.rowHeight)
+                .background(Color(.systemGray6))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             windCell(hour)
-            value(hour.gustKn, tint: Self.windColour(hour.gustKn ?? 0))
+            fill(hour.gustKn, tint: Self.windColour(hour.gustKn ?? 0))
             skyCell(hour)
-            value(hour.temperatureC, suffix: "°", tint: Self.temperatureColour(hour.temperatureC))
+            fill(hour.temperatureC, suffix: "°", tint: Self.temperatureColour(hour.temperatureC),
+                 onColour: true)
 
             if hasWaves {
-                value(wave?.heightM, decimals: 1, tint: Color.blue.opacity(0.45))
-                value(wave?.periodS, tint: Color.blue.opacity(0.28))
+                // Height above the bar, the way the wind number sits above
+                // its block — the eye reads the numbers in one column.
+                Text(wave?.heightM.map { String(format: "%.1f", $0) } ?? "—")
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Self.rowHeight)
+                fill(wave?.periodS, suffix: "s", tint: Color.blue.opacity(0.75), onColour: true)
             }
 
-            value(hour.precipitationChance, suffix: "%",
-                  tint: Color.blue.opacity(min(0.6, (hour.precipitationChance ?? 0) / 140)))
+            if detailed {
+                fill(hour.precipitationChance, suffix: "%",
+                     tint: Color.blue.opacity(min(0.55, (hour.precipitationChance ?? 0) / 150)))
+                fill(hour.uvIndex, tint: Color.yellow.opacity(min(0.5, (hour.uvIndex ?? 0) / 14)))
+                fill(hour.visibilityM.map { $0 / 1000 }, tint: Color(.systemGray6))
+            } else {
+                fill(hour.precipitationChance, suffix: "%",
+                     tint: Color.blue.opacity(min(0.55, (hour.precipitationChance ?? 0) / 150)))
+            }
         }
         .frame(width: Self.columnWidth)
         .overlay(alignment: .leading) {
-            // A heavier rule where the day turns over.
             if isDayStart {
-                Rectangle().fill(Color(.systemGray2)).frame(width: 1)
+                Rectangle().fill(Color(.label).opacity(0.55)).frame(width: 1)
             }
         }
     }
 
-    /// Speed, an arrow for direction, and the bearing — the three things the
-    /// iKitesurf grid gets right and a bar chart cannot say at once.
+    /// The cell iKitesurf riders read first: speed above, then a block of
+    /// colour carrying the arrow, with the bearing along the bottom.
     private func windCell(_ hour: WeatherDetail.Hour) -> some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 0) {
             Text(hour.windKn.map { "\(Int($0.rounded()))" } ?? "—")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .font(.system(size: 14, weight: .bold))
                 .monospacedDigit()
-            if let direction = hour.directionDeg {
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 11, weight: .bold))
-                    .rotationEffect(.degrees(direction))
-                Text("\(Int(direction.rounded()))")
-                    .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
+                .frame(height: 20)
+
+            VStack(spacing: 1) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .rotationEffect(.degrees((hour.directionDeg ?? 0) + 180))
+                Text(hour.directionDeg.map { "\(Int($0.rounded()))" } ?? "")
+                    .font(.system(size: 9, weight: .semibold))
                     .monospacedDigit()
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.windHeight - 20)
+            .background(Self.windColour(hour.windKn ?? 0))
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .background(Self.windColour(hour.windKn ?? 0))
     }
 
     private func skyCell(_ hour: WeatherDetail.Hour) -> some View {
         Image(systemName: SpotWeather.symbol(for: hour.code, isDay: true))
-            .font(.system(size: 11))
+            .font(.system(size: 13))
             .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 24)
-            .background(Color(.systemGray6))
+            .frame(height: Self.rowHeight)
+            .background(Color(.systemGray))
     }
 
-    private func value(_ number: Double?, suffix: String = "", decimals: Int = 0,
-                       tint: Color) -> some View {
-        Text(number.map { decimals > 0 ? String(format: "%.\(decimals)f", $0)
-                          : "\(Int($0.rounded()))" }.map { $0 + suffix } ?? "—")
-            .font(.system(size: 10, weight: .semibold))
+    private func fill(_ number: Double?, suffix: String = "", tint: Color,
+                      onColour: Bool = false) -> some View {
+        Text(number.map { "\(Int($0.rounded()))" + suffix } ?? "—")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(onColour ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
             .monospacedDigit()
             .frame(maxWidth: .infinity)
-            .frame(height: 24)
+            .frame(height: Self.rowHeight)
             .background(tint)
     }
 
@@ -1314,25 +1359,122 @@ struct ForecastTable: View {
     static func windColour(_ knots: Double) -> Color {
         switch knots {
         case ..<5: Color(.systemGray6)
-        case ..<8: Color.cyan.opacity(0.22)
-        case ..<12: Color.green.opacity(0.30)
-        case ..<15: Color.green.opacity(0.55)
-        case ..<18: Color.yellow.opacity(0.65)
-        case ..<22: Color.orange.opacity(0.70)
-        case ..<28: Color.red.opacity(0.65)
-        default: Color.purple.opacity(0.60)
+        case ..<8: Color.cyan.opacity(0.30)
+        case ..<12: Color.green.opacity(0.35)
+        case ..<15: Color.green.opacity(0.65)
+        case ..<18: Color.yellow.opacity(0.75)
+        case ..<22: Color.orange.opacity(0.80)
+        case ..<28: Color.red.opacity(0.75)
+        default: Color.purple.opacity(0.70)
         }
     }
 
     static func temperatureColour(_ celsius: Double?) -> Color {
-        guard let celsius else { return Color(.systemGray6) }
+        guard let celsius else { return Color(.systemGray4) }
         return switch celsius {
-        case ..<0: Color.indigo.opacity(0.30)
-        case ..<10: Color.blue.opacity(0.22)
-        case ..<18: Color.teal.opacity(0.20)
-        case ..<25: Color.orange.opacity(0.25)
-        default: Color.red.opacity(0.35)
+        case ..<0: Color.indigo.opacity(0.75)
+        case ..<10: Color.blue.opacity(0.65)
+        case ..<18: Color.teal.opacity(0.70)
+        case ..<25: Color.orange.opacity(0.80)
+        default: Color.red.opacity(0.80)
         }
+    }
+}
+
+// MARK: - Current conditions, the shape riders already know
+
+/// The conditions card, laid out the way iKitesurf lays it out.
+///
+/// Not imitation for its own sake: this is the card our users have read
+/// before every session for years, and the muscle memory is worth more than
+/// any improvement we might invent. Speed on the left behind a direction
+/// badge, cardinal and bearing on the right, and the three supporting numbers
+/// as chips underneath.
+struct ConditionsCard: View {
+
+    let weather: SpotWeather?
+    let windKn: Double?
+    let gustKn: Double?
+    let directionDeg: Double?
+    let temperatureC: Double?
+    let pressureHPa: Double?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                badge
+
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text(windKn.map { "\(Int($0.rounded()))" } ?? "—")
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    Text("kts")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                if let directionDeg {
+                    HStack(spacing: 8) {
+                        Text(Format.cardinal(directionDeg))
+                            .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        Rectangle()
+                            .fill(Color(.systemGray3))
+                            .frame(width: 1, height: 24)
+                        Text("\(Int(directionDeg.rounded()))°")
+                            .font(.title3.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                chip("wind", gustKn.map { "to \(Int($0.rounded())) kts" } ?? "—")
+                chip("thermometer.medium", temperatureC.map { "\(Int($0.rounded()))°C" } ?? "—")
+                chip("barometer", pressureHPa.map { "\(Int($0.rounded())) mb" } ?? "—")
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// The direction badge: a filled disc with the arrow, which is what makes
+    /// the card readable at a glance from a car park.
+    private var badge: some View {
+        ZStack {
+            Circle()
+                .fill(((windKn ?? 0) >= 15 ? Color.accentColor : Color(.systemGray4)).opacity(0.28))
+            Circle()
+                .strokeBorder((windKn ?? 0) >= 15 ? Color.accentColor : Color(.systemGray2), lineWidth: 2)
+            if let directionDeg {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle((windKn ?? 0) >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    // `location.north` points up; the wind from north blows
+                    // south, so it needs half a turn before the bearing.
+                    .rotationEffect(.degrees(directionDeg + 180))
+            }
+        }
+        .frame(width: 46, height: 46)
+    }
+
+    private func chip(_ symbol: String, _ text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1341,7 +1483,7 @@ struct ForecastTable: View {
 /// Drawn rather than a second line because the gap is the point: a steady
 /// twelve is a different day from twelve gusting twenty-five, and a thin band
 /// versus a fat one says that faster than two lines to be compared.
-private struct GustBand: Shape {
+struct GustBand: Shape {
     let speeds: [Double?]
     let gusts: [Double?]
     let peak: Double
@@ -1353,7 +1495,6 @@ private struct GustBand: Shape {
 
         func y(_ value: Double) -> CGFloat { rect.maxY - rect.height * CGFloat(value / peak) }
 
-        // Along the gusts, back along the average.
         var top: [CGPoint] = []
         var bottom: [CGPoint] = []
         for index in speeds.indices {
@@ -1367,6 +1508,225 @@ private struct GustBand: Shape {
         path.move(to: top[0])
         top.dropFirst().forEach { path.addLine(to: $0) }
         bottom.reversed().forEach { path.addLine(to: $0) }
+        path.closeSubpath()
+        return path
+    }
+}
+
+// MARK: - Surf and swell
+
+/// Surf height, the swell trains, and the rose — laid out the way the surf
+/// apps lay it out, for the same reason the conditions card is: riders have
+/// read this arrangement a thousand times.
+struct SurfCard: View {
+
+    let surf: SurfConditions
+    var windDirectionDeg: Double?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                heightCard
+                roseCard
+            }
+            swellCard
+        }
+    }
+
+    // MARK: Height
+
+    private var heightCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("SURF HEIGHT")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.secondary)
+
+            if let range = surf.surfRangeFt {
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text("\(range.low)-\(range.high)")
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    Text("ft")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let description = surf.sizeDescription {
+                Text(description)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if let period = surf.wavePeriodS {
+                Text("\(Int(period.rounded()))s combined sea")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 148)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    // MARK: Rose
+
+    /// Every train on one compass, arrow length by height.
+    ///
+    /// Two swells at ten degrees apart behave completely differently from two
+    /// ninety degrees apart, and no list of numbers shows that as fast as
+    /// putting them on the same circle.
+    private var roseCard: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                ForEach([1.0, 0.66, 0.33], id: \.self) { ring in
+                    Circle()
+                        .strokeBorder(Color(.systemGray4), lineWidth: ring == 1 ? 1 : 0.5)
+                        .frame(width: 104 * ring, height: 104 * ring)
+                }
+                ForEach(Array(["0°", "90°", "180°", "270°"].enumerated()), id: \.offset) { index, label in
+                    Text(label)
+                        .font(.system(size: 7, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(Double(index) * -90))
+                        .offset(y: -60)
+                        .rotationEffect(.degrees(Double(index) * 90))
+                }
+
+                if let primary = surf.primarySwell {
+                    ray(primary, colour: .orange, scale: 1)
+                }
+                if let secondary = surf.secondarySwell {
+                    ray(secondary, colour: .yellow, scale: 0.9)
+                }
+                // The wind, so a rider can see at once whether it is blowing
+                // into the swell or with it.
+                if let windDirectionDeg {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .offset(y: -62)
+                        .rotationEffect(.degrees(windDirectionDeg + 180))
+                }
+
+                Circle()
+                    .fill(Color(.systemBackground))
+                    .frame(width: 7, height: 7)
+            }
+            .frame(width: 128, height: 128)
+
+            Text("swell · wind")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 148)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// An arrow from the centre pointing the way the swell is travelling,
+    /// scaled by height against the biggest train on the rose.
+    private func ray(_ train: SurfConditions.Train, colour: Color, scale: Double) -> some View {
+        let biggest = max(surf.primarySwell?.heightM ?? 0, surf.secondarySwell?.heightM ?? 0, 0.1)
+        let length = 20 + 32 * min(1, train.heightM / biggest)
+        return Triangle()
+            .fill(colour)
+            .frame(width: 11, height: length * scale)
+            .offset(y: -length * scale / 2)
+            .rotationEffect(.degrees((train.directionDeg ?? 0) + 180))
+    }
+
+    // MARK: Trains
+
+    private var swellCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SWELL")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.secondary)
+
+            if let primary = surf.primarySwell {
+                trainRow(primary, colour: .orange)
+            }
+            if let secondary = surf.secondarySwell {
+                trainRow(secondary, colour: .yellow)
+            }
+            if let wind = surf.windWave, wind.heightM > 0.05 {
+                trainRow(wind, colour: .secondary, label: "wind chop")
+            }
+            if surf.primarySwell == nil && surf.secondarySwell == nil {
+                Text("No organised swell — what is out there is wind chop.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 14) {
+                if let temperature = surf.seaTemperatureC {
+                    Label("\(Int(temperature.rounded()))°C water", systemImage: "thermometer.medium")
+                        .font(.caption.weight(.medium))
+                }
+                if let suit = surf.wetsuit {
+                    Text(suit)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 2)
+
+            if let current = surf.currentKn, current > 0.1 {
+                Text("Current \(String(format: "%.1f", current)) kn"
+                     + (surf.currentDirectionDeg.map { " setting \(Format.cardinal($0))" } ?? "")
+                     + " — worth knowing on a downwinder.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func trainRow(_ train: SurfConditions.Train, colour: Color, label: String? = nil) -> some View {
+        HStack(spacing: 10) {
+            Text(String(format: "%.1f ft", train.heightFt))
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .frame(width: 58, alignment: .leading)
+
+            Text(train.periodS.map { "\(Int($0.rounded()))s" } ?? "—")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .leading)
+
+            if let direction = train.directionDeg {
+                Triangle()
+                    .fill(colour)
+                    .frame(width: 9, height: 14)
+                    .rotationEffect(.degrees(direction + 180))
+                Text("\(Format.cardinal(direction)) \(Int(direction.rounded()))°")
+                    .font(.subheadline.weight(.medium))
+            }
+            if let label {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// A narrow triangle pointing up — the swell arrow.
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY - rect.height * 0.25))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
     }

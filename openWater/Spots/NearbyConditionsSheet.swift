@@ -50,6 +50,7 @@ struct NearbyConditionsSheet: View {
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var waves: [WaveHour] = []
     @State private var full = WeatherDetail()
+    @State private var surf: SurfConditions?
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -522,6 +523,10 @@ struct NearbyConditionsSheet: View {
     /// places this app is used is a safety question rather than a comfort one.
     @ViewBuilder
     private var waterTab: some View {
+        if let surf {
+            SurfCard(surf: surf, windDirectionDeg: reading?.directionDeg)
+        }
+
         waveCard
 
         section("TIDE") {
@@ -875,9 +880,11 @@ struct NearbyConditionsSheet: View {
         async let ahead = OpenMeteo.outlook(at: here)
         async let sea = OpenMeteo.waves(at: here)
         async let everything = OpenMeteo.detail(at: here)
+        async let sea2 = OpenMeteo.surf(at: here)
         (resources, stations, weather, reading) = await (nearby, found, air, blowing)
         (alerts, tides, buoys) = await (warnings, tideList, buoyList)
         (outlook, waves, full) = await (ahead, sea, everything)
+        surf = await sea2
         isSearching = false
 
         // Predictions and buoy rows come second, for the same reason station

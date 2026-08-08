@@ -182,8 +182,8 @@ struct DownwindDetailView: View {
                             .foregroundStyle(.white)
                             .frame(width: 20, height: 20)
                             .background(selectedRun == nil || selectedRun == run.id
-                                        ? AnyShapeStyle(.tint)
-                                        : AnyShapeStyle(Color.secondary.opacity(0.4)),
+                                        ? GroupedRun.Kind.downwind.colour
+                                        : Color.secondary.opacity(0.4),
                                         in: Circle())
                     }
 
@@ -209,7 +209,7 @@ struct DownwindDetailView: View {
                 .padding(.vertical, 8)
                 .padding(.horizontal, 6)
                 .background(selectedRun == run.id
-                            ? AnyShapeStyle(Color.accentColor.opacity(0.12))
+                            ? AnyShapeStyle(GroupedRun.Kind.downwind.colour.opacity(0.12))
                             : AnyShapeStyle(Color.clear),
                             in: RoundedRectangle(cornerRadius: 10))
                 .contentShape(Rectangle())
@@ -255,18 +255,20 @@ struct DownwindDetailView: View {
             // The whole session, faded, as context — same as Upwind so the two
             // screens read as the same kind of picture.
             MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
-                .stroke(.gray.opacity(0.3), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
             // Each downwind run drawn whole and numbered, the way the upwind
             // screen draws its beats.
             ForEach(downwindRuns) { run in
                 let chosen = selectedRun == nil || selectedRun == run.id
-                // `.tint` does not resolve inside a MapPolyline — it drew the
-                // system blue while the numbered badges beside it were the
-                // app's orange. Named explicitly so the line and its marker
-                // are the same colour.
+                // The kind's own colour, shared with the Runs tab's map so a
+                // downwind run is the same orange on both. `.accentColor` was
+                // used here and resolves unreliably inside a MapPolyline —
+                // the same line drew orange unselected and system blue
+                // selected — which is the sibling of the `.tint` problem.
                 MapPolyline(coordinates: coordinates(of: run))
-                    .stroke(chosen ? Color.accentColor : Color.secondary.opacity(0.25),
+                    .stroke(chosen ? GroupedRun.Kind.downwind.colour
+                            : Color.secondary.opacity(0.22),
                             style: StrokeStyle(lineWidth: selectedRun == run.id ? 7 : 5,
                                                lineCap: .round, lineJoin: .round))
             }
@@ -279,10 +281,10 @@ struct DownwindDetailView: View {
                             Text("\(run.number)")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
-                                .frame(width: selectedRun == run.id ? 28 : 22,
-                                       height: selectedRun == run.id ? 28 : 22)
-                                .background(chosen ? AnyShapeStyle(.tint)
-                                            : AnyShapeStyle(Color.secondary.opacity(0.35)),
+                                .frame(width: selectedRun == run.id ? 24 : 18,
+                                       height: selectedRun == run.id ? 24 : 18)
+                                .background(chosen ? GroupedRun.Kind.downwind.colour
+                                            : Color.secondary.opacity(0.35),
                                             in: Circle())
                                 .overlay(Circle().stroke(.white, lineWidth: 1.5))
                                 .shadow(color: .black.opacity(0.25), radius: 2, y: 1)

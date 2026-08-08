@@ -27,6 +27,24 @@ struct GroupedRun: Identifiable {
             }
         }
 
+        /// One colour per kind, shared by every map that draws runs.
+        ///
+        /// The Runs map and the Downwind screen have to agree: a rider who
+        /// sees an orange run on one and a blue one on the other, for the
+        /// same stretch of water, learns to distrust both. Downwind keeps the
+        /// app's accent because that screen was drawing it that way first.
+        /// Named literally rather than `.accentColor`. Inside `MapPolyline`
+        /// the accent does not resolve reliably — the same line drew orange
+        /// unselected and system blue selected — which is the sibling of the
+        /// `.tint` problem already found on the Downwind map.
+        var colour: Color {
+            switch self {
+            case .downwind: Color(red: 0.94, green: 0.35, blue: 0.20)
+            case .reaching: .teal
+            case .upwind: .indigo
+            }
+        }
+
         /// What a single run of this kind is called.
         var runName: String {
             switch self {

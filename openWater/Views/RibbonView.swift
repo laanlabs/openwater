@@ -1,3 +1,4 @@
+import MapKit
 import OpenWaterCore
 import SwiftUI
 
@@ -39,8 +40,20 @@ struct RibbonView: View {
     var legs: [SessionLeg] = []
     var isPointToPoint = false
 
+    /// The track, so this tab can draw the runs rather than only list them.
+    ///
+    /// A rider who wanted to see where the downwind legs were had to leave
+    /// the list, open Analysis and pick a screen. The map belongs where the
+    /// runs are.
+    var track: Track?
+    var mapStyle: MapStyleOption = .standard
+
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
+
+    /// The grouped run singled out on this tab's own map.
+    @State private var selectedRun: Int?
+    @State private var camera: MapCameraPosition = .automatic
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
@@ -190,6 +203,23 @@ struct RibbonView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    if track != nil, showsGrouped || showsLegs {
+                        runsMap
+                            .frame(height: 260)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .overlay(alignment: .bottomLeading) {
+                                if selectedRun != nil {
+                                    Button("Show all") { select(nil) }
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(.regularMaterial, in: Capsule())
+                                        .padding(8)
+                                }
+                            }
+                            .padding(.top, 10)
+                    }
+
                     if lanes.isEmpty {
                         ContentUnavailableView(
                             "No \(filter.rawValue.lowercased()) runs",
@@ -285,6 +315,119 @@ struct RibbonView: View {
                 RibbonKeySheet(thresholds: thresholds)
                     .presentationDetents([.medium, .large])
             }
+        }
+    }
+
+    // MARK: - The map
+
+    /// The session's runs drawn where they happened, coloured by kind.
+    ///
+    /// Laid out like the Upwind and Downwind maps on purpose — faded track
+    /// underneath, the runs over it, numbered dots that open into a label,
+    /// and everything else dimmed when one is chosen. Three screens draw runs
+    /// on a map and they should be the same picture.
+    @ViewBuilder
+    private var runsMap: some View {
+        if let track {
+            Map(position: $camera) {
+                MapPolyline(coordinates: track.points.map(\.clCoordinate))
+                    .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+
+                ForEach(mappedRuns) { run in
+                    let chosen = selectedRun == nil || selectedRun == run.id
+                    MapPolyline(coordinates: coordinates(of: run, in: track))
+                        .stroke(chosen ? run.kind.colour : Color.secondary.opacity(0.22),
+                                style: StrokeStyle(lineWidth: selectedRun == run.id ? 6 : 4,
+                                                   lineCap: .round, lineJoin: .round))
+                }
+
+                ForEach(mappedRuns) { run in
+                    if let middle = midpoint(of: run, in: track) {
+                        let chosen = selectedRun == nil || selectedRun == run.id
+                        Annotation("", coordinate: middle, anchor: .center) {
+                            Button { select(selectedRun == run.id ? nil : run.id) } label: {
+                                if selectedRun == run.id {
+                                    Text("\(run.kind.title) \(run.number) · \(Format.distance(run.distance, unit: units.distance))")
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .monospacedDigit()
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(run.kind.colour, in: Capsule())
+                                        .foregroundStyle(.white)
+                                        .shadow(radius: 2)
+                                } else {
+                                    Text("\(run.number)")
+                                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                                        .monospacedDigit()
+                                        .foregroundStyle(.white)
+                                        .frame(width: 18, height: 18)
+                                        .background(chosen ? run.kind.colour
+                                                    : Color.secondary.opacity(0.35), in: Circle())
+                                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                }
+            }
+            .mapStyle(mapStyle.mapStyle)
+        }
+    }
+
+    /// The runs the map draws — the filter applies here too, so choosing
+    /// "Downwind" leaves the downwind legs alone on the water.
+    /// How many the chip is offering to show.
+    private func count(for leg: Leg) -> Int {
+        if showsGrouped {
+            return leg == .all
+                ? groupedRuns.count
+                : groupedRuns.filter { leg.matchesKind($0.kind) }.count
+        }
+        return ribbon.lanes.filter { leg.matches($0.pointOfSail) }.count
+    }
+
+    private var mappedRuns: [GroupedRun] {
+        groupedRuns.filter { filter.matchesKind($0.kind) }
+    }
+
+    private func coordinates(of run: GroupedRun, in track: Track) -> [CLLocationCoordinate2D] {
+        track.points.indices
+            .filter { track.elapsed[$0] >= run.startElapsed && track.elapsed[$0] <= run.endElapsed }
+            .map { track.points[$0].clCoordinate }
+    }
+
+    private func midpoint(of run: GroupedRun, in track: Track) -> CLLocationCoordinate2D? {
+        let line = coordinates(of: run, in: track)
+        guard !line.isEmpty else { return nil }
+        return line[line.count / 2]
+    }
+
+    /// Choosing a run frames it, the way the Downwind screen does.
+    private func select(_ id: Int?) {
+        withAnimation(.snappy) {
+            selectedRun = id
+            guard let id, let track,
+                  let run = groupedRuns.first(where: { $0.id == id })
+            else {
+                camera = .automatic
+                return
+            }
+            let line = coordinates(of: run, in: track)
+            guard !line.isEmpty else { return }
+            let latitudes = line.map(\.latitude), longitudes = line.map(\.longitude)
+            let centre = CLLocationCoordinate2D(
+                latitude: (latitudes.min()! + latitudes.max()!) / 2,
+                longitude: (longitudes.min()! + longitudes.max()!) / 2
+            )
+            camera = .region(MKCoordinateRegion(
+                center: centre,
+                span: MKCoordinateSpan(
+                    latitudeDelta: max(0.004, (latitudes.max()! - latitudes.min()!) * 1.5),
+                    longitudeDelta: max(0.004, (longitudes.max()! - longitudes.min()!) * 1.5)
+                )
+            ))
         }
     }
 
@@ -392,14 +535,21 @@ struct RibbonView: View {
                     HStack(spacing: 4) {
                         Text(leg.rawValue)
                         if leg != .all {
-                            Text("\(ribbon.lanes.filter { leg.matches($0.pointOfSail) }.count)")
+                            // Runs when the list shows runs, stretches when it
+                            // shows stretches. The chip said 34 downwind while
+                            // the heading two lines above said 5 — the same
+                            // session counted two ways, on one screen.
+                            Text("\(count(for: leg))")
                                 .foregroundStyle(.secondary)
                         }
                     }
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .padding(.horizontal, 10)
+                    // "Downwind" with a count was eliding to "Downwi… 34" at
+                    // 0.8 on the narrowest phone. Smaller beats truncated:
+                    // a shrunk word is still readable, half a word is not.
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity)
                     .background(filter == leg ? AnyShapeStyle(.tint.opacity(0.18))
@@ -490,25 +640,36 @@ struct RibbonView: View {
     private func groupedRow(_ run: GroupedRun) -> some View {
         let tacks = run.kind == .upwind ? run.lanes.count : 0
         return Button {
-            guard tacks > 1 else { return }
-            withAnimation(.snappy) {
-                expandedLeg = expandedLeg == run.id ? nil : run.id
-            }
+            // A tap picks the run out on the map. Expanding an upwind run's
+            // tacks is the chevron's job — one tap, one meaning.
+            select(selectedRun == run.id ? nil : run.id)
         } label: {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     if tacks > 1 {
-                        Image(systemName: expandedLeg == run.id ? "chevron.down" : "chevron.right")
-                            .font(.caption2).foregroundStyle(.secondary).frame(width: 12)
+                        Button {
+                            withAnimation(.snappy) {
+                                expandedLeg = expandedLeg == run.id ? nil : run.id
+                            }
+                        } label: {
+                            Image(systemName: expandedLeg == run.id ? "chevron.down" : "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     } else {
-                        Color.clear.frame(width: 12)
+                        Color.clear.frame(width: 20)
                     }
 
                     Text("\(run.number)")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .frame(width: 20, height: 20)
-                        .background(.tint, in: Circle())
+                        .background(selectedRun == nil || selectedRun == run.id
+                                    ? run.kind.colour
+                                    : Color.secondary.opacity(0.35), in: Circle())
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
@@ -531,6 +692,11 @@ struct RibbonView: View {
                     }
                 }
                 .padding(.vertical, 9)
+                .padding(.horizontal, 6)
+                .background(selectedRun == run.id
+                            ? AnyShapeStyle(run.kind.colour.opacity(0.12))
+                            : AnyShapeStyle(Color.clear),
+                            in: RoundedRectangle(cornerRadius: 10))
 
                 if expandedLeg == run.id, tacks > 1 {
                     ForEach(run.lanes, id: \.id) { lane in
@@ -542,7 +708,6 @@ struct RibbonView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(tacks <= 1)
     }
 
     private func laneRow(_ lane: SessionRibbon.Lane) -> some View {

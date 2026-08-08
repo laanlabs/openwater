@@ -425,6 +425,8 @@ struct SessionDetailView: View {
             onSetWind: { isSettingWind = true },
             legs: summary.shape.legs,
             isPointToPoint: summary.shape.isPointToPoint,
+            track: session.track,
+            mapStyle: settings.mapStyle,
             selectedLane: $selectedRun
         )
     }

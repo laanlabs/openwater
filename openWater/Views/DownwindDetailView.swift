@@ -33,7 +33,8 @@ struct DownwindDetailView: View {
     @Environment(SessionLibrary.self) private var library
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
-    @State private var selectedGlide: Int?
+    /// The run being singled out on the map, if any.
+    @State private var selectedRun: Int?
     @State private var isMapFullScreen = false
     @State private var camera: MapCameraPosition = .automatic
     @State private var isRecomputing = false
@@ -171,13 +172,19 @@ struct DownwindDetailView: View {
 
             ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
                 if index > 0 { Divider().padding(.vertical, 2) }
+                Button {
+                    select(selectedRun == run.id ? nil : run.id)
+                } label: {
                 HStack(spacing: 10) {
                     if runs.count > 1 {
                         Text("\(run.number)")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .frame(width: 20, height: 20)
-                            .background(.tint, in: Circle())
+                            .background(selectedRun == nil || selectedRun == run.id
+                                        ? AnyShapeStyle(.tint)
+                                        : AnyShapeStyle(Color.secondary.opacity(0.4)),
+                                        in: Circle())
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -200,6 +207,14 @@ struct DownwindDetailView: View {
                     }
                 }
                 .padding(.vertical, 8)
+                .padding(.horizontal, 6)
+                .background(selectedRun == run.id
+                            ? AnyShapeStyle(Color.accentColor.opacity(0.12))
+                            : AnyShapeStyle(Color.clear),
+                            in: RoundedRectangle(cornerRadius: 10))
+                .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .cardChrome()
@@ -224,7 +239,7 @@ struct DownwindDetailView: View {
                 .accessibilityLabel("Expand map")
             }
             .overlay(alignment: .bottomLeading) {
-                if selectedGlide != nil {
+                if selectedRun != nil {
                     Button("Show all") { select(nil) }
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
@@ -245,20 +260,34 @@ struct DownwindDetailView: View {
             // Each downwind run drawn whole and numbered, the way the upwind
             // screen draws its beats.
             ForEach(downwindRuns) { run in
+                let chosen = selectedRun == nil || selectedRun == run.id
+                // `.tint` does not resolve inside a MapPolyline — it drew the
+                // system blue while the numbered badges beside it were the
+                // app's orange. Named explicitly so the line and its marker
+                // are the same colour.
                 MapPolyline(coordinates: coordinates(of: run))
-                    .stroke(.tint, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    .stroke(chosen ? Color.accentColor : Color.secondary.opacity(0.25),
+                            style: StrokeStyle(lineWidth: selectedRun == run.id ? 7 : 5,
+                                               lineCap: .round, lineJoin: .round))
             }
 
             ForEach(downwindRuns) { run in
                 if let start = midpoint(of: run) {
+                    let chosen = selectedRun == nil || selectedRun == run.id
                     Annotation("", coordinate: start, anchor: .center) {
-                        Text("\(run.number)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .frame(width: 22, height: 22)
-                            .background(.tint, in: Circle())
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                        Button { select(selectedRun == run.id ? nil : run.id) } label: {
+                            Text("\(run.number)")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .frame(width: selectedRun == run.id ? 28 : 22,
+                                       height: selectedRun == run.id ? 28 : 22)
+                                .background(chosen ? AnyShapeStyle(.tint)
+                                            : AnyShapeStyle(Color.secondary.opacity(0.35)),
+                                            in: Circle())
+                                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                        }
+                        .buttonStyle(.plain)
                     }
                     .annotationTitles(.hidden)
                 }
@@ -292,14 +321,12 @@ struct DownwindDetailView: View {
     /// eye is exactly the work this screen exists to save.
     private func select(_ id: Int?) {
         withAnimation(.snappy) {
-            selectedGlide = id
-            guard let id, let glide = glides.first(where: { $0.id == id }),
-                  glide.endIndex < session.track.count
-            else {
+            selectedRun = id
+            guard let id, let run = downwindRuns.first(where: { $0.id == id }) else {
                 camera = .automatic
                 return
             }
-            camera = .region(region(covering: coordinates(of: glide)))
+            camera = .region(region(covering: coordinates(of: run)))
         }
     }
 

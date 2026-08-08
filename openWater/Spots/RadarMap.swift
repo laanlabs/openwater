@@ -49,7 +49,7 @@ enum RadarSource: Hashable {
     var coverage: String {
         switch self {
         case .noaa(let region, let product):
-            "\(product.explanation) Showing the \(region.label) mosaic — NOAA also covers Hawaii, Alaska, the Caribbean and Guam, and nowhere else on earth."
+            "\(product.explanation) Showing \(region.label) — NOAA also covers Hawaii, Alaska, the Caribbean and Guam, and nowhere else on earth."
         case .rainViewer:
             "Global, though thin outside radar-covered countries."
         }

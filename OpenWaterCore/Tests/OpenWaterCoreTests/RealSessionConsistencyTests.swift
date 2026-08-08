@@ -67,9 +67,16 @@ struct RealSessionConsistencyTests {
     /// test passes silently — which is how a moved folder would quietly turn
     /// every one of these checks off.
     @Test("The fixtures are actually there")
-    func fixturesExist() {
+    func fixturesExist() throws {
+        // The recordings are riders' own GPS tracks and are deliberately not
+        // in the repository, so a fresh clone has no `testdata/` at all and
+        // must not fail for it. What still has to fail is the folder being
+        // there and empty — that is a fixture set that moved, which would
+        // turn every check below off in silence.
+        try #require(FileManager.default.fileExists(atPath: Self.testdata.path),
+                     "no testdata/ — real recordings are local-only; drop GPX or .openwater files there to run these")
         #expect(!Self.fixtures.isEmpty,
-                "no test files at \(Self.testdata.path) — the consistency checks below ran on nothing")
+                "testdata/ exists but holds no readable recordings — the consistency checks below ran on nothing")
     }
 
     @Test("The pieces of the analysis agree with each other", arguments: fixtures)

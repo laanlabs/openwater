@@ -1154,8 +1154,6 @@ struct DownwindRideCard: View {
     let distance: Double
     let units: UnitPreferences
 
-    private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
-
     /// One flight and no touchdowns is the thing worth calling out — it is the
     /// whole ambition of a downwinder and most sessions do not manage it.
     private var isUnbroken: Bool {
@@ -1163,44 +1161,49 @@ struct DownwindRideCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("THE RIDE")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: columns, spacing: 8) {
-                SummaryTile(label: "Time on foil", value: Format.duration(foil.timeOnFoil))
-                SummaryTile(label: "On foil", value: "\(Int(foil.foilingFraction * 100))%")
-                SummaryTile(label: isUnbroken ? "Ride" : "Rides",
-                            value: isUnbroken ? "Unbroken" : "\(foil.flightCount)")
-                if let longest = foil.longestFlight, !isUnbroken {
-                    SummaryTile(label: "Longest ride",
-                                value: Format.shortDuration(longest.duration))
+            // One number, big. This is the glance the screen exists for:
+            // how long was I up. Everything else is a supporting clause.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Format.duration(foil.timeOnFoil))
+                    .font(.system(size: 40, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                if isUnbroken {
+                    Text("unbroken")
+                        .font(.headline)
+                        .foregroundStyle(.tint)
+                } else {
+                    Text("over \(foil.flightCount) rides")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
                 }
-                SummaryTile(label: "Distance", value: Format.distance(distance, unit: units.distance))
-                SummaryTile(label: "Touchdowns", value: "\(foil.touchdownCount)")
+                Spacer(minLength: 0)
             }
 
-            Text(summaryLine)
-                .font(.caption2)
+            Text(supportingLine)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// The sentence that reconciles this card with the one below it, in the
-    /// rider's own terms.
-    private var summaryLine: String {
-        let gliding = Int(downwind.glideFraction * 100)
-        let working = max(0, 100 - gliding)
+    private var supportingLine: String {
+        var parts = [Format.distance(distance, unit: units.distance)]
+        parts.append("\(Int(foil.foilingFraction * 100))% of the session on foil")
         if isUnbroken {
-            return "One unbroken ride — you never touched down. Inside it, "
-                + "\(downwind.glideCount) glides linked end to end: about \(gliding)% of the time "
-                + "the swell was carrying you and about \(working)% you were working for it."
+            parts.append("never touched down")
+        } else if foil.touchdownCount > 0 {
+            parts.append("\(foil.touchdownCount) touchdown"
+                         + (foil.touchdownCount == 1 ? "" : "s"))
         }
-        return "\(foil.flightCount) rides, \(foil.touchdownCount) touchdown"
-            + (foil.touchdownCount == 1 ? "" : "s")
-            + ". Inside them, \(downwind.glideCount) glides: about \(gliding)% of the time "
-            + "the swell was carrying you and about \(working)% you were working for it."
+        if let longest = foil.longestFlight, !isUnbroken {
+            parts.append("longest \(Format.shortDuration(longest.duration))")
+        }
+        return parts.joined(separator: " · ")
     }
+
 }

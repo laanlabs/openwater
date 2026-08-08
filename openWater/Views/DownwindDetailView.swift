@@ -39,6 +39,16 @@ struct DownwindDetailView: View {
     @State private var isRecomputing = false
     @State private var expandedChain: Int?
 
+    /// Whether to open the glide-by-glide breakdown.
+    ///
+    /// Closed by default, and it stays closed between sessions. The rider this
+    /// screen was rebuilt for put it plainly: "It's one unbroken ride. I don't
+    /// really care about breaking it up into 20 chunks. Would mainly just
+    /// glance at it to see how long the total ride was." So the glance is the
+    /// screen, and the chunks are behind a button — the same call already made
+    /// on the Runs tab, for the same reason.
+    @AppStorage("downwind.showsGlideDetail") private var showsGlideDetail = false
+
     private var glides: [Glide] { summary.downwind.glides }
     private var legs: [SessionLeg] { summary.shape.legs }
 
@@ -65,17 +75,20 @@ struct DownwindDetailView: View {
                                      movingTime: summary.movingTime,
                                      distance: summary.distance, units: units)
                         .cardChrome()
-
-                    DownwindCard(downwind: summary.downwind, units: units)
-                        .cardChrome()
                 }
 
                 if showsLegs { legsCard }
 
                 if !glides.isEmpty {
                     mapCard
-                    if showsChains { chainList }
-                    glideList
+                    glideDetailButton
+
+                    if showsGlideDetail {
+                        DownwindCard(downwind: summary.downwind, units: units)
+                            .cardChrome()
+                        if showsChains { chainList }
+                        glideList
+                    }
                 }
 
                 explanation
@@ -111,6 +124,35 @@ struct DownwindDetailView: View {
     }
 
     // MARK: - Map
+
+    /// The way in to the breakdown, saying what is behind it so the tap is
+    /// informed rather than exploratory.
+    private var glideDetailButton: some View {
+        Button {
+            withAnimation(.snappy) { showsGlideDetail.toggle() }
+            if !showsGlideDetail { select(nil) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: showsGlideDetail ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(showsGlideDetail ? "Hide glide detail" : "Glide detail")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(summary.downwind.glideCount) glides · \(Int(summary.downwind.glideFraction * 100))% of the ride gliding")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .cardChrome()
+    }
 
     private var mapCard: some View {
         map
@@ -163,7 +205,7 @@ struct DownwindDetailView: View {
             // A tap target per glide, because a `MapPolyline` cannot take one.
             // Small and numbered so a session with a dozen stays legible; the
             // chosen one grows and says how long it lasted.
-            ForEach(glides) { glide in
+            ForEach(showsGlideDetail ? glides : []) { glide in
                 if glide.endIndex < session.track.count {
                     Annotation("", coordinate: midpoint(of: glide), anchor: .center) {
                         Button {

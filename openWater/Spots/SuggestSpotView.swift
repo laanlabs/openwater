@@ -2,18 +2,23 @@ import OpenWaterCore
 import PhotosUI
 import SwiftUI
 
-/// Fix a spot, or add one — standing on it.
+/// Fix a spot, or add one — standing on it, or pointing at it on the map.
 ///
 /// The website has the same form; the app's advantage is that the rider is
-/// *there*: the camera is in their hand and the GPS knows where "here" is, so
-/// a new spot's pin places itself and a correction's photo is thirty seconds
-/// old. Everything goes to the same review queue the site feeds — nothing a
-/// rider submits appears in the guide until a human has looked at it.
+/// often *there*: the camera is in their hand and the GPS knows where "here"
+/// is, so a new spot's pin places itself and a correction's photo is thirty
+/// seconds old. But "there" is not the only case — a spot remembered from last
+/// season, or the far end of a downwinder you have never stood at, both want a
+/// pin dropped on a map. So every pin here starts from the best guess
+/// available and stays movable. Everything goes to the same review queue the
+/// site feeds — nothing a rider submits appears in the guide until a human has
+/// looked at it.
 struct SuggestSpotView: View {
 
     enum Mode {
         case correction(GuideSpot)
-        case newSpot
+        /// A place already chosen — from the map — or `nil` to use the fix.
+        case newSpot(PickedPlace?)
     }
 
     let mode: Mode
@@ -34,6 +39,17 @@ struct SuggestSpotView: View {
     @State private var submitted = false
     @State private var errorMessage: String?
 
+    /// Where the spot is — the launch, and for a run, where it ends.
+    @State private var launch: PickedPlace?
+    @State private var landing: PickedPlace?
+    @State private var picking: PinTarget?
+    @State private var seeded = false
+
+    enum PinTarget: String, Identifiable {
+        case launch, landing
+        var id: String { rawValue }
+    }
+
     private static let activityOptions = [
         "Wing Foiling", "Prone Foiling", "Parawinging", "SUP Foiling",
         "Downwind Foiling", "Windsurfing", "Kite Foiling",
@@ -42,6 +58,7 @@ struct SuggestSpotView: View {
     private static let kinds: [(id: String, label: String, prompt: String)] = [
         ("photo", "Photo", "Anything worth knowing about the photos — where they're taken from, what the conditions were."),
         ("correction", "Fix info", "Conditions, best wind, season, hazards, launch and parking — anything the page gets wrong or misses."),
+        ("location", "Adjust location", "Say what's wrong with the pin — parking is on the other side, the beach access moved, the takeout is round the headland."),
         ("wind", "Wind meter", "Where is the meter, who runs it? Paste a link below."),
         ("camera", "Webcam", "Where is the camera, what does it show? Paste a link below."),
     ]
@@ -85,6 +102,21 @@ struct SuggestSpotView: View {
             }
         }
         .toolLocation(recorder)
+        .onAppear(perform: seed)
+        .sheet(item: $picking) { target in
+            LocationPickerSheet(
+                title: target == .launch ? "Where is the launch?" : "Where does it land?",
+                initial: (target == .launch ? pinnedLaunch : landing ?? pinnedLaunch)?.coordinate
+            ) { place in
+                switch target {
+                case .launch:
+                    launch = place
+                    if !isCorrection, name.isEmpty { name = place.name }
+                case .landing:
+                    landing = place
+                }
+            }
+        }
         .alert("Couldn't submit", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: {
@@ -92,13 +124,51 @@ struct SuggestSpotView: View {
         }
     }
 
+    /// Start each pin from the best guess there is: the spot being corrected,
+    /// the place picked on the map, or — failing both — wherever the phone
+    /// says it is. Once, so a rider who moves a pin does not have it moved
+    /// back under them by a late GPS fix.
+    private func seed() {
+        guard !seeded else { return }
+        switch mode {
+        case .correction(let spot):
+            launch = PickedPlace(name: spot.name,
+                                 latitude: spot.latitude, longitude: spot.longitude)
+        case .newSpot(let place):
+            if let place {
+                launch = place
+                if name.isEmpty { name = place.name }
+            }
+        }
+        seeded = true
+    }
+
+    /// The launch pin, falling back to the live fix while nothing is chosen.
+    private var pinnedLaunch: PickedPlace? {
+        if let launch { return launch }
+        guard let here = recorder.location.lastCoordinate else { return nil }
+        return PickedPlace(name: "", coordinate: here)
+    }
+
+    /// Has the rider actually moved the pin? Twenty metres is well inside a
+    /// car park and well outside GPS noise.
+    private var movedLaunch: Bool {
+        guard case .correction(let spot) = mode, let pinnedLaunch else { return false }
+        return Geo.distance(pinnedLaunch.coordinate,
+                            .init(latitude: spot.latitude, longitude: spot.longitude)) > 20
+    }
+
     private var canSubmit: Bool {
         if isCorrection {
-            // The site's rule: a photo submission needs photos, anything else
-            // needs words.
+            // A location fix needs a change to describe: a moved pin, a
+            // landing added, or words saying what is wrong. Otherwise the
+            // site's rule — photos need photos, everything else needs words.
+            if kind == "location" {
+                return pinnedLaunch != nil && (movedLaunch || landing != nil || !details.isEmpty)
+            }
             return kind == "photo" ? !photos.isEmpty : !details.isEmpty
         }
-        return !name.isEmpty && recorder.location.lastCoordinate != nil
+        return !name.isEmpty && pinnedLaunch != nil
     }
 
     // MARK: - Form
@@ -124,15 +194,7 @@ struct SuggestSpotView: View {
             } else {
                 Section {
                     TextField("Name — what locals call it", text: $name)
-                    LabeledContent("Pin") {
-                        if let here = recorder.location.lastCoordinate {
-                            Text(String(format: "%.5f, %.5f", here.latitude, here.longitude))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ProgressView()
-                        }
-                    }
+                    pinRow("Pin", place: pinnedLaunch, target: .launch)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 7) {
                             ForEach(Self.activityOptions, id: \.self) { activity in
@@ -156,9 +218,11 @@ struct SuggestSpotView: View {
                 } header: {
                     Text("New spot")
                 } footer: {
-                    Text("The pin is where you're standing — submit from the launch and it places itself.")
+                    Text("The pin starts where you're standing — submit from the launch and it places itself. Tap it to put it somewhere else on the map.")
                 }
             }
+
+            if isCorrection, kind == "location" { locationSection }
 
             Section {
                 photoStrip
@@ -187,6 +251,77 @@ struct SuggestSpotView: View {
                 Text(promptText + "\n\nEverything goes to review — nothing appears in the guide until a person has checked it.")
             }
         }
+    }
+
+    /// Both ends of a spot.
+    ///
+    /// A pin is a single point, which is fine for a lake and wrong for a
+    /// downwinder: those have a launch you drive to and a landing you get
+    /// picked up from, often miles apart, and the guide's one coordinate is
+    /// only ever the first of them. Riders who have done the run know where
+    /// the takeout is; this is where they say so.
+    @ViewBuilder
+    private var locationSection: some View {
+        Section {
+            pinRow("Launch", place: pinnedLaunch, target: .launch)
+
+            if landing != nil {
+                pinRow("Lands at", place: landing, target: .landing)
+                Button("Remove the landing", role: .destructive) {
+                    landing = nil
+                }
+                .font(.callout)
+            } else {
+                Button {
+                    picking = .landing
+                } label: {
+                    Label("Add where a downwinder lands", systemImage: "mappin.and.ellipse")
+                }
+            }
+        } header: {
+            Text("Where it is")
+        } footer: {
+            Text(landing == nil
+                 ? "Tap a pin to move the map under it. If this spot is a downwind run rather than a place you return to, add the landing as well — that's the end riders can never find."
+                 : "Two pins, so the guide can show the run rather than a dot. Say in the details below which end needed fixing, and why.")
+        }
+    }
+
+    /// A pin as a row: what it is, where it is, and an obvious way to move it.
+    private func pinRow(_ title: String, place: PickedPlace?, target: PinTarget) -> some View {
+        Button {
+            picking = target
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    if let place {
+                        Text(coordinates(place))
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Finding you…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                if place == nil {
+                    ProgressView()
+                }
+                Image(systemName: "map")
+                    .foregroundStyle(.tint)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func coordinates(_ place: PickedPlace) -> String {
+        let pin = String(format: "%.5f, %.5f", place.latitude, place.longitude)
+        return place.name.isEmpty ? pin : "\(place.name) · \(pin)"
     }
 
     private var promptText: String {
@@ -268,16 +403,11 @@ struct SuggestSpotView: View {
             submission.kind = kind
             submission.spotId = spot.spotId
             submission.name = spot.name
+            if kind == "location" { attachPins(to: &submission) }
         } else {
             submission.name = name
             submission.activities = activities.sorted().joined(separator: ", ")
-            if let here = recorder.location.lastCoordinate {
-                submission.spotType = "launch"
-                let lat = (here.latitude * 1e5).rounded() / 1e5
-                let lon = (here.longitude * 1e5).rounded() / 1e5
-                submission.points = "[[\(lat),\(lon)]]"
-                submission.location = String(format: "%.5f, %.5f", here.latitude, here.longitude)
-            }
+            attachPins(to: &submission)
         }
         submission.details = details
         submission.links = links
@@ -292,6 +422,33 @@ struct SuggestSpotView: View {
             }
             isSubmitting = false
         }
+    }
+
+    /// Writes the pins into the submission the review queue already
+    /// understands: `points` is the machine-readable pair, `location` the line
+    /// a human reads. A spot with two ends is a `downwind` rather than a
+    /// `launch`, which is the distinction the guide draws.
+    private func attachPins(to submission: inout SpotSuggestionClient.Submission) {
+        guard let launch = pinnedLaunch else { return }
+        let pins = [launch] + (landing.map { [$0] } ?? [])
+        submission.spotType = landing == nil ? "launch" : "downwind"
+        submission.points = "[" + pins.map { "[\(rounded($0))]" }.joined(separator: ",") + "]"
+        submission.location = zip(["Launch", "Lands at"], pins)
+            .map { describe($0, $1) }
+            .joined(separator: "\n")
+    }
+
+    /// Five decimal places is about a metre — more is false precision from a
+    /// pin dropped by thumb.
+    private func rounded(_ place: PickedPlace) -> String {
+        let lat = (place.latitude * 1e5).rounded() / 1e5
+        let lon = (place.longitude * 1e5).rounded() / 1e5
+        return "\(lat),\(lon)"
+    }
+
+    private func describe(_ label: String, _ place: PickedPlace) -> String {
+        let pin = String(format: "%.5f, %.5f", place.latitude, place.longitude)
+        return place.name.isEmpty ? "\(label): \(pin)" : "\(label): \(place.name) (\(pin))"
     }
 
     private var thanks: some View {
@@ -403,7 +560,7 @@ struct ImproveSpotHubView: View {
 
             Section {
                 Button {
-                    presenting = .newSpot
+                    presenting = .newSpot(nil)
                 } label: {
                     Label("Add a new spot here", systemImage: "plus.circle")
                 }

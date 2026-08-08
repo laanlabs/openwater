@@ -15,6 +15,11 @@ import SwiftUI
 /// rider taps a share button. Nothing here is passive.
 struct ShareLocationView: View {
 
+    /// Shorter when this is a sheet over the Spots map: the share button has
+    /// to be above the fold at the medium detent, and the little map is
+    /// reassurance rather than the point — there is a full one behind it.
+    var mapHeight: CGFloat = 240
+
     @Environment(PhoneRecorder.self) private var recorder
     @Environment(\.openURL) private var openURL
     /// Remembered, because which maps app your people use does not change
@@ -84,7 +89,7 @@ struct ShareLocationView: View {
                 }
             }
         }
-        .frame(height: 240)
+        .frame(height: mapHeight)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -142,6 +147,28 @@ struct ShareLocationView: View {
     private func coordinateText(_ c: Geo.Coordinate) -> String {
         String(format: "%.5f, %.5f", c.latitude, c.longitude)
     }
+}
 
+/// The same screen, presented rather than pushed.
+///
+/// Sharing a pin is not only a Tools errand. The moment it is wanted most —
+/// standing on a beach at the end of a run, telling a driver where to come —
+/// is the moment the Spots map is already open, and walking to another tab to
+/// do it is a detour. Presenting the same view rather than copying it keeps
+/// one implementation of the pin, the maps-app choice and the share sheet.
+struct ShareLocationSheet: View {
 
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ShareLocationView(mapHeight: 170)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        .presentationDetents([.medium, .large])
+    }
 }

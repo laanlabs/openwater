@@ -30,6 +30,7 @@ struct SpotsTabView: View {
     @State private var firingOnly = false
     @State private var pickingNewSpot = false
     @State private var addingSpot: NewSpotRequest?
+    @State private var sharingLocation = false
 
     enum PanelMode: String, CaseIterable {
         case nearby = "Nearby", favorites = "Favorites", destinations = "Destinations"
@@ -102,6 +103,9 @@ struct SpotsTabView: View {
         }
         .sheet(item: $addingSpot) { request in
             SuggestSpotView(mode: .newSpot(request.place))
+        }
+        .sheet(isPresented: $sharingLocation) {
+            ShareLocationSheet()
         }
         .task { await guide.load() }
         .task(id: windRefreshKey) {
@@ -225,7 +229,7 @@ struct SpotsTabView: View {
                     squareButton("magnifyingglass", showsBadge: hasActiveFilter) {
                         withAnimation(.snappy) { controlsExpanded = true }
                     }
-                    addSpotMenu
+                    moreMenu
                     squareButton("location.fill") {
                         withAnimation(.snappy) { camera = .userLocation(fallback: .automatic) }
                     }
@@ -236,24 +240,34 @@ struct SpotsTabView: View {
         .padding(.top, 8)
     }
 
-    /// Adding a spot from the map, which is where a rider is already looking
-    /// when they notice one is missing. Two ways in, because the guide gets
-    /// both kinds of gap: the launch you are standing on, and the one across
-    /// the bay you can point at but have never driven to.
-    private var addSpotMenu: some View {
+    /// What else a rider does while looking at this map.
+    ///
+    /// Adding a spot is here because the map is where you are already looking
+    /// when you notice one is missing, and it takes two forms: the launch you
+    /// are standing on, and the one across the bay you can point at but have
+    /// never driven to. Sharing a pin is here for the same reason — it is
+    /// wanted at the end of a run, with this screen open, not two tabs away
+    /// in Tools.
+    private var moreMenu: some View {
         Menu {
             Button {
                 addingSpot = NewSpotRequest(place: hereOrCentre)
             } label: {
-                Label("Add a spot here", systemImage: "location.fill")
+                Label("Add a spot here", systemImage: "plus.circle")
             }
             Button {
                 pickingNewSpot = true
             } label: {
                 Label("Pick the spot on the map", systemImage: "mappin.and.ellipse")
             }
+            Divider()
+            Button {
+                sharingLocation = true
+            } label: {
+                Label("Share my position", systemImage: "square.and.arrow.up")
+            }
         } label: {
-            squareLabel("plus")
+            squareLabel("ellipsis")
         }
     }
 

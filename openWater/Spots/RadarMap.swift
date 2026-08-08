@@ -15,10 +15,10 @@ import SwiftUI
 /// is a licensing question rather than a technical one and may well change.
 enum RadarSource: Hashable {
 
-    /// NOAA's RIDGE II mosaic, served as WMS. United States only, keyless,
-    /// and US federal work — public domain, so there is nothing to agree to.
-    /// One frame: whatever the mosaic currently holds.
-    case noaa
+    /// NOAA's RIDGE II mosaic, served as WMS. Keyless, and US federal work —
+    /// public domain, so there is nothing to agree to. One frame: whatever
+    /// the mosaic currently holds.
+    case noaa(region: RadarRegion, product: RadarProduct)
 
     /// RainViewer, global, with roughly two hours of past frames that can be
     /// animated. Each frame is a path from their index.
@@ -41,15 +41,17 @@ enum RadarSource: Hashable {
 
     var attribution: String {
         switch self {
-        case .noaa: "Radar: NOAA / National Weather Service, RIDGE II mosaic"
-        case .rainViewer: "Radar: RainViewer"
+        case .noaa(let region, _): "NOAA / National Weather Service, \(region.label) mosaic"
+        case .rainViewer: "RainViewer"
         }
     }
 
     var coverage: String {
         switch self {
-        case .noaa: "Continental United States only — NOAA's mosaic does not cover anywhere else."
-        case .rainViewer: "Global, though thin outside radar-covered countries."
+        case .noaa(let region, let product):
+            "\(product.explanation) Showing the \(region.label) mosaic — NOAA also covers Hawaii, Alaska, the Caribbean and Guam, and nowhere else on earth."
+        case .rainViewer:
+            "Global, though thin outside radar-covered countries."
         }
     }
 
@@ -65,20 +67,21 @@ enum RadarSource: Hashable {
     /// conversion: the world is `2^z` tiles wide, y counts down from the top.
     func tileURL(x: Int, y: Int, z: Int) -> URL? {
         switch self {
-        case .noaa:
+        case .noaa(let region, let product):
             let span = (Self.mercatorEdge * 2) / pow(2, Double(z))
             let minX = -Self.mercatorEdge + Double(x) * span
             let maxY = Self.mercatorEdge - Double(y) * span
             let bbox = [minX, maxY - span, minX + span, maxY]
                 .map { String(format: "%.3f", $0) }
                 .joined(separator: ",")
+            let layer = "\(region.rawValue)_\(product.suffix)"
             var components = URLComponents(
-                string: "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows")!
+                string: "https://opengeo.ncep.noaa.gov/geoserver/\(region.rawValue)/\(layer)/ows")!
             components.queryItems = [
                 .init(name: "service", value: "WMS"),
                 .init(name: "version", value: "1.1.1"),
                 .init(name: "request", value: "GetMap"),
-                .init(name: "layers", value: "conus_bref_qcd"),
+                .init(name: "layers", value: layer),
                 .init(name: "styles", value: ""),
                 .init(name: "format", value: "image/png"),
                 .init(name: "transparent", value: "true"),
@@ -93,6 +96,86 @@ enum RadarSource: Hashable {
             // colour 4 is their "Universal Blue" ramp; 1_1 asks for smoothed
             // tiles with snow shown separately.
             return URL(string: "\(frame.host)\(frame.path)/256/\(z)/\(x)/\(y)/4/1_1.png")
+        }
+    }
+}
+
+/// Which mosaic covers a point.
+///
+/// "Continental United States only" was true of the layer we happened to
+/// pick, not of NOAA. The same four products exist for Hawaii, Alaska, the
+/// Caribbean and Guam — and Hawaii in particular is not a footnote for this
+/// sport.
+enum RadarRegion: String, CaseIterable, Hashable {
+    case conus, hawaii, alaska, carib, guam
+
+    var label: String {
+        switch self {
+        case .conus: "the continental US"
+        case .hawaii: "Hawaii"
+        case .alaska: "Alaska"
+        case .carib: "the Caribbean"
+        case .guam: "Guam"
+        }
+    }
+
+    /// Rough footprints, generous at the edges — a mosaic that returns empty
+    /// tiles is a better failure than picking the wrong one and showing
+    /// nothing at all.
+    private var box: (lat: ClosedRange<Double>, lon: ClosedRange<Double>) {
+        switch self {
+        case .conus: (24...50, -125...(-66))
+        case .hawaii: (18...23, -161...(-154))
+        case .alaska: (51...72, -180...(-129))
+        case .carib: (16...20, -68...(-64))
+        case .guam: (12...16, 143...147)
+        }
+    }
+
+    static func covering(_ coordinate: Geo.Coordinate) -> RadarRegion {
+        allCases.first {
+            $0.box.lat.contains(coordinate.latitude) && $0.box.lon.contains(coordinate.longitude)
+        } ?? .conus
+    }
+}
+
+/// What the radar is being asked to show.
+///
+/// Four products, all free, and each answers a different question. Echo tops
+/// is the interesting one here: it is the height of the storm, and a tall
+/// echo top is deep convection — which is as close as free public data gets
+/// to "is there lightning in that cell", since no free strike feed exists.
+enum RadarProduct: String, CaseIterable, Hashable {
+    case base, composite, echoTops, precipitationType
+
+    var suffix: String {
+        switch self {
+        case .base: "bref_qcd"
+        case .composite: "cref_qcd"
+        case .echoTops: "neet_v18"
+        case .precipitationType: "pcpn_typ"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .base: "Rain"
+        case .composite: "Storm cores"
+        case .echoTops: "Storm tops"
+        case .precipitationType: "Type"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .base:
+            "Base reflectivity — what the lowest radar sweep sees, which is closest to what is falling on you."
+        case .composite:
+            "Composite reflectivity — the strongest return anywhere in the column, so a cell that looks mild at ground level but is violent aloft shows up."
+        case .echoTops:
+            "Echo tops — how high the storm reaches. Tall tops mean deep convection: the free stand-in for a lightning map, since no free strike feed can be redistributed."
+        case .precipitationType:
+            "Precipitation type — rain, snow, ice or mixed, which decides what the water is doing as much as how much of it there is."
         }
     }
 }
@@ -238,12 +321,15 @@ struct RadarScreen: View {
     @State private var frames: [RainViewerFrame] = []
     @State private var index: Int = 0
     @State private var isPlaying = false
+    @State private var product: RadarProduct = .base
+
+    private var region: RadarRegion { .covering(centre) }
 
     private var source: RadarSource {
         if RadarSource.allowsRainViewer, let frame = frames[safe: index] {
             return .rainViewer(frame: frame)
         }
-        return .noaa
+        return .noaa(region: region, product: product)
     }
 
     var body: some View {
@@ -260,6 +346,11 @@ struct RadarScreen: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Picker("Layer", selection: $product) {
+                ForEach(RadarProduct.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
             if RadarSource.allowsRainViewer, frames.count > 1 {
                 scrubber
             }

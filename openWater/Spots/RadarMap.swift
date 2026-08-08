@@ -34,15 +34,32 @@ enum RadarSource: Hashable {
     /// reads as non-commercial, and shipping against it on that reading would
     /// be someone else's licence broken quietly.
     ///
-    /// Flip this once a plan is in place. Everything below already works: the
-    /// frame index loads, the tiles render, the scrubber animates. Nothing
-    /// else has to change.
-    static let allowsRainViewer = false
+    /// Enabled: openWater is not a commercial product, which is the condition
+    /// their free tier is written around. Attribution is shown on the screen.
+    static let allowsRainViewer = true
 
     var attribution: String {
         switch self {
         case .noaa(let region, _): "NOAA / National Weather Service, \(region.label) mosaic"
         case .rainViewer: "RainViewer"
+        }
+    }
+
+    /// How far in each provider's tiles go.
+    ///
+    /// RainViewer's free tilecache stops at zoom 7. Above it every tile is
+    /// the same 1,370-byte grey "Zoom Level Not Supported" placeholder rather
+    /// than a 404, so the map fills with legible complaints instead of
+    /// failing quietly — which is exactly what it did. Measured, not guessed:
+    /// z5 and z7 return real data, z8 upward return the placeholder.
+    ///
+    /// Capping here makes MapKit upscale the last good tiles instead of
+    /// asking for ones that do not exist. The loop is therefore coarser than
+    /// the NOAA stills, which is the trade for having a past at all.
+    var maximumZoom: Int {
+        switch self {
+        case .noaa: 12
+        case .rainViewer: 7
         }
     }
 
@@ -231,7 +248,7 @@ final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
         // sweep with no coastline under it tells a rider nothing.
         canReplaceMapContent = false
         minimumZ = 3
-        maximumZ = 12
+        maximumZ = source.maximumZoom
     }
 
     override nonisolated func url(forTilePath path: MKTileOverlayPath) -> URL {
@@ -321,16 +338,40 @@ struct RadarScreen: View {
     @State private var frames: [RainViewerFrame] = []
     @State private var index: Int = 0
     @State private var isPlaying = false
-    @State private var product: RadarProduct = .base
+    /// What the map is showing: one of NOAA's still layers, or the loop.
+    ///
+    /// Both, rather than one or the other. NOAA alone publishes storm cores,
+    /// storm tops and precipitation type; RainViewer alone has a past to
+    /// play. Neither replaces the other.
+    enum Layer: Hashable {
+        case still(RadarProduct)
+        case loop
+    }
+
+    @State private var layer: Layer = .still(.base)
+
+    private var product: RadarProduct {
+        if case .still(let product) = layer { return product }
+        return .base
+    }
+
+    private var showsLoop: Bool { layer == .loop }
 
     private var region: RadarRegion { .covering(centre) }
 
+    /// RainViewer for plain rain — global, and the only source with a past to
+    /// animate. NOAA for the three products it alone publishes: storm cores,
+    /// storm tops and precipitation type have no RainViewer equivalent, and
+    /// losing them to get a scrubber would be a poor trade.
     private var source: RadarSource {
-        if RadarSource.allowsRainViewer, let frame = frames[safe: index] {
+        if showsLoop, let frame = frames[safe: index] {
             return .rainViewer(frame: frame)
         }
         return .noaa(region: region, product: product)
     }
+
+    /// Only the animated source gets a scrubber.
+    private var isAnimated: Bool { showsLoop && frames.count > 1 }
 
     var body: some View {
         RadarMapView(centre: centre, source: source, style: settings.mapStyle)
@@ -342,18 +383,35 @@ struct RadarScreen: View {
                 frames = await RainViewer.frames()
                 index = max(0, frames.count - 1)
             }
+            // The loop. `isPlaying` used to toggle a glyph and nothing else —
+            // the button looked like it worked and the map never moved.
+            //
+            // Restarting from the beginning when play is pressed at the end
+            // matters: the last frame is now, and a rider who taps play there
+            // wants to watch the last two hours arrive, not sit on a still.
+            .task(id: isPlaying) {
+                guard isPlaying, frames.count > 1 else { return }
+                if index >= frames.count - 1 { index = 0 }
+                while !Task.isCancelled, isPlaying {
+                    try? await Task.sleep(for: .milliseconds(index == frames.count - 1 ? 900 : 260))
+                    guard !Task.isCancelled, isPlaying else { return }
+                    index = index >= frames.count - 1 ? 0 : index + 1
+                }
+            }
     }
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Layer", selection: $product) {
-                ForEach(RadarProduct.allCases, id: \.self) { Text($0.label).tag($0) }
+            Picker("Layer", selection: $layer) {
+                ForEach(RadarProduct.allCases, id: \.self) { Text($0.label).tag(Layer.still($0)) }
+                Text("Loop").tag(Layer.loop)
             }
             .pickerStyle(.segmented)
-
-            if RadarSource.allowsRainViewer, frames.count > 1 {
-                scrubber
+            .onChange(of: layer) { _, _ in
+                if case .still = layer { isPlaying = false }
             }
+
+            if isAnimated { scrubber }
             Text(source.attribution)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -382,7 +440,7 @@ struct RadarScreen: View {
             Slider(
                 value: Binding(
                     get: { Double(index) },
-                    set: { index = Int($0.rounded()) }
+                    set: { isPlaying = false; index = Int($0.rounded()) }
                 ),
                 in: 0...Double(max(1, frames.count - 1)),
                 step: 1

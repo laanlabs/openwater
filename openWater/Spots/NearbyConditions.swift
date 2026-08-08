@@ -103,6 +103,31 @@ struct WindOutlook {
 
     let hours: [Date]
     let models: [Model]
+    var timeZone: TimeZone?
+
+    /// The mean of just the models a rider has left switched on.
+    ///
+    /// Separate from `consensus`, which always averages everything: on the
+    /// compare screen the whole point is that turning one off changes the
+    /// blend, so you can see what the answer looks like without the model you
+    /// distrust today.
+    func blend(of enabled: Set<String>) -> [Double?] {
+        let chosen = models.filter { enabled.contains($0.id) }
+        guard !chosen.isEmpty else { return [] }
+        return hours.indices.map { hour in
+            let values = chosen.compactMap { $0.speeds[safe: hour] ?? nil }
+            guard !values.isEmpty else { return nil }
+            return values.reduce(0, +) / Double(values.count)
+        }
+    }
+
+    /// How far each model actually runs. They stop at different horizons —
+    /// ICON at eight days, GEM at ten, GFS at sixteen — and a line that just
+    /// ends is worth explaining rather than hiding.
+    func horizon(of model: Model) -> Date? {
+        guard let last = model.speeds.lastIndex(where: { $0 != nil }) else { return nil }
+        return hours[safe: last]
+    }
 
     /// Mean across models at each hour — the consensus line.
     var consensus: [Double?] {
@@ -380,7 +405,7 @@ enum OpenMeteo {
         ("gem_seamless", "GEM"),
     ]
 
-    static func outlook(at coordinate: Geo.Coordinate, hours: Int = 24) async -> WindOutlook {
+    static func outlook(at coordinate: Geo.Coordinate, days: Int = 1) async -> WindOutlook {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -388,8 +413,9 @@ enum OpenMeteo {
             .init(name: "hourly", value: "wind_speed_10m"),
             .init(name: "models", value: models.map(\.id).joined(separator: ",")),
             .init(name: "wind_speed_unit", value: "kn"),
-            .init(name: "forecast_hours", value: String(hours)),
+            .init(name: "forecast_days", value: String(days)),
             .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
               let (data, response) = try? await URLSession.shared.data(from: url),
@@ -410,7 +436,8 @@ enum OpenMeteo {
         }
         return WindOutlook(
             hours: times.map { Date(timeIntervalSince1970: $0) },
-            models: series
+            models: series,
+            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
         )
     }
 

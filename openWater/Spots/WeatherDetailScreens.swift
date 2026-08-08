@@ -240,6 +240,7 @@ struct CurrentConditionsScreen: View {
 struct ForecastScreen: View {
 
     let title: String
+    let coordinate: Geo.Coordinate
     let detail: WeatherDetail
     let outlook: WindOutlook
     var waves: [WaveHour] = []
@@ -311,11 +312,32 @@ struct ForecastScreen: View {
     @ViewBuilder
     private var modelLines: some View {
         if !outlook.isEmpty {
+            NavigationLink {
+                ModelCompareScreen(title: title, coordinate: coordinate)
+            } label: {
+                modelLinesBody
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var modelLinesBody: some View {
+        if !outlook.isEmpty {
             let peak = max(outlook.models.flatMap { $0.speeds.compactMap { $0 } }.max() ?? 1, 1)
             VStack(alignment: .leading, spacing: 10) {
-                Text("EACH MODEL, NEXT 24 HOURS")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("EACH MODEL, NEXT 24 HOURS")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Compare")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tint)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
 
                 ZStack(alignment: .bottomLeading) {
                     ChartGrid(peak: peak)
@@ -626,5 +648,247 @@ private struct ModelTrace: Shape {
             if started { path.addLine(to: point) } else { path.move(to: point); started = true }
         }
         return path
+    }
+}
+
+// MARK: - Comparing the models properly
+
+/// The models, full screen, scrollable and switchable.
+///
+/// The card version is a thumbnail: four lines over one day, enough to see
+/// whether they agree. This is the version for actually deciding. It runs as
+/// far forward as the models do, it lets a rider turn off the one they do not
+/// trust at this spot — everybody who watches forecasts closely has an
+/// opinion about that — and it redraws the blend from whatever is left, so
+/// the answer visibly changes as you include and exclude.
+struct ModelCompareScreen: View {
+
+    let title: String
+    let coordinate: Geo.Coordinate
+
+    @Environment(AppSettings.self) private var settings
+    @State private var outlook = WindOutlook(hours: [], models: [])
+    @State private var enabled: Set<String> = []
+    @State private var isLoading = true
+    /// The hour under the finger, when there is one.
+    @State private var probe: Int?
+
+    private static let palette: [Color] = [.blue, .orange, .green, .purple]
+    /// Ten points an hour is roughly a day per screen — close enough to read
+    /// a sea breeze, far enough that a week is a few flicks away.
+    private static let hourWidth: CGFloat = 10
+
+    private var zone: TimeZone { outlook.timeZone ?? .current }
+
+    private var blend: [Double?] { outlook.blend(of: enabled) }
+
+    private var peak: Double {
+        let shown = outlook.models.filter { enabled.contains($0.id) }
+        return max(shown.flatMap { $0.speeds.compactMap { $0 } }.max() ?? 1, 1)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isLoading {
+                ProgressView().frame(maxHeight: .infinity)
+            } else if outlook.isEmpty {
+                ContentUnavailableView("No model data here",
+                                       systemImage: "chart.xyaxis.line",
+                                       description: Text("The global models returned nothing for this point."))
+            } else {
+                readout
+                chart
+                    .frame(maxHeight: .infinity)
+                toggles
+            }
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Models")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            outlook = await OpenMeteo.outlook(at: coordinate, days: 10)
+            enabled = Set(outlook.models.map(\.id))
+            isLoading = false
+        }
+    }
+
+    // MARK: The value under the finger
+
+    /// What the models say at the hour being touched, or at the start when
+    /// nothing is.
+    private var readout: some View {
+        let hour = probe ?? 0
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(outlook.hours[safe: hour].map {
+                    $0.formatted(Date.FormatStyle(timeZone: zone)
+                        .weekday(.abbreviated).hour().minute())
+                } ?? "—")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if let value = blend[safe: hour] ?? nil {
+                    (Text("\(Int(value.rounded()))").font(.title3.weight(.heavy))
+                     + Text(" kn blend").font(.caption.weight(.semibold)))
+                        .foregroundStyle(value >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                        .monospacedDigit()
+                }
+            }
+            HStack(spacing: 14) {
+                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                    if enabled.contains(model.id) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Self.palette[index % Self.palette.count])
+                                .frame(width: 7, height: 7)
+                            Text((model.speeds[safe: hour] ?? nil).map { "\(Int($0.rounded()))" } ?? "—")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                Text(probe == nil ? "Drag the chart to read a time" : "")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(.secondarySystemGroupedBackground))
+    }
+
+    // MARK: The chart
+
+    private var chart: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            let width = CGFloat(outlook.hours.count) * Self.hourWidth
+
+            VStack(spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    ChartGrid(peak: peak)
+
+                    // Midnight rules, so a week of wind reads as days rather
+                    // than as one long wobble.
+                    ForEach(midnights, id: \.self) { hour in
+                        Rectangle()
+                            .fill(Color(.systemGray4).opacity(0.7))
+                            .frame(width: 0.5)
+                            .offset(x: CGFloat(hour) * Self.hourWidth)
+                    }
+
+                    ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                        if enabled.contains(model.id) {
+                            ModelTrace(speeds: model.speeds, peak: peak)
+                                .stroke(Self.palette[index % Self.palette.count].opacity(0.75),
+                                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        }
+                    }
+
+                    // The blend last and heaviest — it is the answer, the
+                    // others are the working.
+                    ModelTrace(speeds: blend, peak: peak)
+                        .stroke(Color.primary,
+                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+                    if let probe {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.35))
+                            .frame(width: 1)
+                            .offset(x: CGFloat(probe) * Self.hourWidth)
+                    }
+                }
+                // Fills whatever height is left rather than a fixed 260 —
+                // on a tall phone that was a small chart floating in a screen
+                // of nothing.
+                .frame(width: width)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            probe = min(max(0, Int(value.location.x / Self.hourWidth)),
+                                        outlook.hours.count - 1)
+                        }
+                )
+
+                axis(width: width)
+            }
+            .padding(.vertical, 12)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+    }
+
+    private var midnights: [Int] {
+        var calendar = Calendar.current
+        calendar.timeZone = zone
+        return outlook.hours.indices.filter { index in
+            calendar.component(.hour, from: outlook.hours[index]) == 0
+        }
+    }
+
+    private func axis(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(midnights, id: \.self) { hour in
+                Text(outlook.hours[hour].formatted(
+                    Date.FormatStyle(timeZone: zone).weekday(.abbreviated)))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .offset(x: CGFloat(hour) * Self.hourWidth + 3)
+            }
+        }
+        .frame(width: width, height: 16, alignment: .topLeading)
+    }
+
+    // MARK: Switching models
+
+    private var toggles: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                    let on = enabled.contains(model.id)
+                    Button {
+                        // Never all off — an empty blend is a blank screen
+                        // with no way back except guessing.
+                        if on, enabled.count > 1 { enabled.remove(model.id) }
+                        else { enabled.insert(model.id) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(on ? Self.palette[index % Self.palette.count]
+                                      : Color(.systemGray3))
+                                .frame(width: 8, height: 8)
+                            Text(model.label)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(on ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                        }
+                        .padding(.horizontal, 11)
+                        .frame(height: 32)
+                        .background(on ? AnyShapeStyle(Color(.secondarySystemGroupedBackground))
+                                    : AnyShapeStyle(Color(.systemGray6)),
+                                    in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Text(footnote)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private var footnote: String {
+        let horizons = outlook.models.compactMap { model -> String? in
+            guard enabled.contains(model.id), let end = outlook.horizon(of: model) else { return nil }
+            return "\(model.label) to \(end.formatted(Date.FormatStyle(timeZone: zone).weekday(.abbreviated)))"
+        }
+        return "The heavy line is the blend of whatever is switched on. Models run to different horizons — "
+            + horizons.joined(separator: ", ")
+            + ". Free from Open-Meteo."
     }
 }

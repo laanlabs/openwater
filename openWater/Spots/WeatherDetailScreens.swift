@@ -1868,3 +1868,149 @@ private struct Triangle: Shape {
         return path
     }
 }
+
+// MARK: - Tide
+
+/// The tide, drawn.
+///
+/// A pair of times is the usual answer and it is the wrong shape: what a
+/// rider needs is where the water is *now* and which way it is going, which a
+/// curve says in one look and a table makes you work out. The turns are
+/// labelled on the curve rather than listed beside it, so "two hours to low"
+/// is a distance rather than a subtraction.
+struct TideChart: View {
+
+    let curve: TideCurve
+    var zone: TimeZone { curve.timeZone ?? .current }
+
+    private var span: (low: Double, high: Double) {
+        let low = curve.low, high = curve.high
+        let pad = max(0.1, (high - low) * 0.18)
+        return (low - pad, high + pad)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            header
+            chart
+            // The datum matters: heights here are against mean sea level and
+            // NOAA's are against mean lower low water, so the two sets of
+            // numbers will not match and a rider comparing them deserves to
+            // know why before they conclude one of us is broken.
+            Text("Sea level against MSL, from Open-Meteo's marine model — worldwide, and a model rather than a harmonic prediction. NOAA's stations below are measured against MLLW, so their heights read differently and their times are the authority.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("TIDE")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.secondary)
+
+            if let now = curve.now {
+                Text(String(format: "%.1f m", now.metres))
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                if let rising = curve.isRising {
+                    Image(systemName: rising ? "arrow.up" : "arrow.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(rising ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if let next = curve.nextTurn {
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(next.isHigh ? "NEXT HIGH" : "NEXT LOW")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text(next.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened,
+                                                            timeZone: zone)))
+                        .font(.subheadline.weight(.bold))
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+
+    /// Horizontal position of a moment across the whole curve.
+    private func x(_ date: Date, width: CGFloat) -> CGFloat {
+        guard let first = curve.points.first?.at, let last = curve.points.last?.at,
+              last > first else { return 0 }
+        return width * CGFloat(date.timeIntervalSince(first) / last.timeIntervalSince(first))
+    }
+
+    private func y(_ metres: Double, height: CGFloat) -> CGFloat {
+        let range = span
+        return height * (1 - CGFloat((metres - range.low) / max(0.01, range.high - range.low)))
+    }
+
+    private var chart: some View {
+        GeometryReader { geometry in
+            let height = geometry.size.height
+            let width = geometry.size.width
+
+            ZStack(alignment: .topLeading) {
+                // Water, filled — the shape reads as sea rather than as a
+                // line chart that happens to be about the sea.
+                Path { path in
+                    guard let first = curve.points.first else { return }
+                    path.move(to: CGPoint(x: x(first.at, width: width), y: height))
+                    for point in curve.points {
+                        path.addLine(to: CGPoint(x: x(point.at, width: width),
+                                                 y: y(point.metres, height: height)))
+                    }
+                    path.addLine(to: CGPoint(x: width, y: height))
+                    path.closeSubpath()
+                }
+                .fill(LinearGradient(colors: [Color.blue.opacity(0.35), Color.blue.opacity(0.08)],
+                                     startPoint: .top, endPoint: .bottom))
+
+                Path { path in
+                    for (index, point) in curve.points.enumerated() {
+                        let spot = CGPoint(x: x(point.at, width: width),
+                                           y: y(point.metres, height: height))
+                        if index == 0 { path.move(to: spot) } else { path.addLine(to: spot) }
+                    }
+                }
+                .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+
+                ForEach(curve.turns) { turn in
+                    VStack(spacing: 1) {
+                        Text(turn.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened,
+                                                                timeZone: zone)))
+                            .font(.system(size: 8, weight: .bold))
+                        Text(String(format: "%.1f", turn.metres))
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                    }
+                    .monospacedDigit()
+                    .fixedSize()
+                    .offset(x: x(turn.at, width: width) - 16,
+                            y: turn.isHigh ? y(turn.metres, height: height) - 26
+                                           : y(turn.metres, height: height) + 4)
+                }
+
+                if let now = curve.now {
+                    Rectangle()
+                        .fill(Color.orange)
+                        .frame(width: 2, height: height)
+                        .offset(x: x(now.at, width: width))
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 8, height: 8)
+                        .offset(x: x(now.at, width: width) - 4,
+                                y: y(now.metres, height: height) - 4)
+                }
+            }
+        }
+        .frame(height: 96)
+    }
+}

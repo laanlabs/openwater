@@ -1164,3 +1164,115 @@ extension OpenMeteo {
         return conditions.hasAnything ? conditions : nil
     }
 }
+
+// MARK: - Tide
+
+/// The tide curve at a point, and the turns derived from it.
+///
+/// NOAA's predictions are the authority where they exist, and they exist only
+/// in the United States. Open-Meteo's marine model carries sea level
+/// worldwide, which is a model rather than a harmonic prediction and is
+/// therefore worse — and available at every spot in the guide, which makes it
+/// the right thing to draw. The NOAA stations stay listed underneath for
+/// anyone who wants the real numbers.
+struct TideCurve {
+
+    struct Point: Identifiable {
+        let at: Date
+        let metres: Double
+        var id: Date { at }
+    }
+
+    struct Turn: Identifiable {
+        let at: Date
+        let metres: Double
+        let isHigh: Bool
+        var id: Date { at }
+    }
+
+    let points: [Point]
+    var timeZone: TimeZone?
+
+    var isEmpty: Bool { points.count < 3 }
+
+    var low: Double { points.map(\.metres).min() ?? 0 }
+    var high: Double { points.map(\.metres).max() ?? 1 }
+
+    /// Where the water is now, interpolated between the surrounding hours.
+    var now: Point? {
+        let moment = Date()
+        guard let after = points.firstIndex(where: { $0.at >= moment }) else { return points.last }
+        guard after > 0 else { return points.first }
+        let a = points[after - 1], b = points[after]
+        let span = b.at.timeIntervalSince(a.at)
+        guard span > 0 else { return a }
+        let fraction = moment.timeIntervalSince(a.at) / span
+        return Point(at: moment, metres: a.metres + (b.metres - a.metres) * fraction)
+    }
+
+    /// Rising or falling, which is the half of "1.1 m" that actually matters
+    /// — a metre on the way up is a different beach from a metre on the way
+    /// down, and it decides whether the sandbar is about to appear or go.
+    var isRising: Bool? {
+        let moment = Date()
+        guard let after = points.firstIndex(where: { $0.at >= moment }), after > 0 else { return nil }
+        return points[after].metres > points[after - 1].metres
+    }
+
+    /// Highs and lows, read off the curve as sign changes in the slope.
+    ///
+    /// Derived rather than fetched because the curve is global and the
+    /// harmonic tables are not — and an hourly series resolves a turn to
+    /// within about half an hour, which is the precision anybody plans to.
+    var turns: [Turn] {
+        guard points.count > 2 else { return [] }
+        var found: [Turn] = []
+        for index in 1..<(points.count - 1) {
+            let before = points[index - 1].metres
+            let here = points[index].metres
+            let after = points[index + 1].metres
+            if here >= before, here >= after, here > before || here > after {
+                found.append(Turn(at: points[index].at, metres: here, isHigh: true))
+            } else if here <= before, here <= after, here < before || here < after {
+                found.append(Turn(at: points[index].at, metres: here, isHigh: false))
+            }
+        }
+        return found
+    }
+
+    var nextTurn: Turn? { turns.first { $0.at > Date() } }
+}
+
+extension OpenMeteo {
+
+    /// Two days of sea level, hourly. Global.
+    static func tide(at coordinate: Geo.Coordinate) async -> TideCurve {
+        var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: "sea_level_height_msl"),
+            .init(name: "forecast_days", value: "2"),
+            .init(name: "past_days", value: "1"),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hourly = root["hourly"] as? [String: Any],
+              let times = hourly["time"] as? [Double],
+              let heights = hourly["sea_level_height_msl"] as? [Any]
+        else { return TideCurve(points: []) }
+
+        let points = times.indices.compactMap { index -> TideCurve.Point? in
+            guard let metres = heights[safe: index] as? Double else { return nil }
+            return TideCurve.Point(at: Date(timeIntervalSince1970: times[index]), metres: metres)
+        }
+        return TideCurve(
+            points: points,
+            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
+        )
+    }
+}

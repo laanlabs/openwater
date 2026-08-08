@@ -28,20 +28,37 @@ struct SpotsTabView: View {
     @State private var panelDrag: CGFloat = 0
     @State private var disciplineFilter: String?
     @State private var firingOnly = false
+    @State private var pickingNewSpot = false
+    @State private var addingSpot: NewSpotRequest?
 
     enum PanelMode: String, CaseIterable {
         case nearby = "Nearby", favorites = "Favorites", destinations = "Destinations"
     }
 
+    /// Four snap points, not three. The old floor was 30% of the screen, so
+    /// "get out of my way" was not a thing the panel could do — dragging it
+    /// down just sprang it back, which is what "the nearby tab doesn't slide
+    /// down" meant. `.minimized` is the header alone: the mode switch stays
+    /// reachable and the map gets everything else.
     enum PanelDetent: CaseIterable {
-        case peek, half, full
+        case minimized, peek, half, full
+        /// Zero means "as small as the header allows" — resolved in points,
+        /// because the header does not scale with the screen.
         var fraction: CGFloat {
             switch self {
-            case .peek: 0.30
-            case .half: 0.55
-            case .full: 0.90
+            case .minimized: 0
+            case .peek: 0.32
+            case .half: 0.58
+            case .full: 0.92
             }
         }
+    }
+
+    /// A request to add a spot: either at a place picked on the map, or `nil`
+    /// for "here", which lets the form use the live fix as it always has.
+    struct NewSpotRequest: Identifiable {
+        let place: PickedPlace?
+        let id = UUID()
     }
 
     enum SpotsRoute: Hashable {
@@ -77,6 +94,14 @@ struct SpotsTabView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $pickingNewSpot) {
+            LocationPickerSheet(title: "Where is the spot?", initial: mapCentre) { place in
+                addingSpot = NewSpotRequest(place: place)
+            }
+        }
+        .sheet(item: $addingSpot) { request in
+            SuggestSpotView(mode: .newSpot(request.place))
         }
         .task { await guide.load() }
         .task(id: windRefreshKey) {
@@ -200,6 +225,7 @@ struct SpotsTabView: View {
                     squareButton("magnifyingglass", showsBadge: hasActiveFilter) {
                         withAnimation(.snappy) { controlsExpanded = true }
                     }
+                    addSpotMenu
                     squareButton("location.fill") {
                         withAnimation(.snappy) { camera = .userLocation(fallback: .automatic) }
                     }
@@ -210,24 +236,63 @@ struct SpotsTabView: View {
         .padding(.top, 8)
     }
 
+    /// Adding a spot from the map, which is where a rider is already looking
+    /// when they notice one is missing. Two ways in, because the guide gets
+    /// both kinds of gap: the launch you are standing on, and the one across
+    /// the bay you can point at but have never driven to.
+    private var addSpotMenu: some View {
+        Menu {
+            Button {
+                addingSpot = NewSpotRequest(place: hereOrCentre)
+            } label: {
+                Label("Add a spot here", systemImage: "location.fill")
+            }
+            Button {
+                pickingNewSpot = true
+            } label: {
+                Label("Pick the spot on the map", systemImage: "mappin.and.ellipse")
+            }
+        } label: {
+            squareLabel("plus")
+        }
+    }
+
+    /// The rider's own fix when there is one — `nil` lets the form keep
+    /// following it as it settles — otherwise whatever the map is centred on.
+    private var hereOrCentre: PickedPlace? {
+        if recorder.location.lastCoordinate != nil { return nil }
+        guard let centre = mapCentre else { return nil }
+        return PickedPlace(name: "", coordinate: centre)
+    }
+
+    private var mapCentre: Geo.Coordinate? {
+        visibleRegion.map {
+            Geo.Coordinate(latitude: $0.center.latitude, longitude: $0.center.longitude)
+        }
+    }
+
     private var hasActiveFilter: Bool { disciplineFilter != nil || firingOnly }
 
     private func squareButton(_ symbol: String, showsBadge: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .frame(width: 44, height: 44)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
-                .overlay(alignment: .topTrailing) {
-                    if showsBadge {
-                        Circle()
-                            .fill(.tint)
-                            .frame(width: 9, height: 9)
-                            .offset(x: -5, y: 5)
-                    }
-                }
+            squareLabel(symbol, showsBadge: showsBadge)
         }
         .buttonStyle(.plain)
+    }
+
+    private func squareLabel(_ symbol: String, showsBadge: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .frame(width: 44, height: 44)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+            .overlay(alignment: .topTrailing) {
+                if showsBadge {
+                    Circle()
+                        .fill(.tint)
+                        .frame(width: 9, height: 9)
+                        .offset(x: -5, y: 5)
+                }
+            }
     }
 
     /// The disciplines that earn a chip — same rule as the website: only ones
@@ -267,14 +332,21 @@ struct SpotsTabView: View {
 
     // MARK: - Panel
 
+    /// The header's own height: the grab bar plus the mode switch. This is
+    /// what `.minimized` resolves to, plus room for the tab bar that floats
+    /// over the panel — without that the switch would sit behind it.
+    private var collapsedHeight: CGFloat { 76 + tabBarHeight }
+
+    private func height(for detent: PanelDetent, in size: CGSize) -> CGFloat {
+        max(collapsedHeight, size.height * detent.fraction)
+    }
+
     private func panel(in size: CGSize) -> some View {
-        let height = max(120, size.height * panelDetent.fraction - panelDrag)
+        let resting = height(for: panelDetent, in: size)
+        let live = min(height(for: .full, in: size),
+                       max(collapsedHeight, resting - panelDrag))
         return VStack(spacing: 0) {
-            Capsule()
-                .fill(Color(.systemGray3))
-                .frame(width: 38, height: 5)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
+            grabBar(in: size)
 
             Picker("Mode", selection: $panelMode) {
                 ForEach(PanelMode.allCases, id: \.self) { mode in
@@ -285,30 +357,81 @@ struct SpotsTabView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
 
+            // At the short detents the list has nothing to scroll, so the
+            // whole panel drags — which is what a thumb landing anywhere on
+            // it expects. Once it is tall enough to scroll, only the grab bar
+            // drags, or the two gestures fight.
             panelContent
+                .gesture(dragGesture(in: size), isEnabled: isCompact)
         }
-        .frame(height: height, alignment: .top)
+        .frame(height: live, alignment: .top)
         .frame(maxWidth: .infinity)
+        .clipped()
         .background(
             UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22)
                 .fill(.regularMaterial)
                 .shadow(color: .black.opacity(0.14), radius: 15, y: -4)
                 .ignoresSafeArea(edges: .bottom)
         )
-        .gesture(
-            DragGesture()
-                .onChanged { panelDrag = $0.translation.height }
-                .onEnded { value in
-                    let current = size.height * panelDetent.fraction - value.predictedEndTranslation.height
-                    let nearest = PanelDetent.allCases.min {
-                        abs(size.height * $0.fraction - current) < abs(size.height * $1.fraction - current)
-                    } ?? .peek
+    }
+
+    /// The one part of the panel that drags.
+    ///
+    /// It used to be the whole panel, which is why the list underneath fought
+    /// the sheet for every swipe. A grab bar the width of the panel is the
+    /// same target every map app uses, and it leaves the list free to scroll.
+    /// The chevron beside it does the same job without a gesture at all —
+    /// which is the point, since a drag you have to discover is not a control.
+    private func grabBar(in size: CGSize) -> some View {
+        Capsule()
+            .fill(Color(.systemGray3))
+            .frame(width: 38, height: 5)
+            .frame(maxWidth: .infinity)
+            .frame(height: 30)
+            .padding(.top, 4)
+            .contentShape(Rectangle())
+            .overlay(alignment: .trailing) {
+                Button {
                     withAnimation(.snappy) {
-                        panelDetent = nearest
-                        panelDrag = 0
+                        panelDetent = panelDetent == .minimized ? .half : .minimized
                     }
+                } label: {
+                    Image(systemName: panelDetent == .minimized ? "chevron.up" : "chevron.down")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 28)
+                        .background(Color(.systemGray5), in: Capsule())
                 }
-        )
+                .buttonStyle(.plain)
+                .padding(.trailing, 14)
+                .accessibilityLabel(panelDetent == .minimized ? "Expand nearby" : "Minimize nearby")
+            }
+            .onTapGesture {
+                withAnimation(.snappy) {
+                    panelDetent = panelDetent == .minimized ? .half : .minimized
+                }
+            }
+            .gesture(dragGesture(in: size))
+    }
+
+    /// Drag to the nearest snap point, thrown rather than dropped — the
+    /// projected end of the flick decides, so a fast flick down minimizes
+    /// from full without stopping at every detent on the way.
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { panelDrag = $0.translation.height }
+            .onEnded { value in
+                let projected = height(for: panelDetent, in: size)
+                    - value.predictedEndTranslation.height
+                let nearest = PanelDetent.allCases.min {
+                    abs(height(for: $0, in: size) - projected)
+                        < abs(height(for: $1, in: size) - projected)
+                } ?? .peek
+                withAnimation(.snappy) {
+                    panelDetent = nearest
+                    panelDrag = 0
+                }
+            }
     }
 
     @ViewBuilder
@@ -341,8 +464,12 @@ struct SpotsTabView: View {
                 }
                 .padding(.bottom, tabBarHeight + 12)
             }
-            .scrollDisabled(panelDetent == .peek)
+            .scrollDisabled(isCompact)
         }
+    }
+
+    private var isCompact: Bool {
+        panelDetent == .peek || panelDetent == .minimized
     }
 
     // MARK: Nearby

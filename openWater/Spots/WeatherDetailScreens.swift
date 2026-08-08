@@ -788,7 +788,7 @@ struct ModelCompareScreen: View {
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            outlook = await OpenMeteo.outlook(at: coordinate, days: 10)
+            outlook = await OpenMeteo.outlook(at: coordinate, days: 16, pastDays: 1)
             enabled = Set(outlook.models.map(\.id))
             isLoading = false
         }
@@ -799,51 +799,90 @@ struct ModelCompareScreen: View {
     /// What the models say at the hour being touched, or at the start when
     /// nothing is.
     private var readout: some View {
-        let hour = probe ?? 0
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+        let hour = probe ?? nowIndex ?? 0
+        let gusts = outlook.blendGusts(of: enabled)
+        let directions = outlook.blendDirections(of: enabled)
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(outlook.hours[safe: hour].map {
                     $0.formatted(Date.FormatStyle(timeZone: zone)
-                        .weekday(.abbreviated).hour().minute())
+                        .weekday(.abbreviated).month(.abbreviated).day().hour())
                 } ?? "—")
                     .font(.subheadline.weight(.bold))
-                Spacer()
+
+                if probe == nil, nowIndex != nil {
+                    Text("now")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange, in: Capsule())
+                }
+
+                Spacer(minLength: 0)
+
+                if let direction = directions[safe: hour] ?? nil {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 11, weight: .bold))
+                            .rotationEffect(.degrees(direction + 180))
+                        Text(Format.cardinal(direction))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let value = blend[safe: hour] ?? nil {
-                    (Text("\(Int(value.rounded()))").font(.title3.weight(.heavy))
-                     + Text(" kn blend").font(.caption.weight(.semibold)))
+                    (Text("\(Int(value.rounded()))").font(.system(size: 28, weight: .heavy, design: .rounded))
+                     + Text(" kn").font(.subheadline.weight(.semibold)))
                         .foregroundStyle(value >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                         .monospacedDigit()
                 }
-            }
-            HStack(spacing: 14) {
-                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
-                    if enabled.contains(model.id) {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Self.palette[index % Self.palette.count])
-                                .frame(width: 7, height: 7)
-                            Text((model.speeds[safe: hour] ?? nil).map { "\(Int($0.rounded()))" } ?? "—")
-                                .font(.caption.weight(.semibold))
-                                .monospacedDigit()
+                if let gust = gusts[safe: hour] ?? nil {
+                    Text("gusting \(Int(gust.rounded()))")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+
+                // Per model, named — a bare row of coloured numbers made you
+                // match them back to the chips at the bottom of the screen.
+                HStack(spacing: 10) {
+                    ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                        if enabled.contains(model.id) {
+                            VStack(spacing: 0) {
+                                Text((model.speeds[safe: hour] ?? nil).map { "\(Int($0.rounded()))" } ?? "—")
+                                    .font(.caption.weight(.bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Self.palette[index % Self.palette.count])
+                                Text(model.label)
+                                    .font(.system(size: 7, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
                 }
-                Spacer(minLength: 0)
-                Text(probe == nil ? "Drag the chart to read a time" : "")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground))
     }
 
     // MARK: The chart
 
-    private static let headerHeight: CGFloat = 22
-    private static let arrowsHeight: CGFloat = 40
-    private static let axisWidth: CGFloat = 30
+    private static let headerHeight: CGFloat = 24
+    /// The arrow band, plus the gap that keeps it off the plot floor. They
+    /// were sitting directly on the axis, which read as part of the chart
+    /// rather than as its own row.
+    private static let arrowsHeight: CGFloat = 46
+    private static let arrowsGap: CGFloat = 10
+    private static let axisWidth: CGFloat = 32
+
+    private static var footerHeight: CGFloat { arrowsHeight + arrowsGap }
 
     private var step: Double { ChartGrid.interval(for: peak) }
     private var levels: [Double] { ChartGrid.levels(peak: peak, step: step) }
@@ -854,20 +893,50 @@ struct ModelCompareScreen: View {
     /// The axis and the rules sit outside the scroll view. Only the data
     /// moves — a scale that slides away with its own traces is decoration.
     private var chart: some View {
+        // A horizontal ScrollView gives its content unbounded vertical space,
+        // so `maxHeight: .infinity` on the plot expanded past the viewport and
+        // pushed the arrow row off the bottom. The height has to be measured
+        // here and handed down.
+        GeometryReader { outer in
+            chartBody(plotHeight: max(80, outer.size.height
+                                      - Self.headerHeight - Self.footerHeight - 20))
+        }
+    }
+
+    private func chartBody(plotHeight: CGFloat) -> some View {
         let width = CGFloat(outlook.hours.count) * Self.hourWidth
 
         return HStack(spacing: 0) {
             axisGutter
             ZStack(alignment: .topLeading) {
                 horizontalRules
-                ScrollView(.horizontal, showsIndicators: true) {
-                    VStack(spacing: 0) {
-                        hourHeader(width: width)
-                        plot(width: width)
-                        arrowRow(width: width)
+                ScrollViewReader { scroller in
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        VStack(spacing: 0) {
+                            hourHeader(width: width)
+                            plot(width: width, height: plotHeight)
+                            arrowRow(width: width)
+                        }
+                        // Anchors every few hours, so the view can be sent to
+                        // "now" without scrolling by raw offset.
+                        .overlay(alignment: .leading) {
+                            ForEach(ticks, id: \.self) { hour in
+                                Color.clear
+                                    .frame(width: 1)
+                                    .id(hour)
+                                    .offset(x: CGFloat(hour) * Self.hourWidth)
+                            }
+                        }
+                    }
+                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                    .onChange(of: outlook.hours.count) { _, _ in
+                        // A day of history sits to the left of now; land on
+                        // it rather than at the start of yesterday.
+                        guard let now = nowIndex else { return }
+                        let anchor = ticks.last { $0 <= max(0, now - 6) } ?? 0
+                        scroller.scrollTo(anchor, anchor: .leading)
                     }
                 }
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             }
         }
         .padding(.vertical, 10)
@@ -875,7 +944,7 @@ struct ModelCompareScreen: View {
 
     private var axisGutter: some View {
         GeometryReader { geometry in
-            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.arrowsHeight)
+            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
             ForEach(levels, id: \.self) { level in
                 Text("\(Int(level))")
                     .font(.system(size: 9, weight: .semibold))
@@ -895,7 +964,7 @@ struct ModelCompareScreen: View {
 
     private var horizontalRules: some View {
         GeometryReader { geometry in
-            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.arrowsHeight)
+            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
             ForEach(levels, id: \.self) { level in
                 let isKey = abs(level - 15) < 0.01
                 Rectangle()
@@ -908,7 +977,7 @@ struct ModelCompareScreen: View {
             Rectangle()
                 .fill(Color(.systemGray2))
                 .frame(height: 1)
-                .offset(y: geometry.size.height - Self.arrowsHeight)
+                .offset(y: geometry.size.height - Self.footerHeight - 20)
         }
         .allowsHitTesting(false)
     }
@@ -931,8 +1000,18 @@ struct ModelCompareScreen: View {
         .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
     }
 
-    private func plot(width: CGFloat) -> some View {
+    private func plot(width: CGFloat, height: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
+            // Everything left of now, greyed. The models are hindcasting
+            // there rather than forecasting, and it should not read as part
+            // of the decision.
+            if let now = nowIndex, now > 0 {
+                Rectangle()
+                    .fill(Color(.systemGray5).opacity(0.55))
+                    .frame(width: CGFloat(now) * Self.hourWidth)
+                    .frame(maxHeight: .infinity)
+            }
+
             ForEach(ticks, id: \.self) { hour in
                 Rectangle()
                     .fill(midnights.contains(hour)
@@ -958,6 +1037,37 @@ struct ModelCompareScreen: View {
                 .stroke(Color.primary,
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
 
+            // Where each run stops. A line that simply ends looks like a
+            // bug or like calm; a labelled cap says the model ran out, which
+            // is the honest reading and the reason the blend thins there.
+            GeometryReader { geometry in
+                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                    if enabled.contains(model.id),
+                       let last = model.speeds.lastIndex(where: { $0 != nil }),
+                       let value = model.speeds[last],
+                       last < outlook.hours.count - 2 {
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(Self.palette[index % Self.palette.count])
+                                .frame(width: 6, height: 6)
+                            Text("\(model.label) ends")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(Self.palette[index % Self.palette.count])
+                                .fixedSize()
+                        }
+                        .offset(x: CGFloat(last) * Self.hourWidth + 4,
+                                y: geometry.size.height * (1 - value / peak) - 5)
+                    }
+                }
+            }
+
+            if let now = nowIndex {
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(width: 2)
+                    .offset(x: CGFloat(now) * Self.hourWidth)
+            }
+
             if let probe {
                 Rectangle()
                     .fill(Color.primary.opacity(0.4))
@@ -965,8 +1075,7 @@ struct ModelCompareScreen: View {
                     .offset(x: CGFloat(probe) * Self.hourWidth)
             }
         }
-        .frame(width: width)
-        .frame(maxHeight: .infinity)
+        .frame(width: width, height: height)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -987,14 +1096,14 @@ struct ModelCompareScreen: View {
         return ZStack(alignment: .topLeading) {
             ForEach(arrowTicks, id: \.self) { hour in
                 if let direction = directions[safe: hour] ?? nil {
-                    VStack(spacing: 1) {
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 12, weight: .semibold))
-                            .rotationEffect(.degrees(direction))
+                    VStack(spacing: 2) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .rotationEffect(.degrees(direction + 180))
                             .foregroundStyle((blend[safe: hour] ?? nil).map { $0 >= 15 }
                                              == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                         Text(Format.cardinal(direction))
-                            .font(.system(size: 7, weight: .semibold))
+                            .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.tertiary)
                     }
                     .frame(width: Self.hourWidth * 3)
@@ -1002,8 +1111,11 @@ struct ModelCompareScreen: View {
                 }
             }
         }
+        // Leading, not centre: the children are placed by `offset` from the
+        // origin, so a centred frame shifts every arrow by half the chart's
+        // width — which on a sixteen-day chart is a long way off screen.
         .frame(width: width, height: Self.arrowsHeight, alignment: .topLeading)
-        .padding(.top, 4)
+        .padding(.top, Self.arrowsGap)
     }
 
     /// Every third hour carries a label and a rule; every sixth an arrow.
@@ -1014,6 +1126,13 @@ struct ModelCompareScreen: View {
 
     private var arrowTicks: [Int] {
         outlook.hours.indices.filter { $0 % 6 == 0 }
+    }
+
+    /// The hour we are actually in — the orange rule that separates what has
+    /// happened from what is guessed.
+    private var nowIndex: Int? {
+        let now = Date()
+        return outlook.hours.lastIndex { $0 <= now }
     }
 
     /// Where the day turns over, in the spot's timezone — the rules and
@@ -1059,6 +1178,13 @@ struct ModelCompareScreen: View {
                 Spacer(minLength: 0)
             }
 
+            HStack(spacing: 14) {
+                key(Color.primary, "Blend", line: true)
+                key(Color.orange.opacity(0.35), "Gust range")
+                key(Color.orange, "Now", line: true)
+                Spacer(minLength: 0)
+            }
+
             Text(footnote)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -1067,6 +1193,17 @@ struct ModelCompareScreen: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemGroupedBackground))
+    }
+
+    private func key(_ colour: Color, _ label: String, line: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(colour)
+                .frame(width: line ? 14 : 12, height: line ? 2.5 : 9)
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var footnote: String {

@@ -31,6 +31,9 @@ struct SpotsTabView: View {
     @State private var pickingNewSpot = false
     @State private var addingSpot: NewSpotRequest?
     @State private var sharingLocation = false
+    @State private var isShowingConditions = false
+    @State private var localWeather: SpotWeather?
+    @State private var localWind: WindReading?
 
     enum PanelMode: String, CaseIterable {
         case nearby = "Nearby", favorites = "Favorites", destinations = "Destinations"
@@ -106,6 +109,17 @@ struct SpotsTabView: View {
         }
         .sheet(isPresented: $sharingLocation) {
             ShareLocationSheet()
+        }
+        .sheet(isPresented: $isShowingConditions) {
+            if let here = localCoordinate {
+                NearbyConditionsSheet(title: "Conditions here", coordinate: here)
+            }
+        }
+        .task(id: localWeatherKey) {
+            guard let here = localCoordinate else { return }
+            async let air = guide.weather(at: here)
+            async let blowing = guide.currentWind(at: here)
+            (localWeather, localWind) = await (air, blowing)
         }
         .task { await guide.load() }
         .task(id: windRefreshKey) {
@@ -225,6 +239,7 @@ struct SpotsTabView: View {
                 }
             } else {
                 HStack(spacing: 10) {
+                    weatherChip
                     Spacer()
                     squareButton("magnifyingglass", showsBadge: hasActiveFilter) {
                         withAnimation(.snappy) { controlsExpanded = true }
@@ -238,6 +253,63 @@ struct SpotsTabView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+
+    /// What it is doing where the rider is standing.
+    ///
+    /// The map answers "where can I go" and said nothing at all about now.
+    /// This is the other half: sky and temperature for the rider's own
+    /// position — not a spot, just wherever they are — and the way into every
+    /// station, cam and forecast around them.
+    ///
+    /// It follows the fix when there is one and the map centre when there is
+    /// not, so browsing Maui from the sofa shows Maui's weather rather than
+    /// the weather outside.
+    private var weatherChip: some View {
+        Button {
+            isShowingConditions = true
+        } label: {
+            HStack(spacing: 6) {
+                if let weather = localWeather {
+                    Image(systemName: weather.symbol)
+                        .font(.subheadline)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(weather.tint)
+                    Text("\(Int(weather.temperatureC.rounded()))°")
+                        .font(.subheadline.weight(.bold))
+                        .monospacedDigit()
+                } else {
+                    Image(systemName: "cloud.sun")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let reading = localWind {
+                    Text("\(Int(reading.speedKn.rounded()))kn")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(reading.isFiring ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Weather here, and nearby stations")
+    }
+
+    /// Where "here" is: the rider, or what they are looking at.
+    private var localCoordinate: Geo.Coordinate? {
+        recorder.location.lastCoordinate ?? mapCentre
+    }
+
+    /// Rounded to about a kilometre so panning the map does not refetch on
+    /// every frame — the weather does not change across a city block.
+    private var localWeatherKey: String {
+        guard let here = localCoordinate else { return "" }
+        return String(format: "%.2f,%.2f", here.latitude, here.longitude)
     }
 
     /// What else a rider does while looking at this map.

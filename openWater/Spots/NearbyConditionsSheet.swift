@@ -16,7 +16,23 @@ import SwiftUI
 /// believe".
 struct NearbyConditionsSheet: View {
 
-    let spot: GuideSpot
+    let title: String
+    let coordinate: Geo.Coordinate
+    /// The guide spot this is about, when it is about one. A spot supplies the
+    /// region the resource query is scoped to; a bare coordinate borrows the
+    /// nearest spot's.
+    var spot: GuideSpot?
+
+    init(spot: GuideSpot) {
+        self.title = spot.name
+        self.coordinate = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
+        self.spot = spot
+    }
+
+    init(title: String, coordinate: Geo.Coordinate) {
+        self.title = title
+        self.coordinate = coordinate
+    }
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(AppSettings.self) private var settings
@@ -26,13 +42,13 @@ struct NearbyConditionsSheet: View {
     @State private var tab: Tab = .conditions
     @State private var stations: [FreeStation] = []
     @State private var resources: [SpotGuideStore.GuideResource] = []
+    @State private var reading: WindReading?
+    @State private var weather: SpotWeather?
     @State private var isSearching = true
 
     enum Tab: String, CaseIterable {
         case conditions = "Wind & weather", cams = "Cams", surf = "Surf"
     }
-
-    private var reading: WindReading? { guide.wind[spot.spotId] }
 
     var body: some View {
         NavigationStack {
@@ -48,7 +64,7 @@ struct NearbyConditionsSheet: View {
                 .padding(16)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(spot.name)
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -57,7 +73,7 @@ struct NearbyConditionsSheet: View {
             }
         }
         .presentationDetents([.large])
-        .task(id: spot.spotId) { await search() }
+        .task(id: taskKey) { await search() }
     }
 
     private var picker: some View {
@@ -109,12 +125,12 @@ struct NearbyConditionsSheet: View {
     /// weakest one has to say what it is.
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("MODEL ESTIMATE, THIS SPOT")
+            Text("MODEL ESTIMATE, HERE")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.secondary)
 
             HStack(alignment: .center, spacing: 14) {
-                if let weather = guide.weatherReading(for: spot) {
+                if let weather = weather {
                     VStack(spacing: 2) {
                         Image(systemName: weather.symbol)
                             .font(.title)
@@ -140,7 +156,7 @@ struct NearbyConditionsSheet: View {
                     } else {
                         ProgressView()
                     }
-                    if let weather = guide.weatherReading(for: spot) {
+                    if let weather = weather {
                         Text(weather.label + (weather.apparentC.map { ", feels \(Int($0.rounded()))°" } ?? ""))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -343,13 +359,39 @@ struct NearbyConditionsSheet: View {
     /// Readings come in a second pass rather than being awaited together: the
     /// list is useful the moment it exists, and eight sequential observation
     /// calls would hold the whole sheet blank for the slowest of them.
+    private var taskKey: String {
+        spot?.spotId ?? String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)
+    }
+
+    // A spot goes through the spot-keyed calls so it shares the cache the spot
+    // page has usually already filled; a bare coordinate takes the coordinate
+    // ones. Written out rather than folded into `map`, which cannot carry an
+    // `async` closure.
+
+    private func findResources(_ here: Geo.Coordinate) async -> [SpotGuideStore.GuideResource] {
+        if let spot { return await guide.nearbyResources(to: spot) }
+        return await guide.nearbyResources(near: here)
+    }
+
+    private func findWeather(_ here: Geo.Coordinate) async -> SpotWeather? {
+        if let spot { return await guide.weather(for: spot) }
+        return await guide.weather(at: here)
+    }
+
+    private func findWind(_ here: Geo.Coordinate) async -> WindReading? {
+        if let spot, let known = guide.wind[spot.spotId] { return known }
+        return await guide.currentWind(at: here)
+    }
+
     private func search() async {
         isSearching = true
-        let here = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
+        let here = coordinate
 
-        async let nearby = guide.nearbyResources(to: spot)
+        async let nearby = findResources(here)
         async let found = NationalWeatherService.stations(near: here)
-        (resources, stations) = await (nearby, found)
+        async let air = findWeather(here)
+        async let blowing = findWind(here)
+        (resources, stations, weather, reading) = await (nearby, found, air, blowing)
         isSearching = false
 
         await withTaskGroup(of: (String, StationObservation?).self) { group in

@@ -564,11 +564,32 @@ final class SpotGuideStore {
     /// spot has no region, and caches per region because the second spot a
     /// rider opens in the same place should cost nothing.
     func nearbyResources(to spot: GuideSpot, radius: Double = 40_000) async -> [GuideResource] {
+        await nearbyResources(
+            near: Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude),
+            region: spot, radius: radius
+        )
+    }
+
+    /// The same, for a point that is not a spot — a rider standing somewhere
+    /// the guide has never heard of still wants to know what is around them.
+    ///
+    /// Resources are indexed by region rather than by geography, so an
+    /// arbitrary coordinate has to borrow one: the nearest known spot decides
+    /// which region to search. That is exact in practice, since a region is
+    /// a state or a country and the nearest launch is inside the one you are
+    /// standing in.
+    func nearbyResources(near coordinate: Geo.Coordinate, radius: Double = 40_000) async -> [GuideResource] {
+        await nearbyResources(near: coordinate, region: nearestSpot(to: coordinate), radius: radius)
+    }
+
+    private func nearbyResources(
+        near here: Geo.Coordinate, region spot: GuideSpot?, radius: Double
+    ) async -> [GuideResource] {
+        guard let spot else { return [] }
         let (field, value): (String, String) = spot.adminRegionId.map { ("adminRegionId", $0) }
             ?? ("countryId", spot.countryId ?? "")
         guard !value.isEmpty else { return [] }
 
-        let here = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
         let cacheKey = "\(field)=\(value)"
         if let cached = nearbyCache[cacheKey] {
             return Self.rank(cached, from: here, radius: radius)
@@ -638,14 +659,35 @@ final class SpotGuideStore {
     /// shows. Same free model, same TTL.
     @discardableResult
     func weather(for spot: GuideSpot) async -> SpotWeather? {
-        if let cached = weatherBySpot[spot.spotId],
+        await weather(
+            at: Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude),
+            key: spot.spotId
+        )
+    }
+
+    /// The same at an arbitrary point — the Spots map shows this for wherever
+    /// the rider is, which is usually not a spot in the guide. Cached under a
+    /// coordinate rounded to about a hundred metres, the way the wind at a
+    /// coordinate already is.
+    @discardableResult
+    func weather(at coordinate: Geo.Coordinate) async -> SpotWeather? {
+        await weather(at: coordinate,
+                      key: String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude))
+    }
+
+    func weatherReading(at coordinate: Geo.Coordinate) -> SpotWeather? {
+        weatherBySpot[String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)]
+    }
+
+    private func weather(at coordinate: Geo.Coordinate, key: String) async -> SpotWeather? {
+        if let cached = weatherBySpot[key],
            Date().timeIntervalSince(cached.at) < Self.windTTL {
             return cached
         }
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
-            .init(name: "latitude", value: String(format: "%.4f", spot.latitude)),
-            .init(name: "longitude", value: String(format: "%.4f", spot.longitude)),
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
             .init(name: "current", value: "temperature_2m,apparent_temperature,weather_code,is_day"),
         ]
         struct Payload: Decodable {
@@ -671,7 +713,7 @@ final class SpotGuideStore {
             isDay: (current.is_day ?? 1) == 1,
             at: Date()
         )
-        weatherBySpot[spot.spotId] = reading
+        weatherBySpot[key] = reading
         return reading
     }
 

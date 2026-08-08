@@ -348,6 +348,25 @@ struct NearbyConditionsSheet: View {
                 }
                 .frame(height: 62, alignment: .bottom)
 
+                // Arrows under the bars, every third hour. Speed decides
+                // whether you go and direction decides whether the spot works
+                // at all — a card that shows one without the other is half an
+                // answer.
+                let directions = outlook.blendDirections(of: Set(outlook.models.map(\.id)))
+                HStack(spacing: 3) {
+                    ForEach(outlook.hours.indices, id: \.self) { hour in
+                        Group {
+                            if hour % 3 == 0, let direction = directions[safe: hour] ?? nil {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .rotationEffect(.degrees(direction))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+
                 HStack {
                     Text("now")
                     Spacer()

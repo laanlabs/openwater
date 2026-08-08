@@ -645,9 +645,19 @@ struct ChartGrid: View {
         }
     }
 
-    private var levels: [Double] {
-        guard peak > 0, interval > 0 else { return [] }
-        return Array(stride(from: interval, through: peak, by: interval))
+    private var levels: [Double] { Self.levels(peak: peak, step: interval) }
+
+    static func levels(peak: Double, step: Double) -> [Double] {
+        guard peak > 0, step > 0 else { return [] }
+        return Array(stride(from: step, through: peak, by: step))
+    }
+
+    static func interval(for peak: Double) -> Double {
+        switch peak {
+        case ..<22: 5
+        case ..<45: 10
+        default: 20
+        }
     }
 
     var body: some View {
@@ -817,91 +827,189 @@ struct ModelCompareScreen: View {
 
     // MARK: The chart
 
+    private static let headerHeight: CGFloat = 22
+    private static let arrowsHeight: CGFloat = 40
+    private static let axisWidth: CGFloat = 30
+
+    private var step: Double { ChartGrid.interval(for: peak) }
+    private var levels: [Double] { ChartGrid.levels(peak: peak, step: step) }
+
+    /// A proper plot: labelled axis down the left, hours across the top,
+    /// rules both ways, and the wind's direction under every few columns.
+    ///
+    /// The axis and the rules sit outside the scroll view. Only the data
+    /// moves — a scale that slides away with its own traces is decoration.
     private var chart: some View {
         let width = CGFloat(outlook.hours.count) * Self.hourWidth
 
-        // The grid sits outside the scroll view: a y-axis that slides off the
-        // left edge with the traces labels nothing. Its bottom padding clears
-        // the weekday strip so the rules line up with the plot, not the axis.
-        return ZStack(alignment: .topLeading) {
-            ChartGrid(peak: peak)
-                .padding(.top, 12)
-                .padding(.bottom, 28)
-
-            ScrollView(.horizontal, showsIndicators: true) {
-            VStack(spacing: 0) {
-                ZStack(alignment: .topLeading) {
-                    // Midnight rules, so a week of wind reads as days rather
-                    // than as one long wobble.
-                    ForEach(midnights, id: \.self) { hour in
-                        Rectangle()
-                            .fill(Color(.systemGray4).opacity(0.7))
-                            .frame(width: 0.5)
-                            .offset(x: CGFloat(hour) * Self.hourWidth)
-                    }
-
-                    ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
-                        if enabled.contains(model.id) {
-                            ModelTrace(speeds: model.speeds, peak: peak)
-                                .stroke(Self.palette[index % Self.palette.count].opacity(0.75),
-                                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                        }
-                    }
-
-                    // The blend last and heaviest — it is the answer, the
-                    // others are the working.
-                    ModelTrace(speeds: blend, peak: peak)
-                        .stroke(Color.primary,
-                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-
-                    if let probe {
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.35))
-                            .frame(width: 1)
-                            .offset(x: CGFloat(probe) * Self.hourWidth)
+        return HStack(spacing: 0) {
+            axisGutter
+            ZStack(alignment: .topLeading) {
+                horizontalRules
+                ScrollView(.horizontal, showsIndicators: true) {
+                    VStack(spacing: 0) {
+                        hourHeader(width: width)
+                        plot(width: width)
+                        arrowRow(width: width)
                     }
                 }
-                // Fills whatever height is left rather than a fixed 260 —
-                // on a tall phone that was a small chart floating in a screen
-                // of nothing.
-                .frame(width: width)
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            probe = min(max(0, Int(value.location.x / Self.hourWidth)),
-                                        outlook.hours.count - 1)
-                        }
-                )
-
-                axis(width: width)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             }
-            .padding(.vertical, 12)
-            }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         }
+        .padding(.vertical, 10)
     }
 
+    private var axisGutter: some View {
+        GeometryReader { geometry in
+            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.arrowsHeight)
+            ForEach(levels, id: \.self) { level in
+                Text("\(Int(level))")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: Self.axisWidth - 5, alignment: .trailing)
+                    .offset(y: Self.headerHeight + plotHeight * (1 - level / peak) - 6)
+            }
+            Text("kn")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.axisWidth - 5, alignment: .trailing)
+                .offset(y: Self.headerHeight - 14)
+        }
+        .frame(width: Self.axisWidth)
+    }
+
+    private var horizontalRules: some View {
+        GeometryReader { geometry in
+            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.arrowsHeight)
+            ForEach(levels, id: \.self) { level in
+                let isKey = abs(level - 15) < 0.01
+                Rectangle()
+                    .fill(isKey ? AnyShapeStyle(Color.accentColor.opacity(0.5))
+                          : AnyShapeStyle(Color(.systemGray3).opacity(0.7)))
+                    .frame(height: isKey ? 1.5 : 0.75)
+                    .offset(y: Self.headerHeight + plotHeight * (1 - level / peak))
+            }
+            // The floor, so the traces have something to stand on.
+            Rectangle()
+                .fill(Color(.systemGray2))
+                .frame(height: 1)
+                .offset(y: geometry.size.height - Self.arrowsHeight)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Hours across the top, with the day named where it turns over.
+    private func hourHeader(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(ticks, id: \.self) { hour in
+                let isMidnight = midnights.contains(hour)
+                Text(outlook.hours[hour].formatted(
+                    isMidnight
+                    ? Date.FormatStyle(timeZone: zone).weekday(.abbreviated)
+                    : Date.FormatStyle(timeZone: zone).hour()))
+                    .font(.system(size: 9, weight: isMidnight ? .bold : .regular))
+                    .foregroundStyle(isMidnight ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .fixedSize()
+                    .offset(x: CGFloat(hour) * Self.hourWidth + 3, y: 4)
+            }
+        }
+        .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
+    }
+
+    private func plot(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(ticks, id: \.self) { hour in
+                Rectangle()
+                    .fill(midnights.contains(hour)
+                          ? Color(.systemGray2) : Color(.systemGray4).opacity(0.5))
+                    .frame(width: midnights.contains(hour) ? 1 : 0.5)
+                    .offset(x: CGFloat(hour) * Self.hourWidth)
+            }
+
+            // Gusts behind everything, as a filled band up from the blend —
+            // the headroom above the average is the part that knocks you over.
+            GustBand(speeds: blend, gusts: outlook.blendGusts(of: enabled), peak: peak)
+                .fill(Color.orange.opacity(0.16))
+
+            ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                if enabled.contains(model.id) {
+                    ModelTrace(speeds: model.speeds, peak: peak)
+                        .stroke(Self.palette[index % Self.palette.count].opacity(0.7),
+                                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                }
+            }
+
+            ModelTrace(speeds: blend, peak: peak)
+                .stroke(Color.primary,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+            if let probe {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.4))
+                    .frame(width: 1)
+                    .offset(x: CGFloat(probe) * Self.hourWidth)
+            }
+        }
+        .frame(width: width)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    probe = min(max(0, Int(value.location.x / Self.hourWidth)),
+                                outlook.hours.count - 1)
+                }
+        )
+    }
+
+    /// The direction row.
+    ///
+    /// Speed alone decides whether you go; direction decides whether the spot
+    /// works at all, and reading it off a table while looking at a chart is
+    /// the split every wind site closes by putting the arrows under the plot.
+    private func arrowRow(width: CGFloat) -> some View {
+        let directions = outlook.blendDirections(of: enabled)
+        return ZStack(alignment: .topLeading) {
+            ForEach(arrowTicks, id: \.self) { hour in
+                if let direction = directions[safe: hour] ?? nil {
+                    VStack(spacing: 1) {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .rotationEffect(.degrees(direction))
+                            .foregroundStyle((blend[safe: hour] ?? nil).map { $0 >= 15 }
+                                             == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        Text(Format.cardinal(direction))
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(width: Self.hourWidth * 3)
+                    .offset(x: CGFloat(hour) * Self.hourWidth - Self.hourWidth)
+                }
+            }
+        }
+        .frame(width: width, height: Self.arrowsHeight, alignment: .topLeading)
+        .padding(.top, 4)
+    }
+
+    /// Every third hour carries a label and a rule; every sixth an arrow.
+    /// Denser than that and they collide at ten points an hour.
+    private var ticks: [Int] {
+        outlook.hours.indices.filter { $0 % 3 == 0 }
+    }
+
+    private var arrowTicks: [Int] {
+        outlook.hours.indices.filter { $0 % 6 == 0 }
+    }
+
+    /// Where the day turns over, in the spot's timezone — the rules and
+    /// labels that make a week read as days rather than one long wobble.
     private var midnights: [Int] {
         var calendar = Calendar.current
         calendar.timeZone = zone
-        return outlook.hours.indices.filter { index in
-            calendar.component(.hour, from: outlook.hours[index]) == 0
+        return outlook.hours.indices.filter {
+            calendar.component(.hour, from: outlook.hours[$0]) == 0
         }
-    }
-
-    private func axis(width: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(midnights, id: \.self) { hour in
-                Text(outlook.hours[hour].formatted(
-                    Date.FormatStyle(timeZone: zone).weekday(.abbreviated)))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .offset(x: CGFloat(hour) * Self.hourWidth + 3)
-            }
-        }
-        .frame(width: width, height: 16, alignment: .topLeading)
     }
 
     // MARK: Switching models
@@ -1225,5 +1333,41 @@ struct ForecastTable: View {
         case ..<25: Color.orange.opacity(0.25)
         default: Color.red.opacity(0.35)
         }
+    }
+}
+
+/// The band between the average and the gust.
+///
+/// Drawn rather than a second line because the gap is the point: a steady
+/// twelve is a different day from twelve gusting twenty-five, and a thin band
+/// versus a fat one says that faster than two lines to be compared.
+private struct GustBand: Shape {
+    let speeds: [Double?]
+    let gusts: [Double?]
+    let peak: Double
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard speeds.count > 1, !gusts.isEmpty, peak > 0 else { return path }
+        let step = rect.width / CGFloat(speeds.count - 1)
+
+        func y(_ value: Double) -> CGFloat { rect.maxY - rect.height * CGFloat(value / peak) }
+
+        // Along the gusts, back along the average.
+        var top: [CGPoint] = []
+        var bottom: [CGPoint] = []
+        for index in speeds.indices {
+            guard let speed = speeds[safe: index] ?? nil,
+                  let gust = gusts[safe: index] ?? nil, gust > speed else { continue }
+            let x = rect.minX + CGFloat(index) * step
+            top.append(CGPoint(x: x, y: y(gust)))
+            bottom.append(CGPoint(x: x, y: y(speed)))
+        }
+        guard top.count > 1 else { return path }
+        path.move(to: top[0])
+        top.dropFirst().forEach { path.addLine(to: $0) }
+        bottom.reversed().forEach { path.addLine(to: $0) }
+        path.closeSubpath()
+        return path
     }
 }

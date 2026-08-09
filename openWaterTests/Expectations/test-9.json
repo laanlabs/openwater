@@ -11,6 +11,7 @@
   "maxSpeed" : 8.137092330619506,
   "points" : 520,
   "runsDownwind" : 1,
+  "runsLinked" : 0,
   "runsReaching" : 0,
   "runsUpwind" : 0,
   "sport" : "parawing",

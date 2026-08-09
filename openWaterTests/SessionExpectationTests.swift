@@ -69,6 +69,8 @@ final class SessionExpectationTests: XCTestCase {
         var runsDownwind: Int
         var runsReaching: Int
         var runsUpwind: Int
+        /// Runs entered without touching down — the thing riders chase.
+        var runsLinked: Int
 
         var windDirection: Double?
         var windSource: String?
@@ -152,6 +154,7 @@ final class SessionExpectationTests: XCTestCase {
             runsDownwind: byKind[.downwind] ?? 0,
             runsReaching: byKind[.reaching] ?? 0,
             runsUpwind: byKind[.upwind] ?? 0,
+            runsLinked: runs.filter(\.isLinked).count,
             windDirection: summary.wind?.directionFrom,
             windSource: summary.wind?.source.rawValue
         )
@@ -290,8 +293,10 @@ final class SessionExpectationTests: XCTestCase {
         // The runs.
         out += "## Runs\n\n"
         out += "The segmenter found **\(summary.ribbon.lanes.count) stretches**, which group into "
-        out += "**\(runs.count) runs**. A run ends at a change of point of sail or a touchdown; "
-        out += "stretches sailed off the foil are not runs.\n\n"
+        out += "**\(runs.count) runs**, "
+        out += "**\(runs.filter(\.isLinked).count) of them linked** — entered without touching "
+        out += "down. A run ends at a change of point of sail or a touchdown; stretches sailed "
+        out += "off the foil are not runs.\n\n"
 
         for kind in [GroupedRun.Kind.downwind, .reaching, .upwind] {
             let group = runs.filter { $0.kind == kind }
@@ -485,6 +490,7 @@ final class SessionExpectationTests: XCTestCase {
         check("downwind runs", actual.runsDownwind, expected.runsDownwind)
         check("reaching runs", actual.runsReaching, expected.runsReaching)
         check("upwind runs", actual.runsUpwind, expected.runsUpwind)
+        check("linked runs", actual.runsLinked, expected.runsLinked)
 
         XCTAssertEqual(actual.windSource, expected.windSource, "\(key) (\(file)): wind source")
         if let a = actual.windDirection, let b = expected.windDirection {

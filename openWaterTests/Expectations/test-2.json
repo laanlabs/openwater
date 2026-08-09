@@ -11,6 +11,7 @@
   "maxSpeed" : 7.97427396896785,
   "points" : 1133,
   "runsDownwind" : 6,
+  "runsLinked" : 0,
   "runsReaching" : 0,
   "runsUpwind" : 0,
   "sport" : "wingfoil",

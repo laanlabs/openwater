@@ -254,6 +254,39 @@ final class GroupedRunTests: XCTestCase {
         XCTAssertEqual(runs.count, 2)
     }
 
+    // MARK: Linked runs
+
+    /// Turning without dropping off the foil is the thing riders chase, and
+    /// it is invisible in a list of runs unless the run says so.
+    func testRunsInOneFlightAreLinked() throws {
+        // Gybed twice without touching down: three runs, one ride.
+        let input = try lanes([(.running, 600), (.closeHauled, 600), (.running, 600)])
+        let runs = GroupedRun.group(input, flights: [try flight(0, 0, 400)])
+
+        XCTAssertEqual(runs.count, 3)
+        XCTAssertEqual(runs.map(\.isLinked), [false, true, true],
+                       "The first run is not linked to anything; the other two are")
+    }
+
+    func testARunAfterATouchdownIsNotLinked() throws {
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 3))
+        let runs = GroupedRun.group(input, flights: [
+            try flight(0, 0, 95), try flight(1, 105, 195), try flight(2, 205, 295),
+        ])
+
+        XCTAssertEqual(runs.map(\.isLinked), [false, false, false])
+    }
+
+    /// Without flight detection nothing is known about touchdowns, and every
+    /// run would share a nil ride — claiming a whole windsurfing session was
+    /// linked when the app cannot see the foil at all.
+    func testNothingIsLinkedWithoutFlightDetection() throws {
+        let input = try lanes([(.running, 600), (.closeHauled, 600), (.running, 600)])
+        let runs = GroupedRun.group(input, flights: [])
+
+        XCTAssertFalse(runs.contains { $0.isLinked })
+    }
+
     // MARK: Aggregates
 
     func testARunSpansFromItsFirstStretchToItsLast() throws {

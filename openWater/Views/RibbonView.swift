@@ -137,6 +137,7 @@ struct RibbonView: View {
     /// question the screen could not answer without scanning every row.
     enum Order: String, CaseIterable, Identifiable {
         case time = "In order"
+        case grouped = "Grouped"
         case fastest = "Fastest"
         case longest = "Longest"
 
@@ -146,7 +147,7 @@ struct RibbonView: View {
     private var lanes: [SessionRibbon.Lane] {
         let matching = ribbon.lanes.filter { filter.matches($0.pointOfSail) }
         switch order {
-        case .time: return matching
+        case .time, .grouped: return matching
         case .fastest: return matching.sorted { $0.averageSpeed > $1.averageSpeed }
         case .longest: return matching.sorted { $0.distance > $1.distance }
         }
@@ -191,7 +192,24 @@ struct RibbonView: View {
     }
 
     private var showsGrouped: Bool {
-        !showsLegs && order == .time && groupedRuns.count < ribbon.lanes.count
+        !showsLegs && groupedRuns.count < ribbon.lanes.count
+    }
+
+    /// The runs as the list shows them.
+    ///
+    /// One list, not one per kind. Kind sections put every downwind run
+    /// together, which reads well until you notice that "In order" was
+    /// selected and the single downwind run was sitting above ten reaches it
+    /// happened between — the session did not go that way round. The kind
+    /// filter above already answers "show me only the downwind ones", so the
+    /// list itself can just be the session in the order it happened.
+    private var orderedRuns: [GroupedRun] {
+        let matching = groupedRuns.filter { filter.matchesKind($0.kind) }
+        switch order {
+        case .time, .grouped: return matching
+        case .fastest: return matching.sorted { $0.averageSpeed > $1.averageSpeed }
+        case .longest: return matching.sorted { $0.distance > $1.distance }
+        }
     }
 
     /// What kind of run a leg is, from the point of sail its stretches were
@@ -291,16 +309,25 @@ struct RibbonView: View {
                     }
 
                     if showsGrouped {
-                        ForEach(GroupedRun.Kind.allCases, id: \.self) { kind in
-                            let group = groupedRuns.filter { $0.kind == kind && filter.matchesKind(kind) }
-                            if !group.isEmpty {
-                                Text("\(kind.title) · \(group.count)")
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.top, 12)
-                                ForEach(group) { run in
-                                    groupedRow(run)
+                        if order == .grouped {
+                            // All the downwind runs in one place, which is the
+                            // question this answers — but as a choice, not as
+                            // the shape every session is forced into.
+                            ForEach(GroupedRun.Kind.allCases, id: \.self) { kind in
+                                let group = orderedRuns.filter { $0.kind == kind }
+                                if !group.isEmpty {
+                                    Text("\(kind.title) · \(group.count)")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.top, 12)
+                                    ForEach(group) { run in
+                                        groupedRow(run)
+                                    }
                                 }
+                            }
+                        } else {
+                            ForEach(orderedRuns) { run in
+                                groupedRow(run)
                             }
                         }
                     }
@@ -735,14 +762,27 @@ struct RibbonView: View {
                                     : Color.secondary.opacity(0.35), in: Circle())
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                        Text("\(Format.speed(run.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(run.maxSpeed, unit: units.speed, decimals: 1)) max"
-                             + (tacks > 1 ? " · \(tacks) tacks" : ""))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        HStack(spacing: 6) {
+                            Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+
+                            // Came into this run without touching down. The
+                            // run either side is ordinary; the join is the
+                            // hard part, so it is called out rather than left
+                            // to be inferred from two rows being adjacent.
+                            if run.isLinked { LinkedChip() }
+                        }
+                        HStack(spacing: 4) {
+                            Text(run.kind.title)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(run.kind.colour)
+                            Text("· \(Format.speed(run.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(run.maxSpeed, unit: units.speed, decimals: 1)) max"
+                                 + (tacks > 1 ? " · \(tacks) tacks" : ""))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
 
                     Spacer(minLength: 8)

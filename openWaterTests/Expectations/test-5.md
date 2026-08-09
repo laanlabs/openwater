@@ -26,7 +26,7 @@ Wingfoil · 2:15:11 · 46.21 km · 17.8 kn max
 
 ## Runs
 
-The segmenter found **246 stretches**, which group into **113 runs**. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **246 stretches**, which group into **113 runs**, **90 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
 ### Downwind · 48
 

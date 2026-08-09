@@ -78,6 +78,16 @@ struct GroupedRun: Identifiable {
     var number: Int
     let lanes: [SessionRibbon.Lane]
 
+    /// Whether the rider got here from the previous run without touching down.
+    ///
+    /// Linking runs is the thing riders actually chase: turning without
+    /// dropping off the foil is harder than the run either side of it, and a
+    /// session of six linked runs is a different afternoon from six runs with
+    /// a swim between each. Always false on a session with no flight
+    /// detection — nothing is known about touchdowns there, and silence is
+    /// better than a guess.
+    var isLinked: Bool = false
+
     var distance: Double { lanes.reduce(0) { $0 + $1.distance } }
     var duration: TimeInterval {
         guard let first = lanes.first, let last = lanes.last else { return 0 }
@@ -165,20 +175,35 @@ struct GroupedRun: Identifiable {
         // attempts — real distance, but not something a rider counts. Left in,
         // they bury the rides: sixteen reaching runs where two of them are
         // 134 m at three knots. They belong to the session, not to this list.
+        //
+        // The ride each surviving group belongs to is carried alongside it,
+        // not discarded with the filter: two runs in the same ride are two
+        // runs the rider linked without touching down, and that is the whole
+        // difference between a good session and a tiring one.
+        var kept = Array(zip(groups, rides))
         if !flown.isEmpty {
-            groups = zip(groups, rides).compactMap { $1 == nil ? nil : $0 }
+            kept = kept.filter { $0.1 != nil }
         }
 
         // A group's kind is decided by the distance sailed on each point of
         // sail inside it, not by whichever stretch happened to come first.
         var runs: [GroupedRun] = []
         var seen: [Kind: Int] = [:]
-        for (index, group) in groups.enumerated() {
+        for (index, entry) in kept.enumerated() {
+            let (group, ride) = entry
             var byKind: [Kind: Double] = [:]
             for lane in group { byKind[Kind(lane.pointOfSail), default: 0] += lane.distance }
             let kind = byKind.max { $0.value < $1.value }?.key ?? .reaching
             seen[kind, default: 0] += 1
-            runs.append(GroupedRun(id: index, kind: kind, number: seen[kind]!, lanes: group))
+
+            // Linked when the previous run ended in the same flight this one
+            // begins in. `ride != nil` matters: without flight detection every
+            // run has a nil ride, and nil == nil would call the whole session
+            // linked while claiming to know something it does not.
+            let linked = index > 0 && ride != nil && kept[index - 1].1 == ride
+
+            runs.append(GroupedRun(id: index, kind: kind, number: seen[kind]!,
+                                   lanes: group, isLinked: linked))
         }
         return runs
     }

@@ -189,9 +189,12 @@ struct DownwindDetailView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
+                        HStack(spacing: 6) {
+                            Text("\(Format.distance(run.distance, unit: units.distance)) · \(Format.shortDuration(run.duration))")
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                            if run.isLinked { LinkedChip() }
+                        }
                         Text("\(Format.speed(run.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(run.maxSpeed, unit: units.speed, decimals: 1)) max")
                             .font(.caption2)
                             .foregroundStyle(.secondary)

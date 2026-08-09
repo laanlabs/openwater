@@ -46,6 +46,10 @@ public final class RecordingEngine {
     /// it rides through to the saved session as their own note on the day.
     public var swellHeight: Double?
 
+    /// Degrees the swell comes from, if the rider called it. Independent of
+    /// the wind: on a beach day they are routinely not the same quarter.
+    public var swellDirection: Double?
+
     public var wind: Wind? {
         didSet { analyzer?.setWind(wind) }
     }
@@ -178,7 +182,8 @@ public final class RecordingEngine {
             appVersion: appVersion,
             title: title,
             spotName: spotName,
-            swellHeight: swellHeight
+            swellHeight: swellHeight,
+            swellDirection: swellDirection
         )
 
         state = .idle
@@ -301,7 +306,8 @@ public final class RecordingEngine {
         endBattery: Double? = nil,
         title: String? = nil,
         spotName: String? = nil,
-        swellHeight: Double? = nil
+        swellHeight: Double? = nil,
+        swellDirection: Double? = nil
     ) -> Session {
         let track = TrackBuilder(options: .forSport(sport)).build(from: points)
         let summary = SessionAnalyzer(
@@ -321,6 +327,7 @@ public final class RecordingEngine {
             appVersion: appVersion,
             endBattery: endBattery,
             swellHeight: swellHeight,
+            swellDirection: swellDirection,
             summary: summary
         )
     }

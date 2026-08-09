@@ -179,7 +179,8 @@ struct SessionMapTab: View {
                 // they realise the wind is wrong — and every angle on the
                 // other tabs is measured from it.
                 Button(action: onEditConditions) {
-                    WindDial(wind: wind, swell: session.swellHeight, units: settings.units)
+                    WindDial(wind: wind, swell: session.swellHeight,
+                             swellFrom: session.swellDirection, units: settings.units)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -497,6 +498,7 @@ struct WindDial: View {
 
     let wind: Wind
     var swell: Double? = nil
+    var swellFrom: Double? = nil
     let units: UnitPreferences
 
     var body: some View {
@@ -562,7 +564,8 @@ struct WindDial: View {
     }
 
     private func swellText(_ metres: Double) -> String {
-        "\(Format.height(metres, unit: units.distance)) swell"
+        guard let swellFrom else { return "\(Format.height(metres, unit: units.distance)) swell" }
+        return "\(Format.height(metres, unit: units.distance)) \(Format.cardinal(swellFrom))"
     }
 }
 

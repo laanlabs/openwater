@@ -55,6 +55,19 @@ public struct Session: Sendable, Codable, Identifiable {
     /// rider learns which conditions actually suit them.
     public var swellHeight: Double?
 
+    /// Degrees the swell is coming from, 0–360, if the rider called it.
+    ///
+    /// Deliberately not derived from the wind, because on the days this
+    /// matters they disagree: riding a beach on ocean swell, the wind can be
+    /// side-shore or straight offshore while the bumps keep marching in from
+    /// one quarter. A rider on those days is riding the swell, and the wind
+    /// angle says nothing about which way the good runs went.
+    ///
+    /// Optional in storage, so archives written before it existed still
+    /// decode — the synthesised decoder uses `decodeIfPresent` for Optionals
+    /// and would throw on a missing key for anything else.
+    public var swellDirection: Double?
+
     /// Wind for the session — estimated on import, overridable by the rider.
     ///
     /// Prefer `effectiveWind` when reading: the analysis carries its own copy,
@@ -158,6 +171,7 @@ public struct Session: Sendable, Codable, Identifiable {
         feeling: Int? = nil,
         foilTakeoffSpeed: Double? = nil,
         swellHeight: Double? = nil,
+        swellDirection: Double? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -182,6 +196,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.feeling = feeling
         self.foilTakeoffSpeed = foilTakeoffSpeed
         self.swellHeight = swellHeight
+        self.swellDirection = swellDirection
         self.summary = summary
     }
 }

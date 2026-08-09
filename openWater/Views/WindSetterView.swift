@@ -27,27 +27,33 @@ struct WindSetterView: View {
     /// swell and the row stays off — the record screen is asking "what is it
     /// doing", the session screens are asking "what was it like".
     let initialSwell: Double?
+    /// Degrees the swell comes from, if this session already has one.
+    let initialSwellDirection: Double?
     let showsSwell: Bool
-    /// Degrees the wind comes from, m/s (nil when the rider skips speed), and
-    /// swell in metres (nil when not offered or left at zero).
-    let onApply: (Double, Double?, Double?) -> Void
+    /// Degrees the wind comes from, m/s (nil when the rider skips speed),
+    /// swell in metres, and degrees the swell comes from — the last two nil
+    /// when not offered, left at zero, or never pointed at.
+    let onApply: (Double, Double?, Double?, Double?) -> Void
 
-    init(session: Session, onApply: @escaping (Double, Double?, Double?) -> Void) {
+    init(session: Session, onApply: @escaping (Double, Double?, Double?, Double?) -> Void) {
         self.trackPoints = session.track.points
         self.reference = session.effectiveWind
         self.referenceLabel = "the estimate"
         self.initialSwell = session.swellHeight
+        self.initialSwellDirection = session.swellDirection
         self.showsSwell = true
         self.onApply = onApply
     }
 
     init(initialWind: Wind?, initialSwell: Double? = nil,
+         initialSwellDirection: Double? = nil,
          showsSwell: Bool = false, referenceLabel: String = "the forecast",
-         onApply: @escaping (Double, Double?, Double?) -> Void) {
+         onApply: @escaping (Double, Double?, Double?, Double?) -> Void) {
         self.trackPoints = []
         self.reference = initialWind
         self.referenceLabel = referenceLabel
         self.initialSwell = initialSwell
+        self.initialSwellDirection = initialSwellDirection
         self.showsSwell = showsSwell
         self.onApply = onApply
     }
@@ -60,32 +66,72 @@ struct WindSetterView: View {
     @State private var swell: Double = 0
     @State private var hasDragged = false
 
+    /// Which arrow the dial is dragging.
+    ///
+    /// One dial rather than two, because the number a rider is really giving
+    /// us is the angle *between* wind and swell — side-shore, offshore, dead
+    /// behind — and that is only readable when both arrows sit on the same
+    /// circle over the same track.
+    @State private var pointing: Pointing = .wind
+    @State private var swellDirection: Double = 0
+    /// Swell direction is only reported once it has actually been given. An
+    /// untouched dial sitting at north is not a rider saying "north".
+    @State private var hasSwellDirection = false
+
+    private enum Pointing: String, CaseIterable, Identifiable {
+        case wind = "Wind"
+        case swell = "Swell"
+        var id: String { rawValue }
+    }
+
+    /// The angle currently under the drag.
+    private var pointed: Double {
+        get { pointing == .wind ? direction : swellDirection }
+        nonmutating set {
+            if pointing == .wind { direction = newValue }
+            else { swellDirection = newValue; hasSwellDirection = true }
+        }
+    }
+
     private var estimate: Wind? { reference }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                Text(trackPoints.isEmpty
-                     ? "Drag the arrow to point the way the wind is blowing."
-                     : "Drag the arrow to point the way the wind was blowing across your track.")
+                Text(prompt)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal)
+
+                if showsSwell {
+                    Picker("", selection: $pointing) {
+                        ForEach(Pointing.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 40)
+                }
 
                 dial
                     .frame(width: 300, height: 300)
 
                 HStack(spacing: 6) {
-                    Text(Format.cardinal(direction))
+                    Text(Format.cardinal(pointed))
                         .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text("\(Int(direction.rounded()))°")
+                    Text("\(Int(pointed.rounded()))°")
                         .font(.system(size: 30, weight: .medium, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
                 .contentTransition(.numericText())
-                .animation(.snappy, value: Int(direction))
+                .animation(.snappy, value: Int(pointed))
+
+                if showsSwell, hasSwellDirection {
+                    Text(offsetLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 speedRow
 
@@ -117,7 +163,8 @@ struct WindSetterView: View {
                     Button("Save") {
                         onApply(direction,
                                 knots > 0.5 ? knots / 1.94384 : nil,
-                                showsSwell && swell > 0.05 ? swell : nil)
+                                showsSwell && swell > 0.05 ? swell : nil,
+                                showsSwell && hasSwellDirection ? swellDirection : nil)
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -129,6 +176,14 @@ struct WindSetterView: View {
                     if let s = estimate.speed { knots = s * 1.94384 }
                 }
                 if let initialSwell { swell = initialSwell }
+                if let initialSwellDirection {
+                    swellDirection = initialSwellDirection
+                    hasSwellDirection = true
+                } else if let estimate {
+                    // Somewhere to start dragging from, not an assertion —
+                    // `hasSwellDirection` stays false until it is dragged.
+                    swellDirection = estimate.directionFrom
+                }
             }
         }
         .presentationDetents([.large])
@@ -176,8 +231,15 @@ struct WindSetterView: View {
                 // The wind: rides the rim at `direction` and blows through the
                 // middle of the track. One rotated group, so the arrow and its
                 // streamlines cannot disagree.
+                if showsSwell {
+                    swellArrow(size: size)
+                        .rotationEffect(.degrees(swellDirection))
+                        .opacity(pointing == .swell ? 1 : 0.4)
+                }
+
                 windArrow(size: size)
                     .rotationEffect(.degrees(direction))
+                    .opacity(showsSwell && pointing == .swell ? 0.4 : 1)
             }
             .contentShape(Circle())
             .gesture(
@@ -188,10 +250,64 @@ struct WindSetterView: View {
                         guard dx * dx + dy * dy > 100 else { return }
                         hasDragged = true
                         // Screen-up is north; atan2 measured clockwise from it.
-                        direction = Geo.normalizeDegrees(Double(atan2(dx, -dy)) * 180 / Double.pi)
+                        pointed = Geo.normalizeDegrees(Double(atan2(dx, -dy)) * 180 / Double.pi)
                     }
             )
         }
+    }
+
+    private var prompt: String {
+        if pointing == .swell {
+            return trackPoints.isEmpty
+                ? "Drag the arrow to point the way the swell is coming from."
+                : "Drag the arrow to point the way the swell was marching across your track."
+        }
+        return trackPoints.isEmpty
+            ? "Drag the arrow to point the way the wind is blowing."
+            : "Drag the arrow to point the way the wind was blowing across your track."
+    }
+
+    /// Wind against swell, said the way a rider would say it.
+    ///
+    /// This is the whole reason swell has its own arrow: on a beach day the
+    /// wind can be side-shore or straight offshore while the bumps keep
+    /// coming from one quarter, and "cross-shore" is the fact that explains
+    /// the session.
+    private var offsetLine: String {
+        // Shortest way round the circle: 350° and 10° are 20° apart, not 340°.
+        let raw = Geo.normalizeDegrees(swellDirection - direction)
+        let between = raw > 180 ? 360 - raw : raw
+        let rounded = Int(between.rounded())
+        switch between {
+        case ..<30: return "Swell running with the wind"
+        case ..<70: return "Swell \(rounded)° off the wind"
+        case ..<110: return "Swell across the wind — \(rounded)°"
+        default: return "Swell against the wind — \(rounded)°"
+        }
+    }
+
+    /// Rounder and hollow, so it never reads as a second wind arrow.
+    private func swellArrow(size: CGFloat) -> some View {
+        VStack(spacing: 3) {
+            Circle()
+                .fill(Color.teal)
+                .frame(width: 30, height: 30)
+                .overlay {
+                    Image(systemName: "water.waves")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(radius: 2)
+            // Wave crests rather than streamlines — swell arrives in lines.
+            ForEach(0..<3, id: \.self) { i in
+                Capsule()
+                    .fill(Color.teal.opacity(0.5 - Double(i) * 0.12))
+                    .frame(width: 16, height: 2.5)
+            }
+            Spacer()
+        }
+        .frame(height: size - 8)
+        .padding(.top, 6)
     }
 
     private func windArrow(size: CGFloat) -> some View {

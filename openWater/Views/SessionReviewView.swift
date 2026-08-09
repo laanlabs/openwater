@@ -159,12 +159,13 @@ struct SessionReviewView: View {
             }
             .sheet(isPresented: $isSettingConditions) {
                 if let session {
-                    WindSetterView(session: sessionWithStagedEdits(session)) { direction, speed, swell in
+                    WindSetterView(session: sessionWithStagedEdits(session)) { direction, speed, swell, swellFrom in
                         windDirectionText = String(Int(direction.rounded()))
                         windSpeedText = speed.map {
                             String(Int(settings.units.speed.convert(fromMetresPerSecond: $0).rounded()))
                         } ?? ""
                         edits.swellHeight = swell
+                        edits.swellDirection = swellFrom
                     }
                 }
             }
@@ -236,6 +237,7 @@ struct SessionReviewView: View {
     private func sessionWithStagedEdits(_ session: Session) -> Session {
         var staged = session
         staged.swellHeight = edits.swellHeight
+        staged.swellDirection = edits.swellDirection
         if let direction = Double(windDirectionText.trimmingCharacters(in: .whitespaces)) {
             let speed = Double(windSpeedText.trimmingCharacters(in: .whitespaces))
                 .map { settings.units.speed.toMetresPerSecond($0) }
@@ -284,6 +286,7 @@ struct SessionReviewView: View {
         // swell height skips reanalysis entirely — but it still has to be
         // written, which the guard below handles by saving either way.
         edited.swellHeight = edits.swellHeight
+        edited.swellDirection = edits.swellDirection
 
         guard session.requiresReanalysis(for: edited) else {
             library.save(session.applying(edited, categories: settings.categories,

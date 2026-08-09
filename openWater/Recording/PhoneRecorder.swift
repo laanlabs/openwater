@@ -76,6 +76,11 @@ final class PhoneRecorder {
         set { engine.swellHeight = newValue }
     }
 
+    var swellDirection: Double? {
+        get { engine.swellDirection }
+        set { engine.swellDirection = newValue }
+    }
+
     var allTimeBests: [SpeedCategory: Double] {
         get { engine.allTimeBests }
         set { engine.allTimeBests = newValue }

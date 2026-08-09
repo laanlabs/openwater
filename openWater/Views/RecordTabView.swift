@@ -169,10 +169,12 @@ struct RecordTabView: View {
         .sheet(isPresented: $isSettingWind) {
             WindSetterView(initialWind: recorder.wind ?? launchWind.map(windFromReading),
                            initialSwell: recorder.swellHeight,
-                           showsSwell: true) { direction, speed, swell in
+                           initialSwellDirection: recorder.swellDirection,
+                           showsSwell: true) { direction, speed, swell, swellFrom in
                 recorder.wind = Wind(directionFrom: direction, speed: speed,
                                      source: .manual, confidence: 1)
                 recorder.swellHeight = swell
+                recorder.swellDirection = swellFrom
             }
         }
     }
@@ -403,6 +405,7 @@ struct RecordTabView: View {
         // manual or otherwise.
         recorder.wind = nil
         recorder.swellHeight = nil
+        recorder.swellDirection = nil
         launchWind = nil
     }
 }

@@ -94,7 +94,9 @@ struct SessionOverview: View {
                         }
 
                         if let swell = session.swellHeight, swell > 0.05 {
-                            Text("\(Format.height(swell, unit: settings.units.distance)) swell")
+                            Text(session.swellDirection.map {
+                                "\(Format.height(swell, unit: settings.units.distance)) swell from \(Format.cardinal($0))"
+                            } ?? "\(Format.height(swell, unit: settings.units.distance)) swell")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

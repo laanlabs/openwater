@@ -1,3 +1,4 @@
+import CoreLocation
 import OpenWaterCore
 import XCTest
 @testable import openWater
@@ -111,7 +112,9 @@ final class SessionExpectationTests: XCTestCase {
     // MARK: Measuring
 
     /// Analyse one file exactly as an import would.
-    private func measure(_ url: URL) throws -> (key: String, expectation: Expectation) {
+    private func measure(_ url: URL) throws
+        -> (key: String, expectation: Expectation, session: Session,
+            summary: SessionSummary, runs: [GroupedRun]) {
         let data = try Data(contentsOf: url)
         let imported = try TrackImporter.read(data)
 
@@ -151,7 +154,184 @@ final class SessionExpectationTests: XCTestCase {
             windSource: summary.wind?.source.rawValue
         )
 
-        return (key(for: session), expectation)
+        return (key(for: session), expectation, session, summary, runs)
+    }
+
+    // MARK: The readable half
+
+    /// A page per recording, in prose and tables.
+    ///
+    /// The JSON next to it is for the machine: it fails a build when a number
+    /// moves. This is for the rider: it says where the session was, what the
+    /// conditions were, and lists every run the analysis found, so the
+    /// question "is this actually right?" can be answered by reading rather
+    /// than by opening the app and tapping through four screens.
+    ///
+    /// Anything below the notes marker is preserved across re-records. That
+    /// is where the ground truth goes — what the rider says the session was —
+    /// and it would be worthless if regenerating wiped it.
+    private func document(
+        for session: Session, summary: SessionSummary, runs: [GroupedRun],
+        place: String?, existing: String?
+    ) -> String {
+        var out = ""
+
+        let date = DateFormatter()
+        date.dateFormat = "d MMMM yyyy 'at' HH:mm"
+        date.timeZone = TimeZone(identifier: "UTC")
+        date.locale = Locale(identifier: "en_US_POSIX")
+
+        out += "# \(place ?? "Unknown water") — \(date.string(from: session.startDate)) UTC\n\n"
+        out += "\(session.sport.displayName) · \(duration(summary.duration)) · "
+        out += "\(kilometres(summary.distance)) · \(knots(summary.maxSpeed)) max\n\n"
+
+        // What kind of session it was.
+        out += "## The session\n\n"
+        out += "- Shape: **\(summary.shape.kind.displayName)**"
+        if summary.shape.legs.count > 1 {
+            out += ", in \(summary.shape.legs.count) legs (split where recording stopped)"
+        }
+        out += "\n"
+        out += "- Net displacement \(kilometres(summary.shape.netDisplacement)), "
+        out += "straightness \(String(format: "%.2f", summary.shape.straightness)) "
+        out += "_(0 = back where you started, 1 = a straight line)_\n"
+        if let alignment = summary.shape.downwindAlignment {
+            out += "- \(Int(alignment.rounded()))° off dead downwind overall\n"
+        }
+        out += "- Average moving speed \(knots(summary.averageMovingSpeed))\n"
+        out += "\n"
+
+        // Conditions.
+        out += "## Conditions\n\n"
+        if let wind = summary.wind {
+            let source = wind.source == .manual ? "set by the rider" : "estimated from the track"
+            out += "- **Wind** \(cardinal(wind.directionFrom)) "
+            out += "\(Int(wind.directionFrom.rounded()))° — _\(source)_\n"
+            out += "- **Wind speed** "
+            out += wind.hasSpeed ? "\(knots(wind.speed ?? 0))\n" : "_not set_\n"
+        } else {
+            out += "- **Wind** _not known_ — upwind and downwind cannot be told apart without it\n"
+        }
+        if let swell = session.swellHeight, swell > 0.05 {
+            out += "- **Swell** \(String(format: "%.1f", swell)) m"
+            if let from = session.swellDirection {
+                out += " from \(cardinal(from)) \(Int(from.rounded()))°"
+            } else {
+                out += " _(direction not set)_"
+            }
+            out += "\n"
+        } else {
+            out += "- **Swell** _not set_\n"
+        }
+        out += "\n"
+
+        // Foiling and events.
+        out += "## On the water\n\n"
+        out += "| | |\n|---|---|\n"
+        out += "| On foil | \(Int((summary.foil.foilingFraction * 100).rounded()))% · "
+        out += "\(duration(summary.foil.timeOnFoil)) across \(summary.flights.count) flights |\n"
+        out += "| Turns | \(summary.maneuvers.count) |\n"
+        out += "| Falls | \(summary.fallSummary.count) |\n"
+        out += "| Jumps | \(summary.jumps.count) |\n"
+        out += "| Glides | \(summary.downwind.glides.count) · \(duration(summary.downwind.glideTime)) gliding |\n"
+        out += "\n"
+
+        // The runs.
+        out += "## Runs\n\n"
+        out += "The segmenter found **\(summary.ribbon.lanes.count) stretches**, which group into "
+        out += "**\(runs.count) runs**. A run ends at a change of point of sail or a touchdown; "
+        out += "stretches sailed off the foil are not runs.\n\n"
+
+        for kind in [GroupedRun.Kind.downwind, .reaching, .upwind] {
+            let group = runs.filter { $0.kind == kind }
+            guard !group.isEmpty else { continue }
+            out += "### \(kind.title) · \(group.count)\n\n"
+            out += "| # | Distance | Duration | Avg | Max | Off downwind | Stretches |\n"
+            out += "|--:|---:|---:|---:|---:|---:|---:|\n"
+            for run in group {
+                out += "| \(run.number) "
+                out += "| \(metresOrKilometres(run.distance)) "
+                out += "| \(duration(run.duration)) "
+                out += "| \(knots(run.averageSpeed)) "
+                out += "| \(knots(run.maxSpeed)) "
+                out += "| \(run.alignment.map { "\(Int($0.rounded()))°" } ?? "—") "
+                out += "| \(run.lanes.count) |\n"
+            }
+            out += "\n"
+        }
+
+        out += Self.notesMarker + "\n\n"
+        if let existing, let range = existing.range(of: Self.notesMarker) {
+            // Keep whatever the rider wrote, exactly as they wrote it.
+            let kept = existing[range.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            out += kept.isEmpty ? Self.notesTemplate : kept + "\n"
+        } else {
+            out += Self.notesTemplate
+        }
+        return out
+    }
+
+    private static let notesMarker =
+        "<!-- Anything below this line is yours. Re-recording will not touch it. -->"
+
+    private static let notesTemplate = """
+        ## What this session actually was
+
+        _How many runs would you say you did? Where did you launch and land?
+        Anything the numbers above get wrong?_
+
+        - Runs I'd count:
+        - Conditions as I remember them:
+        - What looks wrong:
+        """
+
+    // MARK: Formatting
+    //
+    // Done here rather than through the app's `Format`, which reads the
+    // rider's unit preferences — a document that changes because somebody
+    // switched to mph would diff for no reason.
+
+    private func knots(_ metresPerSecond: Double) -> String {
+        String(format: "%.1f kn", metresPerSecond * 1.94384)
+    }
+
+    private func kilometres(_ metres: Double) -> String {
+        String(format: "%.2f km", metres / 1000)
+    }
+
+    private func metresOrKilometres(_ metres: Double) -> String {
+        metres < 1000 ? "\(Int(metres.rounded())) m" : kilometres(metres)
+    }
+
+    private func duration(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60)
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s)
+                     : String(format: "%d:%02d", m, s)
+    }
+
+    private func cardinal(_ degrees: Double) -> String {
+        let points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                      "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+        let index = Int((degrees / 22.5).rounded()) % 16
+        return points[(index + 16) % 16]
+    }
+
+    /// The nearest place name, at town level.
+    ///
+    /// Deliberately coarse. A launch site is public knowledge; the track that
+    /// reaches it is not, which is why the recordings stay out of the
+    /// repository. Reverse geocoding runs only while recording, so the check
+    /// pass never touches the network.
+    private func placeName(for track: Track) async -> String? {
+        guard let middle = track.points[safe: track.points.count / 2] else { return nil }
+        let location = CLLocation(latitude: middle.latitude, longitude: middle.longitude)
+        guard let mark = try? await CLGeocoder().reverseGeocodeLocation(location).first
+        else { return nil }
+        let parts = [mark.locality ?? mark.subAdministrativeArea,
+                     mark.administrativeArea].compactMap { $0 }
+        return parts.isEmpty ? mark.country : parts.joined(separator: ", ")
     }
 
     /// A recording's identity: when it started, to the second, in UTC.
@@ -165,7 +345,7 @@ final class SessionExpectationTests: XCTestCase {
 
     // MARK: The test
 
-    func testEveryRecordingMatchesItsExpectation() throws {
+    func testEveryRecordingMatchesItsExpectation() async throws {
         let files = try recordings()
         try XCTSkipIf(files.isEmpty, """
             No recordings in \(Self.recordingsDirectory.path).
@@ -185,11 +365,19 @@ final class SessionExpectationTests: XCTestCase {
         var checked = 0
 
         for file in files {
-            let (key, actual) = try measure(file)
+            let (key, actual, session, summary, runs) = try measure(file)
             let path = Self.expectationsDirectory.appendingPathComponent("\(key).json")
 
             guard !isRecording else {
                 try encoder.encode(actual).write(to: path)
+
+                let page = Self.expectationsDirectory.appendingPathComponent("\(key).md")
+                let existing = try? String(contentsOf: page, encoding: .utf8)
+                let text = document(for: session, summary: summary, runs: runs,
+                                    place: await placeName(for: session.track),
+                                    existing: existing)
+                try text.write(to: page, atomically: true, encoding: .utf8)
+
                 recorded += 1
                 continue
             }

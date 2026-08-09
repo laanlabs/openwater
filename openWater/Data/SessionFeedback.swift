@@ -160,6 +160,33 @@ enum SessionFeedback {
             recordingPath = path
         }
 
+        let fields = self.fields(for: report, recordingPath: recordingPath,
+                                 system: await systemVersion)
+
+        var request = URLRequest(url: URL(string:
+            "\(SpotGuideStore.firestoreBase)/sessionFeedback?documentId=\(id)&key=\(SpotGuideStore.apiKey)")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["fields": fields])
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else { throw SubmissionError.save(code) }
+    }
+
+    /// The document, exactly as Firestore receives it.
+    ///
+    /// Separate from sending because the rules that accept this live in the
+    /// website repository, and `hasOnly` on the key list means a field added
+    /// here without one added there does not degrade — every submission from
+    /// every rider starts failing with a 403. `SessionFeedbackTests` holds
+    /// this to the deployed key list so that cannot happen quietly.
+    /// `system` is passed in rather than read here: `UIDevice` is
+    /// main-actor isolated, and making this async purely to name a phone
+    /// model would put an `await` in front of every test that builds a
+    /// document.
+    static func fields(for report: Report, recordingPath: String?,
+                       system: String = "") -> [String: [String: Any]] {
         var fields: [String: [String: Any]] = [
             "topic": ["stringValue": report.topic.rawValue],
             "text": ["stringValue": String(
@@ -177,12 +204,12 @@ enum SessionFeedback {
             "turns": ["integerValue": String(report.turns)],
             "falls": ["integerValue": String(report.falls)],
             "jumps": ["integerValue": String(report.jumps)],
-            "foilingFraction": ["doubleValue": report.foilingFraction],
+            "foilingFraction": ["doubleValue": finite(report.foilingFraction)],
             "appVersion": ["stringValue": appVersion],
-            "system": ["stringValue": await systemVersion],
+            "system": ["stringValue": system],
             "createdAt": ["stringValue": ISO8601DateFormatter().string(from: Date())],
         ]
-        if let direction = report.windDirection {
+        if let direction = report.windDirection, direction.isFinite {
             fields["windDirection"] = ["doubleValue": direction]
         }
         if let source = report.windSource {
@@ -195,16 +222,14 @@ enum SessionFeedback {
         if !contact.isEmpty {
             fields["contact"] = ["stringValue": String(contact.prefix(200))]
         }
+        return fields
+    }
 
-        var request = URLRequest(url: URL(string:
-            "\(SpotGuideStore.firestoreBase)/sessionFeedback?documentId=\(id)&key=\(SpotGuideStore.apiKey)")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["fields": fields])
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else { throw SubmissionError.save(code) }
+    /// A NaN reaches `JSONSerialization` as an unencodable value and throws,
+    /// which surfaces to the rider as a failure to send rather than as the
+    /// division by zero it actually was.
+    private static func finite(_ value: Double) -> Double {
+        value.isFinite ? value : 0
     }
 
     /// The session as an archive, for a rider who has asked to send it.
@@ -231,9 +256,17 @@ enum SessionFeedback {
         return objectName
     }
 
+    /// Exposed for `SessionFeedbackTests`, which holds this to the filename
+    /// pattern the deployed Storage rule matches.
+    static func testIdentifier() -> String { identifier() }
+
     /// A random name. Deliberately not derived from the session or the
     /// device: two reports from one rider should not be linkable by their
     /// identifiers alone.
+    ///
+    /// Twenty lowercase hex characters, because the Storage rule matches
+    /// `^[a-f0-9]{20}\.openwater$` — a UUID's own dashes and uppercase would
+    /// be refused.
     private static func identifier() -> String {
         UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(20).description
     }

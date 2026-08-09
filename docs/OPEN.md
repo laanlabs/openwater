@@ -81,65 +81,42 @@ it cannot be done from the command line.
 
 ---
 
-## 3. "Report a problem" is built and cannot send yet
+## 3. Problem reports need an App Store privacy answer before shipping
 
-Every build now has a bug button beside the ⋯ on a session. It files what
-the rider says against the numbers the app was showing, and optionally — only
-when they turn it on — the recording itself, so a problem can be reproduced.
-`scripts/fetch-feedback.sh` pulls the reports into the expectation pages.
+The rules are deployed and verified live against `openwaterapp-2e0f7`:
+create into `sessionFeedback` and `feedback/` in Storage, everything else —
+read, list, update, delete — refused, including the app's own submissions.
+Numeric fields are typed and bounded, strings capped, the Storage rule
+narrowed to `application/octet-stream` and `^[a-f0-9]{20}\.openwater$`, and
+`resource == null` makes it genuinely create-only rather than
+create-or-silently-replace.
 
-**Two things are missing, and both are outside this repository.**
+`SessionFeedbackTests` pins this repository's half of that contract: the
+exact key list `hasOnly` allows, and the identifier shape the filename
+pattern matches. Those rules live in the website repository, so without the
+test a field added here would 403 *every* submission from *every* rider with
+nothing on this side to catch it.
 
-**The rules.** Writes go to a `sessionFeedback` collection and, with consent,
-to `feedback/` in Storage. Neither has a rule, so submissions come back 403 —
-the sheet says so rather than failing quietly. Following `spotSuggestions`
-exactly: create-only, bounded, never readable by the app.
+**What is still outstanding is the disclosure.** The App Store privacy
+answers describe web sharing — a rider deliberately publishing a session.
+Uploading a track so a bug can be reproduced is a different purpose, and the
+current answers do not cover it.
 
-```
-match /sessionFeedback/{id} {
-  allow create: if request.resource.data.keys().hasOnly([
-                     'topic', 'text', 'contact', 'session', 'sport',
-                     'duration', 'distance', 'analysisVersion',
-                     'runsDownwind', 'runsReaching', 'runsUpwind',
-                     'stretches', 'flights', 'turns', 'falls', 'jumps',
-                     'foilingFraction', 'windDirection', 'windSource',
-                     'recordingPath', 'appVersion', 'system', 'createdAt'])
-                && request.resource.data.text is string
-                && request.resource.data.text.size() <= 4000
-                && request.resource.data.session.size() <= 60
-                && request.resource.data.topic in ['Runs', 'Foiling',
-                     'Speed & distance', 'Wind', 'Turns, falls & jumps',
-                     'Something else'];
-  allow read, update, delete: if false;
-}
-```
+Before this ships:
 
-```
-// Storage — same shape as suggestions/, never publicly readable.
-match /feedback/{file} {
-  allow create: if request.resource.size < 25 * 1024 * 1024;
-  allow read, update, delete: if false;
-}
-```
+- Location listed under Diagnostics as well as its existing purpose.
+- A privacy-policy line: feedback recordings are sent only when the rider
+  turns the toggle on, used only to reproduce the problem, never published.
 
-**The App Store privacy answers.** This is the part that must not be skipped.
-The app can now upload a rider's full GPS track for a purpose the current
-disclosure does not cover — the existing answers describe web sharing, which
-is a different thing a rider initiates for a different reason. Before this
-ships, "Location" needs listing under Diagnostics or Product Interaction as
-well, and the privacy policy needs a line saying feedback recordings are
-sent only on request, used only to reproduce a problem, and never published.
+The in-app handling is already deliberate — off every time, never
+remembered, the track not encoded unless the toggle is on, plain words in
+the footer — and none of that substitutes for declaring it.
 
-The app-side handling is already deliberate: off every time the sheet opens,
-never remembered, the track is not even encoded unless the toggle is on, and
-the footer says in plain words what leaves the phone. None of that
-substitutes for the disclosure.
-
-Reading the collection back needs owner credentials (`gcloud auth
-application-default login`); the app can only create. A report that carries a
-recording says so in the page, with its Storage path — that is the rider's
-personal location data, so pull it to reproduce the problem and do not keep
-it afterwards.
+**Loose end:** a 42-byte test object is left at
+`feedback/00000000000000000000.openwater`. The rules deny deletion to
+unauthenticated callers by design and the Firebase CLI has no object-delete
+command, so it needs the console or `gsutil`. Nothing reads that folder, so
+it is inert.
 
 ---
 

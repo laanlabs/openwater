@@ -329,7 +329,8 @@ struct SessionAnalysisTab: View {
     /// The row says what the screen behind it is about: downwind runs, from
     /// the same grouping the screen and the Runs tab use.
     private var glideValue: String? {
-        let runs = GroupedRun.group(summary.ribbon.lanes).filter { $0.kind == .downwind }
+        let runs = GroupedRun.group(summary.ribbon.lanes, flights: summary.flights)
+            .filter { $0.kind == .downwind }
         guard !runs.isEmpty else { return "none found" }
         if runs.count == 1 {
             return Format.distance(runs[0].distance, unit: settings.units.distance)

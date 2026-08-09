@@ -48,6 +48,12 @@ struct RibbonView: View {
     var track: Track?
     var mapStyle: MapStyleOption = .standard
 
+    /// The session's flights, so a run ends where the rider came off the foil.
+    ///
+    /// Without these the list groups on point of sail alone, and a session
+    /// with seven swims in it reads as one thirty-six-minute reach.
+    var flights: [Flight] = []
+
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
 
@@ -154,7 +160,7 @@ struct RibbonView: View {
     /// downwinders and five beats back — which is what a rider would say if
     /// you asked them about it.
     private var groupedRuns: [GroupedRun] {
-        GroupedRun.group(ribbon.lanes)
+        GroupedRun.group(ribbon.lanes, flights: flights)
     }
 
     private var showsGrouped: Bool {

@@ -106,18 +106,35 @@ struct GroupedRun: Identifiable {
     /// reach while bearing away from a beat is part of the turn, not a leg of
     /// its own, and letting it split the run is how six downwinders became
     /// thirty-four.
-    static func group(_ lanes: [SessionRibbon.Lane], absorb: Double = 60) -> [GroupedRun] {
+    ///
+    /// **A run never spans a touchdown.** Coming off the foil ends the ride,
+    /// whatever the rider was pointing at either side of it, and a screen that
+    /// merges across one reports thirty-six minutes and seven and a half
+    /// kilometres as a single reach when the rider swam six times inside it.
+    /// Pass `flights` to get that split; without them this groups on point of
+    /// sail alone, which is what a non-foiling sport wants.
+    static func group(
+        _ lanes: [SessionRibbon.Lane],
+        flights: [Flight] = [],
+        absorb: Double = 60,
+        touchdown: Double = 3
+    ) -> [GroupedRun] {
+        let flown = rides(from: flights, touchdown: touchdown)
+
         var groups: [[SessionRibbon.Lane]] = []
         var kinds: [Kind] = []
+        var rides: [Int?] = []
 
         for lane in lanes.sorted(by: { $0.startElapsed < $1.startElapsed }) {
             let kind = Kind(lane.pointOfSail)
-            if let current = kinds.last,
+            let ride = ride(of: lane, in: flown)
+            if let current = kinds.last, ride == rides[rides.count - 1],
                kind == current || lane.distance < absorb {
                 groups[groups.count - 1].append(lane)
             } else {
                 groups.append([lane])
                 kinds.append(kind)
+                rides.append(ride)
             }
         }
 
@@ -128,10 +145,28 @@ struct GroupedRun: Identifiable {
         //
         // Only the first group can be this short. Every later group begins
         // with a stretch that cleared `absorb` — that is what started it.
-        if groups.count > 1, groups[0].reduce(0, { $0 + $1.distance }) < absorb {
+        //
+        // It merges forward only within the same ride: a first stretch that
+        // ends in a swim is short *because* of the swim, and folding it into
+        // the next flight would span the touchdown this method exists to
+        // respect.
+        if groups.count > 1, rides[0] == rides[1],
+           groups[0].reduce(0, { $0 + $1.distance }) < absorb {
             groups[1].insert(contentsOf: groups[0], at: 0)
             groups.removeFirst()
             kinds.removeFirst()
+            rides.removeFirst()
+        }
+
+        // A run is a ride.
+        //
+        // Splitting at touchdowns leaves the stretches between them standing
+        // on their own, and those are the swim back out and the drift between
+        // attempts — real distance, but not something a rider counts. Left in,
+        // they bury the rides: sixteen reaching runs where two of them are
+        // 134 m at three knots. They belong to the session, not to this list.
+        if !flown.isEmpty {
+            groups = zip(groups, rides).compactMap { $1 == nil ? nil : $0 }
         }
 
         // A group's kind is decided by the distance sailed on each point of
@@ -146,5 +181,44 @@ struct GroupedRun: Identifiable {
             runs.append(GroupedRun(id: index, kind: kind, number: seen[kind]!, lanes: group))
         }
         return runs
+    }
+
+    /// Flights joined across momentary touchdowns.
+    ///
+    /// The foil detector ends a flight the instant the board touches, which is
+    /// the right answer to "how long were you flying" and the wrong one to
+    /// "how many runs did you do" — a tap and a swim are not the same event.
+    /// Flights less than `touchdown` apart are one ride.
+    private static func rides(
+        from flights: [Flight], touchdown: Double
+    ) -> [(start: TimeInterval, end: TimeInterval)] {
+        var rides: [(start: TimeInterval, end: TimeInterval)] = []
+        for flight in flights.sorted(by: { $0.startElapsed < $1.startElapsed }) {
+            if let last = rides.last, flight.startElapsed - last.end < touchdown {
+                rides[rides.count - 1].end = max(last.end, flight.endElapsed)
+            } else {
+                rides.append((flight.startElapsed, flight.endElapsed))
+            }
+        }
+        return rides
+    }
+
+    /// Which ride a stretch belongs to, or nil if it was sailed on the water.
+    ///
+    /// By greatest overlap rather than by containment: a stretch that begins
+    /// off the foil and ends flying belongs to the flight, and one that spans
+    /// a touchdown belongs to whichever side of it lasted longer. That is as
+    /// fine as this can get — a run is built from whole stretches, so a
+    /// touchdown in the middle of one cannot split it.
+    private static func ride(
+        of lane: SessionRibbon.Lane, in rides: [(start: TimeInterval, end: TimeInterval)]
+    ) -> Int? {
+        var best: (index: Int, overlap: TimeInterval)?
+        for (index, ride) in rides.enumerated() {
+            let overlap = min(lane.endElapsed, ride.end) - max(lane.startElapsed, ride.start)
+            guard overlap > 0 else { continue }
+            if best == nil || overlap > best!.overlap { best = (index, overlap) }
+        }
+        return best?.index
     }
 }

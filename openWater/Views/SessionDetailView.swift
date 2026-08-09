@@ -427,6 +427,7 @@ struct SessionDetailView: View {
             isPointToPoint: summary.shape.isPointToPoint,
             track: session.track,
             mapStyle: settings.mapStyle,
+            flights: summary.flights,
             selectedLane: $selectedRun
         )
     }

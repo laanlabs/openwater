@@ -147,6 +147,113 @@ final class GroupedRunTests: XCTestCase {
                        GroupedRun.group(ordered).map(\.kind))
     }
 
+    // MARK: Coming off the foil
+
+    /// A flight over `[start, end]` seconds.
+    private func flight(_ id: Int, _ start: TimeInterval, _ end: TimeInterval) throws -> Flight {
+        let json: [String: Any] = [
+            "id": id,
+            "startElapsed": start, "endElapsed": end,
+            "startIndex": id * 2, "endIndex": id * 2 + 1,
+            "distance": (end - start) * 5,
+            "averageSpeed": 5, "maxSpeed": 6,
+            "takeoffSpeed": 4, "landingSpeed": 3,
+            "confidence": 1,
+        ]
+        return try JSONDecoder().decode(
+            Flight.self, from: JSONSerialization.data(withJSONObject: json)
+        )
+    }
+
+    /// The complaint this rule exists for: one point of sail, seven swims,
+    /// reported as a single thirty-six-minute reach.
+    func testATouchdownEndsTheRun() throws {
+        // Three 100 s reaches in a row — one run on point of sail alone.
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 3))
+        XCTAssertEqual(GroupedRun.group(input).count, 1)
+
+        // Same stretches, but the rider swam ten seconds between each.
+        let flights = [
+            try flight(0, 0, 95),
+            try flight(1, 105, 195),
+            try flight(2, 205, 295),
+        ]
+        let runs = GroupedRun.group(input, flights: flights)
+
+        XCTAssertEqual(runs.count, 3)
+        XCTAssertEqual(runs.map(\.kind), [.reaching, .reaching, .reaching])
+        XCTAssertEqual(runs.map(\.number), [1, 2, 3])
+    }
+
+    func testStretchesInsideOneFlightStayOneRun() throws {
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 3))
+        let runs = GroupedRun.group(input, flights: [try flight(0, 0, 300)])
+
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs.first?.lanes.count, 3)
+    }
+
+    /// The foil detector ends a flight the instant the board touches. A tap
+    /// and a swim are not the same event, and only one of them ends a run.
+    func testAMomentaryTouchdownDoesNotEndTheRun() throws {
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 2))
+        let runs = GroupedRun.group(input, flights: [
+            try flight(0, 0, 100),
+            try flight(1, 101, 200),      // back up after a second
+        ])
+
+        XCTAssertEqual(runs.count, 1)
+    }
+
+    /// A point-of-sail change still splits inside a single flight — a rider
+    /// who gybes without touching down did two runs, not one.
+    func testPointOfSailStillSplitsWithinAFlight() throws {
+        let input = try lanes([(.running, 600), (.closeHauled, 600)])
+        let runs = GroupedRun.group(input, flights: [try flight(0, 0, 240)])
+
+        XCTAssertEqual(runs.map(\.kind), [.downwind, .upwind])
+    }
+
+    /// No flights means a non-foiling sport, where the old rule is the right
+    /// one. This must not fragment a windsurfer's session into single lanes.
+    func testWithoutFlightsGroupingIsUnchanged() throws {
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 4))
+
+        XCTAssertEqual(GroupedRun.group(input, flights: []).count, 1)
+    }
+
+    /// A run is a ride. The stretches sailed on the water between rides are
+    /// the swim back out — they never join a flight, and on a foiling session
+    /// they are not runs at all.
+    func testWaterborneStretchesAreNotRuns() throws {
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 3))
+        // Only the first stretch was flown; the other two were the paddle back.
+        let runs = GroupedRun.group(input, flights: [try flight(0, 0, 100)])
+
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs.first?.lanes.count, 1)
+    }
+
+    /// The same stretches on a session with no flight detection at all are
+    /// still runs — dropping them there would empty a windsurfer's list.
+    func testWaterborneStretchesSurviveWithoutFlightDetection() throws {
+        let input = try lanes(Array(repeating: (PointOfSail.reaching, 500), count: 3))
+
+        XCTAssertEqual(GroupedRun.group(input, flights: []).count, 1)
+        XCTAssertEqual(GroupedRun.group(input, flights: []).first?.lanes.count, 3)
+    }
+
+    /// The leading-stretch merge must not reach across a touchdown either.
+    func testAShortOpeningStretchDoesNotMergeAcrossATouchdown() throws {
+        let input = try lanes([(.reaching, 40), (.running, 2000)])
+        let runs = GroupedRun.group(input, flights: [
+            try flight(0, 0, 8),           // got up, came straight down
+            try flight(1, 100, 500),       // and then had the actual run
+        ])
+
+        XCTAssertEqual(runs.count, 2)
+    }
+
     // MARK: Aggregates
 
     func testARunSpansFromItsFirstStretchToItsLast() throws {

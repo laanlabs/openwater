@@ -168,11 +168,19 @@ lands on top of the shot. Grant it once by hand, then use that flag.
 ## Smaller, known, and deliberate
 
 **The reaching band may be too wide.** The 1:24 lapping session reports 5
-downwind, 8 reaching and 2 upwind. Eight reaches on a session that is
+downwind, 12 reaching and 2 upwind. Twelve reaches on a session that is
 visibly laps up and down a river is suspicious — either the 55–120° band is
 catching legs a rider would call downwind, or those are genuine cross-river
 transits. Worth checking against a rider's own account before touching the
 thresholds.
+
+**A run is a ride, and on a foiling session that is now literal.** Stretches
+belonging to no flight are dropped from the run list — they are the swim back
+out, and left in they read as runs at three knots. The cost is that the run
+list no longer accounts for the whole session's distance, and that it leans
+entirely on the foil detector: a missed flight is now a missing run rather
+than a run with a gap in it. Sessions with no flights at all (any
+non-foiling sport) keep every stretch, which is what they want.
 
 **A drawn run is slightly longer than the sum of its stretches.** The maps
 draw every track point between a run's first and last stretch, so a brief

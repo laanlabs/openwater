@@ -67,7 +67,8 @@ struct DownwindDetailView: View {
     /// same point of sail, and the Runs tab uses the same grouping so the two
     /// screens always agree.
     private var downwindRuns: [GroupedRun] {
-        GroupedRun.group(summary.ribbon.lanes).filter { $0.kind == .downwind }
+        GroupedRun.group(summary.ribbon.lanes, flights: summary.flights)
+            .filter { $0.kind == .downwind }
     }
 
     /// The track between a run's first and last stretch.

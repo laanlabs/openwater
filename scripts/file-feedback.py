@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File Firestore devFeedback notes into the expectation pages.
+"""File Firestore sessionFeedback reports into the expectation pages.
 
 Called by scripts/fetch-feedback.sh. Kept separate so the filing can be
 re-run against a saved JSON dump without hitting the network again.
@@ -44,7 +44,7 @@ def render(notes):
     out.append("")
     for n in sorted(notes, key=lambda n: n.get("createdAt", ""), reverse=True):
         when = (n.get("createdAt") or "")[:16].replace("T", " ")
-        out.append(f"### {n.get('verdict', '?')} — {when}")
+        out.append(f"### {n.get('topic', '?')} — {when}")
         out.append("")
         text = (n.get("text") or "").strip()
         for line in text.splitlines() or [""]:
@@ -56,6 +56,13 @@ def render(notes):
             f"from {n.get('stretches', '?')} stretches and {n.get('flights', '?')} flights. "
             f"Analysis v{n.get('analysisVersion', '?')}, {n.get('appVersion', '?')}._"
         )
+        if n.get("recordingPath"):
+            out.append("")
+            out.append(f"**Recording attached** — `{n['recordingPath']}` in Storage. "
+                       "The rider chose to send it; treat it as their personal location data.")
+        if n.get("contact"):
+            out.append("")
+            out.append(f"_Wants a reply: {n['contact']}_")
         out.append("")
     out.append(FEEDBACK_END)
     return "\n".join(out)

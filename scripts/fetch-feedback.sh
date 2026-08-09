@@ -15,6 +15,10 @@
 # Re-running is safe: the section is rebuilt from Firestore each time, and
 # everything you wrote by hand elsewhere in the page is left alone.
 #
+# Some reports carry a recording the rider chose to attach; the page says so
+# and gives its Storage path. That is their personal location data — pull it
+# only when you are actually reproducing the problem, and do not keep it.
+#
 # Reading requires owner credentials — the app can only create. Authenticate
 # with:  gcloud auth application-default login
 set -euo pipefail
@@ -29,7 +33,7 @@ if [ -z "$TOKEN" ]; then
   cat <<'MSG'
 No gcloud access token.
 
-devFeedback is create-only for the app, so reading it needs owner
+sessionFeedback is create-only for the app, so reading it needs owner
 credentials:
 
     gcloud auth application-default login
@@ -39,9 +43,9 @@ MSG
   exit 1
 fi
 
-echo "==> Fetching devFeedback from $PROJECT"
+echo "==> Fetching sessionFeedback from $PROJECT"
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  "https://firestore.googleapis.com/v1/projects/$PROJECT/databases/(default)/documents/devFeedback?pageSize=300" \
+  "https://firestore.googleapis.com/v1/projects/$PROJECT/databases/(default)/documents/sessionFeedback?pageSize=300" \
   -o /tmp/openwater-feedback.json
 
 python3 scripts/file-feedback.py /tmp/openwater-feedback.json

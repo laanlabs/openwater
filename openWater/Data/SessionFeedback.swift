@@ -1,125 +1,203 @@
-#if DEBUG
 import Foundation
 import OpenWaterCore
 import UIKit
 
-/// Notes on what the analysis got wrong, sent from whatever device is to hand.
+/// "This run says it did X and it actually did Y" — from the rider, about the
+/// session in front of them.
 ///
-/// Tuning happens by comparing a session on screen against its page in
-/// `openWaterTests/Expectations/`. The comparison happens on the water or on
-/// the sofa, on a phone; the tuning happens later, at a desk. Between those
-/// two the observation used to be lost, or arrive as "the reaching count
-/// looked wrong on one of the Montauk ones".
+/// The analysis is tuned by comparing what the app claims against what
+/// somebody who was there remembers. That comparison only ever happens on a
+/// phone, right after a session; the tuning happens later at a desk. Between
+/// the two the observation was lost, or arrived as "the run count looked
+/// wrong on one of them". This carries it across intact.
 ///
-/// So a note goes up with the session it is about and the numbers as they
-/// stood when it was written, and `scripts/fetch-feedback.sh` pulls them back
-/// down into the expectation pages. The numbers matter as much as the words:
-/// "48 downwind runs is nonsense" means nothing six analysis versions later
-/// unless it records that it was written when the count *was* 48.
+/// **The numbers travel with the words.** "It says 48 downwind runs and that
+/// is nonsense" means nothing six analysis versions later unless the note
+/// records that the count *was* 48 when it was written.
 ///
-/// **Debug only**, the whole file. This is a developer tool and nothing about
-/// it should exist in a build a rider installs.
+/// ## What is sent, and what is not
 ///
-/// The security model is `SpotSuggestionClient`'s, and it needs the same
-/// treatment in the Firestore rules: create-only into `devFeedback`, every
-/// field bounded, no read, no list, no update, no delete. Until that rule
-/// exists the writes are rejected — see `docs/OPEN.md`.
+/// By default: the rider's words, the numbers on screen, and the app and
+/// device version. No coordinates, no track, nothing that says where anybody
+/// was.
+///
+/// The recording itself goes only when the rider explicitly asks for it,
+/// through a toggle that is off every time and says plainly what it does. A
+/// GPS track is where somebody launches, where they live if they recorded
+/// from home, and when they are reliably out. It is the most sensitive thing
+/// this app holds, and it is never attached by inference — not from a
+/// category, not from a previous submission, not from a setting they ticked
+/// once.
+///
+/// The security model is `SpotSuggestionClient`'s: create-only into
+/// `sessionFeedback`, create-only into `feedback/` in Storage, never
+/// readable, listable or deletable by the app — including its own
+/// submissions.
 enum SessionFeedback {
 
-    /// One note, with the session state it was written against.
-    struct Note {
-        var session: String                 // "test-5"
-        var verdict: Verdict
-        var text: String
+    /// What the rider says is wrong, so a sweep can be sorted without reading
+    /// every note. Named for what a rider would say, not for the code that
+    /// produces it.
+    enum Topic: String, CaseIterable, Identifiable, Codable {
+        case runs = "Runs"
+        case foiling = "Foiling"
+        case speed = "Speed & distance"
+        case wind = "Wind"
+        case turns = "Turns, falls & jumps"
+        case other = "Something else"
 
-        // What the app was saying at the time. Without these a note ages into
-        // an opinion about numbers nobody can reconstruct.
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .runs: "arrow.triangle.turn.up.right.diamond"
+            case .foiling: "airplane"
+            case .speed: "gauge.with.dots.needle.67percent"
+            case .wind: "wind"
+            case .turns: "arrow.trianglehead.2.clockwise"
+            case .other: "ellipsis.bubble"
+            }
+        }
+
+        var prompt: String {
+            switch self {
+            case .runs: "How many runs was it really, and how would you have split them?"
+            case .foiling: "What did it get wrong about your flights or time on foil?"
+            case .speed: "Which number is off, and what should it be?"
+            case .wind: "Where was the wind actually coming from?"
+            case .turns: "What did it miss, or count that never happened?"
+            case .other: "What happened, and what did you expect to see?"
+            }
+        }
+    }
+
+    /// One report, with the state of the session it is about.
+    struct Report {
+        var topic: Topic
+        var text: String
+        /// Left empty unless the rider wants a reply.
+        var contact: String = ""
+        /// Set only when the rider has explicitly asked to send the recording.
+        var recording: Data?
+
+        // The session as the app was describing it. Non-identifying: counts,
+        // durations and a wind bearing, no coordinates.
+        var sessionTitle: String
+        var sport: String
+        var duration: TimeInterval
+        var distance: Double
         var analysisVersion: Int
         var runsDownwind: Int
         var runsReaching: Int
         var runsUpwind: Int
         var stretches: Int
         var flights: Int
+        var turns: Int
+        var falls: Int
+        var jumps: Int
+        var foilingFraction: Double
         var windDirection: Double?
         var windSource: String?
     }
 
-    /// The shape of the complaint, so a sweep can be sorted without reading
-    /// every note.
-    enum Verdict: String, CaseIterable, Identifiable {
-        case wrong = "Wrong"
-        case close = "Close"
-        case right = "Right"
-
-        var id: String { rawValue }
-
-        var explanation: String {
-            switch self {
-            case .wrong: "The numbers do not describe this session"
-            case .close: "Roughly right, but something is off"
-            case .right: "This matches what I'd say happened"
-            }
-        }
-    }
-
     enum SubmissionError: LocalizedError {
+        case recordingUpload
         case save(Int)
 
         var errorDescription: String? {
             switch self {
+            case .recordingUpload:
+                "Your notes were not sent because the recording failed to upload. Try again, or send without it."
             case .save(403):
-                "Rejected by Firestore — the devFeedback rule is probably not deployed yet."
+                "The server refused it. If this build is new, the feedback rules may not be deployed yet."
             case .save(let code):
-                "Could not save the note (HTTP \(code))."
+                "Could not send that (HTTP \(code)). Try again in a minute."
             }
         }
     }
 
-    /// Build a note from a session as the app currently sees it.
+    /// Build a report from a session as the app currently sees it.
     @MainActor
-    static func note(for session: Session, summary: SessionSummary,
-                     verdict: Verdict, text: String) -> Note {
+    static func report(for session: Session, summary: SessionSummary,
+                       topic: Topic, text: String) -> Report {
         let runs = GroupedRun.group(summary.ribbon.lanes, flights: summary.flights)
-        return Note(
-            session: session.title ?? session.displayTitle,
-            verdict: verdict,
+        return Report(
+            topic: topic,
             text: text,
+            sessionTitle: session.title ?? session.displayTitle,
+            sport: session.sport.rawValue,
+            duration: summary.duration,
+            distance: summary.distance,
             analysisVersion: summary.analysisVersion,
             runsDownwind: runs.filter { $0.kind == .downwind }.count,
             runsReaching: runs.filter { $0.kind == .reaching }.count,
             runsUpwind: runs.filter { $0.kind == .upwind }.count,
             stretches: summary.ribbon.lanes.count,
             flights: summary.flights.count,
+            turns: summary.maneuvers.count,
+            falls: summary.fallSummary.count,
+            jumps: summary.jumps.count,
+            foilingFraction: summary.foil.foilingFraction,
             windDirection: summary.wind?.directionFrom,
             windSource: summary.wind?.source.rawValue
         )
     }
 
-    static func submit(_ note: Note) async throws {
+    /// Upload the recording first, then the note.
+    ///
+    /// That order, so a failed upload never leaves a note claiming a
+    /// recording is attached when it is not — the same reasoning as the spot
+    /// suggestion pipeline, and the same reason it throws rather than
+    /// silently sending a note without it.
+    static func submit(_ report: Report) async throws {
+        let id = identifier()
+        var recordingPath: String?
+
+        if let recording = report.recording {
+            guard let path = await upload(recording, named: id) else {
+                throw SubmissionError.recordingUpload
+            }
+            recordingPath = path
+        }
+
         var fields: [String: [String: Any]] = [
-            "session": ["stringValue": String(note.session.prefix(60))],
-            "verdict": ["stringValue": note.verdict.rawValue],
+            "topic": ["stringValue": report.topic.rawValue],
             "text": ["stringValue": String(
-                note.text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4000))],
-            "analysisVersion": ["integerValue": String(note.analysisVersion)],
-            "runsDownwind": ["integerValue": String(note.runsDownwind)],
-            "runsReaching": ["integerValue": String(note.runsReaching)],
-            "runsUpwind": ["integerValue": String(note.runsUpwind)],
-            "stretches": ["integerValue": String(note.stretches)],
-            "flights": ["integerValue": String(note.flights)],
+                report.text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4000))],
+            "session": ["stringValue": String(report.sessionTitle.prefix(60))],
+            "sport": ["stringValue": report.sport],
+            "duration": ["integerValue": String(Int(report.duration))],
+            "distance": ["integerValue": String(Int(report.distance))],
+            "analysisVersion": ["integerValue": String(report.analysisVersion)],
+            "runsDownwind": ["integerValue": String(report.runsDownwind)],
+            "runsReaching": ["integerValue": String(report.runsReaching)],
+            "runsUpwind": ["integerValue": String(report.runsUpwind)],
+            "stretches": ["integerValue": String(report.stretches)],
+            "flights": ["integerValue": String(report.flights)],
+            "turns": ["integerValue": String(report.turns)],
+            "falls": ["integerValue": String(report.falls)],
+            "jumps": ["integerValue": String(report.jumps)],
+            "foilingFraction": ["doubleValue": report.foilingFraction],
             "appVersion": ["stringValue": appVersion],
-            "device": ["stringValue": await UIDevice.current.model],
+            "system": ["stringValue": await systemVersion],
             "createdAt": ["stringValue": ISO8601DateFormatter().string(from: Date())],
         ]
-        if let direction = note.windDirection {
+        if let direction = report.windDirection {
             fields["windDirection"] = ["doubleValue": direction]
         }
-        if let source = note.windSource {
+        if let source = report.windSource {
             fields["windSource"] = ["stringValue": source]
+        }
+        if let recordingPath {
+            fields["recordingPath"] = ["stringValue": recordingPath]
+        }
+        let contact = report.contact.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !contact.isEmpty {
+            fields["contact"] = ["stringValue": String(contact.prefix(200))]
         }
 
         var request = URLRequest(url: URL(string:
-            "\(SpotGuideStore.firestoreBase)/devFeedback?key=\(SpotGuideStore.apiKey)")!)
+            "\(SpotGuideStore.firestoreBase)/sessionFeedback?documentId=\(id)&key=\(SpotGuideStore.apiKey)")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["fields": fields])
@@ -129,11 +207,46 @@ enum SessionFeedback {
         guard (200..<300).contains(code) else { throw SubmissionError.save(code) }
     }
 
+    /// The session as an archive, for a rider who has asked to send it.
+    ///
+    /// Built on demand rather than held on the report, so a sheet that is
+    /// opened, read and cancelled never encodes a track at all.
+    static func recording(of session: Session) -> Data? {
+        try? SessionArchive(session: session).encoded()
+    }
+
+    private static func upload(_ archive: Data, named name: String) async -> String? {
+        let objectName = "feedback/\(name).openwater"
+        guard let encoded = objectName.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
+              let url = URL(string:
+                "https://firebasestorage.googleapis.com/v0/b/\(SpotGuideStore.storageBucket)/o?uploadType=media&name=\(encoded)")
+        else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.httpBody = archive
+        guard let (_, response) = try? await URLSession.shared.upload(for: request, from: archive),
+              (response as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        return objectName
+    }
+
+    /// A random name. Deliberately not derived from the session or the
+    /// device: two reports from one rider should not be linkable by their
+    /// identifiers alone.
+    private static func identifier() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(20).description
+    }
+
     private static var appVersion: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
         return "\(short) (\(build))"
     }
+
+    @MainActor
+    private static var systemVersion: String {
+        "\(UIDevice.current.model), iOS \(UIDevice.current.systemVersion)"
+    }
 }
-#endif

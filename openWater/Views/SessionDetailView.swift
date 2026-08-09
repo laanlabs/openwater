@@ -37,9 +37,7 @@ struct SessionDetailView: View {
     @State private var isPlayingBack = false
     @State private var isEditing = false
     @State private var isSettingWind = false
-    #if DEBUG
     @State private var isGivingFeedback = false
-    #endif
     @State private var isConfirmingDelete = false
     @State private var isConfirmingRemoveMax = false
     @State private var savedAsNewActivity = false
@@ -128,18 +126,25 @@ struct SessionDetailView: View {
         // contradict the screen the rider just left.
         .onAppear { Task { await loadSession() } }
         .toolbar {
+            // Beside the menu rather than inside it. "This says I did twelve
+            // runs and I did six" is the most useful thing a rider can tell
+            // us during tuning, and burying it two taps down in a menu that
+            // opens with Edit and ends with Delete is a good way never to
+            // hear it.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isGivingFeedback = true
+                } label: {
+                    Image(systemName: "ladybug")
+                }
+                .accessibilityLabel("Report a problem with this session")
+                .disabled(session?.summary == nil)
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Edit…", systemImage: "pencil") { isEditing = true }
 
-                    #if DEBUG
-                    // A developer tool, and only in a debug build. Filed
-                    // against the numbers on screen, so tuning later does not
-                    // rest on remembering which session looked wrong.
-                    Button("Session Feedback…", systemImage: "exclamationmark.bubble") {
-                        isGivingFeedback = true
-                    }
-                    #endif
 
                     // Offered wherever a rider might look for it, and only when
                     // there is something to put back. The full recording is
@@ -232,13 +237,11 @@ struct SessionDetailView: View {
                 WebShareView(stored: stored, session: session)
             }
         }
-        #if DEBUG
         .sheet(isPresented: $isGivingFeedback) {
             if let session, let summary = session.summary {
                 FeedbackSheet(session: session, summary: summary)
             }
         }
-        #endif
         .sheet(isPresented: $isSettingWind) {
             if let session {
                 WindSetterView(session: session) { direction, speed, swell, swellFrom in

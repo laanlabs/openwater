@@ -1,14 +1,18 @@
-#if DEBUG
 import OpenWaterCore
 import SwiftUI
 
-/// Say what this session's analysis got wrong, from the session itself.
+/// Tell us what this session got wrong.
 ///
-/// Deliberately opened from the session being judged rather than from a
-/// general feedback screen, so the note carries the numbers it is about
-/// without anybody having to transcribe them. The panel showing those numbers
-/// is not decoration — it is what the note will be filed against, shown so
-/// there is no doubt what is being disputed.
+/// Opened from the session being judged, not from a general feedback screen,
+/// so the numbers being disputed travel with the complaint and nobody has to
+/// transcribe them. The "what it currently says" panel is not decoration — it
+/// is what the report is filed against, shown so there is no doubt about
+/// which claim is being called wrong.
+///
+/// The recording toggle is off every time it opens and says exactly what it
+/// sends. A GPS track is the most sensitive thing this app holds, and the
+/// only honest way to ask for one is in the words a rider would use to
+/// describe what they are handing over.
 struct FeedbackSheet: View {
 
     let session: Session
@@ -16,60 +20,77 @@ struct FeedbackSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var verdict: SessionFeedback.Verdict = .wrong
+    @State private var topic: SessionFeedback.Topic = .runs
     @State private var text = ""
+    @State private var contact = ""
+    @State private var sendsRecording = false
     @State private var isSending = false
     @State private var failure: String?
-    @State private var sent = false
 
-    private var note: SessionFeedback.Note {
-        SessionFeedback.note(for: session, summary: summary,
-                            verdict: verdict, text: text)
+    private var report: SessionFeedback.Report {
+        SessionFeedback.report(for: session, summary: summary, topic: topic, text: text)
+    }
+
+    private var canSend: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Verdict", selection: $verdict) {
-                        ForEach(SessionFeedback.Verdict.allCases) { Text($0.rawValue).tag($0) }
+                    Picker("What's wrong", selection: $topic) {
+                        ForEach(SessionFeedback.Topic.allCases) { topic in
+                            Label(topic.rawValue, systemImage: topic.icon).tag(topic)
+                        }
                     }
-                    .pickerStyle(.segmented)
-                    Text(verdict.explanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("What's wrong with it") {
-                    TextField(
-                        "How many runs would you say this was? What did the analysis miss?",
-                        text: $text, axis: .vertical
-                    )
-                    .lineLimit(4...12)
+                } footer: {
+                    Text("The analysis is tuned against sessions people tell us about. "
+                         + "Being specific about what it should have said is the most useful thing you can send.")
                 }
 
                 Section {
-                    LabeledContent("Session", value: note.session)
-                    LabeledContent("Runs", value:
-                        "\(note.runsDownwind) downwind · \(note.runsReaching) reaching · \(note.runsUpwind) upwind")
-                    LabeledContent("Stretches", value: "\(note.stretches)")
-                    LabeledContent("Flights", value: "\(note.flights)")
-                    LabeledContent("Analysis", value: "v\(note.analysisVersion)")
+                    TextField(topic.prompt, text: $text, axis: .vertical)
+                        .lineLimit(4...12)
+                }
+
+                Section {
+                    currentNumbers
                 } header: {
-                    Text("Filed against")
+                    Text("What it currently says")
                 } footer: {
-                    Text("Saved with the note, so it still means something after the numbers move.")
+                    Text("Sent with your note so it still makes sense after these numbers change.")
+                }
+
+                Section {
+                    Toggle("Send my recording too", isOn: $sendsRecording)
+                } footer: {
+                    Text(sendsRecording
+                         ? "This attaches the full GPS track of this session — everywhere you went, "
+                           + "and when. It lets us reproduce exactly what you are seeing. It is never "
+                           + "published, and it is only ever sent when you turn this on."
+                         : "Off. Only your note and the numbers above are sent — no location data. "
+                           + "Turn this on if you want us to be able to reproduce the problem.")
+                }
+
+                Section {
+                    TextField("Email (optional)", text: $contact)
+                        .textContentType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("Only if you would like a reply. Leave it blank to stay anonymous.")
                 }
 
                 if let failure {
                     Section {
-                        Text(failure)
+                        Label(failure, systemImage: "exclamationmark.triangle")
                             .font(.callout)
                             .foregroundStyle(.red)
                     }
                 }
             }
-            .navigationTitle(sent ? "Sent" : "Session feedback")
+            .navigationTitle("Report a problem")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -78,21 +99,41 @@ struct FeedbackSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSending ? "Sending…" : "Send") { send() }
                         .fontWeight(.semibold)
-                        .disabled(isSending ||
-                                  text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!canSend)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var currentNumbers: some View {
+        let report = report
+        LabeledContent("Runs",
+                       value: "\(report.runsDownwind) downwind · \(report.runsReaching) reaching · \(report.runsUpwind) upwind")
+        LabeledContent("On foil",
+                       value: "\(Int((report.foilingFraction * 100).rounded()))% · \(report.flights) flights")
+        LabeledContent("Turns, falls, jumps",
+                       value: "\(report.turns) · \(report.falls) · \(report.jumps)")
+        if let direction = report.windDirection {
+            LabeledContent("Wind", value: "\(Format.cardinal(direction)) \(Int(direction.rounded()))°")
         }
     }
 
     private func send() {
         isSending = true
         failure = nil
-        let note = note
+
+        var outgoing = report
+        outgoing.contact = contact
+        // Encoded here, at the moment of consent — a sheet that is opened,
+        // read and cancelled never turns a track into bytes.
+        if sendsRecording {
+            outgoing.recording = SessionFeedback.recording(of: session)
+        }
+
         Task {
             do {
-                try await SessionFeedback.submit(note)
-                sent = true
+                try await SessionFeedback.submit(outgoing)
                 dismiss()
             } catch {
                 failure = error.localizedDescription
@@ -101,4 +142,3 @@ struct FeedbackSheet: View {
         }
     }
 }
-#endif

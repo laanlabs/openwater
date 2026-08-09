@@ -81,37 +81,65 @@ it cannot be done from the command line.
 
 ---
 
-## 3. The `devFeedback` Firestore rule is not deployed
+## 3. "Report a problem" is built and cannot send yet
 
-**Session feedback cannot be sent until it is.** Debug builds have a "Session
-Feedback…" item in the session menu that files a note against the numbers on
-screen, and `scripts/fetch-feedback.sh` pulls those notes into the
-expectation pages. The write goes to a `devFeedback` collection that has no
-rule yet, so every submission comes back 403 — the sheet says so rather than
-failing quietly.
+Every build now has a bug button beside the ⋯ on a session. It files what
+the rider says against the numbers the app was showing, and optionally — only
+when they turn it on — the recording itself, so a problem can be reproduced.
+`scripts/fetch-feedback.sh` pulls the reports into the expectation pages.
 
-The rule wanted, following `spotSuggestions` exactly (create-only, bounded,
-never readable by the app):
+**Two things are missing, and both are outside this repository.**
+
+**The rules.** Writes go to a `sessionFeedback` collection and, with consent,
+to `feedback/` in Storage. Neither has a rule, so submissions come back 403 —
+the sheet says so rather than failing quietly. Following `spotSuggestions`
+exactly: create-only, bounded, never readable by the app.
 
 ```
-match /devFeedback/{id} {
+match /sessionFeedback/{id} {
   allow create: if request.resource.data.keys().hasOnly([
-                     'session', 'verdict', 'text', 'analysisVersion',
+                     'topic', 'text', 'contact', 'session', 'sport',
+                     'duration', 'distance', 'analysisVersion',
                      'runsDownwind', 'runsReaching', 'runsUpwind',
-                     'stretches', 'flights', 'windDirection', 'windSource',
-                     'appVersion', 'device', 'createdAt'])
-                && request.resource.data.session is string
-                && request.resource.data.session.size() <= 60
+                     'stretches', 'flights', 'turns', 'falls', 'jumps',
+                     'foilingFraction', 'windDirection', 'windSource',
+                     'recordingPath', 'appVersion', 'system', 'createdAt'])
                 && request.resource.data.text is string
                 && request.resource.data.text.size() <= 4000
-                && request.resource.data.verdict in ['Wrong', 'Close', 'Right'];
+                && request.resource.data.session.size() <= 60
+                && request.resource.data.topic in ['Runs', 'Foiling',
+                     'Speed & distance', 'Wind', 'Turns, falls & jumps',
+                     'Something else'];
   allow read, update, delete: if false;
 }
 ```
 
-Not done here because the rules live with the website, which another
-developer is working on. Reading the collection back needs owner credentials
-(`gcloud auth application-default login`); the app can only create.
+```
+// Storage — same shape as suggestions/, never publicly readable.
+match /feedback/{file} {
+  allow create: if request.resource.size < 25 * 1024 * 1024;
+  allow read, update, delete: if false;
+}
+```
+
+**The App Store privacy answers.** This is the part that must not be skipped.
+The app can now upload a rider's full GPS track for a purpose the current
+disclosure does not cover — the existing answers describe web sharing, which
+is a different thing a rider initiates for a different reason. Before this
+ships, "Location" needs listing under Diagnostics or Product Interaction as
+well, and the privacy policy needs a line saying feedback recordings are
+sent only on request, used only to reproduce a problem, and never published.
+
+The app-side handling is already deliberate: off every time the sheet opens,
+never remembered, the track is not even encoded unless the toggle is on, and
+the footer says in plain words what leaves the phone. None of that
+substitutes for the disclosure.
+
+Reading the collection back needs owner credentials (`gcloud auth
+application-default login`); the app can only create. A report that carries a
+recording says so in the page, with its Storage path — that is the rider's
+personal location data, so pull it to reproduce the problem and do not keep
+it afterwards.
 
 ---
 

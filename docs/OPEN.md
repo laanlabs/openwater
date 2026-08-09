@@ -81,7 +81,41 @@ it cannot be done from the command line.
 
 ---
 
-## 3. Speed through water
+## 3. The `devFeedback` Firestore rule is not deployed
+
+**Session feedback cannot be sent until it is.** Debug builds have a "Session
+Feedback…" item in the session menu that files a note against the numbers on
+screen, and `scripts/fetch-feedback.sh` pulls those notes into the
+expectation pages. The write goes to a `devFeedback` collection that has no
+rule yet, so every submission comes back 403 — the sheet says so rather than
+failing quietly.
+
+The rule wanted, following `spotSuggestions` exactly (create-only, bounded,
+never readable by the app):
+
+```
+match /devFeedback/{id} {
+  allow create: if request.resource.data.keys().hasOnly([
+                     'session', 'verdict', 'text', 'analysisVersion',
+                     'runsDownwind', 'runsReaching', 'runsUpwind',
+                     'stretches', 'flights', 'windDirection', 'windSource',
+                     'appVersion', 'device', 'createdAt'])
+                && request.resource.data.session is string
+                && request.resource.data.session.size() <= 60
+                && request.resource.data.text is string
+                && request.resource.data.text.size() <= 4000
+                && request.resource.data.verdict in ['Wrong', 'Close', 'Right'];
+  allow read, update, delete: if false;
+}
+```
+
+Not done here because the rules live with the website, which another
+developer is working on. Reading the collection back needs owner credentials
+(`gcloud auth application-default login`); the app can only create.
+
+---
+
+## 4. Speed through water
 
 **The one structural debt left in the analysis.**
 
@@ -117,7 +151,7 @@ tests, not a patch.
 
 ---
 
-## 4. A pass on a real device
+## 5. A pass on a real device
 
 The app has been built and installed on an iPhone 17 Pro, and the radar loop
 was debugged on one in Maine — but most screens have only been walked in the
@@ -133,7 +167,7 @@ simulator.
 
 ---
 
-## 5. Sport is guessed on import
+## 6. Sport is guessed on import
 
 A GPX that does not name its sport imports as the app's default. Three
 Montauk recordings came in as wingfoil purely because nothing said otherwise
@@ -147,7 +181,7 @@ needs to be less arbitrary.
 
 ---
 
-## 6. The README is stale
+## 7. The README is stale
 
 The screenshots are current; the prose is not. It does not mention the
 Analysis tab, the Runs map, the Conditions and radar screens, the adjustable

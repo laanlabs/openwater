@@ -37,6 +37,9 @@ struct SessionDetailView: View {
     @State private var isPlayingBack = false
     @State private var isEditing = false
     @State private var isSettingWind = false
+    #if DEBUG
+    @State private var isGivingFeedback = false
+    #endif
     @State private var isConfirmingDelete = false
     @State private var isConfirmingRemoveMax = false
     @State private var savedAsNewActivity = false
@@ -129,6 +132,15 @@ struct SessionDetailView: View {
                 Menu {
                     Button("Edit…", systemImage: "pencil") { isEditing = true }
 
+                    #if DEBUG
+                    // A developer tool, and only in a debug build. Filed
+                    // against the numbers on screen, so tuning later does not
+                    // rest on remembering which session looked wrong.
+                    Button("Session Feedback…", systemImage: "exclamationmark.bubble") {
+                        isGivingFeedback = true
+                    }
+                    #endif
+
                     // Offered wherever a rider might look for it, and only when
                     // there is something to put back. The full recording is
                     // always kept behind a trim, so this can never fail.
@@ -220,6 +232,13 @@ struct SessionDetailView: View {
                 WebShareView(stored: stored, session: session)
             }
         }
+        #if DEBUG
+        .sheet(isPresented: $isGivingFeedback) {
+            if let session, let summary = session.summary {
+                FeedbackSheet(session: session, summary: summary)
+            }
+        }
+        #endif
         .sheet(isPresented: $isSettingWind) {
             if let session {
                 WindSetterView(session: session) { direction, speed, swell, swellFrom in

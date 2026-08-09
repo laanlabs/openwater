@@ -29,3 +29,7 @@ Package.resolved
 # Real recordings — riders' own GPS tracks. Fixtures for local test
 # runs only; they are personal location data and must not be published.
 testdata/
+
+# Test recordings ride along with debug builds but are never committed.
+openWater/DevSeed/*
+!openWater/DevSeed/README.md

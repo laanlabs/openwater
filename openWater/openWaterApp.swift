@@ -55,6 +55,12 @@ struct openWaterApp: App {
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
                     library.purgeExpiredTrash()
+                    #if DEBUG
+                    // The test set, so a debug build always has the sessions
+                    // the expectation pages describe. No-op once they are in,
+                    // and absent entirely from a release build.
+                    DevSeed.loadIfNeeded(into: library)
+                    #endif
                     sync.activate()
                 }
                 .onChange(of: scenePhase) { _, phase in

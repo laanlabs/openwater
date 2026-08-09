@@ -160,8 +160,22 @@ The segmenter found **246 stretches**, which group into **113 runs**. A run ends
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+**The outlier of the whole set, and the case to tune against.**
+
+113 runs from 23 flights. Ninety of those splits are point-of-sail changes,
+not touchdowns. 246 stretches barely collapse at all — 246 → 113 — and 242
+turns is one every 33 seconds across two and a quarter hours.
+
+Whatever this session was, it was not 113 runs. Either the laps are tight
+enough that every weave crosses a band boundary, or the reaching band is too
+wide for a session sailed mostly across the wind. Fixing test-5 without
+breaking test-2 and test-9 is the real test.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

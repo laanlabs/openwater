@@ -72,8 +72,20 @@ The segmenter found **82 stretches**, which group into **29 runs**. A run ends a
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+A long downwinder — 15 km of net displacement, 9° off dead downwind — but
+the rider was on foil only 59% of the time, the lowest in the set, across 21
+flights with 3 falls. Hard conditions or a long swim-heavy day.
+
+22 downwind runs against 21 flights, so the touchdown rule is doing nearly
+all the work here and doing it correctly. A rider might still describe the
+whole thing as "one downwinder", which is the open question for
+point-to-point sessions: is a run a ride, or is a run the whole way down?
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

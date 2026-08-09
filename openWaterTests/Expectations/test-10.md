@@ -53,8 +53,20 @@ The segmenter found **43 stretches**, which group into **11 runs**. A run ends a
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+A short, fast lapping session — the highest top speed in the set (21 kn) and
+the highest average moving speed (13.9 kn), with only 2:22 spent gliding
+despite 9 glides.
+
+11 runs from 10 flights. The touchdown rule accounts for essentially the
+whole count here, with just 1 downwind and 10 reaching, which is the
+behaviour we want: runs tracking rides rather than tracking direction
+changes.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

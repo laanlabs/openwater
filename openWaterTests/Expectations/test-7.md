@@ -64,8 +64,18 @@ The segmenter found **117 stretches**, which group into **22 runs**. A run ends 
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+Lapping, and a clean one — 93% on foil, no falls at all in 1:26. 22 runs
+from 16 flights is the most reasonable ratio of the lapping sessions.
+
+**Worth checking:** 17 reaching against 5 downwind. Same reaching-heavy
+pattern as the others, but much less extreme, which makes this a useful
+middle case: whatever fixes test-5 should leave this roughly where it is.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

@@ -66,8 +66,20 @@ The segmenter found **67 stretches**, which group into **19 runs**. A run ends a
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+The Columbia River session most of this work was done against, and the one
+whose numbers are quoted in the commit history.
+
+19 runs from 8 flights: 5 downwind, 12 reaching, 2 upwind. The twelve
+reaches sit between 88° and 121° off dead downwind, which is genuinely
+across the wind — river laps, back and forth. So the band is not obviously
+wrong here, but "twelve reaches" is still more structure than a rider would
+volunteer about an afternoon of laps.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

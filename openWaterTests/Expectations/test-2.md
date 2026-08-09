@@ -44,8 +44,19 @@ The segmenter found **11 stretches**, which group into **6 runs**. A run ends at
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+The cleanest downwinder in the set, and the best reference case for the
+touchdown rule. Straightness 0.91 and 0° off dead downwind — a straight shot
+down the beach. 7 flights, 6 downwind runs, no reaching and no upwind at all.
+
+A rider would describe this as "one downwinder, fell about six times", and
+the analysis says six runs. **If a change makes this anything other than 6
+downwind and nothing else, the change is wrong.**
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

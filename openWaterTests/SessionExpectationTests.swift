@@ -23,9 +23,10 @@ import XCTest
 /// recordings this test skips rather than fails, so a fresh clone stays
 /// green.
 ///
-/// **Keyed by start date, not by filename.** Filenames carry riders' names;
-/// a start date identifies a recording just as well, survives a rename, and
-/// says nothing about who was on the water.
+/// **Keyed by filename.** The recordings are named `test-1`, `test-2` and so
+/// on precisely so that the key gives nothing away — the names riders'
+/// devices write carry the rider's own name, which is why the originals were
+/// renamed rather than keyed around.
 ///
 /// To accept new numbers after a deliberate change:
 ///
@@ -106,7 +107,14 @@ final class SessionExpectationTests: XCTestCase {
         return try FileManager.default
             .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { ["gpx", "fit", "tcx", "csv", "openwater"].contains($0.pathExtension.lowercased()) }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            // Numerically: "test-10" sorts before "test-2" as a string.
+            .sorted {
+                let a = Int($0.deletingPathExtension().lastPathComponent
+                    .components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? 0
+                let b = Int($1.deletingPathExtension().lastPathComponent
+                    .components(separatedBy: CharacterSet.decimalDigits.inverted).joined()) ?? 0
+                return a == b ? $0.lastPathComponent < $1.lastPathComponent : a < b
+            }
     }
 
     // MARK: Measuring
@@ -116,13 +124,7 @@ final class SessionExpectationTests: XCTestCase {
         -> (key: String, expectation: Expectation, session: Session,
             summary: SessionSummary, runs: [GroupedRun]) {
         let data = try Data(contentsOf: url)
-        let imported = try TrackImporter.read(data)
-
-        // Sport is not in a GPX file, and it sets every threshold for
-        // flights, turns and glides. The import sheet defaults to wingfoil
-        // and so does this — an expectation measured under a different sport
-        // would be measuring something else.
-        let session = imported.makeSession(sport: .wingfoil)
+        let session = try load(data, named: url.lastPathComponent)
         guard let summary = session.summary else {
             throw XCTSkip("\(url.lastPathComponent) produced no analysis")
         }
@@ -154,7 +156,26 @@ final class SessionExpectationTests: XCTestCase {
             windSource: summary.wind?.source.rawValue
         )
 
-        return (key(for: session), expectation, session, summary, runs)
+        return (url.deletingPathExtension().lastPathComponent,
+                expectation, session, summary, runs)
+    }
+
+    /// Turn a file into an analysed session the way the app's import does.
+    ///
+    /// The two paths differ and the difference matters. An archive already
+    /// knows its sport, its wind and its swell, and re-analysing one as
+    /// wingfoil would measure a parawing session against the wrong
+    /// thresholds for flights, turns and glides. A GPX knows none of that, so
+    /// it gets the same wingfoil default the import sheet offers.
+    private func load(_ data: Data, named name: String) throws -> Session {
+        guard TrackImporter.detectFormat(data) == .openwater else {
+            return try TrackImporter.read(data).makeSession(sport: .wingfoil)
+        }
+        if let bundle = try? SessionArchiveBundle.decode(data),
+           let first = bundle.sessions.first {
+            return first
+        }
+        return try SessionArchive.decode(data).upToDateSession()
     }
 
     // MARK: The readable half
@@ -332,15 +353,6 @@ final class SessionExpectationTests: XCTestCase {
         let parts = [mark.locality ?? mark.subAdministrativeArea,
                      mark.administrativeArea].compactMap { $0 }
         return parts.isEmpty ? mark.country : parts.joined(separator: ", ")
-    }
-
-    /// A recording's identity: when it started, to the second, in UTC.
-    private func key(for session: Session) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss'Z'"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: session.startDate)
     }
 
     // MARK: The test

@@ -103,8 +103,18 @@ The segmenter found **202 stretches**, which group into **56 runs**. A run ends 
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+A long lapping session — 2:38 and 45 km, 92% on foil across 33 flights, 198
+turns. Same shape as test-3 and test-5.
+
+**What looks off:** 56 runs, 42 of them reaching. The flight count (33) is
+high enough that the touchdown rule explains some of it, but the reaching
+count is again carrying most of the total.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

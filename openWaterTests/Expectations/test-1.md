@@ -61,8 +61,21 @@ The segmenter found **38 stretches**, which group into **18 runs**. A run ends a
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+A point-to-point downwinder — about 9 km of coast, 66% straight, 9° off dead
+downwind overall. Ridden in 12 flights, and the analysis reports 12 downwind
+runs, so the touchdown split is doing exactly what it should: one run per
+ride, twelve restarts.
+
+**What looks off:** 6 reaching runs on a session that averaged 9° off dead
+downwind. If the whole thing was that square to the wind, very little should
+be classifying as a reach. Worth checking whether those six are real
+cross-shore stretches or the reaching band catching bear-aways.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

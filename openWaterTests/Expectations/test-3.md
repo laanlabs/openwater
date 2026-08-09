@@ -85,8 +85,20 @@ The segmenter found **141 stretches**, which group into **38 runs**. A run ends 
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+Lapping at one spot for an hour and a half, and almost never off the foil —
+96%, with only 9 flights in 90 minutes. 119 turns is one every 45 seconds.
+
+**What looks off:** 38 runs from 9 flights. Twenty-nine of those splits come
+from changes of point of sail rather than touchdowns, and 23 of them are
+reaching. A rider who was up for nine long rides would not say they did 38
+runs. This is where the definition of a run and the rider's own count
+diverge most sharply, alongside test-5.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

@@ -1,6 +1,6 @@
 # Goldendale, WA — 2 August 2026 at 23:49 UTC
 
-Wingfoil · 8:50 · 3.24 km · 15.8 kn max
+Parawing · 8:50 · 3.24 km · 15.8 kn max
 
 ## The session
 
@@ -39,8 +39,20 @@ The segmenter found **18 stretches**, which group into **1 runs**. A run ends at
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**A first read, from the numbers above — not from having been there.**
+Correct it; the rider's account is the ground truth, this is only a starting
+point so the page is not blank.
+
+**The reference case. One unbroken ride, and the only parawing file.**
+
+100% on foil, a single flight, 5° off dead downwind, 18 stretches collapsing
+to exactly 1 run. This is the session that produced the "this should be one
+run" feedback, and it is now right.
+
+Any change that splits this into more than one run is wrong. It is also the
+only file with jumps (4), so it is the only cover the jump detector has.
+
+### Your call
 
 - Runs I'd count:
 - Conditions as I remember them:

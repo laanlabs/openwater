@@ -102,6 +102,32 @@ struct RibbonView: View {
             case .downwind: point == .broadReach || point == .running
             }
         }
+
+        /// Legs take their colour from the run kind they are, so a downwind
+        /// leg and a downwind run are the same orange on the same map.
+        var colour: Color {
+            switch self {
+            case .upwind: GroupedRun.Kind.upwind.colour
+            case .downwind: GroupedRun.Kind.downwind.colour
+            case .all, .reaching: GroupedRun.Kind.reaching.colour
+            }
+        }
+    }
+
+    /// One thing the map draws.
+    ///
+    /// The map and the list are one screen and have to be showing the same
+    /// unit — legs when the list is showing legs, runs when it is showing
+    /// runs. Drawing runs beneath a list of legs is how this tab came to say
+    /// "1 run" above a map with sixteen numbered ones on it.
+    private struct Drawn: Identifiable {
+        let id: Int
+        let title: String
+        let number: Int
+        let distance: Double
+        let colour: Color
+        let startElapsed: TimeInterval
+        let endElapsed: TimeInterval
     }
 
     /// How the lanes are stacked.
@@ -145,11 +171,12 @@ struct RibbonView: View {
     /// but eighteen rows is an answer to a question nobody asked. So the top
     /// level is the run, and the stretches inside it are one tap down.
     ///
-    /// Only when the session actually went somewhere: an afternoon of laps has
-    /// exactly one leg, which is the whole session, and collapsing fifty-two
-    /// laps into one row would be the same mistake in the other direction.
+    /// Only when there is more than one leg. A single leg spans the whole
+    /// session, so the row reads "Downwind run · 8.03 km · 1:08:03" — the
+    /// header said twice, in place of the list of runs the rider opened this
+    /// tab to see. Legs earn their keep on a shuttle day and nowhere else.
     private var showsLegs: Bool {
-        isPointToPoint && !legs.isEmpty && order == .time && filter == .all
+        isPointToPoint && legs.count > 1 && order == .time && filter == .all
     }
 
     /// The session as a rider counts it: consecutive stretches on the same
@@ -214,7 +241,7 @@ struct RibbonView: View {
                             .frame(height: 260)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                             .overlay(alignment: .bottomLeading) {
-                                if selectedRun != nil {
+                                if selection != nil {
                                     Button("Show all") { select(nil) }
                                         .font(.caption.weight(.semibold))
                                         .padding(.horizontal, 10)
@@ -339,26 +366,26 @@ struct RibbonView: View {
                 MapPolyline(coordinates: track.points.map(\.clCoordinate))
                     .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
-                ForEach(mappedRuns) { run in
-                    let chosen = selectedRun == nil || selectedRun == run.id
+                ForEach(drawn) { run in
+                    let chosen = selection == nil || selection == run.id
                     MapPolyline(coordinates: coordinates(of: run, in: track))
-                        .stroke(chosen ? run.kind.colour : Color.secondary.opacity(0.22),
-                                style: StrokeStyle(lineWidth: selectedRun == run.id ? 6 : 4,
+                        .stroke(chosen ? run.colour : Color.secondary.opacity(0.22),
+                                style: StrokeStyle(lineWidth: selection == run.id ? 6 : 4,
                                                    lineCap: .round, lineJoin: .round))
                 }
 
-                ForEach(mappedRuns) { run in
+                ForEach(drawn) { run in
                     if let middle = midpoint(of: run, in: track) {
-                        let chosen = selectedRun == nil || selectedRun == run.id
+                        let chosen = selection == nil || selection == run.id
                         Annotation("", coordinate: middle, anchor: .center) {
-                            Button { select(selectedRun == run.id ? nil : run.id) } label: {
-                                if selectedRun == run.id {
-                                    Text("\(run.kind.title) \(run.number) · \(Format.distance(run.distance, unit: units.distance))")
+                            Button { select(selection == run.id ? nil : run.id) } label: {
+                                if selection == run.id {
+                                    Text("\(run.title) \(run.number) · \(Format.distance(run.distance, unit: units.distance))")
                                         .font(.system(size: 11, weight: .bold, design: .rounded))
                                         .monospacedDigit()
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 4)
-                                        .background(run.kind.colour, in: Capsule())
+                                        .background(run.colour, in: Capsule())
                                         .foregroundStyle(.white)
                                         .shadow(radius: 2)
                                 } else {
@@ -367,7 +394,7 @@ struct RibbonView: View {
                                         .monospacedDigit()
                                         .foregroundStyle(.white)
                                         .frame(width: 18, height: 18)
-                                        .background(chosen ? run.kind.colour
+                                        .background(chosen ? run.colour
                                                     : Color.secondary.opacity(0.35), in: Circle())
                                         .overlay(Circle().stroke(.white, lineWidth: 1.5))
                                 }
@@ -398,13 +425,43 @@ struct RibbonView: View {
         groupedRuns.filter { filter.matchesKind($0.kind) }
     }
 
-    private func coordinates(of run: GroupedRun, in track: Track) -> [CLLocationCoordinate2D] {
+    /// What the map draws, taken from whichever unit the list is showing.
+    private var drawn: [Drawn] {
+        guard showsLegs else {
+            return mappedRuns.map {
+                Drawn(id: $0.id, title: $0.kind.title, number: $0.number,
+                      distance: $0.distance, colour: $0.kind.colour,
+                      startElapsed: $0.startElapsed, endElapsed: $0.endElapsed)
+            }
+        }
+        // Numbered within their own type, exactly as the rows below are.
+        var seen: [Leg: Int] = [:]
+        return legs.enumerated().map { index, leg in
+            let kind = type(of: leg)
+            seen[kind, default: 0] += 1
+            return Drawn(id: index, title: kind.rawValue, number: seen[kind]!,
+                         distance: leg.distance, colour: kind.colour,
+                         startElapsed: leg.startElapsed, endElapsed: leg.endElapsed)
+        }
+    }
+
+    /// The selection, but only while it still refers to something drawn.
+    ///
+    /// Legs and runs number themselves separately, so a selection made in one
+    /// mode can survive into the other and match nothing — which dims every
+    /// line on the map and leaves no way back except "Show all".
+    private var selection: Int? {
+        guard let selectedRun, drawn.contains(where: { $0.id == selectedRun }) else { return nil }
+        return selectedRun
+    }
+
+    private func coordinates(of item: Drawn, in track: Track) -> [CLLocationCoordinate2D] {
         track.points.indices
-            .filter { track.elapsed[$0] >= run.startElapsed && track.elapsed[$0] <= run.endElapsed }
+            .filter { track.elapsed[$0] >= item.startElapsed && track.elapsed[$0] <= item.endElapsed }
             .map { track.points[$0].clCoordinate }
     }
 
-    private func midpoint(of run: GroupedRun, in track: Track) -> CLLocationCoordinate2D? {
+    private func midpoint(of run: Drawn, in track: Track) -> CLLocationCoordinate2D? {
         let line = coordinates(of: run, in: track)
         guard !line.isEmpty else { return nil }
         return line[line.count / 2]
@@ -415,7 +472,7 @@ struct RibbonView: View {
         withAnimation(.snappy) {
             selectedRun = id
             guard let id, let track,
-                  let run = groupedRuns.first(where: { $0.id == id })
+                  let run = drawn.first(where: { $0.id == id })
             else {
                 camera = .automatic
                 return

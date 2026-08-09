@@ -249,7 +249,8 @@ enum SessionFeedback {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.httpBody = archive
+        // Body comes from `upload(for:from:)`, not `httpBody` — setting both
+        // holds a second copy of a multi-megabyte archive for nothing.
         guard let (_, response) = try? await URLSession.shared.upload(for: request, from: archive),
               (response as? HTTPURLResponse)?.statusCode == 200
         else { return nil }

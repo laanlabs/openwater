@@ -31,6 +31,8 @@ struct SessionDetailView: View {
     @State private var view: Mode = .map
     @State private var selectedRun: Int?
     @State private var isExporting = false
+    /// The archive written for an AirDrop, cleared when the sheet closes.
+    @State private var archiveToSend: SharedFile?
     @State private var isSharingToWeb = false
     @State private var isSharingImage = false
     @State private var isMapFullScreen = false
@@ -141,6 +143,26 @@ struct SessionDetailView: View {
                 .disabled(session?.summary == nil)
             }
 
+            // Every way out of the app, in the place a rider looks for it.
+            // These were three items in the middle of a menu that opens with
+            // Edit and ends with Delete, which is a strange place to keep the
+            // thing people do most after a good session.
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Share Image…", systemImage: "photo") { isSharingImage = true }
+                    Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }
+                    Divider()
+                    Button("Send to Another Device…", systemImage: "airplayaudio") {
+                        sendArchive()
+                    }
+                    Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Share this session")
+                .disabled(session == nil)
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Edit…", systemImage: "pencil") { isEditing = true }
@@ -170,16 +192,11 @@ struct SessionDetailView: View {
                     }
                     .disabled(session == nil)
                     Divider()
-                    Button("Share Image…", systemImage: "photo") { isSharingImage = true }
-                        .disabled(session == nil)
-                    Button("Share a Link…", systemImage: "link") { isSharingToWeb = true }
-                        .disabled(session == nil)
-                    Button("Export…", systemImage: "square.and.arrow.up") { isExporting = true }
-                    // A "Flying only" toggle used to sit here. It was bound to
-                    // a variable nothing read, so it did nothing at all — while
-                    // the identically-labelled one in the full-screen map
-                    // worked. The Map tab has its own foil filter; one working
-                    // control beats two that disagree.
+                    // Sharing and exporting have their own button now. A
+                    // "Flying only" toggle used to sit here too; it was bound
+                    // to a variable nothing read, so it did nothing at all
+                    // while the identically-labelled one in the full-screen
+                    // map worked. The Map tab has its own foil filter.
                     Divider()
                     // Deleting was only possible from the list, which is not
                     // where anyone looks for it after opening a session and
@@ -191,6 +208,9 @@ struct SessionDetailView: View {
                     Image(systemName: "ellipsis.circle")
                 }
             }
+        }
+        .sheet(item: $archiveToSend) { file in
+            ActivitySheet(items: [file.url])
         }
         .sheet(isPresented: $isExporting) {
             ExportView(stored: stored)
@@ -304,6 +324,21 @@ struct SessionDetailView: View {
     /// A manual wind, straight from the dial. Goes through `Edits` so the
     /// reanalysis rule lives in exactly one place.
     @MainActor
+    /// Write the session as an archive and offer it to AirDrop.
+    ///
+    /// The archive rather than a GPX: it carries the sport, the wind, the
+    /// trim and the analysis, so the session lands on the other device as the
+    /// same session rather than as a bare track to be re-guessed.
+    private func sendArchive() {
+        guard let session, let data = try? SessionArchive(session: session).encoded() else { return }
+        let name = (session.title ?? session.displayTitle)
+            .replacingOccurrences(of: "/", with: "-")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(name).openwater")
+        guard (try? data.write(to: url)) != nil else { return }
+        archiveToSend = SharedFile(url: url)
+    }
+
     private func applyWind(direction: Double, speed: Double?, swell: Double?,
                            swellFrom: Double?, to session: Session) {
         let categories = settings.categories

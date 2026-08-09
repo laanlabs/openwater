@@ -1,51 +1,87 @@
 # Open work
 
-Written 7 August 2026, at analysis version 11, 250 core tests passing.
+Written 8 August 2026, at analysis version 12, 250 core tests and 27 app
+tests passing.
 
 Ordered by what I would do next, not by size. Each item says what is wrong,
 what the evidence was, and what "done" looks like — so it can be picked up
 cold without re-deriving the reasoning.
 
+**Where the recordings are.** They are not in this repository and never will
+be: `testdata/` is gitignored and was removed from the history on 8 August
+(`9616941`). Riders' GPS traces are their home addresses. Keep your own
+files in a local `testdata/` and import them through the app; anything in
+this document that cites a recording names it, but you will need your own.
+
 ---
 
 ## 0. Done since this was written
 
-**Privacy manifest** (`13a46f6`+). The upload warning was Apple's
-ITMS-91053: the app had no `PrivacyInfo.xcprivacy`, which has been required
-since May 2024. Added for both the phone and the watch, declaring the one
-required-reason API this app touches (UserDefaults, reason CA92.1) and the
-precise location a web share transmits. `scripts/testflight.sh` now fails
-before upload if either manifest is missing or a declared API has no reason
-code — the warning never blocked a build, which is why it went unnoticed.
+**Runs and the maps that draw them.** The segmenter splits on every
+meaningful change of direction, which on a lapping afternoon is sixty-seven
+pieces; a rider looking at the same track says "six downwinders and five
+beats back". `GroupedRun` (`openWater/Views/GroupedRuns.swift`) merges
+consecutive stretches on one point of sail into the run a rider counts, and
+now feeds the Runs tab, the Downwind list and both maps from one place, so
+they cannot disagree. The Runs tab opens with a map of every run, numbered
+and coloured by kind, filterable and tappable.
 
-Not verified against Apple's own validator: `altool --validate-app` needs the
-App Store Connect key, which is not on this machine. A clean archive, export
-and local verification all pass. **Confirm the warning is actually gone on
-the next real upload.**
+**The glide-time defect** (`43651a8`). `glideTime` discarded sub-minimum
+glides *along with their time*, so a session that was 99% on foil reported
+44%. Split into a `Detection` that separates nameable glides from time spent
+gliding. The consistency test had been asserting the defect and was
+corrected to bounds rather than equality. Version 11 → 12.
+
+**Weather, conditions and radar.** Nearby free stations (NWS, NOAA CO-OPS
+tides, NDBC buoys), multi-model Open-Meteo forecasts, marine swell, and
+radar — NOAA RIDGE II stills plus an animated RainViewer loop that prefetches
+and caches every frame before playing. All keyless and non-commercial.
+
+**Screenshots re-captured** for the restructured tabs, including the new
+Analysis shot.
 
 ---
 
 ## 1. Ship a TestFlight build
 
-**Riders on the current TestFlight cannot open any session.** They see
+**Riders on the current TestFlight still cannot open any session.** They see
 "Loading session…" for ever, on every session in their history.
 
-The cause is fixed on `main` (`7076ae3`) and has been all day, along with
-everything since. Nothing has shipped, so the fix helps nobody yet. This is
-not a code change:
+The cause was fixed on `main` on 7 August (`7076ae3`), and everything in
+sections 0 above has landed since. Nothing has shipped, so none of it helps
+anybody yet. This is not a code change:
 
 ```bash
 scripts/testflight.sh
 ```
 
-Worth knowing before it goes: `analysisVersion` moved 4 → 11 today, so every
+Worth knowing before it goes: `analysisVersion` has moved 4 → 12, so every
 stored session re-analyses on first open. That is the intended path and
-`upToDateSession` handles it, but the first open of a long session will take
-a beat longer than usual.
+`upToDateSession` handles it, but the first open of a long session takes a
+beat longer than usual.
+
+Also unconfirmed: the privacy manifest added on 7 August fixed Apple's
+ITMS-91053 warning locally, but `altool --validate-app` needs an App Store
+Connect key that is not on this machine. **Confirm the warning is gone on
+the next real upload.**
 
 ---
 
-## 2. Speed through water
+## 2. Recordings were public before the history rewrite
+
+Five recordings were pushed to a public GitHub repository before `9616941`
+removed them and force-pushed. The history is clean now and the objects are
+unreachable, but **unreachable is not deleted** — GitHub keeps them until it
+garbage-collects, and a commit SHA someone already had will still resolve
+until then.
+
+**Done looks like:** asking GitHub Support to run GC on the repository, and
+confirming a known blob SHA 404s afterwards. This is the only step left and
+it cannot be done from the command line.
+
+---
+
+## 3. Speed through water
 
 **The one structural debt left in the analysis.**
 
@@ -55,7 +91,7 @@ root cause of a whole family of faults chased on 6–7 August. Three symptoms
 were patched — the glide floor, shallow speed dips, the smoothness bar — but
 the cause was not.
 
-Evidence, from `testdata/Waterspeed- upwind test.gpx`:
+Evidence, from a Gorge upwind recording:
 
 | | median ground speed |
 | --- | --- |
@@ -81,9 +117,11 @@ tests, not a patch.
 
 ---
 
-## 3. A pass on a real device
+## 4. A pass on a real device
 
-Everything this week was verified in the simulator.
+The app has been built and installed on an iPhone 17 Pro, and the radar loop
+was debugged on one in Maine — but most screens have only been walked in the
+simulator.
 
 - **File-type registration especially.** `com.topografix.gpx` is an
   *imported* type that Strava, Garmin Connect and others also declare, and
@@ -95,11 +133,27 @@ Everything this week was verified in the simulator.
 
 ---
 
-## 4. Screenshots and README are stale again
+## 5. Sport is guessed on import
 
-The captures predate today's work. Changed since: the Conditions card on
-Summary, Runs grouped as legs, linked rides on Downwind, the Splits unit
-chips, warning badges on Analysis rows.
+A GPX that does not name its sport imports as the app's default. Three
+Montauk recordings came in as wingfoil purely because nothing said otherwise
+— and sport sets the thresholds for flights, turns and glides, so a wrong
+guess makes every derived number wrong.
+
+**Done looks like:** remembering the last sport chosen for imports from the
+same source, or at least defaulting to `settings.lastSport` rather than a
+constant. The import sheet already lets a rider change it; the default just
+needs to be less arbitrary.
+
+---
+
+## 6. The README is stale
+
+The screenshots are current; the prose is not. It does not mention the
+Analysis tab, the Runs map, the Conditions and radar screens, the adjustable
+thresholds, or the bundled sample session.
+
+To re-capture after a UI change:
 
 ```bash
 SKIP_INSTALL=1 ./Marketing/capture-screenshots.sh <udid> Marketing/screenshots/appstore/iphone-6.9
@@ -109,40 +163,38 @@ SKIP_INSTALL=1 ./Marketing/capture-screenshots.sh <udid> Marketing/screenshots/a
 `simctl privacy` has no working switch for location, so the permission alert
 lands on top of the shot. Grant it once by hand, then use that flag.
 
-The README also does not mention the Analysis tab, the adjustable
-thresholds, or the bundled sample session.
-
----
-
-## 5. Sport is guessed on import
-
-A GPX that does not name its sport imports as the app's default. The three
-Montauk files in `testdata/` came in as wingfoil purely because nothing said
-otherwise — and sport sets the thresholds for flights, turns and glides, so
-a wrong guess makes every derived number wrong.
-
-**Done looks like:** remembering the last sport chosen for imports from the
-same source, or at least defaulting to `settings.lastSport` rather than a
-constant. The import sheet already lets a rider change it; the default just
-needs to be less arbitrary.
-
 ---
 
 ## Smaller, known, and deliberate
+
+**The reaching band may be too wide.** The 1:24 lapping session reports 5
+downwind, 8 reaching and 2 upwind. Eight reaches on a session that is
+visibly laps up and down a river is suspicious — either the 55–120° band is
+catching legs a rider would call downwind, or those are genuine cross-river
+transits. Worth checking against a rider's own account before touching the
+thresholds.
+
+**A drawn run is slightly longer than the sum of its stretches.** The maps
+draw every track point between a run's first and last stretch, so a brief
+absorbed reach inside a run is included in its line. Both maps use the same
+rule, so they agree with each other; they just do not agree exactly with the
+distance printed on the row.
 
 **The watch shows none of the new analysis** — no shape, glides, jumps or
 route. Defensible: it is a recorder, and the phone is where analysis is
 read. Worth revisiting only if riders ask.
 
-**App-layer tests are thin.** 250 core tests against ~400 lines of app
-tests. The core maths is well covered; `RouteNamer`'s "don't say Viento →
-Viento" rule, the Analysis row conditions and the threshold bindings have no
-tests at all.
+**App-layer tests are still thin.** 250 core tests against 27 app tests.
+`GroupedRun.group` is now covered (`openWaterTests/GroupedRunTests.swift`),
+which was the highest-risk piece. Nothing covers `RouteNamer`'s "don't say
+Viento → Viento" rule, the Analysis row conditions, the threshold bindings,
+or any of the weather and radar code added on 8 August.
 
 **No fixture from a previous release.** `ArchiveCompatibilityTests`
 synthesises old archives by stripping keys, which is good but not the same
 as a file written by a shipped build. Committing one or two real archives
-from older versions would close it properly.
+from older versions would close it properly — archives, not recordings, so
+this is compatible with keeping traces out of the repo.
 
 **Wind confidence reads 1.0** on a clean bidirectional estimate, which is
 stronger than "estimated" deserves and feeds the warning logic. Cosmetic,
@@ -155,9 +207,14 @@ that fails silently rather than a live bug — but it bit a test fixture, and
 it should clamp.
 
 **Jump thresholds are exposed but barely exercised.** The Airtime screen has
-four sliders and has now seen exactly one real jumping session (the Rufus
+four sliders and has seen exactly one real jumping session (the Rufus
 parawing run, 4 jumps). Tuning advice in the notes is educated guesswork
 until more sessions with motion data go through it.
+
+**RainViewer publishes no forecast frames.** The loop is history only.
+`radar.nowcast` returns an empty array on the free tier, and the code
+carries forecast frames when there are any — so if that ever changes, the
+loop extends forward with no further work.
 
 ---
 
@@ -172,7 +229,7 @@ to a quantity that varies by rider, rig or water.
 - foil smoothness → now relative, and only for a session with both quiet and
   rough phases
 - turn granularity → now merged, and cross-checked against the run count
-- run granularity → now grouped into legs for point-to-point sessions
+- run granularity → now grouped into runs a rider would count
 
 The tests that survived contact with real data are the *relative* and
 *physical* ones: fast for this session, quiet for this rig, a turn that cost
@@ -180,7 +237,7 @@ speed, a landing that actually slowed you down. When adding a threshold, the
 question to ask first is "relative to what?" — and if the answer is "nothing,
 it is just a number", it will be wrong for somebody.
 
-Two process rules came out of it, both learned the hard way:
+Three process rules came out of it, all learned the hard way:
 
 1. **Bump `SessionSummary.currentVersion` for any change in detector
    behaviour**, not only when a field is added. `upToDateSession` returns a
@@ -193,3 +250,30 @@ Two process rules came out of it, both learned the hard way:
    default, so a non-optional addition makes every existing archive
    undecodable. That shipped once and broke every session for every user.
    `ArchiveCompatibilityTests` now fails the build if it recurs.
+3. **A rule that skips the first item is a rule with a hole in it.** The
+   run merge absorbed a short stretch into the run already under way, which
+   by construction could never reach the *first* stretch — so every session
+   opened with its few seconds of getting going promoted to a run of its
+   own. Found by a unit test, not by looking at the screen, after the screen
+   had been checked by eye several times.
+
+---
+
+## Three UI traps, each found twice
+
+Worth writing down because each cost an hour and none of them fails loudly.
+
+**`.tint` and `.accentColor` do not resolve inside `MapPolyline`.** The same
+run drew orange unselected and system blue selected. Name colours explicitly
+in map content; `GroupedRun.Kind.colour` is the single source for run
+colours and should stay that way.
+
+**A horizontal `ScrollView` gives its content unbounded vertical space.**
+`maxHeight: .infinity` inside one expands past the viewport and the content
+below it silently vanishes. This ate the wind-arrow row twice.
+
+**`MKTileOverlay.maximumZ` stops MapKit requesting deeper tiles but does not
+upscale shallower ones** — the map is simply blank above the ceiling. The
+fix is a `loadTile` override that crops the ancestor tile. RainViewer's free
+tilecache publishes to z7, which is well below where anybody actually looks
+at a map.

@@ -121,6 +121,19 @@ struct GroupedRun: Identifiable {
             }
         }
 
+        // The loop above can only absorb a short stretch into a run already
+        // under way, which leaves the very first one unreachable: a session
+        // that opens with a few seconds of getting going would report that as
+        // a run of its own before the real first run. Merge it forward.
+        //
+        // Only the first group can be this short. Every later group begins
+        // with a stretch that cleared `absorb` — that is what started it.
+        if groups.count > 1, groups[0].reduce(0, { $0 + $1.distance }) < absorb {
+            groups[1].insert(contentsOf: groups[0], at: 0)
+            groups.removeFirst()
+            kinds.removeFirst()
+        }
+
         // A group's kind is decided by the distance sailed on each point of
         // sail inside it, not by whichever stretch happened to come first.
         var runs: [GroupedRun] = []

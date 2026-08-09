@@ -1,0 +1,22 @@
+{
+  "averageMovingSpeed" : 5.265146519965323,
+  "distance" : 13658.32711772504,
+  "duration" : 3005.1019999980927,
+  "falls" : 2,
+  "flights" : 12,
+  "foilingFraction" : 0.7786898896220023,
+  "glideTime" : 1995.00100004673,
+  "glides" : 13,
+  "jumps" : 0,
+  "maxSpeed" : 8.240598271473033,
+  "points" : 2475,
+  "runsDownwind" : 12,
+  "runsReaching" : 6,
+  "runsUpwind" : 0,
+  "sport" : "wingfoil",
+  "stretches" : 38,
+  "timeOnFoil" : 2020.00100004673,
+  "turns" : 36,
+  "windDirection" : 52,
+  "windSource" : "estimatedBidirectional"
+}

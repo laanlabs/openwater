@@ -178,6 +178,36 @@ final class SessionExpectationTests: XCTestCase {
         return try SessionArchive.decode(data).upToDateSession()
     }
 
+    // MARK: Putting them on a simulator
+
+    /// Write each recording out as a titled `.openwater` archive.
+    ///
+    /// Loading these into a simulator by hand means ten trips through the
+    /// import sheet and ten sessions labelled with whatever the recording
+    /// device called them — which is the rider's own name, and unreadable
+    /// besides. An archive carries its own title and sport, and imports
+    /// without a confirmation step, so ten `simctl openurl` calls put the
+    /// whole set on a device already named test-1 to test-10.
+    ///
+    /// Off unless asked for. `scripts/load-simulator.sh` runs it.
+    func testWriteTitledArchives() throws {
+        let destination = ProcessInfo.processInfo.environment["OPENWATER_ARCHIVE_OUT"]
+        try XCTSkipIf(destination == nil, "Set OPENWATER_ARCHIVE_OUT to write archives")
+
+        let out = URL(fileURLWithPath: destination!, isDirectory: true)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+
+        for file in try recordings() {
+            let name = file.deletingPathExtension().lastPathComponent
+            var session = try load(try Data(contentsOf: file), named: file.lastPathComponent)
+            session.title = name
+
+            let path = out.appendingPathComponent("\(name).openwater")
+            try SessionArchive(session: session).encoded().write(to: path)
+            print("wrote \(path.lastPathComponent) — \(session.sport.displayName)")
+        }
+    }
+
     // MARK: The readable half
 
     /// A page per recording, in prose and tables.

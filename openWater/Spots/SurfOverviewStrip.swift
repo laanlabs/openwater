@@ -29,21 +29,36 @@ struct SurfOverviewStrip: View {
     }
 
     private func column(_ day: SurfOutlook.Day) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 7) {
             Text(dayName(day.date))
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .semibold))
+                .textCase(.uppercase)
+                .kerning(0.4)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
 
-            Text(size(day))
-                .font(.subheadline.weight(.heavy))
-                .monospacedDigit()
+            // The number carries the weight; the unit gets out of its way.
+            // Repeating "ft" five times across a strip is five words nobody
+            // needs to read twice.
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(size(day))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                if day.biggest.map({ $0 > 0.05 }) == true {
+                    Text(unitSuffix)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
 
             // One arrow per part of the day. Three is enough to see the wind
             // swing that decides a session and few enough to read at a glance.
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 ForEach(day.bands.prefix(3)) { band in
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 10, weight: .semibold))
                         .rotationEffect(.degrees((band.windFromDeg ?? 0) + 180))
                         .foregroundStyle(band.windFromDeg == nil ? .tertiary : .secondary)
                 }
@@ -57,12 +72,12 @@ struct SurfOverviewStrip: View {
                 ForEach(day.bands.prefix(4)) { band in
                     Capsule()
                         .fill(colour(band))
-                        .frame(width: 12, height: 4)
+                        .frame(width: 13, height: 4)
                 }
             }
         }
-        .frame(width: 78)
-        .padding(.vertical, 8)
+        .frame(width: 86)
+        .padding(.vertical, 10)
     }
 
     private func colour(_ band: SurfOutlook.Band) -> Color {
@@ -75,17 +90,33 @@ struct SurfOverviewStrip: View {
         }
     }
 
+    /// The day's size, as a range only when the range says something.
+    ///
+    /// "0.9–1.0 ft" is false precision dressed as detail: the model does not
+    /// resolve a tenth of a foot and nobody plans around one. A range earns
+    /// its dash when the day actually changes.
     private func size(_ day: SurfOutlook.Day) -> String {
         let heights = day.bands.compactMap { $0.primary?.heightM }
         guard let low = heights.min(), let high = heights.max(), high > 0.05 else {
             return "Flat"
         }
-        // The low without its unit, the high with it — "1–3 ft" rather than
-        // "1 ft–3 ft", which is how a range is spoken.
-        let highText = Format.height(high, unit: units.distance)
-        let lowNumber = Format.height(low, unit: units.distance)
-            .split(separator: " ").first.map(String.init) ?? ""
-        return "\(lowNumber)–\(highText)"
+        let lowText = number(low), highText = number(high)
+        return lowText == highText ? highText : "\(lowText)–\(highText)"
+    }
+
+    /// The figure alone, at the precision the unit deserves — a tenth of a
+    /// metre, a whole foot.
+    private func number(_ metres: Double) -> String {
+        switch units.distance {
+        case .imperial:
+            return "\(Int((metres / DistanceUnit.metresPerFoot).rounded()))"
+        case .metric, .nautical:
+            return String(format: "%.1f", metres)
+        }
+    }
+
+    private var unitSuffix: String {
+        units.distance == .imperial ? "ft" : "m"
     }
 
     private func dayName(_ date: Date) -> String {

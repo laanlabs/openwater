@@ -31,12 +31,33 @@ struct FullScreenMapView: View {
     @State private var minimumSpeed: Double = 0
     @State private var isPlaying = false
 
+    /// The same grouping every other screen uses. The full-screen map was
+    /// offering `summary.runs` — sixty-seven stretches where the Runs tab
+    /// showed thirty runs — so the two disagreed about what a run even was.
+    private var runs: [GroupedRun] {
+        GroupedRun.group(summary.ribbon.lanes, flights: summary.flights)
+    }
+
+    /// The run the selection falls inside.
+    ///
+    /// `selectedRun` stays a stretch index, because it is shared with the
+    /// Map tab and the ribbon, which both speak in stretches. A stretch
+    /// identifies the run containing it perfectly well.
+    private var selectedGroup: GroupedRun? {
+        guard let selectedRun else { return nil }
+        return runs.first { $0.lanes.contains { $0.runIndex == selectedRun } }
+    }
+
+    private var isolatedRuns: Set<Int>? {
+        selectedGroup.map { Set($0.lanes.map(\.runIndex)) }
+    }
+
     var body: some View {
         ZStack {
             TrackMapView(
                 session: session,
                 summary: summary,
-                selectedRun: selectedRun,
+                isolatedRuns: isolatedRuns,
                 showFalls: showFalls,
                 showManeuvers: showManeuvers,
                 minimumSpeed: minimumSpeed,
@@ -48,9 +69,9 @@ struct FullScreenMapView: View {
                     // answer to "what happened here" is the run it belongs to,
                     // which isolates it and dims everything else.
                     withAnimation(.snappy) {
-                        selectedRun = summary.runs.first {
+                        selectedRun = runs.first {
                             time >= $0.startElapsed && time <= $0.endElapsed
-                        }?.index
+                        }?.lanes.first?.runIndex
                     }
                 }
             )
@@ -103,8 +124,7 @@ struct FullScreenMapView: View {
 
             Spacer()
 
-            if let run = selectedRun,
-               let selected = summary.runs.first(where: { $0.index == run }) {
+            if let selected = selectedGroup {
                 runBadge(selected)
             }
 
@@ -151,10 +171,11 @@ struct FullScreenMapView: View {
         .animation(.snappy, value: showControls)
     }
 
-    private func runBadge(_ run: Run) -> some View {
+    private func runBadge(_ run: GroupedRun) -> some View {
         VStack(spacing: 1) {
-            Text("Run \(run.index + 1)")
+            Text("\(run.kind.title) \(run.number)")
                 .font(.caption.weight(.semibold))
+                .foregroundStyle(run.kind.colour)
             Text("\(Format.speed(run.averageSpeed, unit: settings.units.speed, decimals: 1)) · \(Format.distance(run.distance, unit: settings.units.distance))")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -166,20 +187,21 @@ struct FullScreenMapView: View {
 
     private var controls: some View {
         VStack(spacing: 8) {
-            if !summary.runs.isEmpty {
+            if !runs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 5) {
                         FilterChip(title: "All", isOn: selectedRun == nil) {
                             withAnimation { selectedRun = nil }
                         }
-                        ForEach(summary.runs) { run in
+                        ForEach(runs) { run in
+                            let isOn = selectedGroup?.id == run.id
                             Button {
                                 withAnimation {
-                                    selectedRun = selectedRun == run.index ? nil : run.index
+                                    selectedRun = isOn ? nil : run.lanes.first?.runIndex
                                 }
                             } label: {
                                 VStack(spacing: 0) {
-                                    Text("\(run.index + 1)")
+                                    Text("\(run.number)")
                                         .font(.system(size: 12, weight: .semibold))
                                     Text(Format.speed(run.averageSpeed, unit: settings.units.speed,
                                                       decimals: 1, includeSymbol: false))
@@ -190,12 +212,11 @@ struct FullScreenMapView: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 5)
                                 .background(
-                                    selectedRun == run.index
-                                        ? AnyShapeStyle(.tint)
-                                        : AnyShapeStyle(.regularMaterial),
+                                    isOn ? AnyShapeStyle(run.kind.colour)
+                                         : AnyShapeStyle(.regularMaterial),
                                     in: RoundedRectangle(cornerRadius: 7)
                                 )
-                                .foregroundStyle(selectedRun == run.index ? .white : .primary)
+                                .foregroundStyle(isOn ? .white : run.kind.colour)
                             }
                             .buttonStyle(.plain)
                         }
@@ -215,9 +236,10 @@ struct FullScreenMapView: View {
                         .padding(10)
                         .background(.regularMaterial, in: Circle())
                 }
-                .disabled(summary.runs.isEmpty)
+                .disabled(runs.isEmpty)
 
-                Text(selectedRun.map { "Run \($0 + 1) of \(summary.runs.count)" } ?? "Whole session")
+                Text(selectedGroup.map { "\($0.kind.title) \($0.number) of \(runs.count)" }
+                     ?? "Whole session")
                     .font(.caption)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -239,16 +261,16 @@ struct FullScreenMapView: View {
     /// Move to the next or previous run, entering run mode from "whole session"
     /// and wrapping at both ends.
     private func step(_ delta: Int) {
-        guard !summary.runs.isEmpty else { return }
-        let indices = summary.runs.map(\.index)
+        let runs = runs
+        guard !runs.isEmpty else { return }
         withAnimation(.snappy) {
-            guard let current = selectedRun,
-                  let position = indices.firstIndex(of: current) else {
-                selectedRun = delta > 0 ? indices.first : indices.last
+            guard let current = selectedGroup,
+                  let position = runs.firstIndex(where: { $0.id == current.id }) else {
+                selectedRun = (delta > 0 ? runs.first : runs.last)?.lanes.first?.runIndex
                 return
             }
-            let next = (position + delta + indices.count) % indices.count
-            selectedRun = indices[next]
+            let next = (position + delta + runs.count) % runs.count
+            selectedRun = runs[next].lanes.first?.runIndex
         }
     }
 }

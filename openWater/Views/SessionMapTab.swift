@@ -147,7 +147,7 @@ struct SessionMapTab: View {
         TrackMapView(
             session: session,
             summary: summary,
-            selectedRun: selectedRun,
+            isolatedRuns: selectedRun.map { [$0] },
             // Not while trimming. `trimRange` below already marks the
             // selection, and passing it as a highlight as well made the map's
             // cached base layer depend on a value that changes sixty times a

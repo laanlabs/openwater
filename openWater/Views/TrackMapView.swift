@@ -23,8 +23,13 @@ struct TrackMapView: View {
     let session: Session
     let summary: SessionSummary
 
-    /// Run to isolate. `nil` shows the whole session.
-    var selectedRun: Int?
+    /// Stretches to isolate. `nil` shows the whole session.
+    ///
+    /// A set rather than one index, because the unit a rider picks is a run —
+    /// and a run is several of the segmenter's stretches. Isolating one of
+    /// them highlighted a fragment of what was tapped, or nothing at all when
+    /// the tapped run happened to start on a different stretch.
+    var isolatedRuns: Set<Int>?
 
     /// Highlight a specific time range — used to show where a record was set.
     var highlight: ClosedRange<TimeInterval>?
@@ -87,7 +92,7 @@ struct TrackMapView: View {
     @State private var fullTrack: [CLLocationCoordinate2D] = []
 
     private var showsGhostLayer: Bool {
-        selectedRun != nil || highlight != nil || foilingOnly
+        isolatedRuns != nil || highlight != nil || foilingOnly
             || foilFilter != .everything || minimumSpeed > 0 || partialUpTo != nil
     }
 
@@ -96,7 +101,7 @@ struct TrackMapView: View {
     /// drag costs one polyline rather than a full rebuild.
     private struct BandKey: Equatable {
         let sessionID: UUID
-        let selectedRun: Int?
+        let isolatedRuns: Set<Int>?
         let foilingOnly: Bool
         let foilFilter: FoilFilter
         let minimumSpeed: Double
@@ -114,7 +119,7 @@ struct TrackMapView: View {
     private var bandKey: BandKey {
         BandKey(
             sessionID: session.id,
-            selectedRun: selectedRun,
+            isolatedRuns: isolatedRuns,
             foilingOnly: foilingOnly,
             foilFilter: foilFilter,
             minimumSpeed: minimumSpeed,
@@ -323,7 +328,7 @@ struct TrackMapView: View {
             else { return }
             onSeek(hit)
         }
-        .onChange(of: selectedRun) { _, _ in frameSelection() }
+        .onChange(of: isolatedRuns) { _, _ in frameSelection() }
         .onAppear { frameSelection() }
     }
 
@@ -331,7 +336,11 @@ struct TrackMapView: View {
 
     private var visibleSegments: [StateSegment] {
         summary.segments.filter { segment in
-            if let selectedRun, segment.runIndex != selectedRun { return false }
+            if let isolatedRuns {
+                // A segment belonging to no run — the drift before the first
+                // one, the walk after the last — is not part of any of them.
+                guard let index = segment.runIndex, isolatedRuns.contains(index) else { return false }
+            }
             if foilingOnly, segment.state != .foiling { return false }
             switch foilFilter {
             case .everything: break
@@ -608,7 +617,7 @@ struct TrackMapView: View {
         // just confusing.
         if let partialUpTo, session.track.elapsed[index] > partialUpTo { return nil }
         if trimRange != nil { return nil }
-        if foilingOnly || foilFilter != .everything || selectedRun != nil { return nil }
+        if foilingOnly || foilFilter != .everything || isolatedRuns != nil { return nil }
         return point.clCoordinate
     }
 
@@ -616,8 +625,13 @@ struct TrackMapView: View {
 
     private func frameSelection() {
         let points: [CLLocationCoordinate2D]
-        if let selectedRun, let run = summary.runs.first(where: { $0.index == selectedRun }) {
-            points = session.track.points[run.startIndex...run.endIndex].map(\.clCoordinate)
+        if let isolatedRuns, !isolatedRuns.isEmpty {
+            // Every stretch in the run, not just the first: framing on one of
+            // them zoomed to a fraction of what the rider had selected.
+            let runs = summary.runs.filter { isolatedRuns.contains($0.index) }
+            points = runs.flatMap {
+                session.track.points[$0.startIndex...$0.endIndex].map(\.clCoordinate)
+            }
         } else {
             points = session.track.points.map(\.clCoordinate)
         }

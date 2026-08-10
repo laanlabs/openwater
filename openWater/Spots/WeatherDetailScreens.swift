@@ -971,12 +971,19 @@ struct ModelCompareScreen: View {
             ZStack(alignment: .topLeading) {
                 horizontalRules
                 ScrollViewReader { scroller in
+                    GeometryReader { viewport in
+                    let half = viewport.size.width / 2
                     ScrollView(.horizontal, showsIndicators: true) {
                         VStack(spacing: 0) {
                             hourHeader(width: width)
                             plot(width: width, height: plotHeight)
                             arrowRow(width: width)
                         }
+                        // Half a viewport either side, so the first hour and
+                        // the last can both be brought to the middle. Without
+                        // it the ends of the forecast are unreadable — the
+                        // reading line can never reach them.
+                        .padding(.horizontal, half)
                         // Anchors every few hours, so the view can be sent to
                         // "now" without scrolling by raw offset.
                         .overlay(alignment: .leading) {
@@ -989,12 +996,37 @@ struct ModelCompareScreen: View {
                         }
                     }
                     .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                    // Whatever sits under the middle of the screen is what the
+                    // header reads out. The line does not move; the forecast
+                    // does, which makes the whole chart the control rather
+                    // than a hairline somebody has to catch with a fingertip.
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.contentOffset.x
+                    } action: { _, offset in
+                        // The centre sits at `offset + half` on screen, and
+                        // the content's leading padding is also `half`, so in
+                        // data coordinates the two cancel to the offset itself.
+                        let hour = Int(offset / Self.hourWidth + 0.5)
+                        probe = min(max(0, hour), max(0, outlook.hours.count - 1))
+                    }
+                    .overlay {
+                        // Fixed to the screen, not to the data.
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.45))
+                            .frame(width: 1)
+                            .allowsHitTesting(false)
+                    }
                     .onChange(of: outlook.hours.count) { _, _ in
-                        // A day of history sits to the left of now; land on
-                        // it rather than at the start of yesterday.
+                        // Open on now, under the reading line. A day of
+                        // history stays to the left for anyone who wants to
+                        // scroll back into it, but nobody opens a forecast to
+                        // look at yesterday.
                         guard let now = nowIndex else { return }
-                        let anchor = ticks.last { $0 <= max(0, now - 6) } ?? 0
-                        scroller.scrollTo(anchor, anchor: .leading)
+                        let anchor = ticks.min {
+                            abs($0 - now) < abs($1 - now)
+                        } ?? 0
+                        scroller.scrollTo(anchor, anchor: .center)
+                    }
                     }
                 }
             }
@@ -1128,22 +1160,9 @@ struct ModelCompareScreen: View {
                     .offset(x: CGFloat(now) * Self.hourWidth)
             }
 
-            if let probe {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.4))
-                    .frame(width: 1)
-                    .offset(x: CGFloat(probe) * Self.hourWidth)
-            }
+
         }
         .frame(width: width, height: height)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    probe = min(max(0, Int(value.location.x / Self.hourWidth)),
-                                outlook.hours.count - 1)
-                }
-        )
     }
 
     /// The direction row.

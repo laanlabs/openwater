@@ -757,22 +757,44 @@ private struct SpotsPanel<Content: View>: View {
         detent == .peek || detent == .minimized
     }
 
+    /// The panel slides. It does not grow and shrink.
+    ///
+    /// That distinction is the whole difference between a drag that glides and
+    /// one that flickers. Driving the height from the drag re-proposes a new
+    /// size to the `ScrollView` inside on every frame, so its `LazyVStack`
+    /// recomputes which rows fit and builds and tears down the ones at the
+    /// boundary — sixty times a second. A row built from scratch starts its
+    /// thumbnail loading again from the grey placeholder, which is what a
+    /// rider sees as the list glitching under their thumb.
+    ///
+    /// So the content is laid out once at its tallest, and the drag moves it
+    /// with `offset`. Offsetting is a draw-time transform: nothing is
+    /// re-proposed, no row is rebuilt, and whatever hangs below the bottom of
+    /// the screen is simply not on screen.
     var body: some View {
-        let live = min(height(for: .full), max(collapsedHeight, height(for: detent) - drag))
+        let full = height(for: .full)
+        let resting = height(for: detent)
+        let live = min(full, max(collapsedHeight, resting - drag))
         VStack(spacing: 0) {
             grabBar
             content
+                // The panel is laid out at its tallest but only `resting` of
+                // it is on screen, so without this the last rows of the list
+                // sit in the part that is below the bottom edge and no amount
+                // of scrolling can reach them. Keyed to the detent, not to the
+                // drag, so it changes once on release rather than per frame.
+                .contentMargins(.bottom, full - resting, for: .scrollContent)
                 .gesture(dragGesture, isEnabled: isCompact)
         }
-        .frame(height: live, alignment: .top)
+        .frame(height: full, alignment: .top)
         .frame(maxWidth: .infinity)
-        .clipped()
         .background(
             UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22)
                 .fill(.regularMaterial)
                 .shadow(color: .black.opacity(0.14), radius: 15, y: -4)
                 .ignoresSafeArea(edges: .bottom)
         )
+        .offset(y: full - live)
     }
 
     /// The one part of the panel that drags.
@@ -1025,25 +1047,79 @@ struct SpotThumb: View {
     let url: String?
     var size: CGFloat = 46
 
+    @State private var loaded: UIImage?
+
+    private var parsed: URL? { url.flatMap { URL(string: $0) } }
+
+    /// Read straight out of the cache during body evaluation, so a row that
+    /// has been drawn once already draws with its picture on the very first
+    /// frame rather than a frame of grey.
+    private var image: UIImage? {
+        loaded ?? parsed.flatMap { ThumbnailCache.shared.image(for: $0) }
+    }
+
     var body: some View {
         Group {
-            if let url, let parsed = URL(string: url) {
-                AsyncImage(url: parsed) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Color(.systemGray5)
-                }
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
                 ZStack {
                     Color(.systemGray5)
-                    Image(systemName: "water.waves")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if parsed == nil {
+                        Image(systemName: "water.waves")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task(id: url) {
+            guard let parsed, ThumbnailCache.shared.image(for: parsed) == nil else { return }
+            loaded = await ThumbnailCache.shared.load(parsed)
+        }
+    }
+}
+
+/// Thumbnails, kept in memory for as long as the app is running.
+///
+/// `AsyncImage` was doing this job and cannot: it holds its loading state in
+/// the view, so every time SwiftUI rebuilds a row — a lazy stack recycling it,
+/// a panel changing size, a list reordering — the picture restarts from the
+/// placeholder. On a list of spots that reads as the whole thing flashing
+/// grey, which is what a rider reported while dragging the panel.
+///
+/// `NSCache` rather than a dictionary, so this yields memory back under
+/// pressure instead of growing until the guide is exhausted.
+@MainActor
+final class ThumbnailCache {
+
+    static let shared = ThumbnailCache()
+
+    private let cache = NSCache<NSURL, UIImage>()
+    /// One request per URL, however many rows ask for it at once.
+    private var inFlight: [URL: Task<UIImage?, Never>] = [:]
+
+    private init() { cache.countLimit = 300 }
+
+    func image(for url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
+
+    func load(_ url: URL) async -> UIImage? {
+        if let cached = cache.object(forKey: url as NSURL) { return cached }
+        if let running = inFlight[url] { return await running.value }
+
+        let task = Task<UIImage?, Never> {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data)
+            else { return nil }
+            return image
+        }
+        inFlight[url] = task
+        let image = await task.value
+        inFlight[url] = nil
+        if let image { cache.setObject(image, forKey: url as NSURL) }
+        return image
     }
 }
 

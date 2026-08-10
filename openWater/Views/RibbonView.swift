@@ -32,8 +32,26 @@ struct RibbonView: View {
     /// exist at all. Upwind and Downwind are the run's angle to the wind, so
     /// without one they are not there — and a rider who does not know that
     /// reads their absence as the session having none.
-    var windWarning: String?
+    var windPrompt: WindPrompt?
     var onSetWind: () -> Void = {}
+
+    /// What the runs list is missing, and how loudly to say so.
+    ///
+    /// This started as one line of orange caption text with a chevron, which
+    /// is the shape of a warning label and not the shape of a control. A rider
+    /// reads "no wind direction" as a statement about their session rather
+    /// than as the one tap that fixes every upwind and downwind row below it.
+    /// So the blocking case gets a card with a real button in it, and the
+    /// merely-imprecise case stays quiet — the two are not the same news.
+    struct WindPrompt {
+        let title: String
+        let detail: String
+        /// True when the runs genuinely cannot be classified without it.
+        let isBlocking: Bool
+        /// What the button says. "Set the wind" when there is none; "Set it
+        /// exactly" when the app has already guessed.
+        let action: String
+    }
 
     /// The session's own runs — the whole way down a river, rather than the
     /// stretches between turns. Empty unless the session went somewhere.
@@ -464,7 +482,7 @@ struct RibbonView: View {
                         controls
                         if !availableFilters.isEmpty { filterRow }
                     }
-                    if let windWarning { windNotice(windWarning) }
+                    if let windPrompt { windNotice(windPrompt) }
                     if track != nil, showsGrouped || showsLegs { pinnedMap }
                 }
                 .background(.bar)
@@ -1134,24 +1152,66 @@ struct RibbonView: View {
         }
     }
 
-    private func windNotice(_ text: String) -> some View {
-        Button(action: onSetWind) {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.caption2)
-                Text(text)
-                    .font(.caption2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9))
+    @ViewBuilder
+    private func windNotice(_ prompt: WindPrompt) -> some View {
+        if prompt.isBlocking {
+            // The button sits under the words rather than beside them. Beside,
+            // it is at the mercy of the title's length and the rider's text
+            // size — and the one thing this card exists to do is be a button
+            // somebody notices.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "wind")
+                        .font(.title3)
+                        .foregroundStyle(.orange)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(prompt.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text(prompt.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Button(prompt.action, systemImage: "location.north.line", action: onSetWind)
+                    .font(.callout.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .frame(maxWidth: .infinity)
             }
-            .foregroundStyle(.orange)
+            .padding(12)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
             .padding(.bottom, 8)
-            .contentShape(Rectangle())
+        } else {
+            // A guess is not a blocker: the rows below are all classified,
+            // they are just classified off an inferred bearing. Said once,
+            // quietly, with the same one-tap fix.
+            Button(action: onSetWind) {
+                HStack(spacing: 6) {
+                    Image(systemName: "wind")
+                        .font(.caption2)
+                    Text(prompt.detail)
+                        .font(.caption2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Text(prompt.action)
+                        .font(.caption2.weight(.semibold))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9))
+                }
+                .foregroundStyle(.orange)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     private func connector(after laneID: Int) -> SessionRibbon.Connector? {

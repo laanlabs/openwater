@@ -465,13 +465,23 @@ struct SessionDetailView: View {
 
     /// Upwind, Reaching and Downwind are a run's angle to the wind, so the
     /// filters are only as good as the direction they are measured from.
-    private func runsWindWarning(_ session: Session) -> String? {
+    private func runsWindPrompt(_ session: Session) -> RibbonView.WindPrompt? {
         guard session.sport.isWindPowered else { return nil }
         guard let wind = session.effectiveWind else {
-            return "No wind direction, so runs cannot be sorted upwind from downwind. Set it."
+            return RibbonView.WindPrompt(
+                title: "Wind direction not set",
+                detail: "Upwind and downwind are a run's angle to the wind, so until it is set every run here is just a reach.",
+                isBlocking: true,
+                action: "Set the wind"
+            )
         }
         guard wind.source.isEstimate else { return nil }
-        return "Wind direction estimated from your track — the upwind and downwind filters follow it."
+        return RibbonView.WindPrompt(
+            title: "Wind direction estimated",
+            detail: "Estimated from the shape of your track — the upwind and downwind rows follow it.",
+            isBlocking: false,
+            action: "Set it"
+        )
     }
 
     private func ribbonView(session: Session, summary: SessionSummary) -> some View {
@@ -481,7 +491,7 @@ struct SessionDetailView: View {
             units: settings.units,
             bestRunIndex: summary.bestRun?.index,
             thresholds: settings.thresholds(for: session.sport),
-            windWarning: runsWindWarning(session),
+            windPrompt: runsWindPrompt(session),
             onSetWind: { isSettingWind = true },
             legs: summary.shape.legs,
             isPointToPoint: summary.shape.isPointToPoint,

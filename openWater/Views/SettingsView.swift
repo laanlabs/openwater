@@ -22,7 +22,7 @@ struct SettingsView: View {
 
         NavigationStack {
             Form {
-                Section("Units") {
+                Section {
                     Picker("Speed", selection: $settings.units.speed) {
                         ForEach(SpeedUnit.allCases, id: \.self) { unit in
                             Text(unit.symbol).tag(unit)
@@ -33,6 +33,20 @@ struct SettingsView: View {
                         Text("Nautical (NM)").tag(DistanceUnit.nautical)
                         Text("Imperial (mi)").tag(DistanceUnit.imperial)
                     }
+                    Picker("Temperature", selection: Binding(
+                        get: { settings.units.temperatureUnit },
+                        set: { settings.units.temperature = $0 }
+                    )) {
+                        ForEach(TemperatureUnit.allCases) {
+                            Text("\($0.title) (\($0.symbol))").tag($0)
+                        }
+                    }
+                } header: {
+                    Text("Units")
+                } footer: {
+                    Text("Set from your phone the first time the app runs. Speed stays in "
+                         + "knots whatever you pick — it is what the sport is measured in "
+                         + "everywhere, and a figure in mph is not comparable with anyone else's.")
                 }
 
                 Section {

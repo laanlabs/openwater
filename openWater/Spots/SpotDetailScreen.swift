@@ -321,7 +321,9 @@ struct SpotDetailScreen: View {
                         .font(.title3)
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(weather.tint)
-                    Text("\(Int(weather.temperatureC.rounded()))°")
+                    Text(Format.temperature(weather.temperatureC,
+                                             unit: settings.units.temperatureUnit,
+                                             includeSymbol: false))
                         .font(.caption2.weight(.bold))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)

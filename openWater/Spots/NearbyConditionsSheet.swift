@@ -505,7 +505,7 @@ struct NearbyConditionsSheet: View {
                 parts.append(Format.cardinal(direction))
             }
             if let temperature = observation.temperatureC {
-                parts.append("\(Int(temperature.rounded()))°C")
+                parts.append(Format.temperature(temperature, unit: settings.units.temperatureUnit))
             }
             if let summary = observation.summary { parts.append(summary) }
             if let at = observation.at {

@@ -72,18 +72,65 @@ public struct UnitPreferences: Hashable, Sendable, Codable {
     public var speed: SpeedUnit
     public var distance: DistanceUnit
 
+    /// Optional in storage so preferences saved before it existed still
+    /// decode; read it through `temperatureUnit`.
+    public var temperature: TemperatureUnit?
+
+    /// What the weather is shown in. Celsius unless the rider says otherwise.
+    public var temperatureUnit: TemperatureUnit { temperature ?? .celsius }
+
     /// Knots and nautical miles are what the water speaks.
     public static let `default` = UnitPreferences(speed: .knots, distance: .metric)
 
-    public init(speed: SpeedUnit = .knots, distance: DistanceUnit = .metric) {
+    public init(speed: SpeedUnit = .knots, distance: DistanceUnit = .metric,
+                temperature: TemperatureUnit? = nil) {
         self.speed = speed
         self.distance = distance
+        self.temperature = temperature
+    }
+
+    /// What this phone is already set up for.
+    ///
+    /// A first launch should agree with the rest of the device rather than
+    /// making somebody in Texas convert every reading in their head. Speed
+    /// stays in knots regardless — it is the unit the sport is measured in
+    /// everywhere, and a speed-sailing figure in mph is not comparable with
+    /// anybody else's.
+    public static var forThisDevice: UnitPreferences {
+        let metric = Locale.current.measurementSystem != .us
+        return UnitPreferences(
+            speed: .knots,
+            distance: metric ? .metric : .imperial,
+            temperature: metric ? .celsius : .fahrenheit
+        )
+    }
+}
+
+/// How the weather is shown.
+public enum TemperatureUnit: String, Sendable, Codable, CaseIterable, Identifiable {
+    case celsius, fahrenheit
+
+    public var id: String { rawValue }
+    public var symbol: String { self == .celsius ? "°C" : "°F" }
+    public var shortSymbol: String { "°" }
+    public var title: String { self == .celsius ? "Celsius" : "Fahrenheit" }
+
+    public func convert(fromCelsius value: Double) -> Double {
+        self == .celsius ? value : value * 9 / 5 + 32
     }
 }
 
 // MARK: - Formatting
 
 public enum Format {
+
+    /// A temperature from Celsius, which is what every source here speaks.
+    public static func temperature(
+        _ celsius: Double, unit: TemperatureUnit, includeSymbol: Bool = true
+    ) -> String {
+        let value = Int(unit.convert(fromCelsius: celsius).rounded())
+        return includeSymbol ? "\(value)\(unit.symbol)" : "\(value)°"
+    }
 
     public static func speed(
         _ metresPerSecond: Double,

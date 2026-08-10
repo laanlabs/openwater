@@ -317,7 +317,9 @@ struct SpotsTabView: View {
                         .font(.subheadline)
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(weather.tint)
-                    Text("\(Int(weather.temperatureC.rounded()))°")
+                    Text(Format.temperature(weather.temperatureC,
+                                             unit: settings.units.temperatureUnit,
+                                             includeSymbol: false))
                         .font(.subheadline.weight(.bold))
                         .monospacedDigit()
                 } else {

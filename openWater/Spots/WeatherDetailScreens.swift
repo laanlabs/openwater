@@ -1387,6 +1387,8 @@ private struct Dart: Shape {
 /// slide off is a wall of numbers.
 struct ForecastTable: View {
 
+    @Environment(AppSettings.self) private var settings
+
     let hours: [WeatherDetail.Hour]
     let waves: [WaveHour]
     var zone: TimeZone = .current
@@ -1445,7 +1447,7 @@ struct ForecastTable: View {
             label("Wind\n(kn)", height: Self.windHeight)
             label("Gust")
             label("Sky")
-            label("°C")
+            label(settings.units.temperatureUnit.symbol)
             if hasWaves {
                 label("Wave\n(m)", height: Self.rowHeight * 2)
             }
@@ -1613,6 +1615,8 @@ struct ForecastTable: View {
 /// as chips underneath.
 struct ConditionsCard: View {
 
+    @Environment(AppSettings.self) private var settings
+
     let weather: SpotWeather?
     let windKn: Double?
     let gustKn: Double?
@@ -1653,7 +1657,9 @@ struct ConditionsCard: View {
 
             HStack(spacing: 8) {
                 chip("wind", gustKn.map { "to \(Int($0.rounded())) kts" } ?? "—")
-                chip("thermometer.medium", temperatureC.map { "\(Int($0.rounded()))°C" } ?? "—")
+                chip("thermometer.medium", temperatureC.map {
+                    Format.temperature($0, unit: settings.units.temperatureUnit)
+                } ?? "—")
                 chip("barometer", pressureHPa.map { "\(Int($0.rounded())) mb" } ?? "—")
             }
         }
@@ -1740,6 +1746,8 @@ struct GustBand: Shape {
 /// apps lay it out, for the same reason the conditions card is: riders have
 /// read this arrangement a thousand times.
 struct SurfCard: View {
+
+    @Environment(AppSettings.self) private var settings
 
     let surf: SurfConditions
     var windDirectionDeg: Double?
@@ -1883,7 +1891,8 @@ struct SurfCard: View {
 
             HStack(spacing: 14) {
                 if let temperature = surf.seaTemperatureC {
-                    Label("\(Int(temperature.rounded()))°C water", systemImage: "thermometer.medium")
+                    Label("\(Format.temperature(temperature, unit: settings.units.temperatureUnit)) water",
+                          systemImage: "thermometer.medium")
                         .font(.caption.weight(.medium))
                 }
                 if let suit = surf.wetsuit {

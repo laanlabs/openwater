@@ -116,9 +116,19 @@ final class AppSettings {
     private let defaults = UserDefaults.standard
 
     init() {
-        let speed = defaults.string(forKey: "speedUnit").flatMap(SpeedUnit.init(rawValue:)) ?? .knots
-        let distance = defaults.string(forKey: "distanceUnit").flatMap(DistanceUnit.init(rawValue:)) ?? .metric
-        units = UnitPreferences(speed: speed, distance: distance)
+        // A first launch takes its units from the phone. Somebody in Texas
+        // should not have to convert every reading in their head before the
+        // app is usable, and the device already knows the answer. Anything
+        // they change afterwards wins, because the stored value is read back
+        // in preference to the default.
+        let device = UnitPreferences.forThisDevice
+        let speed = defaults.string(forKey: "speedUnit")
+            .flatMap(SpeedUnit.init(rawValue:)) ?? device.speed
+        let distance = defaults.string(forKey: "distanceUnit")
+            .flatMap(DistanceUnit.init(rawValue:)) ?? device.distance
+        let temperature = defaults.string(forKey: "temperatureUnit")
+            .flatMap(TemperatureUnit.init(rawValue:)) ?? device.temperatureUnit
+        units = UnitPreferences(speed: speed, distance: distance, temperature: temperature)
         quiver = (defaults.data(forKey: "quiver"))
             .flatMap { try? JSONDecoder().decode([GearItem].self, from: $0) } ?? []
         customDistances = defaults.array(forKey: "customDistances") as? [Double] ?? []
@@ -155,6 +165,7 @@ final class AppSettings {
     private func persist() {
         defaults.set(units.speed.rawValue, forKey: "speedUnit")
         defaults.set(units.distance.rawValue, forKey: "distanceUnit")
+        defaults.set(units.temperatureUnit.rawValue, forKey: "temperatureUnit")
         defaults.set(customDistances, forKey: "customDistances")
         defaults.set(customDurations, forKey: "customDurations")
         defaults.set(mapStyle.rawValue, forKey: "mapStyle")

@@ -95,6 +95,7 @@ struct SettingsView: View {
                         ScrollView { WatchStatusView().padding() }
                             .navigationTitle("Apple Watch")
                             .navigationBarTitleDisplayMode(.inline)
+                            .feedbackButton("Settings · Apple Watch")
                     } label: {
                         Label("Apple Watch", systemImage: "applewatch")
                     }
@@ -137,6 +138,7 @@ struct SettingsView: View {
             }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
             .navigationTitle("Settings")
+            .feedbackButton("Settings")
             // A decimal pad has no return key, so without a way out the
             // keyboard stayed up through scrolling and even a tab switch,
             // sitting over the rest of Settings. Two ways out, because there

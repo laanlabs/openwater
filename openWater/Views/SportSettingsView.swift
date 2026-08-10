@@ -43,6 +43,7 @@ struct SportSettingsView: View {
         }
         .navigationTitle("Sports")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Sports")
     }
 }
 
@@ -134,6 +135,7 @@ struct SportThresholdEditor: View {
         }
         .navigationTitle(sport.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Sport settings")
     }
 
     /// A speed, shown in the rider's own units and stored in m/s.

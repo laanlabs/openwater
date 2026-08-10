@@ -57,6 +57,7 @@ struct ShareLocationView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Share My Location")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Share My Location")
         .toolLocation(recorder)
     }
 

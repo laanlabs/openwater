@@ -134,6 +134,7 @@ struct QuiverView: View {
         }
         .navigationTitle("Quiver")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Quiver")
         .toolbar { EditButton() }
         .onDisappear {
             // Empty rows are how somebody leaves a mind changed; nothing is

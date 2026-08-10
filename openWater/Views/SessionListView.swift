@@ -142,6 +142,7 @@ struct SessionListView: View {
             }
             .navigationTitle("Sessions")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Sessions")
             .onChange(of: sessions.count, initial: true) { _, _ in
                 applyScreenshotRouteIfNeeded()
             }

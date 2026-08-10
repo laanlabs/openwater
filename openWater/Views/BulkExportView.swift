@@ -92,6 +92,7 @@ struct BulkExportView: View {
             }
             .navigationTitle("Export Sessions")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Export Sessions")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

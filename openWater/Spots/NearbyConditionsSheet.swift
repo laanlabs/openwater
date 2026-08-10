@@ -94,6 +94,7 @@ struct NearbyConditionsSheet: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Nearby conditions")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

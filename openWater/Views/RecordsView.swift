@@ -86,6 +86,7 @@ struct RecordsView: View {
                 }
             }
             .navigationTitle("Bests")
+            .feedbackButton("Bests")
             .navigationDestination(for: UUID.self) { id in
                 if let stored = library.session(id: id), !stored.isDeleted {
                     SessionDetailView(stored: stored)
@@ -219,6 +220,7 @@ struct TrendsView: View {
                 }
             }
             .navigationTitle("Trends")
+            .feedbackButton("Trends")
         }
     }
 

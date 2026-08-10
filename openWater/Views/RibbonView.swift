@@ -1289,6 +1289,7 @@ struct RibbonKeySheet: View {
             }
             .navigationTitle("How runs are worked out")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Session · How runs are worked out")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

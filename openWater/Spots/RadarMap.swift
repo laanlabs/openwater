@@ -565,6 +565,7 @@ struct RadarScreen: View {
             .safeAreaInset(edge: VerticalEdge.bottom) { footer }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(NavigationBarItem.TitleDisplayMode.inline)
+            .feedbackButton("Radar")
             .task {
                 frames = await RainViewer.frames()
                 index = max(0, frames.count - 1)

@@ -171,6 +171,7 @@ struct SessionReviewView: View {
             }
             .navigationTitle("Session saved")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Session saved")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Skip") { dismiss() }

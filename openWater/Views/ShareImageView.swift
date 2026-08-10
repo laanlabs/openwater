@@ -105,6 +105,7 @@ struct ShareImageView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Share Image")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Share Image")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

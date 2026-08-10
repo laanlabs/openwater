@@ -98,6 +98,7 @@ struct UpwindDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Upwind")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Session · Upwind")
         .onAppear {
             guard legs.isEmpty else { return }
             legs = upwindLegs(track: session.track, wind: wind)

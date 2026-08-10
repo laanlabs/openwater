@@ -71,6 +71,7 @@ struct RecordTabView: View {
             }
             .navigationTitle(recorder.state == .idle ? "Record" : sport.displayName)
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Record")
             .toolbarVisibility(recorder.state == .idle ? .automatic : .hidden, for: .navigationBar)
             .toolbar {
                 if recorder.state == .idle, isActive {

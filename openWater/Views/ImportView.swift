@@ -88,6 +88,7 @@ struct ImportView: View {
             }
             .navigationTitle("Import session")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Import session")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -276,6 +277,7 @@ struct ExportView: View {
             }
             .navigationTitle("Export")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Export")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

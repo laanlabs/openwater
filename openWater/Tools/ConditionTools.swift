@@ -75,6 +75,7 @@ struct ShuttlePlannerView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Shuttle Planner")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Shuttle Planner")
         .toolLocation(recorder)
         .task { await guide.load() }
         .task(id: "\(launch?.name ?? "")-\(takeout?.name ?? "")") {
@@ -294,6 +295,7 @@ struct WindHereView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Wind Here")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Wind Here")
         .toolLocation(recorder)
         .task(id: "\(recorder.location.lastCoordinate != nil)") {
             guard let here = recorder.location.lastCoordinate else { return }
@@ -372,6 +374,7 @@ struct DaylightView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Daylight")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Daylight")
         .toolLocation(recorder)
         .onReceive(clock) { now = $0 }
     }
@@ -435,6 +438,7 @@ struct BigSpeedoView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Speedo")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Speedo")
         .toolLocation(recorder)
         // The whole point is glancing at it over minutes — the screen must
         // not sleep mid-tow. Restored on the way out.

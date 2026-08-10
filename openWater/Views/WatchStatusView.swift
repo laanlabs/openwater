@@ -231,6 +231,7 @@ struct WatchPill: View {
                     }
                     .navigationTitle("Apple Watch")
                     .navigationBarTitleDisplayMode(.inline)
+                    .feedbackButton("Apple Watch")
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Done") { showingDetail = false }

@@ -88,6 +88,7 @@ struct BuoyDetailScreen: View {
         }
         .navigationTitle(buoy.name)
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Buoy detail")
     }
 
     private var map: some View {
@@ -159,6 +160,7 @@ struct BuoyMapScreen: View {
         .mapStyle(.standard(elevation: .flat))
         .navigationTitle("Buoys nearby")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Buoys nearby")
         .sheet(item: $chosen) { buoy in
             NavigationStack {
                 BuoyDetailScreen(buoy: buoy, from: from)

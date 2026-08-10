@@ -124,6 +124,7 @@ struct DownwindDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Downwind")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Session · Downwind")
         .overlay {
             if isRecomputing {
                 ProgressView("Re-reading the session…")
@@ -137,6 +138,7 @@ struct DownwindDetailView: View {
                     .ignoresSafeArea(edges: .bottom)
                     .navigationTitle("Glides")
                     .navigationBarTitleDisplayMode(.inline)
+                    .feedbackButton("Session · Glides")
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Done") { isMapFullScreen = false }

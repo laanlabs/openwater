@@ -43,6 +43,7 @@ struct RecentlyDeletedView: View {
         }
         .navigationTitle("Recently Deleted")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Recently Deleted")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }

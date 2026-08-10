@@ -20,6 +20,7 @@ struct TideFullScreen: View {
     @State private var probe: Int?
     @State private var scroll = ScrollPosition()
     @State private var hasLanded = false
+    @State private var isGivingFeedback = false
 
     /// Screen width per hourly sample.
     ///
@@ -64,6 +65,9 @@ struct TideFullScreen: View {
             Spacer(minLength: 0)
         }
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $isGivingFeedback) {
+            AppFeedbackSheet(screen: "Tide chart")
+        }
     }
 
     private var header: some View {
@@ -79,7 +83,16 @@ struct TideFullScreen: View {
                 Text(title)
                     .font(.headline)
                 Spacer()
-                Color.clear.frame(width: 44, height: 44)
+                // The slot on the right was a spacer keeping the title
+                // centred against the back button. It is the same size and
+                // the same shape as a control, so it may as well be one.
+                Button { isGivingFeedback = true } label: {
+                    Image(systemName: "ladybug")
+                        .font(.headline)
+                        .padding(10)
+                        .background(.regularMaterial, in: Circle())
+                }
+                .accessibilityLabel("Send feedback about the tide chart")
             }
 
             if let reading {

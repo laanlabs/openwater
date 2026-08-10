@@ -25,17 +25,29 @@ struct SpotsTabView: View {
     @State private var controlsExpanded = false
     @State private var panelMode: PanelMode = .nearby
     @State private var panelDetent: PanelDetent = .peek
-    @State private var panelDrag: CGFloat = 0
     @State private var disciplineFilter: String?
     @State private var firingOnly = false
     @State private var pickingNewSpot = false
     @State private var addingSpot: NewSpotRequest?
     @State private var sharingLocation = false
+    @State private var isGivingFeedback = false
     @State private var isShowingConditions = false
     @State private var localWeather: SpotWeather?
     /// Drives the chip's fade while the weather is in flight.
     @State private var isBreathing = false
     @State private var localWind: WindReading?
+
+    /// The two spot lists, worked out when something they depend on moves
+    /// rather than every time the body runs.
+    ///
+    /// Both are a filter and a distance sort over the whole guide — a
+    /// thousand-odd haversines each. As computed properties they were paid for
+    /// on every body evaluation, and the body runs on every frame of a panel
+    /// drag, which is what made the map's pins strobe: fifty annotations
+    /// rebuilt from a freshly sorted array sixty times a second. Held as
+    /// state, a drag re-reads the same array and MapKit has nothing to diff.
+    @State private var pins: [GuideSpot] = []
+    @State private var nearby: [GuideSpot] = []
 
     /// A point the rider chose by holding a finger on the map.
     ///
@@ -119,6 +131,9 @@ struct SpotsTabView: View {
         }
         .sheet(isPresented: $sharingLocation) {
             ShareLocationSheet()
+        }
+        .sheet(isPresented: $isGivingFeedback) {
+            AppFeedbackSheet(screen: "Spots")
         }
         .sheet(isPresented: $isShowingConditions) {
             if let here = localCoordinate {
@@ -429,6 +444,17 @@ struct SpotsTabView: View {
                 sharingLocation = true
             } label: {
                 Label("Share my position", systemImage: "square.and.arrow.up")
+            }
+            Divider()
+            // This tab hides its navigation bar, so the bug button every other
+            // screen carries in the toolbar has nowhere to go. It lives here
+            // rather than as a fifth floating control: the map is the point of
+            // the screen, and a permanent extra button over it is exactly the
+            // hat brim the controls were collapsed to avoid.
+            Button {
+                isGivingFeedback = true
+            } label: {
+                Label("Feedback about this screen", systemImage: "ladybug")
             }
         } label: {
             squareLabel("ellipsis")

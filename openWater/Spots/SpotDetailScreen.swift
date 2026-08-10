@@ -124,6 +124,7 @@ struct SpotDetailScreen: View {
                 }
             }
         }
+        .feedbackButton("Spot detail")
         .sheet(isPresented: $isSuggesting) {
             SuggestSpotView(mode: .correction(spot))
         }
@@ -612,6 +613,7 @@ struct DestinationScreen: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(region.name)
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Destination guide")
         .task(id: region.id) {
             await guide.refreshWind(for: spots)
         }

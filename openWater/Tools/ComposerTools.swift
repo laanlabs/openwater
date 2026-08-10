@@ -35,6 +35,7 @@ struct CallOutView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Session Call-out")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Session Call-out")
         .toolLocation(recorder)
         .task(id: draftKey) { await draft() }
         .onChange(of: time) { _, _ in Task { await draft(force: true) } }
@@ -141,6 +142,7 @@ struct FloatPlanView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Float Plan")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Float Plan")
         .toolLocation(recorder)
         .sheet(item: $picking) { end in
             LocationPickerSheet(
@@ -271,6 +273,7 @@ struct UnitsConverterView: View {
         }
         .navigationTitle("Units")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Units converter")
     }
 
     /// Beaufort from the empirical relation v = 0.836·B^1.5 m/s.

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 #
-# Pull session feedback out of Firestore and file it into the expectation
+# Pull rider feedback out of Firestore and file it into the expectation
 # pages, so a sweep of notes written on a phone becomes something to work
 # from at a desk.
 #
 #   scripts/fetch-feedback.sh
+#
+# Two collections, because there are two kinds of note. `sessionFeedback` is
+# about a session and carries the numbers that were on screen; it is filed
+# into that session's page. `appFeatureFeedback` is about a screen — sent from
+# the bug button the rest of the app carries — and is printed at the end.
 #
 # Each note lands under "Feedback from the device" in
 # openWaterTests/Expectations/test-N.md, newest first, carrying the numbers
@@ -49,3 +54,33 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
   -o /tmp/openwater-feedback.json
 
 python3 scripts/file-feedback.py /tmp/openwater-feedback.json
+
+# The other half: notes about the app rather than about a session, sent from
+# the bug button that every screen carries. They have no session to file
+# against, so they are printed rather than written into an expectation page —
+# the screen name is the whole index.
+echo
+echo "==> Fetching appFeatureFeedback from $PROJECT"
+curl -sS -H "Authorization: Bearer $TOKEN" \
+  "https://firestore.googleapis.com/v1/projects/$PROJECT/databases/(default)/documents/appFeatureFeedback?pageSize=300" \
+  -o /tmp/openwater-app-feedback.json
+
+python3 - /tmp/openwater-app-feedback.json <<'PY'
+import json, sys
+
+docs = json.load(open(sys.argv[1])).get("documents", [])
+def s(fields, key):
+    return (fields.get(key) or {}).get("stringValue", "")
+
+rows = sorted(docs, key=lambda d: s(d.get("fields", {}), "createdAt"), reverse=True)
+if not rows:
+    print("   nothing yet")
+for doc in rows:
+    f = doc.get("fields", {})
+    when = s(f, "createdAt")[:16].replace("T", " ")
+    head = f"[{when}] {s(f, 'type'):11} {s(f, 'title')}"
+    tail = " · ".join(x for x in (s(f, "version"), s(f, "platform"), s(f, "contact")) if x)
+    print(f"\n{head}\n   {tail}")
+    for line in s(f, "details").splitlines():
+        print(f"   {line}")
+PY

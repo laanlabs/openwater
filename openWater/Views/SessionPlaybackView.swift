@@ -30,6 +30,7 @@ struct SessionPlaybackView: View {
     @State private var followsPlayhead = true
     @State private var showChrome = true
     @State private var trailOnly = false
+    @State private var isReportingProblem = false
 
     /// 20 Hz gives a playhead that moves smoothly without waking the CPU more
     /// than the display needs.
@@ -64,6 +65,9 @@ struct SessionPlaybackView: View {
         .statusBarHidden(!showChrome)
         .task(id: isPlaying) { await runPlayback() }
         .onAppear { frameWholeTrack() }
+        .sheet(isPresented: $isReportingProblem) {
+            FeedbackSheet(session: session, summary: summary)
+        }
     }
 
     // MARK: - Map
@@ -209,6 +213,10 @@ struct SessionPlaybackView: View {
                 Button("Fit whole track", systemImage: "arrow.up.left.and.arrow.down.right") {
                     followsPlayhead = false
                     frameWholeTrack()
+                }
+                Divider()
+                Button("Report a problem", systemImage: "ladybug") {
+                    isReportingProblem = true
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")

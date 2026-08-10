@@ -41,6 +41,7 @@ struct SurfForecastScreen: View {
         }
         .navigationTitle("Surf forecast")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Surf forecast")
         .task {
             outlook = await OpenMeteo.surfOutlook(at: coordinate)
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }

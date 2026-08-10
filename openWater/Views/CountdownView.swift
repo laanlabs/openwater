@@ -32,6 +32,7 @@ struct CountdownView: View {
             .padding(24)
             .navigationTitle("Race Start")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Race Start")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

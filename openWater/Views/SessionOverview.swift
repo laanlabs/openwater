@@ -556,6 +556,7 @@ struct BestSpeedsList: View {
         }
         .navigationTitle("Best Speeds")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Session · Best Speeds")
     }
 }
 

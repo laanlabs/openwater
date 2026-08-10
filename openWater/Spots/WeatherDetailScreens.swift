@@ -57,6 +57,7 @@ struct CurrentConditionsScreen: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Now")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Current conditions")
     }
 
     private var headline: some View {
@@ -332,6 +333,7 @@ struct ForecastScreen: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Forecast")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Forecast")
     }
 
     // MARK: Agreement
@@ -834,29 +836,43 @@ struct ModelCompareScreen: View {
                                        description: Text("The global models returned nothing for this point."))
             } else {
                 readout
-                chart
-                    .frame(maxHeight: .infinity)
+                // Equatable, and deliberately: the reading line writes `probe`
+                // as the forecast slides under it, and without this the chart
+                // rebuilt — four full-width vector traces, a gust band and a
+                // hundred and thirty date labels — on every one of those
+                // writes. The chart depends on the forecast and the switches,
+                // neither of which a scroll touches.
+                ModelChart(outlook: outlook, series: series, enabled: enabled, zone: zone) { hour in
+                    probe = hour
+                }
+                .equatable()
+                .frame(maxHeight: .infinity)
                 toggles
             }
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Models")
         .task {
             outlook = await OpenMeteo.outlook(at: coordinate, days: 16, pastDays: 1)
             enabled = Set(outlook.models.map(\.id))
+            recompute()
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
         }
+        .onChange(of: enabled) { _, _ in recompute() }
     }
 
-    // MARK: The value under the finger
+    private func recompute() {
+        series = ModelSeries(outlook: outlook, enabled: enabled, zone: zone)
+    }
 
-    /// What the models say at the hour being touched, or at the start when
-    /// nothing is.
+    // MARK: The value under the reading line
+
+    /// What the models say at the hour being read, or at now when the rider
+    /// has not moved the chart.
     private var readout: some View {
-        let hour = probe ?? nowIndex ?? 0
-        let gusts = outlook.blendGusts(of: enabled)
-        let directions = outlook.blendDirections(of: enabled)
+        let hour = probe ?? series.nowIndex ?? 0
         return VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(outlook.hours[safe: hour].map {

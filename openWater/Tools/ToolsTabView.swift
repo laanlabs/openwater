@@ -42,6 +42,7 @@ struct ToolsTabView: View {
             }
             .navigationDestination(for: Tool.self) { destination(for: $0) }
             .navigationTitle("Tools")
+            .feedbackButton("Tools")
         }
     }
 

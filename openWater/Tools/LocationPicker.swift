@@ -80,6 +80,7 @@ struct LocationPickerSheet: View {
             .safeAreaInset(edge: .bottom) { confirmBar }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Location picker")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

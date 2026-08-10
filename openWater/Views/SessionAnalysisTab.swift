@@ -446,6 +446,7 @@ struct AnalysisDetail<Content: View>: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Session · \(title)")
     }
 }
 

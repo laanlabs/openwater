@@ -52,6 +52,7 @@ struct WebShareView: View {
             }
             .navigationTitle("Share a Link")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Share a Link")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

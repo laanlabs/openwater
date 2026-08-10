@@ -33,6 +33,7 @@ struct FullScreenMapView: View {
     @State private var showControls = true
     @State private var minimumSpeed: Double = 0
     @State private var isPlaying = false
+    @State private var isReportingProblem = false
 
     /// The same grouping every other screen uses. The full-screen map was
     /// offering `summary.runs` — sixty-seven stretches where the Runs tab
@@ -116,6 +117,9 @@ struct FullScreenMapView: View {
         .fullScreenCover(isPresented: $isPlaying) {
             SessionPlaybackView(session: session, summary: summary)
         }
+        .sheet(isPresented: $isReportingProblem) {
+            FeedbackSheet(session: session, summary: summary)
+        }
     }
 
     // MARK: - Chrome
@@ -170,6 +174,13 @@ struct FullScreenMapView: View {
                             minimumSpeed = speed
                         }
                     }
+                }
+                Divider()
+                // No navigation bar here, so the bug button lives in the menu.
+                // On a session it files the session's own report, numbers and
+                // all — this screen is drawing those numbers.
+                Button("Report a problem", systemImage: "ladybug") {
+                    isReportingProblem = true
                 }
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")

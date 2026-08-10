@@ -146,6 +146,7 @@ struct SessionEditView: View {
             }
             .navigationTitle("Edit session")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Edit session")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

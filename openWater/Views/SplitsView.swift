@@ -70,6 +70,7 @@ struct SplitsView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Split")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Session · Splits")
     }
 
     // MARK: - Chart

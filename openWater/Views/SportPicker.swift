@@ -109,6 +109,7 @@ struct SportRow: View {
             }
             .navigationTitle("Sport")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Sport picker")
         } label: {
             HStack {
                 Label(selection.displayName, systemImage: selection.symbolName)

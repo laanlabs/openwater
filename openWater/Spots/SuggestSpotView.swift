@@ -84,6 +84,7 @@ struct SuggestSpotView: View {
             }
             .navigationTitle(isCorrection ? "Improve This Spot" : "Add a Spot")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Suggest a spot")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -570,6 +571,7 @@ struct ImproveSpotHubView: View {
         }
         .navigationTitle("Add or Fix a Spot")
         .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Add or Fix a Spot")
         .toolLocation(recorder)
         .task { await guide.load() }
         .sheet(item: Binding(

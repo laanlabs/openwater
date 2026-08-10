@@ -155,6 +155,7 @@ struct WindSetterView: View {
             .padding(.top, 12)
             .navigationTitle(showsSwell ? "Conditions" : "Set the Wind")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Set the wind")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

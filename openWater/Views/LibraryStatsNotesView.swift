@@ -89,6 +89,7 @@ struct LibraryStatsNotesView: View {
             }
             .navigationTitle("How these are worked out")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("How the library stats are worked out")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

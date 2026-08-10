@@ -58,6 +58,7 @@ struct MeasurementNotesView: View {
             }
             .navigationTitle("How this was measured")
             .navigationBarTitleDisplayMode(.inline)
+            .feedbackButton("Session · How this was measured")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

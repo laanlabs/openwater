@@ -757,20 +757,30 @@ private struct SpotsPanel<Content: View>: View {
         detent == .peek || detent == .minimized
     }
 
-    /// The panel slides. It does not grow and shrink.
+    /// The panel slides, and it is opaque.
     ///
-    /// That distinction is the whole difference between a drag that glides and
-    /// one that flickers. Driving the height from the drag re-proposes a new
+    /// Both halves of that were found by measuring rather than by guessing,
+    /// after two fixes that were aimed at the wrong thing.
+    ///
+    /// **It slides.** Driving the panel's *height* from the drag re-proposes a
     /// size to the `ScrollView` inside on every frame, so its `LazyVStack`
-    /// recomputes which rows fit and builds and tears down the ones at the
-    /// boundary — sixty times a second. A row built from scratch starts its
-    /// thumbnail loading again from the grey placeholder, which is what a
-    /// rider sees as the list glitching under their thumb.
+    /// rebuilds the rows at the boundary. The content is laid out once at its
+    /// tallest and `offset` moves it, which is a draw-time transform: nothing
+    /// is re-proposed and no row is rebuilt. Logging every body call through a
+    /// drag confirms it — ten panel renders for ten touch points, and one row,
+    /// once, as it came into view.
     ///
-    /// So the content is laid out once at its tallest, and the drag moves it
-    /// with `offset`. Offsetting is a draw-time transform: nothing is
-    /// re-proposed, no row is rebuilt, and whatever hangs below the bottom of
-    /// the screen is simply not on screen.
+    /// **It is opaque.** Which left the flicker, because the flicker was never
+    /// a rebuild. The background was `.regularMaterial` with a fifteen-point
+    /// shadow, and a translucent blur sliding over a live `Map` has to
+    /// re-sample and re-blur what is behind it on every frame, with the shadow
+    /// forcing an offscreen pass on top. An opaque layer cannot shimmer: there
+    /// is nothing behind it to sample. It also takes the map's greens and
+    /// blues out from under the list, which were bleeding through the rows and
+    /// making them hard to read.
+    ///
+    /// The map is still alive — above the panel, which is the part of it the
+    /// rider is looking at.
     var body: some View {
         let full = height(for: .full)
         let resting = height(for: detent)
@@ -790,8 +800,11 @@ private struct SpotsPanel<Content: View>: View {
         .frame(maxWidth: .infinity)
         .background(
             UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22)
-                .fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.14), radius: 15, y: -4)
+                .fill(Color(.systemBackground))
+                // Tighter than it was. A wide blur radius on a layer that
+                // moves every frame is the second most expensive thing here,
+                // and at the top edge of a panel nobody is admiring it.
+                .shadow(color: .black.opacity(0.18), radius: 6, y: -2)
                 .ignoresSafeArea(edges: .bottom)
         )
         .offset(y: full - live)

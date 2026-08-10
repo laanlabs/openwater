@@ -455,15 +455,28 @@ struct RibbonView: View {
                 MapPolyline(coordinates: track.points.map(\.clCoordinate))
                     .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
-                ForEach(drawn) { run in
-                    let chosen = selection == nil || selection == run.id
+                // The others first, the chosen one last. Map content draws in
+                // the order it is declared, so a run picked out of fifty was
+                // being painted over by every run that came after it — on a
+                // session of laps that is most of them, and the run a rider
+                // had just asked to see was the one they could not find.
+                ForEach(unselectedRuns) { run in
                     MapPolyline(coordinates: coordinates(of: run, in: track))
-                        .stroke(chosen ? run.colour : Color.secondary.opacity(0.22),
-                                style: StrokeStyle(lineWidth: selection == run.id ? 6 : 4,
-                                                   lineCap: .round, lineJoin: .round))
+                        .stroke(selection == nil ? run.colour : Color.secondary.opacity(0.22),
+                                style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 }
 
-                ForEach(drawn) { run in
+                if let chosen = selectedDrawn {
+                    MapPolyline(coordinates: coordinates(of: chosen, in: track))
+                        .stroke(chosen.colour,
+                                style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+                }
+
+                // No numbers at all once one is chosen. Forty-seven dimmed
+                // badges over a lapping session are what buried the answer in
+                // the first place, and the dimmed lines still give the shape
+                // of the rest of the day.
+                ForEach(selection == nil ? drawn : []) { run in
                     if let middle = midpoint(of: run, in: track) {
                         let chosen = selection == nil || selection == run.id
                         Annotation("", coordinate: middle, anchor: .center) {
@@ -492,6 +505,23 @@ struct RibbonView: View {
                         }
                         .annotationTitles(.hidden)
                     }
+                }
+
+                if let chosen = selectedDrawn, let middle = midpoint(of: chosen, in: track) {
+                    Annotation("", coordinate: middle, anchor: .center) {
+                        Button { select(nil) } label: {
+                            Text("\(chosen.title) \(chosen.number) · \(Format.distance(chosen.distance, unit: units.distance))")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(chosen.colour, in: Capsule())
+                                .foregroundStyle(.white)
+                                .shadow(radius: 3)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .annotationTitles(.hidden)
                 }
             }
             .mapStyle(mapStyle.mapStyle)
@@ -539,6 +569,16 @@ struct RibbonView: View {
     /// Legs and runs number themselves separately, so a selection made in one
     /// mode can survive into the other and match nothing — which dims every
     /// line on the map and leaves no way back except "Show all".
+    private var selectedDrawn: Drawn? {
+        selection.flatMap { id in drawn.first { $0.id == id } }
+    }
+
+    /// Everything except the chosen run, so the chosen one can be drawn after
+    /// it rather than under it.
+    private var unselectedRuns: [Drawn] {
+        drawn.filter { $0.id != selection }
+    }
+
     private var selection: Int? {
         guard let selectedRun, drawn.contains(where: { $0.id == selectedRun }) else { return nil }
         return selectedRun

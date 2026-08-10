@@ -58,7 +58,13 @@ struct RibbonView: View {
     @Binding var selectedLane: Int?
 
     /// The grouped run singled out on this tab's own map.
-    @State private var selectedRun: Int?
+    /// The runs singled out on this tab's map.
+    ///
+    /// A set rather than one id, because a run of the same kind repeated —
+    /// six beats back up between reaches — is one thing a rider points at,
+    /// and highlighting the first of them would answer a question nobody
+    /// asked. One tap on the group, all six on the water.
+    @State private var selectedRun: Set<Int> = []
     @State private var camera: MapCameraPosition = .automatic
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
@@ -69,6 +75,7 @@ struct RibbonView: View {
     @State private var filter: Leg = .all
     @State private var showsControls = false
     @State private var expandedLeg: Int?
+    @State private var expandedCluster: Int?
 
     /// How much of the screen the map is allowed.
     ///
@@ -361,14 +368,19 @@ struct RibbonView: View {
                                 }
                             }
                         } else {
-                            ForEach(orderedRuns) { run in
-                                // Only in time order: a break between two runs
-                                // means nothing once the rows are sorted by
-                                // speed, the same reason connectors are hidden.
-                                if order == .time, let down = run.offFoilBefore {
-                                    OffFoilBreak(seconds: down)
+                            ForEach(clusters) { cluster in
+                                if cluster.isGroup {
+                                    clusterRow(cluster)
+                                } else if let run = cluster.runs.first {
+                                    // Only in time order: a break between two
+                                    // runs means nothing once the rows are
+                                    // sorted by speed, the same reason
+                                    // connectors are hidden.
+                                    if order == .time, let down = run.offFoilBefore {
+                                        OffFoilBreak(seconds: down)
+                                    }
+                                    groupedRow(run)
                                 }
-                                groupedRow(run)
                             }
                         }
                     }
@@ -436,8 +448,8 @@ struct RibbonView: View {
             .frame(height: mapSize.height)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(alignment: .bottomLeading) {
-                if selection != nil {
-                    Button("Show all") { select(nil) }
+                if !selection.isEmpty {
+                    Button("Show all") { select([]) }
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -479,7 +491,7 @@ struct RibbonView: View {
                                 style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 }
 
-                if let chosen = selectedDrawn {
+                if let chosen = selectedDrawnRuns.first {
                     MapPolyline(coordinates: coordinates(of: chosen, in: track))
                         .stroke(chosen.colour,
                                 style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
@@ -491,10 +503,10 @@ struct RibbonView: View {
                 // of the rest of the day.
                 ForEach(selection == nil ? drawn : []) { run in
                     if let middle = midpoint(of: run, in: track) {
-                        let chosen = selection == nil || selection == run.id
+                        let chosen = selection.isEmpty || selection.contains(run.id)
                         Annotation("", coordinate: middle, anchor: .center) {
-                            Button { select(selection == run.id ? nil : run.id) } label: {
-                                if selection == run.id {
+                            Button { select([run.id]) } label: {
+                                if selection.contains(run.id) {
                                     Text("\(run.title) \(run.number) · \(Format.distance(run.distance, unit: units.distance))")
                                         .font(.system(size: 11, weight: .bold, design: .rounded))
                                         .monospacedDigit()
@@ -520,10 +532,13 @@ struct RibbonView: View {
                     }
                 }
 
-                if let chosen = selectedDrawn, let middle = midpoint(of: chosen, in: track) {
+                if let chosen = selectedDrawnRuns.first,
+                   let middle = midpoint(of: chosen, in: track) {
                     Annotation("", coordinate: middle, anchor: .center) {
-                        Button { select(nil) } label: {
-                            Text("\(chosen.title) \(chosen.number) · \(Format.distance(chosen.distance, unit: units.distance))")
+                        Button { select([]) } label: {
+                            Text(selectedDrawnRuns.count > 1
+                                 ? "\(chosen.title) · \(selectedDrawnRuns.count) runs"
+                                 : "\(chosen.title) \(chosen.number) · \(Format.distance(chosen.distance, unit: units.distance))")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .monospacedDigit()
                                 .padding(.horizontal, 8)
@@ -557,6 +572,49 @@ struct RibbonView: View {
         groupedRuns.filter { filter.matchesKind($0.kind) }
     }
 
+    /// Consecutive runs of one kind, as a rider would say them.
+    ///
+    /// "Six beats back up" is one thing, not six rows — and on test-8 the
+    /// upwind runs arrive in blocks of three and four between the reaches, so
+    /// the list was mostly the word "Upwind" repeated. A block collapses to a
+    /// single row that can be opened; a lone run stays a lone run, because
+    /// wrapping one thing in a group is a disclosure triangle over nothing.
+    struct RunCluster: Identifiable {
+        let id: Int
+        let kind: GroupedRun.Kind
+        let runs: [GroupedRun]
+
+        var isGroup: Bool { runs.count > 1 }
+        var distance: Double { runs.reduce(0) { $0 + $1.distance } }
+        var duration: TimeInterval { runs.reduce(0) { $0 + $1.duration } }
+        var maxSpeed: Double { runs.map(\.maxSpeed).max() ?? 0 }
+        var averageSpeed: Double { duration > 0 ? distance / duration : 0 }
+        var ids: Set<Int> { Set(runs.map(\.id)) }
+    }
+
+    /// The list in time order, with same-kind neighbours collected.
+    ///
+    /// Only in time order: adjacency is the whole basis of a cluster, and two
+    /// runs next to each other in a list sorted by speed were never next to
+    /// each other on the water.
+    private var clusters: [RunCluster] {
+        guard order == .time else {
+            return orderedRuns.enumerated().map {
+                RunCluster(id: $0.offset, kind: $0.element.kind, runs: [$0.element])
+            }
+        }
+        var out: [RunCluster] = []
+        for run in orderedRuns {
+            if let last = out.last, last.kind == run.kind {
+                out[out.count - 1] = RunCluster(id: last.id, kind: last.kind,
+                                                runs: last.runs + [run])
+            } else {
+                out.append(RunCluster(id: out.count, kind: run.kind, runs: [run]))
+            }
+        }
+        return out
+    }
+
     /// What the map draws, taken from whichever unit the list is showing.
     private var drawn: [Drawn] {
         guard showsLegs else {
@@ -582,19 +640,20 @@ struct RibbonView: View {
     /// Legs and runs number themselves separately, so a selection made in one
     /// mode can survive into the other and match nothing — which dims every
     /// line on the map and leaves no way back except "Show all".
-    private var selectedDrawn: Drawn? {
-        selection.flatMap { id in drawn.first { $0.id == id } }
+    /// The chosen runs, in draw order.
+    private var selectedDrawnRuns: [Drawn] {
+        drawn.filter { selection.contains($0.id) }
     }
 
-    /// Everything except the chosen run, so the chosen one can be drawn after
-    /// it rather than under it.
+    /// Everything except the chosen runs, so the chosen ones can be drawn
+    /// after them rather than under them.
     private var unselectedRuns: [Drawn] {
-        drawn.filter { $0.id != selection }
+        drawn.filter { !selection.contains($0.id) }
     }
 
-    private var selection: Int? {
-        guard let selectedRun, drawn.contains(where: { $0.id == selectedRun }) else { return nil }
-        return selectedRun
+    /// The selection, but only the parts of it still drawn.
+    private var selection: Set<Int> {
+        selectedRun.intersection(drawn.map(\.id))
     }
 
     /// The track between a run's ends.
@@ -624,16 +683,17 @@ struct RibbonView: View {
     }
 
     /// Choosing a run frames it, the way the Downwind screen does.
-    private func select(_ id: Int?) {
+    private func select(_ ids: Set<Int>) {
         withAnimation(.snappy) {
-            selectedRun = id
-            guard let id, let track,
-                  let run = drawn.first(where: { $0.id == id })
-            else {
+            // Tapping what is already chosen clears it, which is the way back
+            // for anybody who does not spot the "Show all" button.
+            selectedRun = selectedRun == ids ? [] : ids
+            guard !selectedRun.isEmpty, let track else {
                 camera = .automatic
                 return
             }
-            let line = coordinates(of: run, in: track)
+            let chosen = drawn.filter { selectedRun.contains($0.id) }
+            let line = chosen.flatMap { coordinates(of: $0, in: track) }
             guard !line.isEmpty else { return }
             let latitudes = line.map(\.latitude), longitudes = line.map(\.longitude)
             let centre = CLLocationCoordinate2D(
@@ -856,12 +916,72 @@ struct RibbonView: View {
 
     /// One grouped run. Upwind runs open to their tacks; nothing else does,
     /// because nothing else has pieces worth counting.
+    /// A block of same-kind runs: one row, openable, selectable as a whole.
+    @ViewBuilder
+    private func clusterRow(_ cluster: RunCluster) -> some View {
+        let isOpen = expandedCluster == cluster.id
+        let isChosen = !selection.isEmpty && selection == cluster.ids
+
+        Button {
+            select(cluster.ids)
+        } label: {
+            HStack(spacing: 10) {
+                Button {
+                    withAnimation(.snappy) {
+                        expandedCluster = isOpen ? nil : cluster.id
+                    }
+                } label: {
+                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Text("\(cluster.runs.count)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(selection.isEmpty || isChosen
+                                ? cluster.kind.colour
+                                : Color.secondary.opacity(0.35), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(Format.distance(cluster.distance, unit: units.distance)) · \(Format.shortDuration(cluster.duration))")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    Text("\(cluster.runs.count) \(cluster.kind.title.lowercased()) runs · \(Format.speed(cluster.maxSpeed, unit: units.speed, decimals: 1)) max")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Spacer(minLength: 8)
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .background(isChosen
+                        ? AnyShapeStyle(cluster.kind.colour.opacity(0.12))
+                        : AnyShapeStyle(.clear))
+        }
+        .buttonStyle(.plain)
+
+        if isOpen {
+            ForEach(cluster.runs) { run in
+                groupedRow(run)
+                    .padding(.leading, 14)
+            }
+            .transition(.opacity)
+        }
+    }
+
     private func groupedRow(_ run: GroupedRun) -> some View {
         let tacks = run.kind == .upwind ? run.lanes.count : 0
         return Button {
             // A tap picks the run out on the map. Expanding an upwind run's
             // tacks is the chevron's job — one tap, one meaning.
-            select(selectedRun == run.id ? nil : run.id)
+            select([run.id])
         } label: {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -886,7 +1006,7 @@ struct RibbonView: View {
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .frame(width: 20, height: 20)
-                        .background(selectedRun == nil || selectedRun == run.id
+                        .background(selection.isEmpty || selection.contains(run.id)
                                     ? run.kind.colour
                                     : Color.secondary.opacity(0.35), in: Circle())
 
@@ -925,7 +1045,7 @@ struct RibbonView: View {
                 }
                 .padding(.vertical, 9)
                 .padding(.horizontal, 6)
-                .background(selectedRun == run.id
+                .background(selection.contains(run.id)
                             ? AnyShapeStyle(run.kind.colour.opacity(0.12))
                             : AnyShapeStyle(Color.clear),
                             in: RoundedRectangle(cornerRadius: 10))

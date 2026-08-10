@@ -120,3 +120,32 @@ public enum Geo {
         normalizeDegrees(a + angleDelta(from: a, to: b) / 2)
     }
 }
+
+/// Binary search over a sorted array of times.
+///
+/// Track timestamps are sorted by construction, and several screens need
+/// "the samples between these two moments". Scanning for that is fine once
+/// and ruinous per run: a view drawing a hundred runs turns a linear scan
+/// into a quadratic one, on every render.
+public extension Array where Element == TimeInterval {
+
+    /// The first index whose value is at or after `value`, or nil if none is.
+    func firstIndex(atOrAfter value: TimeInterval) -> Int? {
+        var low = 0, high = count
+        while low < high {
+            let mid = (low + high) / 2
+            if self[mid] < value { low = mid + 1 } else { high = mid }
+        }
+        return low < count ? low : nil
+    }
+
+    /// The last index whose value is at or before `value`, or nil if none is.
+    func lastIndex(atOrBefore value: TimeInterval) -> Int? {
+        var low = 0, high = count
+        while low < high {
+            let mid = (low + high) / 2
+            if self[mid] <= value { low = mid + 1 } else { high = mid }
+        }
+        return low > 0 ? low - 1 : nil
+    }
+}

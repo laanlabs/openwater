@@ -228,8 +228,16 @@ struct RibbonView: View {
     /// accurate and the screen being useless. Grouped, the same session is six
     /// downwinders and five beats back — which is what a rider would say if
     /// you asked them about it.
-    private var groupedRuns: [GroupedRun] {
-        GroupedRun.group(ribbon.lanes, flights: flights)
+    /// Held rather than recomputed.
+    ///
+    /// This was a computed property read from seven places — the list, the
+    /// map, the filter counts, the selection, twice more inside the map — so
+    /// the merge ran seven times for every render of a screen that renders on
+    /// every scroll. Computed once when the session changes, and then read.
+    @State private var groupedRuns: [GroupedRun] = []
+
+    private func regroup() {
+        groupedRuns = GroupedRun.group(ribbon.lanes, flights: flights)
     }
 
     private var showsGrouped: Bool {
@@ -294,7 +302,10 @@ struct RibbonView: View {
             )
         } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                // Lazy, so a session with a hundred and thirty-five runs
+                // builds the dozen rows on screen rather than all of them
+                // before the first frame.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if lanes.isEmpty {
                         ContentUnavailableView(
                             "No \(filter.rawValue.lowercased()) runs",
@@ -401,6 +412,8 @@ struct RibbonView: View {
                 }
                 .background(.bar)
             }
+            .task(id: ribbon.lanes.count) { regroup() }
+            .onChange(of: flights.count) { _, _ in regroup() }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
             .sheet(isPresented: $showingKey) {
                 RibbonKeySheet(thresholds: thresholds)
@@ -584,10 +597,24 @@ struct RibbonView: View {
         return selectedRun
     }
 
+    /// The track between a run's ends.
+    ///
+    /// By binary search, not by filtering. `elapsed` is sorted, and scanning
+    /// the whole track once per run is O(runs × samples) — on test-5 that is
+    /// 135 runs against 8,000 fixes, a million comparisons, on every single
+    /// evaluation of the view body. That is what made the tab hang before it
+    /// drew anything.
     private func coordinates(of item: Drawn, in track: Track) -> [CLLocationCoordinate2D] {
-        track.points.indices
-            .filter { track.elapsed[$0] >= item.startElapsed && track.elapsed[$0] <= item.endElapsed }
-            .map { track.points[$0].clCoordinate }
+        let range = indexRange(of: item, in: track)
+        guard range.lowerBound <= range.upperBound else { return [] }
+        return track.points[range].map(\.clCoordinate)
+    }
+
+    private func indexRange(of item: Drawn, in track: Track) -> ClosedRange<Int> {
+        let first = track.elapsed.firstIndex(atOrAfter: item.startElapsed) ?? 0
+        let last = track.elapsed.lastIndex(atOrBefore: item.endElapsed)
+            ?? max(0, track.points.count - 1)
+        return min(first, last)...max(first, last)
     }
 
     private func midpoint(of run: Drawn, in track: Track) -> CLLocationCoordinate2D? {

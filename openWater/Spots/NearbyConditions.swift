@@ -1372,6 +1372,7 @@ struct SurfOutlook {
     var swellFromDeg: [Double?] = []
     var windKn: [Double?] = []
     var windFromDeg: [Double?] = []
+    var tideM: [Double?] = []
 
     /// The hour nearest now, for the marker every surf chart carries.
     var nowIndex: Int? {
@@ -1461,6 +1462,7 @@ extension OpenMeteo {
             swellFromDeg: sea.columns["swell_wave_direction"] ?? [],
             windKn: windSpeeds,
             windFromDeg: windAngles,
+            tideM: sea.columns["sea_level_height_msl"] ?? [],
             hasModel: covered
         )
     }
@@ -1495,9 +1497,13 @@ extension OpenMeteo {
 
     private static func hourlyMarine(at coordinate: Geo.Coordinate,
                                      days: Int) async -> HourlyMarine {
+        // Tide rides along on the same call: it is the same API and the same
+        // hours, so asking for it here means one fetch and one axis instead
+        // of two series that have to be aligned afterwards.
         let fields = ["swell_wave_height", "swell_wave_period", "swell_wave_direction",
                       "secondary_swell_wave_height", "secondary_swell_wave_period",
-                      "secondary_swell_wave_direction", "wave_height"]
+                      "secondary_swell_wave_direction", "wave_height",
+                      "sea_level_height_msl"]
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),

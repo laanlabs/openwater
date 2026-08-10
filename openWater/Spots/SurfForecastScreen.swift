@@ -63,12 +63,25 @@ struct SurfForecastScreen: View {
         return ScrollView(.horizontal, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
                 dayHeaders(width: width)
-                bars(width: width, peak: peakSwell, series: outlook.swellM,
-                     tint: .teal, height: 92, label: swellLabel)
-                hourTicks(width: width)
-                bars(width: width, peak: peakWind, series: outlook.windKn,
-                     tint: Color(.systemBlue).opacity(0.55), height: 56, label: windLabel)
-                windArrows(width: width)
+
+                track("SURF") {
+                    bars(peak: peakSwell, series: outlook.swellM,
+                         tint: Color.teal, height: 86, label: swellLabel)
+                }
+
+                track("WIND") {
+                    VStack(alignment: .leading, spacing: 0) {
+                        bars(peak: peakWind, series: outlook.windKn,
+                             tint: Color(.systemBlue).opacity(0.5), height: 54, label: nil)
+                        windRow()
+                    }
+                }
+
+                if outlook.tideM.contains(where: { $0 != nil }) {
+                    track("TIDE") { tideTrack(height: 62) }
+                }
+
+                hourTicks()
             }
             .frame(width: width, alignment: .leading)
             .overlay(alignment: .leading) {
@@ -79,9 +92,90 @@ struct SurfForecastScreen: View {
                         .offset(x: CGFloat(now) * Self.hourWidth)
                 }
             }
-            .drawingGroup()
+            .padding(.vertical, 4)
         }
-        .frame(height: 250)
+    }
+
+    /// A labelled band of the chart.
+    ///
+    /// The label rides in the track's own top-left rather than in a fixed
+    /// gutter: a gutter would sit still while the data scrolled under it,
+    /// which is right for an axis and wrong for a name.
+    private func track<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 2)
+            content()
+        }
+        .padding(.bottom, 10)
+    }
+
+    /// Wind arrows with their speed underneath, every third hour.
+    private func windRow() -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(stride(from: 0, to: outlook.hours.count, by: 3)), id: \.self) { index in
+                VStack(spacing: 1) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees((outlook.windFromDeg[safe: index] ?? nil) ?? 0))
+                        .foregroundStyle((outlook.windFromDeg[safe: index] ?? nil) == nil
+                                         ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    if let speed = outlook.windKn[safe: index] ?? nil {
+                        Text("\(Int(speed.rounded()))")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+                .frame(width: Self.hourWidth * 3)
+                .offset(x: CGFloat(index) * Self.hourWidth)
+            }
+        }
+        .frame(height: 26, alignment: .topLeading)
+    }
+
+    /// The tide as a filled curve on the same axis as everything above it.
+    private func tideTrack(height: CGFloat) -> some View {
+        let values = outlook.tideM
+        let known = values.compactMap { $0 }
+        let low = known.min() ?? 0, high = known.max() ?? 1
+        let range = max(0.05, high - low)
+
+        return ZStack(alignment: .topLeading) {
+            TideTrackShape(values: values, low: low, range: range)
+                .fill(LinearGradient(colors: [.teal.opacity(0.35), .teal.opacity(0.04)],
+                                     startPoint: .top, endPoint: .bottom))
+            TideTrackShape(values: values, low: low, range: range, lineOnly: true)
+                .stroke(.teal.opacity(0.8), lineWidth: 1.5)
+
+            // The turns, which is all anybody reads off a tide track.
+            ForEach(turningPoints, id: \.self) { index in
+                if let value = values[safe: index] ?? nil {
+                    Text(Format.height(value, unit: units.distance))
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .offset(x: CGFloat(index) * Self.hourWidth - 10,
+                                y: height * (1 - (value - low) / range) - 12)
+                }
+            }
+        }
+        .frame(height: height)
+    }
+
+    /// Local highs and lows in the tide.
+    private var turningPoints: [Int] {
+        let v = outlook.tideM
+        return v.indices.filter { index in
+            guard index > 0, index < v.count - 1,
+                  let here = v[index] ?? nil,
+                  let before = v[index - 1] ?? nil,
+                  let after = v[index + 1] ?? nil else { return false }
+            return (here >= before && here >= after) || (here <= before && here <= after)
+        }
     }
 
     private static let hourWidth: CGFloat = 9
@@ -109,9 +203,9 @@ struct SurfForecastScreen: View {
     }
 
     /// A column per hour, with the value called out where it peaks.
-    private func bars(width: CGFloat, peak: Double, series: [Double?],
+    private func bars(peak: Double, series: [Double?],
                       tint: Color, height: CGFloat,
-                      label: @escaping (Int) -> String?) -> some View {
+                      label: ((Int) -> String?)?) -> some View {
         ZStack(alignment: .bottomLeading) {
             ForEach(outlook.hours.indices, id: \.self) { index in
                 let value = series[safe: index] ?? nil
@@ -124,7 +218,7 @@ struct SurfForecastScreen: View {
             // Every sixth hour carries its number, which is enough to read a
             // scale off without a stack of labels.
             ForEach(Array(stride(from: 0, to: outlook.hours.count, by: 6)), id: \.self) { index in
-                if let text = label(index) {
+                if let text = label?(index) {
                     Text(text)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.secondary)
@@ -136,7 +230,7 @@ struct SurfForecastScreen: View {
         .frame(height: height + 12, alignment: .bottomLeading)
     }
 
-    private func hourTicks(width: CGFloat) -> some View {
+    private func hourTicks() -> some View {
         var calendar = Calendar.current
         if let zone = outlook.timeZone { calendar.timeZone = zone }
         let ticks = outlook.hours.indices.filter {
@@ -331,5 +425,32 @@ struct SurfForecastScreen: View {
              + "screens.")
             .font(.caption2)
             .foregroundStyle(.secondary)
+    }
+}
+
+/// The tide series as a shape across the chart's own width.
+private struct TideTrackShape: Shape {
+    let values: [Double?]
+    let low: Double
+    let range: Double
+    var lineOnly = false
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let points = values.enumerated().compactMap { index, value -> CGPoint? in
+            guard let value else { return nil }
+            let x = rect.width * Double(index) / Double(max(1, values.count - 1))
+            return CGPoint(x: x, y: rect.height * (1 - (value - low) / range))
+        }
+        guard let first = points.first else { return path }
+
+        path.move(to: first)
+        for point in points.dropFirst() { path.addLine(to: point) }
+        guard !lineOnly else { return path }
+
+        path.addLine(to: CGPoint(x: points.last?.x ?? rect.width, y: rect.height))
+        path.addLine(to: CGPoint(x: first.x, y: rect.height))
+        path.closeSubpath()
+        return path
     }
 }

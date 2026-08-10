@@ -21,9 +21,14 @@ struct TideFullScreen: View {
     @State private var scroll = ScrollPosition()
     @State private var hasLanded = false
 
-    /// An hour of tide per this many points. The curve is sampled finely
-    /// enough to draw smoothly, which is far finer than anybody scrubs.
-    private static let pointWidth: CGFloat = 6
+    /// Screen width per hourly sample.
+    ///
+    /// Widened with the horizon: four days at six points an hour fits in
+    /// about two screens, which makes a scrollable chart that barely needs
+    /// scrolling and crushes each tide into a spike. Twelve gives a day about
+    /// a screen and a half, so the shape is legible and the scroll is worth
+    /// the gesture.
+    private static let pointWidth: CGFloat = 12
 
     private var zone: TimeZone { curve.timeZone ?? .current }
 

@@ -1252,7 +1252,11 @@ extension OpenMeteo {
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
             .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
             .init(name: "hourly", value: "sea_level_height_msl"),
-            .init(name: "forecast_days", value: "2"),
+            // Three, not two. The API returns whole local days, so two of
+            // them leaves only the rest of today plus tomorrow — measured at
+            // 24 hours ahead, which is not enough to plan around a tide for
+            // a session the day after next. Three guarantees at least 48.
+            .init(name: "forecast_days", value: "3"),
             .init(name: "past_days", value: "1"),
             .init(name: "timeformat", value: "unixtime"),
             .init(name: "timezone", value: "auto"),

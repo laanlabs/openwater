@@ -74,16 +74,12 @@ struct FullScreenMapView: View {
                 foilingOnly: foilingOnly,
                 style: settings.mapStyle,
                 units: settings.units,
-                onSeek: { time in
-                    // Full screen has no scrubber of its own — the useful
-                    // answer to "what happened here" is the run it belongs to,
-                    // which isolates it and dims everything else.
-                    withAnimation(.snappy) {
-                        selectedRun = runs.first {
-                            time >= $0.startElapsed && time <= $0.endElapsed
-                        }?.lanes.first?.runIndex
-                    }
-                }
+                // Tapping the track used to isolate the run it belonged to.
+                // With the run chips gone there is nothing to clear it with,
+                // so a tap would strand somebody looking at one leg of their
+                // session with no way back. Full screen honours a selection
+                // made on the Runs tab and never makes one of its own.
+                onSeek: nil
             )
             .ignoresSafeArea()
             .overlay(alignment: .bottomLeading) {
@@ -195,92 +191,56 @@ struct FullScreenMapView: View {
         .background(.regularMaterial, in: Capsule())
     }
 
+    /// What the session was, in three numbers.
+    ///
+    /// The run chips that used to live here were a second copy of the Runs
+    /// tab, which does the job better — it has room for the list and the map
+    /// together. Full screen is for looking at the track, so what belongs
+    /// over it is the handful of facts that make the track legible: how much
+    /// of it was flying, how much was not, and how many times it went wrong.
     private var controls: some View {
-        VStack(spacing: 8) {
-            if !runs.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
-                        FilterChip(title: "All", isOn: selectedRun == nil) {
-                            withAnimation { selectedRun = nil }
-                        }
-                        ForEach(runs) { run in
-                            let isOn = selectedGroup?.id == run.id
-                            Button {
-                                withAnimation {
-                                    selectedRun = isOn ? nil : run.lanes.first?.runIndex
-                                }
-                            } label: {
-                                VStack(spacing: 0) {
-                                    Text("\(run.number)")
-                                        .font(.system(size: 12, weight: .semibold))
-                                    Text(Format.speed(run.averageSpeed, unit: settings.units.speed,
-                                                      decimals: 1, includeSymbol: false))
-                                        .font(.system(size: 9, design: .rounded))
-                                        .monospacedDigit()
-                                }
-                                .frame(minWidth: 36)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 5)
-                                .background(
-                                    isOn ? AnyShapeStyle(run.kind.colour)
-                                         : AnyShapeStyle(.regularMaterial),
-                                    in: RoundedRectangle(cornerRadius: 7)
-                                )
-                                .foregroundStyle(isOn ? .white : run.kind.colour)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
-
-            // Step through runs one at a time — the most effective way to read
-            // an overlapping track, and worth a dedicated control rather than
-            // making people hunt for the right chip.
-            HStack(spacing: 10) {
-                Button {
-                    step(-1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .padding(10)
-                        .background(.regularMaterial, in: Circle())
-                }
-                .disabled(runs.isEmpty)
-
-                Text(selectedGroup.map { "\($0.kind.title) \($0.number) of \(runs.count)" }
-                     ?? "Whole session")
-                    .font(.caption)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
-
-                Button {
-                    step(1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .padding(10)
-                        .background(.regularMaterial, in: Circle())
-                }
-                .disabled(summary.runs.isEmpty)
-            }
-            .padding(.bottom, 6)
+        HStack(spacing: 0) {
+            stat("airplane", "On foil", Format.shortDuration(summary.foil.timeOnFoil),
+                 tint: .green)
+            divider
+            stat("figure.pool.swim", "Off foil", Format.shortDuration(offFoil),
+                 tint: .secondary)
+            divider
+            stat("exclamationmark.triangle", "Falls", "\(summary.fallSummary.count)",
+                 tint: summary.fallSummary.count > 0 ? .orange : .secondary)
         }
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal)
     }
 
-    /// Move to the next or previous run, entering run mode from "whole session"
-    /// and wrapping at both ends.
-    private func step(_ delta: Int) {
-        let runs = runs
-        guard !runs.isEmpty else { return }
-        withAnimation(.snappy) {
-            guard let current = selectedGroup,
-                  let position = runs.firstIndex(where: { $0.id == current.id }) else {
-                selectedRun = (delta > 0 ? runs.first : runs.last)?.lanes.first?.runIndex
-                return
-            }
-            let next = (position + delta + runs.count) % runs.count
-            selectedRun = runs[next].lanes.first?.runIndex
-        }
+    /// Everything that was not flying — the swim, the walk, the waiting.
+    /// Session length rather than moving time, because the minutes stood on
+    /// the beach are exactly the ones a rider is asking about.
+    private var offFoil: TimeInterval {
+        max(0, summary.duration - summary.foil.timeOnFoil)
     }
+
+    private func stat(_ symbol: String, _ title: String, _ value: String,
+                      tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(width: 1, height: 30)
+    }
+
 }

@@ -70,6 +70,47 @@ struct RibbonView: View {
     @State private var showsControls = false
     @State private var expandedLeg: Int?
 
+    /// How much of the screen the map is allowed.
+    ///
+    /// Scrolling a list of runs while the map scrolls away defeats the point
+    /// of having drawn them — "run 14" means nothing without somewhere to put
+    /// it. So the map is pinned above the list, and because a pinned thing
+    /// takes room from the thing it is explaining, its height is the rider's
+    /// choice rather than ours.
+    enum MapSize: String, CaseIterable, Identifiable {
+        case peek, normal, tall
+
+        var id: String { rawValue }
+
+        var height: CGFloat {
+            switch self {
+            case .peek: 96
+            case .normal: 230
+            case .tall: 380
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .peek: "rectangle.arrowtriangle.2.outward"
+            case .normal: "rectangle.arrowtriangle.2.outward"
+            case .tall: "rectangle.arrowtriangle.2.inward"
+            }
+        }
+
+        /// Cycles peek → normal → tall → peek, so one button covers all three
+        /// and nobody has to hunt for a second control.
+        var next: MapSize {
+            switch self {
+            case .peek: .normal
+            case .normal: .tall
+            case .tall: .peek
+            }
+        }
+    }
+
+    @AppStorage("runsMapSize") private var mapSize: MapSize = .normal
+
     /// Which way a run was going, in the three groups riders actually talk in.
     ///
     /// `PointOfSail` has five cases and the two extremes are rare enough to be
@@ -254,23 +295,6 @@ struct RibbonView: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if track != nil, showsGrouped || showsLegs {
-                        runsMap
-                            .frame(height: 260)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .overlay(alignment: .bottomLeading) {
-                                if selection != nil {
-                                    Button("Show all") { select(nil) }
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(.regularMaterial, in: Capsule())
-                                        .padding(8)
-                                }
-                            }
-                            .padding(.top, 10)
-                    }
-
                     if lanes.isEmpty {
                         ContentUnavailableView(
                             "No \(filter.rawValue.lowercased()) runs",
@@ -373,6 +397,7 @@ struct RibbonView: View {
                         if !availableFilters.isEmpty { filterRow }
                     }
                     if let windWarning { windNotice(windWarning) }
+                    if track != nil, showsGrouped || showsLegs { pinnedMap }
                 }
                 .background(.bar)
             }
@@ -392,6 +417,37 @@ struct RibbonView: View {
     /// underneath, the runs over it, numbered dots that open into a label,
     /// and everything else dimmed when one is chosen. Three screens draw runs
     /// on a map and they should be the same picture.
+    /// The map, held above the list.
+    private var pinnedMap: some View {
+        runsMap
+            .frame(height: mapSize.height)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(alignment: .bottomLeading) {
+                if selection != nil {
+                    Button("Show all") { select(nil) }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(8)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    withAnimation(.snappy) { mapSize = mapSize.next }
+                } label: {
+                    Image(systemName: mapSize.symbol)
+                        .font(.caption.weight(.bold))
+                        .padding(7)
+                        .background(.regularMaterial, in: Circle())
+                }
+                .padding(8)
+                .accessibilityLabel("Map size")
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+    }
+
     @ViewBuilder
     private var runsMap: some View {
         if let track {

@@ -48,8 +48,18 @@ struct FullScreenMapView: View {
         return runs.first { $0.lanes.contains { $0.runIndex == selectedRun } }
     }
 
-    private var isolatedRuns: Set<Int>? {
-        selectedGroup.map { Set($0.lanes.map(\.runIndex)) }
+    /// The selected run as a stretch of track.
+    ///
+    /// From the run's own stretches rather than from its elapsed times, so it
+    /// lines up exactly with the samples the map draws.
+    private var isolatedRange: ClosedRange<Int>? {
+        guard let group = selectedGroup else { return nil }
+        let ids = Set(group.lanes.map(\.runIndex))
+        let runs = summary.runs.filter { ids.contains($0.index) }
+        guard let first = runs.map(\.startIndex).min(),
+              let last = runs.map(\.endIndex).max(), first <= last
+        else { return nil }
+        return first...last
     }
 
     var body: some View {
@@ -57,7 +67,7 @@ struct FullScreenMapView: View {
             TrackMapView(
                 session: session,
                 summary: summary,
-                isolatedRuns: isolatedRuns,
+                isolatedRange: isolatedRange,
                 showFalls: showFalls,
                 showManeuvers: showManeuvers,
                 minimumSpeed: minimumSpeed,

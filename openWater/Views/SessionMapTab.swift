@@ -147,7 +147,9 @@ struct SessionMapTab: View {
         TrackMapView(
             session: session,
             summary: summary,
-            isolatedRuns: selectedRun.map { [$0] },
+            isolatedRange: selectedRun
+                .flatMap { index in summary.runs.first { $0.index == index } }
+                .map { $0.startIndex...$0.endIndex },
             // Not while trimming. `trimRange` below already marks the
             // selection, and passing it as a highlight as well made the map's
             // cached base layer depend on a value that changes sixty times a

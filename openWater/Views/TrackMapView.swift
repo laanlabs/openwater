@@ -23,13 +23,18 @@ struct TrackMapView: View {
     let session: Session
     let summary: SessionSummary
 
-    /// Stretches to isolate. `nil` shows the whole session.
+    /// The stretch of track to isolate, as sample indices. `nil` shows all.
     ///
-    /// A set rather than one index, because the unit a rider picks is a run —
-    /// and a run is several of the segmenter's stretches. Isolating one of
-    /// them highlighted a fragment of what was tapped, or nothing at all when
-    /// the tapped run happened to start on a different stretch.
-    var isolatedRuns: Set<Int>?
+    /// A range rather than a run identity, which is what this used to be and
+    /// why isolation barely worked. A `StateSegment` is only tagged with a
+    /// run when it sits *entirely inside* one, and most of them straddle a
+    /// boundary — on test-8 only 38 of 98 segments carry a run at all, across
+    /// 12 of the 73 runs. Matching on that identity drew a fraction of the
+    /// selection, and for most runs drew nothing.
+    ///
+    /// A range asks the question the rider is actually asking — show me this
+    /// piece of the track — and every segment can answer it.
+    var isolatedRange: ClosedRange<Int>?
 
     /// Highlight a specific time range — used to show where a record was set.
     var highlight: ClosedRange<TimeInterval>?
@@ -92,7 +97,7 @@ struct TrackMapView: View {
     @State private var fullTrack: [CLLocationCoordinate2D] = []
 
     private var showsGhostLayer: Bool {
-        isolatedRuns != nil || highlight != nil || foilingOnly
+        isolatedRange != nil || highlight != nil || foilingOnly
             || foilFilter != .everything || minimumSpeed > 0 || partialUpTo != nil
     }
 
@@ -101,7 +106,7 @@ struct TrackMapView: View {
     /// drag costs one polyline rather than a full rebuild.
     private struct BandKey: Equatable {
         let sessionID: UUID
-        let isolatedRuns: Set<Int>?
+        let isolatedRange: ClosedRange<Int>?
         let foilingOnly: Bool
         let foilFilter: FoilFilter
         let minimumSpeed: Double
@@ -119,7 +124,7 @@ struct TrackMapView: View {
     private var bandKey: BandKey {
         BandKey(
             sessionID: session.id,
-            isolatedRuns: isolatedRuns,
+            isolatedRange: isolatedRange,
             foilingOnly: foilingOnly,
             foilFilter: foilFilter,
             minimumSpeed: minimumSpeed,
@@ -328,18 +333,48 @@ struct TrackMapView: View {
             else { return }
             onSeek(hit)
         }
-        .onChange(of: isolatedRuns) { _, _ in frameSelection() }
+        .onChange(of: isolatedRange) { _, _ in frameSelection() }
         .onAppear { frameSelection() }
     }
 
     // MARK: - Filtering
 
     private var visibleSegments: [StateSegment] {
+        // Clipped, not merely filtered. A state segment routinely runs across
+        // several turns — one unbroken "foiling" stretch can cover half the
+        // session — so keeping whole overlapping segments painted four
+        // kilometres of track for a 491 m run.
+        matchingSegments.map { segment in
+            guard let isolatedRange,
+                  segment.startIndex < isolatedRange.lowerBound
+                    || segment.endIndex > isolatedRange.upperBound
+            else { return segment }
+
+            let first = max(segment.startIndex, isolatedRange.lowerBound)
+            let last = min(segment.endIndex, isolatedRange.upperBound)
+            return StateSegment(
+                id: segment.id,
+                state: segment.state,
+                startIndex: first,
+                endIndex: last,
+                startElapsed: session.track.elapsed[safe: first] ?? segment.startElapsed,
+                endElapsed: session.track.elapsed[safe: last] ?? segment.endElapsed,
+                // Distance and speeds are the whole segment's. Nothing on this
+                // map reads them — the colour comes from the samples — and
+                // recomputing them here would duplicate the analyser to no end.
+                distance: segment.distance,
+                averageSpeed: segment.averageSpeed,
+                maxSpeed: segment.maxSpeed,
+                runIndex: segment.runIndex
+            )
+        }
+    }
+
+    private var matchingSegments: [StateSegment] {
         summary.segments.filter { segment in
-            if let isolatedRuns {
-                // A segment belonging to no run — the drift before the first
-                // one, the walk after the last — is not part of any of them.
-                guard let index = segment.runIndex, isolatedRuns.contains(index) else { return false }
+            if let isolatedRange {
+                guard segment.endIndex >= isolatedRange.lowerBound,
+                      segment.startIndex <= isolatedRange.upperBound else { return false }
             }
             if foilingOnly, segment.state != .foiling { return false }
             switch foilFilter {
@@ -617,7 +652,7 @@ struct TrackMapView: View {
         // just confusing.
         if let partialUpTo, session.track.elapsed[index] > partialUpTo { return nil }
         if trimRange != nil { return nil }
-        if foilingOnly || foilFilter != .everything || isolatedRuns != nil { return nil }
+        if foilingOnly || foilFilter != .everything || isolatedRange != nil { return nil }
         return point.clCoordinate
     }
 
@@ -625,13 +660,12 @@ struct TrackMapView: View {
 
     private func frameSelection() {
         let points: [CLLocationCoordinate2D]
-        if let isolatedRuns, !isolatedRuns.isEmpty {
-            // Every stretch in the run, not just the first: framing on one of
-            // them zoomed to a fraction of what the rider had selected.
-            let runs = summary.runs.filter { isolatedRuns.contains($0.index) }
-            points = runs.flatMap {
-                session.track.points[$0.startIndex...$0.endIndex].map(\.clCoordinate)
-            }
+        if let isolatedRange {
+            let first = max(0, isolatedRange.lowerBound)
+            let last = min(session.track.points.count - 1, isolatedRange.upperBound)
+            points = first <= last
+                ? session.track.points[first...last].map(\.clCoordinate)
+                : session.track.points.map(\.clCoordinate)
         } else {
             points = session.track.points.map(\.clCoordinate)
         }

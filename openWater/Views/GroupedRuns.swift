@@ -70,6 +70,30 @@ struct GroupedRun: Identifiable {
             default: self = .reaching
             }
         }
+
+        /// From the angle itself, which is what a rider is actually judging.
+        ///
+        /// `PointOfSail` puts the upwind boundary at 55°, which is a sailboat
+        /// number. A wing does not point anywhere near that: on test-8 the
+        /// rider covers 8.2 km between 50° and 80° off the wind, every metre
+        /// of it working upwind, and the run list called all of it reaching
+        /// while the Upwind screen — which reads the angle — correctly called
+        /// it beating. Two screens describing the same water differently.
+        ///
+        /// 80° is where a wingfoiler stops making ground to windward and
+        /// starts merely crossing. The downwind boundary stays at 120° where
+        /// `PointOfSail` puts it, because nothing about that one was wrong.
+        init(trueWindAngle: Double?, fallback point: PointOfSail?) {
+            guard let angle = trueWindAngle.map({ abs($0) }) else {
+                self = Kind(point)
+                return
+            }
+            switch angle {
+            case ..<80: self = .upwind
+            case ..<120: self = .reaching
+            default: self = .downwind
+            }
+        }
     }
 
     let id: Int
@@ -162,7 +186,7 @@ struct GroupedRun: Identifiable {
         var bearings: [(x: Double, y: Double)] = []
 
         for lane in lanes.sorted(by: { $0.startElapsed < $1.startElapsed }) {
-            let kind = Kind(lane.pointOfSail)
+            let kind = Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail)
             let ride = ride(of: lane, in: flown)
             let brief = lane.distance < absorb
             let reversed = bearings.last.map {
@@ -231,7 +255,10 @@ struct GroupedRun: Identifiable {
         for (index, entry) in kept.enumerated() {
             let (group, ride) = entry
             var byKind: [Kind: Double] = [:]
-            for lane in group { byKind[Kind(lane.pointOfSail), default: 0] += lane.distance }
+            for lane in group {
+                byKind[Kind(trueWindAngle: lane.trueWindAngle,
+                            fallback: lane.pointOfSail), default: 0] += lane.distance
+            }
             let kind = byKind.max { $0.value < $1.value }?.key ?? .reaching
             seen[kind, default: 0] += 1
 

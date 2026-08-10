@@ -264,7 +264,10 @@ struct WindHereView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             } else {
-                                ProgressView().padding(.top, 8)
+                                // Shaped like the reading it becomes, so the
+                                // row does not jump when the wind arrives.
+                                LoadingPlaceholder(height: 20, width: 70)
+                                    .padding(.top, 8)
                             }
                         }
                         Spacer()

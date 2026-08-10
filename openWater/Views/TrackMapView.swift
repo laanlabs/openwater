@@ -96,6 +96,16 @@ struct TrackMapView: View {
     @State private var bands: [SpeedBand] = []
     @State private var fullTrack: [CLLocationCoordinate2D] = []
 
+    /// A thinned outline of the track, drawn while the coloured bands build.
+    ///
+    /// The bands are computed off the main actor, which keeps the app
+    /// responsive and leaves the map blank for the second it takes on a long
+    /// session — and a blank map reads as a session that failed to load. Every
+    /// twentieth fix is enough to show the shape immediately; it costs a few
+    /// hundred points and is thrown away the moment the real thing lands.
+    @State private var outline: [CLLocationCoordinate2D] = []
+    @State private var isDrawing = true
+
     private var showsGhostLayer: Bool {
         isolatedRange != nil || highlight != nil || foilingOnly
             || foilFilter != .everything || minimumSpeed > 0 || partialUpTo != nil
@@ -171,6 +181,13 @@ struct TrackMapView: View {
                         style.isDark ? .white.opacity(0.28) : .gray.opacity(0.22),
                         lineWidth: 2
                     )
+            }
+
+            // The shape, while the colour is still being worked out.
+            if isDrawing, !outline.isEmpty {
+                MapPolyline(coordinates: outline)
+                    .stroke(style.isDark ? .white.opacity(0.5) : .gray.opacity(0.45),
+                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
             }
 
             // The base track. Everything about it is cached and none of it
@@ -293,7 +310,17 @@ struct TrackMapView: View {
             }
         }
         .mapStyle(style.mapStyle)
+        .task {
+            // Immediately, and once: the outline only depends on the track.
+            guard outline.isEmpty else { return }
+            let points = session.track.points
+            let step = max(1, points.count / 400)
+            outline = stride(from: 0, to: points.count, by: step).map {
+                points[$0].clCoordinate
+            }
+        }
         .task(id: bandKey) {
+            isDrawing = true
             // Off the main actor: a three-hour track is ten thousand samples,
             // and doing this inline made opening a big session hitch before it
             // ever got near a trim.
@@ -311,6 +338,7 @@ struct TrackMapView: View {
             guard !Task.isCancelled else { return }
             bands = computed
             if fullTrack.isEmpty { fullTrack = track.points.map(\.clCoordinate) }
+            withAnimation(.easeOut(duration: 0.2)) { isDrawing = false }
         }
         // MapKit puts its compass in the top-right the moment the map is
         // rotated and its scale in the top-left when zoomed — both underneath

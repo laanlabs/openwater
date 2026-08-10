@@ -42,6 +42,13 @@ public struct Session: Sendable, Codable, Identifiable {
     /// Gear used, by identifier into the gear locker.
     public var gearIDs: [UUID]
 
+    /// What the rider was on, named part by part.
+    ///
+    /// Optional in storage so archives written before it existed still
+    /// decode, and nil rather than a struct of empty strings when nothing was
+    /// filled in.
+    public var equipment: Equipment?
+
     /// Named spot, if the session was matched to one.
     public var spotID: UUID?
     public var spotName: String?
@@ -172,6 +179,7 @@ public struct Session: Sendable, Codable, Identifiable {
         foilTakeoffSpeed: Double? = nil,
         swellHeight: Double? = nil,
         swellDirection: Double? = nil,
+        equipment: Equipment? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -197,6 +205,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.foilTakeoffSpeed = foilTakeoffSpeed
         self.swellHeight = swellHeight
         self.swellDirection = swellDirection
+        self.equipment = equipment
         self.summary = summary
     }
 }

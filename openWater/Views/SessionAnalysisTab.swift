@@ -531,6 +531,9 @@ struct TurnsScreen: View {
 
     var body: some View {
         AnalysisDetail(title: "Turns") {
+            TacksAndGybesCard(summary: summary.maneuverSummary,
+                              maneuvers: summary.maneuvers,
+                              units: settings.units)
             ManeuverCard(summary: summary.maneuverSummary, maneuvers: summary.maneuvers)
                 .cardChrome()
 

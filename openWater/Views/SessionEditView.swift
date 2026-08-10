@@ -124,6 +124,8 @@ struct SessionEditView: View {
                     Text("How it went")
                 }
 
+                equipmentSection
+
                 Section("Notes") {
                     TextField("Gear, conditions, how it went…", text: $edits.notes, axis: .vertical)
                         .lineLimit(3...8)
@@ -181,6 +183,43 @@ struct SessionEditView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Equipment
+
+    /// The kit, part by part.
+    ///
+    /// Two groups because they change independently: a rider swaps front
+    /// wings between runs and keeps the same wing all season, or the
+    /// reverse. Free text, because foil gear is mixed across brands and a
+    /// dropdown that does not contain somebody's kit is worse than a blank
+    /// line — the value is in comparing this front wing with that one over a
+    /// season, which works on whatever names they use consistently.
+    @ViewBuilder
+    private var equipmentSection: some View {
+        let gear = Binding(
+            get: { edits.equipment ?? Equipment() },
+            set: { edits.equipment = $0 }
+        )
+        Section {
+            TextField("Front wing", text: gear.frontWing)
+            TextField("Fuselage", text: gear.fuselage)
+            TextField("Tail", text: gear.tail)
+            TextField("Mast", text: gear.mast)
+            TextField("Board", text: gear.board)
+        } header: {
+            Text("Foil")
+        }
+        Section {
+            TextField("Wing", text: gear.wing)
+            TextField("Parawing", text: gear.parawing)
+            TextField("Paddle", text: gear.paddle)
+        } header: {
+            Text("What drove it")
+        } footer: {
+            Text("However you name your own kit — consistently is all that matters, "
+                 + "so a season of sessions can be compared.")
         }
     }
 

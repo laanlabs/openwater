@@ -47,6 +47,17 @@ struct SessionMapTab: View {
     @State private var showFalls = true
     @State private var showManeuvers = false
 
+    /// What the third live readout shows.
+    enum ThirdMetric: String, CaseIterable, Identifiable {
+        case heartRate, heading
+        var id: String { rawValue }
+        var title: String { self == .heartRate ? "Heart Rate" : "Heading" }
+        var unit: String { self == .heartRate ? "BPM" : "degrees" }
+        var colour: Color { self == .heartRate ? .pink : .purple }
+    }
+
+    @AppStorage("mapThirdMetric") private var thirdMetric: ThirdMetric = .heartRate
+
     @State private var isTrimming = false
     @State private var trimStart: TimeInterval = 0
     @State private var trimEnd: TimeInterval = 0
@@ -327,6 +338,20 @@ struct SessionMapTab: View {
                     endpointStepper("End", value: $trimEnd,
                                     limit: min(duration, trimStart + 10)...duration)
                 }
+
+                if let flying = flyingBounds {
+                    Button {
+                        withAnimation(.snappy) {
+                            trimStart = flying.lowerBound
+                            trimEnd = flying.upperBound
+                        }
+                    } label: {
+                        Label("Trim to the flying", systemImage: "airplane")
+                            .font(.footnote.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(trimStart == flying.lowerBound && trimEnd == flying.upperBound)
+                }
                 trimStats
                 trimControls
             } else {
@@ -364,13 +389,60 @@ struct SessionMapTab: View {
                 value: Format.distance(session.track.cumulativeDistance[safe: index] ?? 0,
                                        unit: settings.units.distance, includeSymbol: false)
             )
-            CardStat(
-                group: "Heart Rate",
-                groupColour: .pink,
-                label: "BPM",
-                value: session.track.points[safe: index]?.heartRate
-                    .map { String(Int($0.rounded())) } ?? "—"
-            )
+            // Third slot is the rider's choice. Heart rate is missing
+            // entirely on a phone-only recording, and heading is the number a
+            // rider wants when reading a track back — which way was I
+            // actually pointing there. Remembered, because somebody who wants
+            // heading wants it on every session, not on this one.
+            Menu {
+                Picker("", selection: $thirdMetric) {
+                    ForEach(ThirdMetric.allCases) { Text($0.title).tag($0) }
+                }
+            } label: {
+                CardStat(
+                    group: thirdMetric.title,
+                    groupColour: thirdMetric.colour,
+                    label: thirdMetric.unit,
+                    value: thirdValue
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// First takeoff to last landing.
+    ///
+    /// A session usually opens with rigging on the beach and closes with a
+    /// walk back up it — on one test recording that is twenty minutes of a
+    /// sixty-one minute file, which drags the averages down and stretches
+    /// every chart around a track that is not the session. Trimming to the
+    /// flying is the same edit almost everybody makes by hand.
+    ///
+    /// Nil when nothing was detected, or when the flying already spans the
+    /// recording — a button that would do nothing should not be offered.
+    private var flyingBounds: ClosedRange<TimeInterval>? {
+        guard let flights = session.summary?.flights, !flights.isEmpty,
+              let first = flights.map(\.startElapsed).min(),
+              let last = flights.map(\.endElapsed).max(),
+              last > first
+        else { return nil }
+
+        // A few seconds either side: the takeoff itself is worth keeping, and
+        // so is the landing it ends on.
+        let start = max(0, first - 5)
+        let end = min(duration, last + 5)
+        guard start > 1 || end < duration - 1 else { return nil }
+        return start...end
+    }
+
+    private var thirdValue: String {
+        switch thirdMetric {
+        case .heartRate:
+            return session.track.points[safe: index]?.heartRate
+                .map { String(Int($0.rounded())) } ?? "—"
+        case .heading:
+            guard let course = session.track.course[safe: index], course >= 0 else { return "—" }
+            return "\(Int(course.rounded()))° \(Format.cardinal(course))"
         }
     }
 

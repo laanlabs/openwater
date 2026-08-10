@@ -39,6 +39,8 @@ extension Session {
         public var swellHeight: Double?
         /// Degrees the swell comes from, if the rider called it.
         public var swellDirection: Double?
+        /// What the rider was on.
+        public var equipment: Equipment?
 
         public init(
             sport: Sport,
@@ -51,7 +53,8 @@ extension Session {
             windDirection: Double? = nil,
             windSpeed: Double? = nil,
             swellHeight: Double? = nil,
-            swellDirection: Double? = nil
+            swellDirection: Double? = nil,
+            equipment: Equipment? = nil
         ) {
             self.sport = sport
             self.title = title
@@ -64,6 +67,7 @@ extension Session {
             self.windSpeed = windSpeed
             self.swellHeight = swellHeight
             self.swellDirection = swellDirection
+            self.equipment = equipment
         }
 
         public init(session: Session) {
@@ -83,6 +87,7 @@ extension Session {
             self.windSpeed = wind?.speed
             self.swellHeight = session.swellHeight
             self.swellDirection = session.swellDirection
+            self.equipment = session.equipment
         }
     }
 
@@ -116,6 +121,7 @@ extension Session {
         result.feeling = edits.feeling
         result.swellHeight = edits.swellHeight
         result.swellDirection = edits.swellDirection
+        result.equipment = edits.equipment.flatMap { $0.isEmpty ? nil : $0 }
 
         guard requiresReanalysis(for: edits) else { return result }
 

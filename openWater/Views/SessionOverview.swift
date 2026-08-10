@@ -93,6 +93,12 @@ struct SessionOverview: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
+                        if let gear = session.equipment?.headline {
+                            Text(gear)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                         if let swell = session.swellHeight, swell > 0.05 {
                             Text(session.swellDirection.map {
                                 "\(Format.height(swell, unit: settings.units.distance)) swell from \(Format.cardinal($0))"

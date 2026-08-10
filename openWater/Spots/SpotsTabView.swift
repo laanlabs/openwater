@@ -596,12 +596,23 @@ struct SpotsTabView: View {
                 }
                 .padding(.bottom, tabBarHeight + 12)
             }
-            .scrollDisabled(isCompact)
+            .scrollDisabled(panelDetent != .full)
+            // Pull-to-collapse, which is what a drag down the list *is*.
+            //
+            // At full the list owns vertical drags, so a rider sliding the
+            // panel down the natural way — a finger down the rows — was
+            // fought by the scroll: the list rubber-banded to -78 points and
+            // oscillated back over thirty frames while the panel sat still.
+            // Measured; that oscillation is the "glitch" riders reported. A
+            // firm pull past the top now reads as what it means. Gated on the
+            // *interacting* phase so a fast scroll-to-top's momentum
+            // overshoot, which also dips negative, cannot trigger it.
+            .onScrollPhaseChange { old, _, context in
+                guard old == .interacting,
+                      context.geometry.contentOffset.y < -60 else { return }
+                withAnimation(.snappy) { panelDetent = .half }
+            }
         }
-    }
-
-    private var isCompact: Bool {
-        panelDetent == .peek || panelDetent == .minimized
     }
 
     // MARK: Nearby
@@ -743,18 +754,34 @@ private struct SpotsPanel<Content: View>: View {
     let collapsedHeight: CGFloat
     @ViewBuilder var content: Content
 
-    @State private var drag: CGFloat = 0
+    /// The live drag, in a `@GestureState` rather than a `@State`.
+    ///
+    /// The difference is what happens when the system cancels a drag rather
+    /// than ending it — a phone call, a scroll stealing the touches, an edge
+    /// gesture. `onEnded` never runs on a cancel, so a plain `@State` kept
+    /// its last value and the panel sat parked partway between detents,
+    /// misaligned with everything keyed to the detent — filmed doing exactly
+    /// that. A gesture state resets itself no matter how the gesture dies,
+    /// and the transaction makes the reset glide instead of snap.
+    @GestureState(resetTransaction: Transaction(animation: .snappy))
+    private var drag: CGFloat = 0
 
     private func height(for detent: SpotsTabView.PanelDetent) -> CGFloat {
         max(collapsedHeight, size.height * detent.fraction)
     }
 
-    /// At the short detents the list has nothing to scroll, so the whole panel
-    /// drags — which is what a thumb landing anywhere on it expects. Once it
-    /// is tall enough to scroll, only the grab bar drags, or the two gestures
-    /// fight.
-    private var isCompact: Bool {
-        detent == .peek || detent == .minimized
+    /// Everywhere but full, a drag anywhere on the panel moves the panel.
+    ///
+    /// This used to flip at half, on the theory that a tall panel's list
+    /// should scroll. What that actually built was a fight: at half and full
+    /// the natural gesture for "get this out of my way" — a finger dragged
+    /// down the rows — went to the scroll instead, which rubber-banded and
+    /// oscillated while the panel refused to move. Measured at -78 points of
+    /// rubber band on one such drag. So the rule is now one sentence: the
+    /// list scrolls only at full, where a pull past its top collapses the
+    /// panel; at every other height the panel is the thing under your thumb.
+    private var dragsFromContent: Bool {
+        detent != .full
     }
 
     /// The panel slides, and it is opaque.
@@ -794,7 +821,7 @@ private struct SpotsPanel<Content: View>: View {
                 // of scrolling can reach them. Keyed to the detent, not to the
                 // drag, so it changes once on release rather than per frame.
                 .contentMargins(.bottom, full - resting, for: .scrollContent)
-                .gesture(dragGesture, isEnabled: isCompact)
+                .gesture(dragGesture, isEnabled: dragsFromContent)
         }
         .frame(height: full, alignment: .top)
         .frame(maxWidth: .infinity)
@@ -852,16 +879,15 @@ private struct SpotsPanel<Content: View>: View {
     /// from full without stopping at every detent on the way.
     private var dragGesture: some Gesture {
         DragGesture()
-            .onChanged { drag = $0.translation.height }
+            .updating($drag) { value, state, _ in state = value.translation.height }
             .onEnded { value in
                 let projected = height(for: detent) - value.predictedEndTranslation.height
                 let nearest = SpotsTabView.PanelDetent.allCases.min {
                     abs(height(for: $0) - projected) < abs(height(for: $1) - projected)
                 } ?? .peek
-                withAnimation(.snappy) {
-                    detent = nearest
-                    drag = 0
-                }
+                // `drag` resets itself through its own transaction; this and
+                // that animate together to the same place.
+                withAnimation(.snappy) { detent = nearest }
             }
     }
 }

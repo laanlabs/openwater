@@ -1,5 +1,6 @@
 import Foundation
 import OpenWaterCore
+import OSLog
 import UIKit
 
 /// "This run says it did X and it actually did Y" — from the rider, about the
@@ -34,6 +35,20 @@ import UIKit
 /// readable, listable or deletable by the app — including its own
 /// submissions.
 enum SessionFeedback {
+
+    /// Visible in Console.app filtered to `subsystem:com.laan.labs.openWater
+    /// category:feedback`, or from a Mac with the phone attached via
+    /// `log stream --device --predicate 'subsystem == "com.laan.labs.openWater"'`.
+    ///
+    /// Logged rather than printed because the interesting failures happen on a
+    /// device, hours from a debugger, and the useful detail is a status code
+    /// and Firestore's own rejection reason — neither of which a rider can be
+    /// asked to read out over the phone.
+    ///
+    /// **The rider's words are never logged**, only how many characters they
+    /// wrote. That is enough to tell a length rejection from any other kind,
+    /// and a device log is readable by anything with the phone plugged in.
+    static let log = Logger(subsystem: "com.laan.labs.openWater", category: "feedback")
 
     /// What the rider says is wrong, so a sweep can be sorted without reading
     /// every note. Named for what a rider would say, not for the code that
@@ -153,8 +168,11 @@ enum SessionFeedback {
         let id = identifier()
         var recordingPath: String?
 
+        log.notice("submit \(id, privacy: .public) topic=\(report.topic.rawValue, privacy: .public) session=\(report.sessionTitle, privacy: .public) chars=\(report.text.count, privacy: .public) recording=\(report.recording?.count ?? 0, privacy: .public)B")
+
         if let recording = report.recording {
             guard let path = await upload(recording, named: id) else {
+                log.error("recording upload failed for \(id, privacy: .public); note not sent")
                 throw SubmissionError.recordingUpload
             }
             recordingPath = path
@@ -169,9 +187,18 @@ enum SessionFeedback {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["fields": fields])
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        log.notice("POST sessionFeedback/\(id, privacy: .public) fields=\(fields.count, privacy: .public)")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else { throw SubmissionError.save(code) }
+        guard (200..<300).contains(code) else {
+            // Firestore says why in the body, and the reason is the point of
+            // looking: a rejected field name reads nothing like a missing rule.
+            let body = String(data: data, encoding: .utf8) ?? "<no body>"
+            log.error("rejected \(code, privacy: .public): \(body, privacy: .public)")
+            throw SubmissionError.save(code)
+        }
+        log.notice("accepted \(id, privacy: .public)")
     }
 
     /// The document, exactly as Firestore receives it.
@@ -251,9 +278,17 @@ enum SessionFeedback {
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         // Body comes from `upload(for:from:)`, not `httpBody` — setting both
         // holds a second copy of a multi-megabyte archive for nothing.
-        guard let (_, response) = try? await URLSession.shared.upload(for: request, from: archive),
-              (response as? HTTPURLResponse)?.statusCode == 200
-        else { return nil }
+        log.notice("upload \(objectName, privacy: .public) \(archive.count, privacy: .public)B")
+        guard let (data, response) = try? await URLSession.shared.upload(for: request, from: archive) else {
+            log.error("upload of \(objectName, privacy: .public) did not complete")
+            return nil
+        }
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "<no body>"
+            log.error("upload rejected \(code, privacy: .public): \(body, privacy: .public)")
+            return nil
+        }
         return objectName
     }
 

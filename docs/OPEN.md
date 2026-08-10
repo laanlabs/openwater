@@ -10,7 +10,7 @@ cold without re-deriving the reasoning.
 **Where the recordings are.** They are not in this repository and never will
 be: `testdata/` is gitignored and was removed from the history on 8 August
 (`9616941`). Riders' GPS traces are their home addresses. Keep your own
-files in a local `testdata/` as `test-1.gpx` … `test-10.gpx`; the
+files in a local `testdata/` as `test-1` … `test-11`; the
 expectations and the pages that describe them are committed, the recordings
 are not.
 
@@ -192,7 +192,7 @@ it — archives, not recordings, so this is compatible with keeping traces out
 of the repository.
 
 **Jump thresholds are exposed but barely exercised.** Four sliders that have
-seen exactly one real jumping session (test-9, 4 jumps). Tuning advice in
+seen two real jumping sessions (test-9 with 4, test-11 with 10). Tuning advice in
 the notes is educated guesswork until more sessions with motion data go
 through.
 

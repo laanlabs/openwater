@@ -78,6 +78,18 @@ struct GroupedRun: Identifiable {
     var number: Int
     let lanes: [SessionRibbon.Lane]
 
+    /// Seconds off the foil between the previous run and this one.
+    ///
+    /// The other half of `isLinked`: linked says the join was clean, this
+    /// says how long the swim was when it was not. A rider reading a session
+    /// back wants both — five seconds is a touch-and-go, fifty is walking the
+    /// board back upwind, and a list that shows neither makes them look the
+    /// same.
+    ///
+    /// Nil on the first run, on a linked one, and whenever flight detection
+    /// cannot say.
+    var offFoilBefore: TimeInterval?
+
     /// Whether the rider got here from the previous run without touching down.
     ///
     /// Linking runs is the thing riders actually chase: turning without
@@ -229,8 +241,19 @@ struct GroupedRun: Identifiable {
             // linked while claiming to know something it does not.
             let linked = index > 0 && ride != nil && kept[index - 1].1 == ride
 
+            // How long the rider was down for, when they were down: the gap
+            // between the ride that ended and the one that starts here.
+            var offFoil: TimeInterval?
+            if index > 0, !linked,
+               let ride, let previous = kept[index - 1].1,
+               ride < flown.count, previous < flown.count {
+                let gap = flown[ride].start - flown[previous].end
+                if gap > 0 { offFoil = gap }
+            }
+
             runs.append(GroupedRun(id: index, kind: kind, number: seen[kind]!,
-                                   lanes: group, isLinked: linked))
+                                   lanes: group, offFoilBefore: offFoil,
+                                   isLinked: linked))
         }
         return runs
     }

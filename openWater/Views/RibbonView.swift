@@ -327,6 +327,12 @@ struct RibbonView: View {
                             }
                         } else {
                             ForEach(orderedRuns) { run in
+                                // Only in time order: a break between two runs
+                                // means nothing once the rows are sorted by
+                                // speed, the same reason connectors are hidden.
+                                if order == .time, let down = run.offFoilBefore {
+                                    OffFoilBreak(seconds: down)
+                                }
                                 groupedRow(run)
                             }
                         }

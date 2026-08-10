@@ -243,8 +243,53 @@ struct RibbonView: View {
     /// every scroll. Computed once when the session changes, and then read.
     @State private var groupedRuns: [GroupedRun] = []
 
+    /// The track coloured by speed, for when nothing is picked out.
+    ///
+    /// A single faded polyline was the wrong idea for a session that laps: at
+    /// 0.35 opacity, eighty passes over the same water stack up to solid
+    /// black, and the map read as an inkblot. The same speed ramp the Map tab
+    /// uses says something instead — where the session was fast and where it
+    /// was not — and dims away to grey the moment a run is chosen.
+    struct HeatBand: Identifiable {
+        let id: Int
+        let coordinates: [CLLocationCoordinate2D]
+        let colour: Color
+    }
+
+    @State private var heat: [HeatBand] = []
+
     private func regroup() {
         groupedRuns = GroupedRun.group(ribbon.lanes, flights: flights)
+        heat = buildHeat()
+    }
+
+    /// Chunks of track, each coloured by the speed through it.
+    ///
+    /// Coarse on purpose — a chunk every twelve samples is far more detail
+    /// than a map this size can show, and it keeps the whole thing to a few
+    /// hundred polylines rather than ten thousand.
+    private func buildHeat() -> [HeatBand] {
+        guard let track, track.points.count > 1 else { return [] }
+        let scale = SpeedScale(speeds: track.speed)
+        let step = max(6, track.points.count / 400)
+
+        var out: [HeatBand] = []
+        var index = 0
+        while index < track.points.count - 1 {
+            let end = min(index + step, track.points.count - 1)
+            let speeds = track.speed[index...end]
+            let mean = speeds.reduce(0, +) / Double(speeds.count)
+            out.append(HeatBand(
+                id: index,
+                // One sample of overlap, so consecutive chunks meet rather
+                // than leaving a gap at every join.
+                coordinates: track.points[index...end].map(\.clCoordinate),
+                colour: Color(speedRampColour(position: scale.position(of: mean),
+                                              midpoint: scale.midpoint))
+            ))
+            index = end
+        }
+        return out
     }
 
     private var showsGrouped: Bool {
@@ -477,8 +522,19 @@ struct RibbonView: View {
     private var runsMap: some View {
         if let track {
             Map(position: $camera) {
-                MapPolyline(coordinates: track.points.map(\.clCoordinate))
-                    .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                // Nothing chosen: the session in its own speeds. Something
+                // chosen: a ghost, so the choice is the only thing readable.
+                if selection.isEmpty {
+                    ForEach(heat) { band in
+                        MapPolyline(coordinates: band.coordinates)
+                            .stroke(band.colour,
+                                    style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                    }
+                } else {
+                    MapPolyline(coordinates: track.points.map(\.clCoordinate))
+                        .stroke(.gray.opacity(0.3),
+                                style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                }
 
                 // The others first, the chosen one last. Map content draws in
                 // the order it is declared, so a run picked out of fifty was

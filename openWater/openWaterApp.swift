@@ -103,6 +103,9 @@ final class AppSettings {
     /// the averages people care about.
     var autoPauseWhileRecording: Bool { didSet { persist() } }
 
+    /// Everything the rider owns, offered when tagging a session.
+    var quiver: [GearItem] = [] { didSet { persist() } }
+
     /// Per-sport adjustments to the detection defaults.
     ///
     /// Keyed by sport, and only sports the rider has actually changed appear —
@@ -116,6 +119,8 @@ final class AppSettings {
         let speed = defaults.string(forKey: "speedUnit").flatMap(SpeedUnit.init(rawValue:)) ?? .knots
         let distance = defaults.string(forKey: "distanceUnit").flatMap(DistanceUnit.init(rawValue:)) ?? .metric
         units = UnitPreferences(speed: speed, distance: distance)
+        quiver = (defaults.data(forKey: "quiver"))
+            .flatMap { try? JSONDecoder().decode([GearItem].self, from: $0) } ?? []
         customDistances = defaults.array(forKey: "customDistances") as? [Double] ?? []
         customDurations = defaults.array(forKey: "customDurations") as? [Double] ?? []
         sharingPrivacy = defaults.data(forKey: "sharingPrivacy")
@@ -160,6 +165,9 @@ final class AppSettings {
         }
         if let data = try? JSONEncoder().encode(sportOverrides) {
             defaults.set(data, forKey: "sportOverrides")
+        }
+        if let data = try? JSONEncoder().encode(quiver) {
+            defaults.set(data, forKey: "quiver")
         }
     }
 }

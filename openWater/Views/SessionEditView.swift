@@ -203,29 +203,56 @@ struct SessionEditView: View {
             set: { edits.equipment = $0 }
         )
         Section {
-            TextField("Front wing", text: gear.frontWing)
-            TextField("Fuselage", text: gear.fuselage)
-            TextField("Tail", text: gear.tail)
-            TextField("Mast", text: gear.mast)
-            TextField("Board", text: gear.board)
+            ForEach(GearKind.foil) { kind in
+                gearField(kind, gear: gear)
+            }
         } header: {
             Text("Foil")
         }
         Section {
-            TextField("Wing", text: gear.wing)
-            TextField("Parawing", text: gear.parawing)
-            TextField("Paddle", text: gear.paddle)
+            ForEach(GearKind.driver) { kind in
+                gearField(kind, gear: gear)
+            }
         } header: {
             Text("What drove it")
         } footer: {
-            Text("However you name your own kit — consistently is all that matters, "
-                 + "so a season of sessions can be compared.")
+            Text("Pick from your quiver, or type anything. Set the quiver up in "
+                 + "Settings so a season of sessions can be compared.")
         }
     }
 
     // MARK: - Wind
 
     @ViewBuilder
+    /// One part, typed by hand or chosen from the quiver.
+    ///
+    /// Typing stays the primary action — a rider on a borrowed board should
+    /// not have to add it to their quiver first — and the menu is there for
+    /// the nine sessions out of ten that use the same kit. It only appears
+    /// when there is something to offer.
+    private func gearField(_ kind: GearKind, gear: Binding<Equipment>) -> some View {
+        let owned = settings.quiver.filter { $0.kind == kind && !$0.isEmpty }
+        return HStack {
+            TextField(kind.one, text: gear[dynamicMember: kind.path])
+            if !owned.isEmpty {
+                Menu {
+                    ForEach(owned) { item in
+                        Button(item.display) { gear.wrappedValue[keyPath: kind.path] = item.display }
+                    }
+                    if !gear.wrappedValue[keyPath: kind.path].isEmpty {
+                        Divider()
+                        Button("Clear", role: .destructive) {
+                            gear.wrappedValue[keyPath: kind.path] = ""
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(.tint)
+                }
+            }
+        }
+    }
+
     private var windSection: some View {
         Section {
             HStack {

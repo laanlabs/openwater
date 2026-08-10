@@ -68,6 +68,16 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
+                        QuiverView()
+                    } label: {
+                        Label("Quiver", systemImage: "bag")
+                    }
+                } footer: {
+                    Text("Your boards, foils and wings — offered when tagging a session.")
+                }
+
+                Section {
+                    NavigationLink {
                         ScrollView { WatchStatusView().padding() }
                             .navigationTitle("Apple Watch")
                             .navigationBarTitleDisplayMode(.inline)

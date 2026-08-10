@@ -137,11 +137,16 @@ struct TideFullScreen: View {
                         .padding(.horizontal, half)
                     }
                     .scrollPosition($scroll)
-                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                        geometry.contentOffset.x
-                    } action: { _, offset in
-                        let index = Int(offset / Self.pointWidth + 0.5)
-                        probe = min(max(0, index), max(0, curve.points.count - 1))
+                    // Transformed to the sample index rather than to the raw
+                    // offset: the action runs only when the value changes, and
+                    // the header can only read out one sample. Reported as a
+                    // distance it fired on every pixel of a drag and rebuilt
+                    // this whole view each time.
+                    .onScrollGeometryChange(for: Int.self) { geometry in
+                        let index = Int(geometry.contentOffset.x / Self.pointWidth + 0.5)
+                        return min(max(0, index), max(0, curve.points.count - 1))
+                    } action: { _, index in
+                        probe = index
                     }
                     .onChange(of: curve.points.count, initial: true) { _, _ in
                         guard !hasLanded, let now = nowIndex else { return }

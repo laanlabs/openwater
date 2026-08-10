@@ -812,28 +812,17 @@ struct ModelCompareScreen: View {
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var enabled: Set<String> = []
     @State private var isLoading = true
-    /// The hour under the finger, when there is one.
+    /// The hour under the reading line.
     @State private var probe: Int?
-    /// Drives the initial scroll. Anchor views cannot do it here: the ticks
-    /// are positioned with `.offset`, which moves them visually without
-    /// moving them in layout, so `scrollTo` saw every one of them at zero and
-    /// could only ever land on the first hour.
-    @State private var scroll = ScrollPosition()
-    @State private var hasLanded = false
+    /// Everything derived from the forecast and the model switches.
+    @State private var series = ModelSeries()
 
-    private static let palette: [Color] = [.blue, .orange, .green, .purple]
+    static let palette: [Color] = [.blue, .orange, .green, .purple]
     /// Ten points an hour is roughly a day per screen — close enough to read
     /// a sea breeze, far enough that a week is a few flicks away.
-    private static let hourWidth: CGFloat = 10
+    static let hourWidth: CGFloat = 10
 
     private var zone: TimeZone { outlook.timeZone ?? .current }
-
-    private var blend: [Double?] { outlook.blend(of: enabled) }
-
-    private var peak: Double {
-        let shown = outlook.models.filter { enabled.contains($0.id) }
-        return max(shown.flatMap { $0.speeds.compactMap { $0 } }.max() ?? 1, 1)
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -876,7 +865,7 @@ struct ModelCompareScreen: View {
                 } ?? "—")
                     .font(.subheadline.weight(.bold))
 
-                if probe == nil, nowIndex != nil {
+                if probe == nil, series.nowIndex != nil {
                     Text("now")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.white)
@@ -887,7 +876,7 @@ struct ModelCompareScreen: View {
 
                 Spacer(minLength: 0)
 
-                if let direction = directions[safe: hour] ?? nil {
+                if let direction = series.directions[safe: hour] ?? nil {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 11, weight: .bold))
@@ -900,13 +889,13 @@ struct ModelCompareScreen: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if let value = blend[safe: hour] ?? nil {
+                if let value = series.blend[safe: hour] ?? nil {
                     (Text("\(Int(value.rounded()))").font(.system(size: 28, weight: .heavy, design: .rounded))
                      + Text(" kn").font(.subheadline.weight(.semibold)))
                         .foregroundStyle(value >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                         .monospacedDigit()
                 }
-                if let gust = gusts[safe: hour] ?? nil {
+                if let gust = series.gusts[safe: hour] ?? nil {
                     Text("gusting \(Int(gust.rounded()))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -936,297 +925,6 @@ struct ModelCompareScreen: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground))
-    }
-
-    // MARK: The chart
-
-    private static let headerHeight: CGFloat = 24
-    /// The arrow band, plus the gap that keeps it off the plot floor. They
-    /// were sitting directly on the axis, which read as part of the chart
-    /// rather than as its own row.
-    private static let arrowsHeight: CGFloat = 46
-    private static let arrowsGap: CGFloat = 10
-    private static let axisWidth: CGFloat = 32
-
-    private static var footerHeight: CGFloat { arrowsHeight + arrowsGap }
-
-    private var step: Double { ChartGrid.interval(for: peak) }
-    private var levels: [Double] { ChartGrid.levels(peak: peak, step: step) }
-
-    /// A proper plot: labelled axis down the left, hours across the top,
-    /// rules both ways, and the wind's direction under every few columns.
-    ///
-    /// The axis and the rules sit outside the scroll view. Only the data
-    /// moves — a scale that slides away with its own traces is decoration.
-    private var chart: some View {
-        // A horizontal ScrollView gives its content unbounded vertical space,
-        // so `maxHeight: .infinity` on the plot expanded past the viewport and
-        // pushed the arrow row off the bottom. The height has to be measured
-        // here and handed down.
-        GeometryReader { outer in
-            chartBody(plotHeight: max(80, outer.size.height
-                                      - Self.headerHeight - Self.footerHeight - 20))
-        }
-    }
-
-    private func chartBody(plotHeight: CGFloat) -> some View {
-        let width = CGFloat(outlook.hours.count) * Self.hourWidth
-
-        return HStack(spacing: 0) {
-            axisGutter
-            ZStack(alignment: .topLeading) {
-                horizontalRules
-                ScrollViewReader { scroller in
-                    GeometryReader { viewport in
-                    let half = viewport.size.width / 2
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        VStack(spacing: 0) {
-                            hourHeader(width: width)
-                            plot(width: width, height: plotHeight)
-                            arrowRow(width: width)
-                        }
-                        // Half a viewport either side, so the first hour and
-                        // the last can both be brought to the middle. Without
-                        // it the ends of the forecast are unreadable — the
-                        // reading line can never reach them.
-                        .padding(.horizontal, half)
-                    }
-                    .scrollPosition($scroll)
-                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                    // Whatever sits under the middle of the screen is what the
-                    // header reads out. The line does not move; the forecast
-                    // does, which makes the whole chart the control rather
-                    // than a hairline somebody has to catch with a fingertip.
-                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                        geometry.contentOffset.x
-                    } action: { _, offset in
-                        // The centre sits at `offset + half` on screen, and
-                        // the content's leading padding is also `half`, so in
-                        // data coordinates the two cancel to the offset itself.
-                        let hour = Int(offset / Self.hourWidth + 0.5)
-                        probe = min(max(0, hour), max(0, outlook.hours.count - 1))
-                    }
-                    .overlay {
-                        // Fixed to the screen, not to the data.
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.45))
-                            .frame(width: 1)
-                            .allowsHitTesting(false)
-                    }
-                    .onChange(of: outlook.hours.count, initial: true) { _, _ in
-                        // Open with now under the reading line. A day of
-                        // history stays to the left for anyone who wants to
-                        // scroll back into it, but nobody opens a forecast to
-                        // look at yesterday.
-                        //
-                        // The probe reads `offset / hourWidth`, so the offset
-                        // that puts an hour under the line is simply that hour
-                        // times the column width — no anchor needed.
-                        guard !hasLanded, let now = nowIndex else { return }
-                        hasLanded = true
-                        scroll.scrollTo(x: CGFloat(now) * Self.hourWidth)
-                    }
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 10)
-    }
-
-    private var axisGutter: some View {
-        GeometryReader { geometry in
-            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
-            ForEach(levels, id: \.self) { level in
-                Text("\(Int(level))")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .frame(width: Self.axisWidth - 5, alignment: .trailing)
-                    .offset(y: Self.headerHeight + plotHeight * (1 - level / peak) - 6)
-            }
-            Text("kn")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.tertiary)
-                .frame(width: Self.axisWidth - 5, alignment: .trailing)
-                .offset(y: Self.headerHeight - 14)
-        }
-        .frame(width: Self.axisWidth)
-    }
-
-    private var horizontalRules: some View {
-        GeometryReader { geometry in
-            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
-            ForEach(levels, id: \.self) { level in
-                let isKey = abs(level - 15) < 0.01
-                Rectangle()
-                    .fill(isKey ? AnyShapeStyle(Color.accentColor.opacity(0.5))
-                          : AnyShapeStyle(Color(.systemGray3).opacity(0.7)))
-                    .frame(height: isKey ? 1.5 : 0.75)
-                    .offset(y: Self.headerHeight + plotHeight * (1 - level / peak))
-            }
-            // The floor, so the traces have something to stand on.
-            Rectangle()
-                .fill(Color(.systemGray2))
-                .frame(height: 1)
-                .offset(y: geometry.size.height - Self.footerHeight - 20)
-        }
-        .allowsHitTesting(false)
-    }
-
-    /// Hours across the top, with the day named where it turns over.
-    private func hourHeader(width: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(ticks, id: \.self) { hour in
-                let isMidnight = midnights.contains(hour)
-                Text(outlook.hours[hour].formatted(
-                    isMidnight
-                    ? Date.FormatStyle(timeZone: zone).weekday(.abbreviated)
-                    : Date.FormatStyle(timeZone: zone).hour()))
-                    .font(.system(size: 9, weight: isMidnight ? .bold : .regular))
-                    .foregroundStyle(isMidnight ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                    .fixedSize()
-                    .offset(x: CGFloat(hour) * Self.hourWidth + 3, y: 4)
-            }
-        }
-        .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
-    }
-
-    private func plot(width: CGFloat, height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            // Everything left of now, greyed. The models are hindcasting
-            // there rather than forecasting, and it should not read as part
-            // of the decision.
-            if let now = nowIndex, now > 0 {
-                Rectangle()
-                    .fill(Color(.systemGray5).opacity(0.55))
-                    .frame(width: CGFloat(now) * Self.hourWidth)
-                    .frame(maxHeight: .infinity)
-            }
-
-            ForEach(ticks, id: \.self) { hour in
-                Rectangle()
-                    .fill(midnights.contains(hour)
-                          ? Color(.systemGray2) : Color(.systemGray4).opacity(0.5))
-                    .frame(width: midnights.contains(hour) ? 1 : 0.5)
-                    .offset(x: CGFloat(hour) * Self.hourWidth)
-            }
-
-            // Gusts behind everything, as a filled band up from the blend —
-            // the headroom above the average is the part that knocks you over.
-            GustBand(speeds: blend, gusts: outlook.blendGusts(of: enabled), peak: peak)
-                .fill(Color.orange.opacity(0.16))
-
-            ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
-                if enabled.contains(model.id) {
-                    ModelTrace(speeds: model.speeds, peak: peak)
-                        .stroke(Self.palette[index % Self.palette.count].opacity(0.7),
-                                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                }
-            }
-
-            ModelTrace(speeds: blend, peak: peak)
-                .stroke(Color.primary,
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-
-            // Where each run stops. A line that simply ends looks like a
-            // bug or like calm; a labelled cap says the model ran out, which
-            // is the honest reading and the reason the blend thins there.
-            GeometryReader { geometry in
-                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
-                    if enabled.contains(model.id),
-                       let last = model.speeds.lastIndex(where: { $0 != nil }),
-                       let value = model.speeds[last],
-                       last < outlook.hours.count - 2 {
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(Self.palette[index % Self.palette.count])
-                                .frame(width: 6, height: 6)
-                            Text("\(model.label) ends")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(Self.palette[index % Self.palette.count])
-                                .fixedSize()
-                        }
-                        .offset(x: CGFloat(last) * Self.hourWidth + 4,
-                                y: geometry.size.height * (1 - value / peak) - 5)
-                    }
-                }
-            }
-
-            if let now = nowIndex {
-                Rectangle()
-                    .fill(Color.orange)
-                    .frame(width: 2)
-                    .offset(x: CGFloat(now) * Self.hourWidth)
-            }
-
-
-        }
-        .frame(width: width, height: height)
-        // Rasterised once instead of re-rasterising four full-width vector
-        // traces, a gust band and the rule set on every frame of a scroll.
-        // The plot only changes when a model is switched on or off, and a
-        // three-day forecast is three thousand points wide — redrawing that
-        // as paths at sixty frames a second is what made the drag stutter.
-        .drawingGroup()
-    }
-
-    /// The direction row.
-    ///
-    /// Speed alone decides whether you go; direction decides whether the spot
-    /// works at all, and reading it off a table while looking at a chart is
-    /// the split every wind site closes by putting the arrows under the plot.
-    private func arrowRow(width: CGFloat) -> some View {
-        let directions = outlook.blendDirections(of: enabled)
-        return ZStack(alignment: .topLeading) {
-            ForEach(arrowTicks, id: \.self) { hour in
-                if let direction = directions[safe: hour] ?? nil {
-                    VStack(spacing: 2) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .rotationEffect(.degrees(direction + 180))
-                            .foregroundStyle((blend[safe: hour] ?? nil).map { $0 >= 15 }
-                                             == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                        Text(Format.cardinal(direction))
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(width: Self.hourWidth * 3)
-                    .offset(x: CGFloat(hour) * Self.hourWidth - Self.hourWidth)
-                }
-            }
-        }
-        // Leading, not centre: the children are placed by `offset` from the
-        // origin, so a centred frame shifts every arrow by half the chart's
-        // width — which on a sixteen-day chart is a long way off screen.
-        .frame(width: width, height: Self.arrowsHeight, alignment: .topLeading)
-        .padding(.top, Self.arrowsGap)
-    }
-
-    /// Every third hour carries a label and a rule; every sixth an arrow.
-    /// Denser than that and they collide at ten points an hour.
-    private var ticks: [Int] {
-        outlook.hours.indices.filter { $0 % 3 == 0 }
-    }
-
-    private var arrowTicks: [Int] {
-        outlook.hours.indices.filter { $0 % 6 == 0 }
-    }
-
-    /// The hour we are actually in — the orange rule that separates what has
-    /// happened from what is guessed.
-    private var nowIndex: Int? {
-        let now = Date()
-        return outlook.hours.lastIndex { $0 <= now }
-    }
-
-    /// Where the day turns over, in the spot's timezone — the rules and
-    /// labels that make a week read as days rather than one long wobble.
-    private var midnights: [Int] {
-        var calendar = Calendar.current
-        calendar.timeZone = zone
-        return outlook.hours.indices.filter {
-            calendar.component(.hour, from: outlook.hours[$0]) == 0
-        }
     }
 
     // MARK: Switching models
@@ -1298,6 +996,365 @@ struct ModelCompareScreen: View {
         return "The heavy line is the blend of whatever is switched on. Models run to different horizons — "
             + horizons.joined(separator: ", ")
             + ". Free from Open-Meteo."
+    }
+}
+
+// MARK: - What the chart is drawn from
+
+/// The forecast, reduced to exactly what the chart draws.
+///
+/// Every field here was a computed property on the screen, and the screen's
+/// body ran on every frame of a horizontal drag. That meant re-blending four
+/// models across four hundred hours several times over, asking `Calendar` for
+/// the hour of each of those four hundred dates to find the midnights, and
+/// formatting a hundred and thirty date labels — sixty times a second, to
+/// answer a question whose answer had not changed. None of it depends on where
+/// the chart is scrolled to; all of it depends on which models are switched
+/// on. So it is worked out when that changes, and not otherwise.
+struct ModelSeries {
+
+    var blend: [Double?] = []
+    var gusts: [Double?] = []
+    var directions: [Double?] = []
+    var peak: Double = 1
+    var levels: [Double] = []
+    /// Every third hour carries a label and a rule; every sixth an arrow.
+    /// Denser than that and they collide at ten points an hour.
+    var ticks: [Int] = []
+    var arrowTicks: [Int] = []
+    var midnights: Set<Int> = []
+    /// The hour we are actually in — the orange rule that separates what has
+    /// happened from what is guessed.
+    var nowIndex: Int?
+    /// The header, already formatted.
+    var headings: [Heading] = []
+
+    struct Heading: Identifiable {
+        let id: Int
+        let text: String
+        let isMidnight: Bool
+    }
+
+    init() {}
+
+    init(outlook: WindOutlook, enabled: Set<String>, zone: TimeZone) {
+        blend = outlook.blend(of: enabled)
+        gusts = outlook.blendGusts(of: enabled)
+        directions = outlook.blendDirections(of: enabled)
+
+        let shown = outlook.models.filter { enabled.contains($0.id) }
+        peak = max(shown.flatMap { $0.speeds.compactMap { $0 } }.max() ?? 1, 1)
+        levels = ChartGrid.levels(peak: peak, step: ChartGrid.interval(for: peak))
+
+        ticks = outlook.hours.indices.filter { $0 % 3 == 0 }
+        arrowTicks = outlook.hours.indices.filter { $0 % 6 == 0 }
+
+        var calendar = Calendar.current
+        calendar.timeZone = zone
+        midnights = Set(outlook.hours.indices.filter {
+            calendar.component(.hour, from: outlook.hours[$0]) == 0
+        })
+
+        let now = Date()
+        nowIndex = outlook.hours.lastIndex { $0 <= now }
+
+        let dayStyle = Date.FormatStyle(timeZone: zone).weekday(.abbreviated)
+        let hourStyle = Date.FormatStyle(timeZone: zone).hour()
+        headings = ticks.map { hour in
+            let isMidnight = midnights.contains(hour)
+            return Heading(id: hour,
+                           text: outlook.hours[hour].formatted(isMidnight ? dayStyle : hourStyle),
+                           isMidnight: isMidnight)
+        }
+    }
+}
+
+// MARK: - The chart
+
+/// A proper plot: labelled axis down the left, hours across the top, rules
+/// both ways, and the wind's direction under every few columns.
+///
+/// The axis and the rules sit outside the scroll view. Only the data moves —
+/// a scale that slides away with its own traces is decoration.
+private struct ModelChart: View, Equatable {
+
+    let outlook: WindOutlook
+    let series: ModelSeries
+    let enabled: Set<String>
+    let zone: TimeZone
+    /// Called when the hour under the reading line changes — whole hours, so
+    /// a drag reports thirty times rather than three thousand.
+    let onProbe: (Int) -> Void
+
+    /// Everything this draws comes from the forecast and the switches. The
+    /// closure is deliberately not compared: it writes the reading out, and
+    /// comparing it would defeat the point of being equatable at all.
+    static func == (lhs: ModelChart, rhs: ModelChart) -> Bool {
+        lhs.enabled == rhs.enabled
+            && lhs.series.peak == rhs.series.peak
+            && lhs.series.blend.count == rhs.series.blend.count
+            && lhs.series.nowIndex == rhs.series.nowIndex
+    }
+
+    /// Drives the initial scroll. Anchor views cannot do it here: the ticks
+    /// are positioned with `.offset`, which moves them visually without moving
+    /// them in layout, so `scrollTo` saw every one of them at zero and could
+    /// only ever land on the first hour.
+    @State private var scroll = ScrollPosition()
+    @State private var hasLanded = false
+
+    private static let headerHeight: CGFloat = 24
+    /// The arrow band, plus the gap that keeps it off the plot floor. They
+    /// were sitting directly on the axis, which read as part of the chart
+    /// rather than as its own row.
+    private static let arrowsHeight: CGFloat = 46
+    private static let arrowsGap: CGFloat = 10
+    private static let axisWidth: CGFloat = 32
+
+    private static var footerHeight: CGFloat { arrowsHeight + arrowsGap }
+
+    private var hourWidth: CGFloat { ModelCompareScreen.hourWidth }
+    private var palette: [Color] { ModelCompareScreen.palette }
+
+    var body: some View {
+        // A horizontal ScrollView gives its content unbounded vertical space,
+        // so `maxHeight: .infinity` on the plot expanded past the viewport and
+        // pushed the arrow row off the bottom. The height has to be measured
+        // here and handed down.
+        GeometryReader { outer in
+            chartBody(plotHeight: max(80, outer.size.height
+                                      - Self.headerHeight - Self.footerHeight - 20))
+        }
+    }
+
+    private func chartBody(plotHeight: CGFloat) -> some View {
+        let width = CGFloat(outlook.hours.count) * hourWidth
+
+        return HStack(spacing: 0) {
+            axisGutter
+            ZStack(alignment: .topLeading) {
+                horizontalRules
+                GeometryReader { viewport in
+                    let half = viewport.size.width / 2
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        VStack(spacing: 0) {
+                            hourHeader(width: width)
+                            plot(width: width, height: plotHeight)
+                            arrowRow(width: width)
+                        }
+                        // Half a viewport either side, so the first hour and
+                        // the last can both be brought to the middle. Without
+                        // it the ends of the forecast are unreadable — the
+                        // reading line can never reach them.
+                        .padding(.horizontal, half)
+                    }
+                    .scrollPosition($scroll)
+                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                    // Whatever sits under the middle of the screen is what the
+                    // header reads out. The line does not move; the forecast
+                    // does, which makes the whole chart the control rather
+                    // than a hairline somebody has to catch with a fingertip.
+                    //
+                    // Transformed to a whole hour rather than to the raw
+                    // offset: the action only runs when the value it is given
+                    // changes, and the readout can only say one hour at a
+                    // time. At ten points an hour that is one update per ten
+                    // points of travel instead of one per pixel.
+                    .onScrollGeometryChange(for: Int.self) { geometry in
+                        // The centre sits at `offset + half` on screen, and
+                        // the content's leading padding is also `half`, so in
+                        // data coordinates the two cancel to the offset itself.
+                        let hour = Int(geometry.contentOffset.x / hourWidth + 0.5)
+                        return min(max(0, hour), max(0, outlook.hours.count - 1))
+                    } action: { _, hour in
+                        onProbe(hour)
+                    }
+                    .overlay {
+                        // Fixed to the screen, not to the data.
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.45))
+                            .frame(width: 1)
+                            .allowsHitTesting(false)
+                    }
+                    .onChange(of: outlook.hours.count, initial: true) { _, _ in
+                        // Open with now under the reading line. A day of
+                        // history stays to the left for anyone who wants to
+                        // scroll back into it, but nobody opens a forecast to
+                        // look at yesterday.
+                        //
+                        // The probe reads `offset / hourWidth`, so the offset
+                        // that puts an hour under the line is simply that hour
+                        // times the column width — no anchor needed.
+                        guard !hasLanded, let now = series.nowIndex else { return }
+                        hasLanded = true
+                        scroll.scrollTo(x: CGFloat(now) * hourWidth)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var axisGutter: some View {
+        GeometryReader { geometry in
+            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
+            ForEach(series.levels, id: \.self) { level in
+                Text("\(Int(level))")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .frame(width: Self.axisWidth - 5, alignment: .trailing)
+                    .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak) - 6)
+            }
+            Text("kn")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.axisWidth - 5, alignment: .trailing)
+                .offset(y: Self.headerHeight - 14)
+        }
+        .frame(width: Self.axisWidth)
+    }
+
+    private var horizontalRules: some View {
+        GeometryReader { geometry in
+            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
+            ForEach(series.levels, id: \.self) { level in
+                let isKey = abs(level - 15) < 0.01
+                Rectangle()
+                    .fill(isKey ? AnyShapeStyle(Color.accentColor.opacity(0.5))
+                          : AnyShapeStyle(Color(.systemGray3).opacity(0.7)))
+                    .frame(height: isKey ? 1.5 : 0.75)
+                    .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak))
+            }
+            // The floor, so the traces have something to stand on.
+            Rectangle()
+                .fill(Color(.systemGray2))
+                .frame(height: 1)
+                .offset(y: geometry.size.height - Self.footerHeight - 20)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Hours across the top, with the day named where it turns over.
+    private func hourHeader(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(series.headings) { heading in
+                Text(heading.text)
+                    .font(.system(size: 9, weight: heading.isMidnight ? .bold : .regular))
+                    .foregroundStyle(heading.isMidnight ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .fixedSize()
+                    .offset(x: CGFloat(heading.id) * hourWidth + 3, y: 4)
+            }
+        }
+        .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
+    }
+
+    private func plot(width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            // Everything left of now, greyed. The models are hindcasting
+            // there rather than forecasting, and it should not read as part
+            // of the decision.
+            if let now = series.nowIndex, now > 0 {
+                Rectangle()
+                    .fill(Color(.systemGray5).opacity(0.55))
+                    .frame(width: CGFloat(now) * hourWidth)
+                    .frame(maxHeight: .infinity)
+            }
+
+            ForEach(series.ticks, id: \.self) { hour in
+                Rectangle()
+                    .fill(series.midnights.contains(hour)
+                          ? Color(.systemGray2) : Color(.systemGray4).opacity(0.5))
+                    .frame(width: series.midnights.contains(hour) ? 1 : 0.5)
+                    .offset(x: CGFloat(hour) * hourWidth)
+            }
+
+            // Gusts behind everything, as a filled band up from the blend —
+            // the headroom above the average is the part that knocks you over.
+            GustBand(speeds: series.blend, gusts: series.gusts, peak: series.peak)
+                .fill(Color.orange.opacity(0.16))
+
+            ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                if enabled.contains(model.id) {
+                    ModelTrace(speeds: model.speeds, peak: series.peak)
+                        .stroke(palette[index % palette.count].opacity(0.7),
+                                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                }
+            }
+
+            ModelTrace(speeds: series.blend, peak: series.peak)
+                .stroke(Color.primary,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+
+            // Where each run stops. A line that simply ends looks like a
+            // bug or like calm; a labelled cap says the model ran out, which
+            // is the honest reading and the reason the blend thins there.
+            GeometryReader { geometry in
+                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                    if enabled.contains(model.id),
+                       let last = model.speeds.lastIndex(where: { $0 != nil }),
+                       let value = model.speeds[last],
+                       last < outlook.hours.count - 2 {
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(palette[index % palette.count])
+                                .frame(width: 6, height: 6)
+                            Text("\(model.label) ends")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(palette[index % palette.count])
+                                .fixedSize()
+                        }
+                        .offset(x: CGFloat(last) * hourWidth + 4,
+                                y: geometry.size.height * (1 - value / series.peak) - 5)
+                    }
+                }
+            }
+
+            if let now = series.nowIndex {
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(width: 2)
+                    .offset(x: CGFloat(now) * hourWidth)
+            }
+        }
+        .frame(width: width, height: height)
+        // Rasterised once instead of re-rasterising four full-width vector
+        // traces, a gust band and the rule set on every frame of a scroll.
+        // The plot only changes when a model is switched on or off, and a
+        // three-day forecast is three thousand points wide — redrawing that
+        // as paths at sixty frames a second is what made the drag stutter.
+        .drawingGroup()
+    }
+
+    /// The direction row.
+    ///
+    /// Speed alone decides whether you go; direction decides whether the spot
+    /// works at all, and reading it off a table while looking at a chart is
+    /// the split every wind site closes by putting the arrows under the plot.
+    private func arrowRow(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(series.arrowTicks, id: \.self) { hour in
+                if let direction = series.directions[safe: hour] ?? nil {
+                    VStack(spacing: 2) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .rotationEffect(.degrees(direction + 180))
+                            .foregroundStyle((series.blend[safe: hour] ?? nil).map { $0 >= 15 }
+                                             == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        Text(Format.cardinal(direction))
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(width: hourWidth * 3)
+                    .offset(x: CGFloat(hour) * hourWidth - hourWidth)
+                }
+            }
+        }
+        // Leading, not centre: the children are placed by `offset` from the
+        // origin, so a centred frame shifts every arrow by half the chart's
+        // width — which on a sixteen-day chart is a long way off screen.
+        .frame(width: width, height: Self.arrowsHeight, alignment: .topLeading)
+        .padding(.top, Self.arrowsGap)
     }
 }
 

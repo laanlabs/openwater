@@ -49,8 +49,14 @@ struct TideFullScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            // Half the screen. A tide curve is a shape, not a plot somebody
+            // reads values off pixel by pixel — given the whole screen it
+            // just made the same two humps larger, and pushed the reading it
+            // exists to give out of the eye's way at the top.
             chart
+                .containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
             footer
+            Spacer(minLength: 0)
         }
         .background(Color(.systemGroupedBackground))
     }
@@ -108,6 +114,16 @@ struct TideFullScreen: View {
                                 .stroke(.teal, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
 
                             dayRules(height: height)
+
+                            // Now, in the water's own coordinates, so it
+                            // scrolls with the curve. The reading line is
+                            // fixed to the screen; this one marks the moment.
+                            if let now = nowIndex {
+                                Rectangle()
+                                    .fill(Color.orange)
+                                    .frame(width: 2, height: height)
+                                    .offset(x: CGFloat(now) * Self.pointWidth)
+                            }
                         }
                         .frame(width: width, height: height)
                         // One layer instead of re-rasterising the curve on
@@ -163,8 +179,25 @@ struct TideFullScreen: View {
     }
 
     private var footer: some View {
-        Text("Heights are against mean sea level, so they will not match NOAA's, "
-             + "which are against mean lower low water. Scroll the water under the line.")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Label {
+                    Text("Now").font(.caption2)
+                } icon: {
+                    Rectangle().fill(.orange).frame(width: 10, height: 2)
+                }
+                Label {
+                    Text("Reading").font(.caption2)
+                } icon: {
+                    Rectangle().fill(Color.primary.opacity(0.45)).frame(width: 10, height: 2)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+
+            Text("Heights are against mean sea level, so they will not match NOAA's, "
+                 + "which are against mean lower low water. Scroll the water under the line.")
+        }
             .font(.caption2)
             .foregroundStyle(.secondary)
             .padding(.horizontal)

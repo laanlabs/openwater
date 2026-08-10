@@ -17,9 +17,18 @@ are not.
 **Debug builds carry the recordings; release builds must not.** They are
 bundle resources, and Xcode copies resources in every configuration — the
 `#if DEBUG` around `DevSeed` stops them being *loaded*, not *shipped*. A
-release build was verified to contain all ten. `scripts/testflight.sh` now
-strips them from the archive and fails the build if any survive, which is the
-only place that check belongs: it is the seam every upload passes through.
+release build was verified to contain all ten.
+
+`EXCLUDED_SOURCE_FILE_NAMES = "*.openwater"` on the app target's Release
+configuration keeps them out at the source, so it holds however the build is
+made — `xcodebuild`, Product ▸ Archive, or a CI runner. `scripts/testflight.sh`
+still strips and still fails on a stray, which is now belt-and-braces rather
+than the only line of defence: a script can be bypassed by anybody archiving
+from Xcode's own menu, and that is exactly the path somebody takes in a
+hurry.
+
+Verified both ways after the change: Release 0, Debug 10, and a clean debug
+install seeds all ten sessions.
 
 **The test bed.** `scripts/record-expectations.sh` re-measures every
 recording and writes both the JSON a build checks against and a readable

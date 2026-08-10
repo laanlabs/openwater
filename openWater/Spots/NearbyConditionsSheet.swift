@@ -502,6 +502,12 @@ struct NearbyConditionsSheet: View {
         metres < 100 ? "at this spot" : Format.distance(metres, unit: settings.units.distance)
     }
 
+    /// "3.7 mi WNW", or just "at this spot" when a bearing would be noise.
+    private func bearingAndDistance(_ resource: SpotGuideStore.GuideResource) -> String {
+        guard resource.metres >= 100 else { return near(resource.metres) }
+        return "\(near(resource.metres)) \(Format.cardinal(resource.bearing))"
+    }
+
     private func stationSubtitle(_ station: FreeStation) -> String {
         var parts = [near(station.metres)]
         if let observation = station.observation {
@@ -647,10 +653,18 @@ struct NearbyConditionsSheet: View {
             }
         }
 
-        let surfLinks = within(resources.filter { $0.kind == .surf })
+        let allSurfLinks = resources.filter { $0.kind == .surf }
+        let surfLinks = within(allSurfLinks)
         section("SURF FORECASTS IN THE GUIDE") {
             if surfLinks.isEmpty {
-                note(isSearching ? "Looking…" : "No surf or marine forecasts this close in the guide. Widen the search to look further.")
+                // Say how far the nearest one is rather than only that there
+                // is none in range — "none this close" and "none at all" are
+                // different answers, and the slider fixes exactly one of them.
+                note(isSearching
+                     ? "Looking…"
+                     : allSurfLinks.isEmpty
+                       ? "No surf or marine forecast pages for this stretch of coast in the guide yet."
+                       : "Nearest surf page is \(Format.distance(allSurfLinks[0].metres, unit: settings.units.distance)) away. Widen the search above to reach it.")
             } else {
                 card {
                     ForEach(Array(surfLinks.enumerated()), id: \.element.id) { index, link in
@@ -850,7 +864,10 @@ struct NearbyConditionsSheet: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     HStack(spacing: 5) {
-                        Text("\(near(resource.metres)) · \(resource.providerLabel)")
+                        // Which way, not only how far. Eleven map links from
+                        // one provider all carry the same name; the bank of
+                        // the river they point at is what separates them.
+                        Text("\(bearingAndDistance(resource)) · \(resource.providerLabel)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

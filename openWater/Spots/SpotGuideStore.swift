@@ -475,6 +475,13 @@ final class SpotGuideStore {
         /// From the spot it was asked about — filled in per query, not stored,
         /// because the same regional cache serves every spot in the region.
         var metres: Double = 0
+        /// And which way, for the same reason.
+        ///
+        /// Distance alone does not separate a row from the one under it when
+        /// eleven Surfline map links all resolve to the same name. "3.7 mi
+        /// WNW" and "4.3 mi ENE" are two different places on two different
+        /// banks of the river, which is the thing a rider is choosing between.
+        var bearing: Double = 0
 
         var id: String { url.absoluteString + name }
 
@@ -497,20 +504,34 @@ final class SpotGuideStore {
             let head = name.components(separatedBy: " — ").first ?? name
             guard Self.isOpaque(head) else { return name }
             if let fromPath = Self.nameFromPath(url) { return fromPath }
+            // A link to a point on a provider's map, named after the point.
+            // There is no name to recover — so say what it is, and let the
+            // distance and bearing beside it do the telling apart.
+            if Self.isEscapedCoordinate(head) { return "\(Self.brand(providerLabel)) map" }
             let tail = head.count > 10 ? String(head.suffix(6)) : head
             return "\(Self.brand(providerLabel)) \(tail)"
         }
 
-        /// An id pretending to be a name: no spaces, and either all digits or
-        /// a long hex run. Real names — "Rincon Point", "Golden Gate Bridge" —
-        /// fail every clause.
+        /// An id pretending to be a name: either all digits, a long hex run,
+        /// or an escaped coordinate. Real names — "Rincon Point", "Golden Gate
+        /// Bridge" — fail every clause.
         private static func isOpaque(_ text: String) -> Bool {
             let trimmed = text.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
+            guard !trimmed.isEmpty else { return false }
+            // Checked before the space rule, not after it. Surfline's map ids
+            // escape the comma between the two coordinates and leave the space
+            // that followed it — "%4045.71640%2C 121.51610%2C12Z" — so the
+            // one clause meant to catch them was the one clause they failed,
+            // and eleven rows in the Gorge printed their own URL fragment.
+            if isEscapedCoordinate(trimmed) { return true }
+            guard !trimmed.contains(" ") else { return false }
             if trimmed.allSatisfy(\.isNumber) { return true }
-            if trimmed.count >= 16, trimmed.allSatisfy(\.isHexDigit) { return true }
-            // Escaped coordinates, which the map links use: "%4033.78278%2C…"
-            return trimmed.hasPrefix("%")
+            return trimmed.count >= 16 && trimmed.allSatisfy(\.isHexDigit)
+        }
+
+        /// "%4033.78278%2C122.51…" — a percent-escaped `@lat,lon` map anchor.
+        private static func isEscapedCoordinate(_ text: String) -> Bool {
+            text.hasPrefix("%")
         }
 
         /// The longest hyphenated path segment — "bolinas-jetty" beats
@@ -519,7 +540,14 @@ final class SpotGuideStore {
             let ignored: Set<String> = ["surf-report", "surf-reports-forecasts-cams-map",
                                         "live-cams", "livecams", "spot", "station"]
             let best = url.pathComponents
-                .filter { $0.contains("-") && !ignored.contains($0) && !$0.contains("%") }
+                .filter { component in
+                    // A map anchor — "@45.71640,-121.51610,12z" — carries a
+                    // hyphen for the negative longitude and would otherwise
+                    // win this on length alone.
+                    guard !component.hasPrefix("@") else { return false }
+                    return component.contains("-") && !ignored.contains(component)
+                        && !component.contains("%")
+                }
                 .max { $0.count < $1.count }
             guard let best, best.count > 3 else { return nil }
             return best
@@ -582,18 +610,72 @@ final class SpotGuideStore {
         await nearbyResources(near: coordinate, region: nearestSpot(to: coordinate), radius: radius)
     }
 
+    /// Scoped by country, not by state.
+    ///
+    /// This used to filter on `adminRegionId`, which loses two whole classes
+    /// of resource. Measured against the live guide in August 2026:
+    ///
+    /// - **205 of 525 `surfSpots` carry no `adminRegionId` at all** — every
+    ///   one of them invisible to a region-scoped query, no matter how close.
+    /// - **Borders.** Standing at Hood River, six of the ten nearest surf
+    ///   pages are on the Washington bank of the Columbia — Swell City, the
+    ///   Hatchery, Bingen, four to seven kilometres away and across the river
+    ///   an Oregon query cannot see. Every rider in the Gorge is a rider in a
+    ///   border region, and so is most of Europe.
+    ///
+    /// Every document in these collections carries a `countryId`, so country
+    /// is both the wider net and the complete one. It is also cheap: the whole
+    /// of the United States is 434 documents across the three collections,
+    /// fetched once and cached, and `rank` still cuts it to the rider's radius.
+    /// Countries are unioned rather than picked, because a lake on a border is
+    /// the same problem one level up.
     private func nearbyResources(
         near here: Geo.Coordinate, region spot: GuideSpot?, radius: Double
     ) async -> [GuideResource] {
-        guard let spot else { return [] }
-        let (field, value): (String, String) = spot.adminRegionId.map { ("adminRegionId", $0) }
-            ?? ("countryId", spot.countryId ?? "")
-        guard !value.isEmpty else { return [] }
-
-        let cacheKey = "\(field)=\(value)"
-        if let cached = nearbyCache[cacheKey] {
-            return Self.rank(cached, from: here, radius: radius)
+        var scopes = countryScopes(near: here, anchor: spot).map { ("countryId", $0) }
+        // Only if the guide knows no country anywhere near — which means it
+        // knows no spot anywhere near either, and the admin region of whatever
+        // it did find is the best that can be done.
+        if scopes.isEmpty, let region = spot?.adminRegionId {
+            scopes = [("adminRegionId", region)]
         }
+        guard !scopes.isEmpty else { return [] }
+
+        var found: [GuideResource] = []
+        for (field, value) in scopes {
+            found += await resources(where: field, equals: value)
+        }
+
+        // A resource attached to two countries' spots comes back twice.
+        var seen = Set<String>()
+        let unique = found.filter { seen.insert($0.id).inserted }
+        return Self.rank(unique, from: here, radius: radius)
+    }
+
+    /// The countries worth searching: the anchor spot's, plus those of any
+    /// spot within a couple of hours' drive, nearest first and capped.
+    ///
+    /// Bounded by distance rather than by count so that a rider in the middle
+    /// of one country searches exactly one, and a rider on a border searches
+    /// both — without either paying for the other's case.
+    private func countryScopes(near here: Geo.Coordinate, anchor: GuideSpot?) -> [String] {
+        var nearest: [String: Double] = [:]
+        if let id = anchor?.countryId { nearest[id] = 0 }
+        for spot in spots {
+            guard let id = spot.countryId else { continue }
+            let metres = Geo.distance(here, .init(latitude: spot.latitude,
+                                                  longitude: spot.longitude))
+            guard metres < 200_000 else { continue }
+            if metres < nearest[id] ?? .greatestFiniteMagnitude { nearest[id] = metres }
+        }
+        return nearest.sorted { $0.value < $1.value }.prefix(3).map(\.key)
+    }
+
+    /// One scope's worth of the guide, fetched once and kept.
+    private func resources(where field: String, equals value: String) async -> [GuideResource] {
+        guard !value.isEmpty else { return [] }
+        let cacheKey = "\(field)=\(value)"
+        if let cached = nearbyCache[cacheKey] { return cached }
 
         let collections: [(String, SpotLink.Kind)] = [
             ("windStations", .wind), ("cameras", .camera), ("surfSpots", .surf),
@@ -627,7 +709,7 @@ final class SpotGuideStore {
         }
 
         nearbyCache[cacheKey] = found
-        return Self.rank(found, from: here, radius: radius)
+        return found
     }
 
     /// Measure and order for one spot. Distance is never cached — the region's
@@ -640,6 +722,7 @@ final class SpotGuideStore {
             .map { resource in
                 var measured = resource
                 measured.metres = Geo.distance(origin, resource.coordinate)
+                measured.bearing = Geo.bearing(from: origin, to: resource.coordinate)
                 return measured
             }
             .filter { $0.metres <= radius }

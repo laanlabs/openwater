@@ -26,7 +26,7 @@ Wingfoil · 1:01:18 · 16.94 km · 21.0 kn max
 
 ## Runs
 
-The segmenter found **43 stretches**, which group into **11 runs**, **1 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **43 stretches**, which group into **40 runs**, **30 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
 ### Downwind · 1
 
@@ -34,20 +34,49 @@ The segmenter found **43 stretches**, which group into **11 runs**, **1 of them 
 |--:|---:|---:|---:|---:|---:|---:|
 | 1 | 200 m | 0:31 | 12.6 kn | 14.3 kn | 56° | 1 |
 
-### Reaching · 10
+### Reaching · 39
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
-| 1 | 2.18 km | 5:09 | 13.7 kn | 20.3 kn | 93° | 6 |
-| 2 | 933 m | 2:23 | 12.7 kn | 19.9 kn | 92° | 3 |
-| 3 | 4.29 km | 9:57 | 14.0 kn | 20.5 kn | 90° | 10 |
-| 4 | 1.60 km | 3:33 | 14.6 kn | 21.0 kn | 88° | 3 |
-| 5 | 493 m | 1:11 | 13.5 kn | 19.2 kn | 86° | 2 |
-| 6 | 2.11 km | 4:58 | 13.7 kn | 20.5 kn | 96° | 6 |
-| 7 | 2.01 km | 4:47 | 13.6 kn | 20.2 kn | 90° | 5 |
-| 8 | 1.50 km | 3:44 | 13.0 kn | 20.4 kn | 89° | 5 |
-| 9 | 140 m | 0:24 | 11.3 kn | 17.4 kn | 88° | 1 |
-| 10 | 266 m | 0:45 | 11.5 kn | 13.6 kn | 94° | 1 |
+| 1 | 406 m | 1:08 | 11.6 kn | 17.2 kn | 111° | 1 |
+| 2 | 465 m | 0:59 | 15.3 kn | 17.3 kn | 96° | 1 |
+| 3 | 560 m | 1:15 | 14.5 kn | 20.3 kn | 91° | 2 |
+| 4 | 491 m | 1:03 | 15.1 kn | 16.9 kn | 82° | 1 |
+| 5 | 262 m | 0:32 | 15.9 kn | 19.5 kn | 86° | 1 |
+| 6 | 252 m | 0:41 | 12.0 kn | 16.2 kn | 113° | 1 |
+| 7 | 450 m | 0:57 | 15.3 kn | 17.4 kn | 82° | 1 |
+| 8 | 231 m | 0:39 | 11.5 kn | 19.9 kn | 82° | 1 |
+| 9 | 402 m | 0:49 | 15.9 kn | 19.6 kn | 103° | 1 |
+| 10 | 701 m | 1:30 | 15.1 kn | 17.1 kn | 87° | 1 |
+| 11 | 387 m | 0:54 | 13.9 kn | 19.2 kn | 87° | 1 |
+| 12 | 358 m | 0:50 | 13.9 kn | 16.1 kn | 91° | 1 |
+| 13 | 734 m | 1:32 | 15.5 kn | 20.5 kn | 98° | 1 |
+| 14 | 746 m | 1:40 | 14.5 kn | 17.0 kn | 88° | 1 |
+| 15 | 450 m | 1:07 | 13.1 kn | 20.4 kn | 81° | 2 |
+| 16 | 510 m | 1:14 | 13.4 kn | 15.9 kn | 93° | 2 |
+| 17 | 604 m | 1:18 | 15.1 kn | 21.0 kn | 97° | 1 |
+| 18 | 648 m | 1:23 | 15.2 kn | 16.8 kn | 84° | 1 |
+| 19 | 348 m | 0:46 | 14.7 kn | 19.2 kn | 82° | 1 |
+| 20 | 295 m | 0:40 | 14.4 kn | 16.7 kn | 93° | 1 |
+| 21 | 197 m | 0:28 | 13.7 kn | 19.2 kn | 79° | 1 |
+| 22 | 149 m | 0:19 | 15.3 kn | 17.1 kn | 112° | 1 |
+| 23 | 542 m | 1:13 | 14.4 kn | 15.9 kn | 96° | 1 |
+| 24 | 265 m | 0:37 | 13.9 kn | 19.6 kn | 88° | 1 |
+| 25 | 283 m | 0:40 | 13.8 kn | 15.4 kn | 96° | 1 |
+| 26 | 439 m | 0:57 | 15.0 kn | 20.5 kn | 90° | 1 |
+| 27 | 427 m | 0:57 | 14.5 kn | 17.0 kn | 93° | 1 |
+| 28 | 433 m | 1:10 | 12.0 kn | 19.5 kn | 91° | 1 |
+| 29 | 432 m | 0:55 | 15.3 kn | 17.0 kn | 90° | 1 |
+| 30 | 446 m | 0:56 | 15.5 kn | 19.9 kn | 86° | 1 |
+| 31 | 432 m | 0:56 | 15.0 kn | 16.6 kn | 92° | 1 |
+| 32 | 270 m | 0:38 | 13.8 kn | 20.2 kn | 90° | 1 |
+| 33 | 310 m | 0:48 | 12.5 kn | 19.9 kn | 89° | 1 |
+| 34 | 508 m | 1:12 | 13.7 kn | 15.3 kn | 90° | 1 |
+| 35 | 230 m | 0:28 | 16.0 kn | 19.7 kn | 85° | 1 |
+| 36 | 297 m | 0:44 | 13.1 kn | 15.1 kn | 103° | 1 |
+| 37 | 156 m | 0:20 | 15.2 kn | 20.4 kn | 80° | 1 |
+| 38 | 140 m | 0:24 | 11.3 kn | 17.4 kn | 88° | 1 |
+| 39 | 266 m | 0:45 | 11.5 kn | 13.6 kn | 94° | 1 |
 
 <!-- Anything below this line is yours. Re-recording will not touch it. -->
 

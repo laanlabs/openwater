@@ -22,7 +22,8 @@ final class GroupedRunTests: XCTestCase {
     /// this needs no new production API — widening one for a test's sake
     /// would be the tail wagging the dog.
     private func lane(
-        _ id: Int, _ point: PointOfSail, metres: Double, from start: TimeInterval
+        _ id: Int, _ point: PointOfSail, metres: Double, from start: TimeInterval,
+        heading: Double = 0
     ) throws -> SessionRibbon.Lane {
         let json: [String: Any] = [
             "id": id,
@@ -32,7 +33,7 @@ final class GroupedRunTests: XCTestCase {
             "distance": metres,
             "averageSpeed": 5,
             "maxSpeed": 6,
-            "heading": 0,
+            "heading": heading,
             "pointOfSail": point.rawValue,
             "trueWindAngle": point == .running ? 180 : (point == .closeHauled ? 45 : 90),
             "foilingFraction": 1,
@@ -252,6 +253,42 @@ final class GroupedRunTests: XCTestCase {
         ])
 
         XCTAssertEqual(runs.count, 2)
+    }
+
+    // MARK: Turning back the way you came
+
+    /// A reach out and a reach back are two runs to the rider and one point
+    /// of sail to the segmenter. This is why a session with forty-eight turns
+    /// could report eleven runs.
+    func testTurningBackTheWayYouCameStartsANewRun() throws {
+        // Same point of sail, opposite directions: 90° out, 270° back.
+        let outbound = try lane(0, .reaching, metres: 600, from: 0, heading: 90)
+        let back = try lane(1, .reaching, metres: 600,
+                            from: outbound.endElapsed, heading: 270)
+
+        let runs = GroupedRun.group([outbound, back], flights: [try flight(0, 0, 400)])
+
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertEqual(runs.map(\.isLinked), [false, true],
+                       "Gybed onto the way back without touching down")
+    }
+
+    /// And the case that must not break with it: weaving down a downwinder
+    /// changes heading constantly and is still one run down.
+    func testWeavingDownwindIsStillOneRun() throws {
+        // 40° either side of dead downwind, five weaves.
+        var weaves: [SessionRibbon.Lane] = []
+        var clock: TimeInterval = 0
+        for i in 0..<5 {
+            let lane = try lane(i, .running, metres: 400, from: clock,
+                                heading: i.isMultiple(of: 2) ? 140 : 220)
+            clock = lane.endElapsed
+            weaves.append(lane)
+        }
+
+        let runs = GroupedRun.group(weaves, flights: [try flight(0, 0, 500)])
+
+        XCTAssertEqual(runs.count, 1, "Eighty degrees apart is a weave, not a turn back")
     }
 
     // MARK: Linked runs

@@ -123,11 +123,19 @@ struct GroupedRun: Identifiable {
     /// kilometres as a single reach when the rider swam six times inside it.
     /// Pass `flights` to get that split; without them this groups on point of
     /// sail alone, which is what a non-foiling sport wants.
+    /// - Parameter reversal: degrees of heading change that end a run.
+    ///   A reach out and a reach back are two runs to the rider and one point
+    ///   of sail to the segmenter, which is why a session with forty-eight
+    ///   turns could report eleven runs. Weaving down a downwinder is not the
+    ///   same event: those headings sit maybe forty degrees either side of
+    ///   dead downwind, where a genuine reversal is nearer a hundred and
+    ///   eighty. The default leaves room on both sides of that gap.
     static func group(
         _ lanes: [SessionRibbon.Lane],
         flights: [Flight] = [],
         absorb: Double = 60,
-        touchdown: Double = 3
+        touchdown: Double = 3,
+        reversal: Double = 120
     ) -> [GroupedRun] {
         let flown = rides(from: flights, touchdown: touchdown)
 
@@ -135,16 +143,35 @@ struct GroupedRun: Identifiable {
         var kinds: [Kind] = []
         var rides: [Int?] = []
 
+        // The heading each open run is established on, as a distance-weighted
+        // circular mean. Short absorbed stretches are deliberately kept out of
+        // it: those are the turn itself, and letting a mid-gybe heading drag
+        // the mean around would blunt the very comparison it exists for.
+        var bearings: [(x: Double, y: Double)] = []
+
         for lane in lanes.sorted(by: { $0.startElapsed < $1.startElapsed }) {
             let kind = Kind(lane.pointOfSail)
             let ride = ride(of: lane, in: flown)
+            let brief = lane.distance < absorb
+            let reversed = bearings.last.map {
+                separation(between: atan2($0.x, $0.y) * 180 / .pi, and: lane.heading) > reversal
+            } ?? false
+
             if let current = kinds.last, ride == rides[rides.count - 1],
-               kind == current || lane.distance < absorb {
+               !(reversed && !brief),
+               kind == current || brief {
                 groups[groups.count - 1].append(lane)
+                if !brief {
+                    let radians = lane.heading * .pi / 180
+                    bearings[bearings.count - 1].x += sin(radians) * lane.distance
+                    bearings[bearings.count - 1].y += cos(radians) * lane.distance
+                }
             } else {
                 groups.append([lane])
                 kinds.append(kind)
                 rides.append(ride)
+                let radians = lane.heading * .pi / 180
+                bearings.append((sin(radians) * lane.distance, cos(radians) * lane.distance))
             }
         }
 
@@ -206,6 +233,12 @@ struct GroupedRun: Identifiable {
                                    lanes: group, isLinked: linked))
         }
         return runs
+    }
+
+    /// Degrees between two bearings, the short way round.
+    private static func separation(between a: Double, and b: Double) -> Double {
+        let raw = abs((a - b).truncatingRemainder(dividingBy: 360))
+        return raw > 180 ? 360 - raw : raw
     }
 
     /// Flights joined across momentary touchdowns.

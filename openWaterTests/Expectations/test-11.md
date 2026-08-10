@@ -77,9 +77,18 @@ The segmenter found **71 stretches**, which group into **34 runs**, **5 of them 
 
 ## What this session actually was
 
-_How many runs would you say you did? Where did you launch and land?
-Anything the numbers above get wrong?_
+**From the rider, 10 August 2026.** Ground truth, not inference.
 
-- Runs I'd count:
-- Conditions as I remember them:
-- What looks wrong:
+- **On foil continuously from about 15:45 to 42:24.** One ride, not thirty.
+- The falls being reported are too short to be falls. Getting back up takes
+  20–30 seconds at least; anything of one or two seconds is a spike or a
+  dip through the threshold, not a rider in the water.
+
+The analysis at the time said 35 flights and 67% on foil, and inside the
+rider's own window it found 30 flights separated by gaps of 3, 4, 4, 6, 6,
+7, 8, 9, 9, 10, 12, 13, 14, 15, 16, 17 and 18 seconds — with several
+"flights" lasting 3 to 10 seconds. Every one of those boundaries is
+invented.
+
+The one fall it found is real: 29 seconds at 42:27, which is where the rider
+says they came down.

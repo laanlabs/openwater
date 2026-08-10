@@ -106,7 +106,50 @@ save a rider measuring a river.
 
 ---
 
-## 2. What a run is, on a lapping session
+## 2. Flights break on dips that were never landings
+
+**A rider has given the ground truth and the current rule contradicts it.**
+
+On test-11 the rider was on the foil continuously from 15:45 to 42:24. Inside
+that window the detector finds **thirty flights**, separated by gaps of 3, 4,
+4, 6, 6, 7, 8, 9, 9, 10, 12, 13, 14, 15, 16, 17 and 18 seconds, with several
+"flights" lasting three to ten seconds. Every one of those boundaries is
+invented. It reports 35 flights and 67% on foil for a session that was one
+ride.
+
+The physical argument is the rider's: coming off the foil and getting going
+again takes twenty to thirty seconds. A gap shorter than that was a dip
+through the threshold — a lull, a gybe, the slow tack of a river, a short GPS
+sample — not a landing. `FoilDetector.minimumTouchdown` is 1.5 seconds, which
+is a claim about clipping a wingtip, not about a rider in the water.
+
+**What was tried, and why it was backed out.** Adding a `minimumRecovery`
+floor of 20 s and joining flights across shorter gaps works, and three core
+tests fail against it — two of them fairly, because they assert that
+four-second and fifteen-second dips are landings, which is below what the
+rider says is possible. The third failure is the real problem:
+
+> "A dry gybe scores above a wet one" starts passing for the wet gybe.
+
+Joining the flights makes `flyingMask` claim the rider was up during the gap,
+so a gybe that dipped to 1.8 m/s reads as having stayed on foil. It did not —
+at three and a half knots nobody is flying.
+
+That is the design point the fix turns on, and it was not obvious until the
+test failed: **how many rides** and **were you up at this instant** are two
+different questions off one mask today. The join belongs to the first;
+`flyingMask`, maneuver `stayedOnFoil`, and anything else asking about a
+moment must keep using the unjoined pieces.
+
+**Done looks like:** flights joined for counting and for run splitting, the
+instantaneous mask left alone, `minimumRecovery` exposed per sport beside the
+other thresholds, the two intuition-based tests rewritten against the rider's
+number, `analysisVersion` bumped, and all eleven expectations re-recorded —
+with test-2 and test-9 unmoved.
+
+---
+
+## 3. What a run is, on a lapping session
 
 Settled for downwinders and still open for laps.
 
@@ -127,7 +170,7 @@ answer belongs.
 
 ---
 
-## 3. A pass on a real device
+## 4. A pass on a real device
 
 The app runs on an iPhone 17 Pro and the radar loop was debugged on one in
 Maine, but most screens have only been walked in the simulator.
@@ -145,7 +188,7 @@ Maine, but most screens have only been walked in the simulator.
 
 ---
 
-## 4. The README is stale
+## 5. The README is stale
 
 The screenshots are current; the prose is not. It does not mention the
 Analysis tab, the pinned Runs map, the Conditions, radar and surf screens,

@@ -1286,3 +1286,224 @@ extension OpenMeteo {
         )
     }
 }
+
+// MARK: - Multi-day surf
+
+/// The swell, day by day, in the parts of the day a rider plans around.
+///
+/// A single "wave height" is the least useful way to describe surf. What
+/// decides a session is the combination — how big, how long the period, which
+/// way it is coming from, and what the wind is doing to it — and how that
+/// combination changes across a day. Hence bands rather than hours: nobody
+/// plans a dawn patrol to the hour, and twenty-four rows a day is a table
+/// nobody reads.
+struct SurfOutlook {
+
+    struct Band: Identifiable {
+        let start: Date
+        let label: String
+        let primary: SurfConditions.Train?
+        let secondary: SurfConditions.Train?
+        let windKn: Double?
+        let windFromDeg: Double?
+
+        var id: Date { start }
+
+        /// Wind relative to the swell it is blowing across.
+        ///
+        /// The single most important thing about a forecast day and the one
+        /// a height alone cannot tell you: the same four feet is clean at
+        /// dawn and unrideable by noon. Nil when either is unknown, because a
+        /// guess here would be worse than a blank.
+        var windEffect: WindEffect? {
+            guard let windFromDeg, let swellFrom = primary?.directionDeg,
+                  let windKn, windKn > 3
+            else { return nil }
+            let raw = abs((windFromDeg - swellFrom).truncatingRemainder(dividingBy: 360))
+            let between = raw > 180 ? 360 - raw : raw
+            // Wind from the same quarter as the swell is behind it, blowing
+            // onshore with it. Opposite is offshore, holding the face up.
+            switch between {
+            case ..<60: return .onshore
+            case ..<120: return .crossShore
+            default: return .offshore
+            }
+        }
+    }
+
+    enum WindEffect: String {
+        case offshore = "offshore"
+        case crossShore = "cross-shore"
+        case onshore = "onshore"
+
+        /// Green is not "good surf", it is "the wind is not spoiling it".
+        var isFavourable: Bool { self == .offshore }
+    }
+
+    struct Day: Identifiable {
+        let date: Date
+        let bands: [Band]
+        var id: Date { date }
+
+        var biggest: Double? { bands.compactMap { $0.primary?.heightM }.max() }
+        var longestPeriod: Double? { bands.compactMap { $0.primary?.periodS }.max() }
+    }
+
+    var days: [Day] = []
+    var timeZone: TimeZone?
+
+    /// Whether the wave model covers this water at all.
+    ///
+    /// Inland, the marine API answers with a full set of hours and a null in
+    /// every column — so the days exist and every band is empty. Rendered
+    /// naively that is five days of confident "flat" for a lake, which is a
+    /// forecast rather than an absence. Flat is a real answer at a real
+    /// coast; no model is a different thing and should say so.
+    var hasModel = false
+
+    var isEmpty: Bool { days.isEmpty || !hasModel }
+}
+
+extension OpenMeteo {
+
+    /// Swell and wind, hourly, for the next several days.
+    ///
+    /// Two calls because they are two APIs — the wave model and the weather
+    /// model — and the wind matters as much as the swell for deciding whether
+    /// to go. Run together so the wait is one call long, not two.
+    static func surfOutlook(at coordinate: Geo.Coordinate, days: Int = 5) async -> SurfOutlook {
+        async let marine = hourlyMarine(at: coordinate, days: days)
+        async let wind = hourlyWind(at: coordinate, days: days)
+        let (sea, air) = await (marine, wind)
+
+        guard !sea.times.isEmpty else { return SurfOutlook() }
+
+        var calendar = Calendar.current
+        if let zone = sea.zone { calendar.timeZone = zone }
+
+        // Four bands a day, named the way somebody talks about going out.
+        let bands: [(name: String, hours: Range<Int>)] = [
+            ("Dawn", 5..<9), ("Morning", 9..<12),
+            ("Afternoon", 12..<17), ("Evening", 17..<21),
+        ]
+
+        let grouped = Dictionary(grouping: sea.times.indices) {
+            calendar.startOfDay(for: sea.times[$0])
+        }
+
+        var out: [SurfOutlook.Day] = []
+        for day in grouped.keys.sorted() {
+            guard let indices = grouped[day] else { continue }
+            var built: [SurfOutlook.Band] = []
+
+            for band in bands {
+                let inBand = indices.filter {
+                    band.hours.contains(calendar.component(.hour, from: sea.times[$0]))
+                }
+                guard let middle = inBand[safe: inBand.count / 2] else { continue }
+
+                built.append(SurfOutlook.Band(
+                    start: sea.times[middle],
+                    label: band.name,
+                    primary: sea.train(at: middle, prefix: "swell_wave_"),
+                    secondary: sea.train(at: middle, prefix: "secondary_swell_wave_"),
+                    windKn: air.speeds[safe: air.index(of: sea.times[middle])] ?? nil,
+                    windFromDeg: air.directions[safe: air.index(of: sea.times[middle])] ?? nil
+                ))
+            }
+            if !built.isEmpty {
+                out.append(SurfOutlook.Day(date: day, bands: built))
+            }
+        }
+        let covered = sea.columns["swell_wave_height"]?.contains { $0 != nil } ?? false
+        return SurfOutlook(days: out, timeZone: sea.zone, hasModel: covered)
+    }
+
+    /// The wave model's hourly fields, kept as raw columns so a band can pull
+    /// any train out of them by name.
+    private struct HourlyMarine {
+        var times: [Date] = []
+        var zone: TimeZone?
+        var columns: [String: [Double?]] = [:]
+
+        func train(at index: Int, prefix: String) -> SurfConditions.Train? {
+            guard let height = columns["\(prefix)height"]?[safe: index] ?? nil,
+                  height > 0.05 else { return nil }
+            return SurfConditions.Train(
+                heightM: height,
+                periodS: columns["\(prefix)period"]?[safe: index] ?? nil,
+                directionDeg: columns["\(prefix)direction"]?[safe: index] ?? nil
+            )
+        }
+    }
+
+    private struct HourlyWind {
+        var times: [Date] = []
+        var speeds: [Double?] = []
+        var directions: [Double?] = []
+
+        func index(of date: Date) -> Int {
+            times.firstIndex { abs($0.timeIntervalSince(date)) < 1800 } ?? -1
+        }
+    }
+
+    private static func hourlyMarine(at coordinate: Geo.Coordinate,
+                                     days: Int) async -> HourlyMarine {
+        let fields = ["swell_wave_height", "swell_wave_period", "swell_wave_direction",
+                      "secondary_swell_wave_height", "secondary_swell_wave_period",
+                      "secondary_swell_wave_direction", "wave_height"]
+        var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: fields.joined(separator: ",")),
+            .init(name: "forecast_days", value: String(days)),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hourly = root["hourly"] as? [String: Any],
+              let stamps = hourly["time"] as? [Double]
+        else { return HourlyMarine() }
+
+        var out = HourlyMarine()
+        out.times = stamps.map { Date(timeIntervalSince1970: $0) }
+        if let identifier = root["timezone"] as? String {
+            out.zone = TimeZone(identifier: identifier)
+        }
+        for field in fields {
+            out.columns[field] = (hourly[field] as? [Any])?.map { $0 as? Double }
+        }
+        return out
+    }
+
+    private static func hourlyWind(at coordinate: Geo.Coordinate,
+                                   days: Int) async -> HourlyWind {
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: "wind_speed_10m,wind_direction_10m"),
+            .init(name: "wind_speed_unit", value: "kn"),
+            .init(name: "forecast_days", value: String(days)),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hourly = root["hourly"] as? [String: Any],
+              let stamps = hourly["time"] as? [Double]
+        else { return HourlyWind() }
+
+        var out = HourlyWind()
+        out.times = stamps.map { Date(timeIntervalSince1970: $0) }
+        out.speeds = (hourly["wind_speed_10m"] as? [Any])?.map { $0 as? Double } ?? []
+        out.directions = (hourly["wind_direction_10m"] as? [Any])?.map { $0 as? Double } ?? []
+        return out
+    }
+}

@@ -590,6 +590,25 @@ struct NearbyConditionsSheet: View {
 
         waveCard
 
+        // The multi-day view, which is the question a surf tab is really
+        // being asked: not "what is it doing" but "when should I go".
+        NavigationLink {
+            SurfForecastScreen(coordinate: coordinate, title: title)
+        } label: {
+            HStack {
+                Label("Multi-day forecast", systemImage: "calendar")
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+
         let mappableBuoys = buoys.filter { $0.metres <= radius }
         section("BUOYS", trailing: {
             if !mappableBuoys.isEmpty {

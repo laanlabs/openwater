@@ -489,10 +489,23 @@ public struct ManeuverDetector: Sendable {
             from: start, to: end, headingChange: headingChange, in: track, wind: wind
         )
 
-        // Did any flight span the whole turn?
-        let stayedOnFoil: Bool? = flights.isEmpty
-            ? nil
-            : flights.contains { $0.startElapsed <= startTime && $0.endElapsed >= endTime }
+        // Did any flight span the whole turn — without dipping inside it?
+        //
+        // Spanning alone is not enough any more. A flight is now what a rider
+        // counts as one ride, so it carries the brief dips it was joined
+        // across, and a turn that happens *inside* one of those dips is
+        // spanned by the flight while the rider was demonstrably not up. That
+        // is how a gybe dipping to three and a half knots came back dry: one
+        // flight either side, joined, and the turn in the gap between them.
+        //
+        // "How many rides" and "were you up here" are different questions and
+        // this is the second one.
+        let stayedOnFoil: Bool? = flights.isEmpty ? nil : flights.contains { flight in
+            guard flight.startElapsed <= startTime, flight.endElapsed >= endTime else { return false }
+            return !flight.dips.contains { dip in
+                dip.lowerBound < end && dip.upperBound > start
+            }
+        }
 
         let score = scoreManeuver(
             entrySpeed: entrySpeed,

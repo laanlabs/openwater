@@ -238,12 +238,23 @@ struct RibbonView: View {
     /// but eighteen rows is an answer to a question nobody asked. So the top
     /// level is the run, and the stretches inside it are one tap down.
     ///
-    /// Only when there is more than one leg. A single leg spans the whole
-    /// session, so the row reads "Downwind run · 8.03 km · 1:08:03" — the
-    /// header said twice, in place of the list of runs the rider opened this
-    /// tab to see. Legs earn their keep on a shuttle day and nowhere else.
+    /// Including when there is only one of them.
+    ///
+    /// That used to be excluded, on the grounds that a single leg spans the
+    /// whole session and so repeats the header. A rider then sent this back
+    /// about a trimmed downwind run:
+    ///
+    /// > this should be all one single down wind run with no jumps
+    ///
+    /// The tab was showing twenty-seven. The shape analysis had it right all
+    /// along — `downwinder`, two degrees off dead downwind, one leg from the
+    /// first fix to the last — and the count-of-two rule threw that away and
+    /// fell back to counting stretches between touchdowns on a course that
+    /// never changed tack. Repeating the header is a far smaller sin than
+    /// inventing twenty-six runs, and the row is worth its keep anyway: it is
+    /// what expands into the weaves inside it.
     private var showsLegs: Bool {
-        isPointToPoint && legs.count > 1 && order == .time && filter == .all
+        isPointToPoint && !legs.isEmpty && order == .time && filter == .all
     }
 
     /// The session as a rider counts it: consecutive stretches on the same
@@ -349,8 +360,14 @@ struct RibbonView: View {
     /// weaves across the bumps, which the segmenter is right to notice and
     /// nobody asked to see: eighteen rows under a single river crossing was
     /// the noise this screen kept being told about.
-    private func hasTacks(_ leg: SessionLeg) -> Bool {
-        type(of: leg) == .upwind && lanes(in: leg).count > 1
+    /// Whether tapping the row opens into what is inside it.
+    ///
+    /// Upwind legs, because the tacks are the whole point of a beat. And any
+    /// single-leg session, because then this row *is* the Runs tab: a rider
+    /// who opened the tab to see how the run was ridden should not be left
+    /// with one line and a screen of white under it.
+    private func canExpand(_ leg: SessionLeg) -> Bool {
+        lanes(in: leg).count > 1 && (type(of: leg) == .upwind || legs.count == 1)
     }
 
     private func lanes(in leg: SessionLeg) -> [SessionRibbon.Lane] {
@@ -401,7 +418,7 @@ struct RibbonView: View {
                                 }
                                 ForEach(Array(group.enumerated()), id: \.element.id) { index, leg in
                                     legRow(leg, number: index + 1, of: group.count)
-                                    if expandedLeg == leg.id, hasTacks(leg) {
+                                    if expandedLeg == leg.id, canExpand(leg) {
                                         ForEach(lanes(in: leg), id: \.id) { lane in
                                             laneRow(lane)
                                                 .padding(.leading, 14)
@@ -920,7 +937,7 @@ struct RibbonView: View {
     /// One run: how far, how long, how fast — and its tacks, when it has any.
     private func legRow(_ leg: SessionLeg, number: Int, of total: Int) -> some View {
         let kind = type(of: leg)
-        let tacks = hasTacks(leg) ? lanes(in: leg).count : 0
+        let tacks = canExpand(leg) ? lanes(in: leg).count : 0
         return Button {
             guard tacks > 0 else { return }
             withAnimation(.snappy) {
@@ -954,11 +971,12 @@ struct RibbonView: View {
 
                 Spacer(minLength: 8)
 
-                // Only tacks are worth counting. A downwind run's stretches
-                // are weaves, and saying "18" about one river crossing told
-                // the rider nothing they wanted.
+                // Named for what they are. On a beat they are tacks and the
+                // count is the point; on a downwind run they are weaves
+                // across the bumps, and calling eighteen of those "tacks"
+                // told the rider something that was not true.
                 if tacks > 0 {
-                    Text("\(tacks) tacks")
+                    Text(kind == .upwind ? "\(tacks) tacks" : "\(tacks) stretches")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

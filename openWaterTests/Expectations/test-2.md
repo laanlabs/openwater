@@ -19,7 +19,7 @@ Wingfoil · 23:27 · 6.19 km · 15.5 kn max
 
 | | |
 |---|---|
-| On foil | 78% · 15:47 across 7 flights |
+| On foil | 78% · 15:47 across 6 flights |
 | Turns | 15 |
 | Falls | 1 |
 | Jumps | 0 |

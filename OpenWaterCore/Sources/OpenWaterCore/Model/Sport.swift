@@ -216,6 +216,22 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// of which dropped below 8 knots.
     public var foilSmoothnessFraction: Double = 1.5
 
+    /// The shortest gap between two flights that could really have been a
+    /// fall, in seconds.
+    ///
+    /// Not a property of the trace — a property of the rider. Falling off,
+    /// coming up for air, swimming to the board, getting the wing or the
+    /// handle back and pumping onto the foil is not a two-second job. Under
+    /// this, two flights are one flight with a dip in it, whatever the speed
+    /// did. A rider put the number at twenty to thirty seconds; twenty is the
+    /// generous end of what they said, so the join only ever claims what they
+    /// would claim.
+    ///
+    /// Per sport because relaunching differs: a kite has to be relaunched off
+    /// the water and a windsurfer has to uphaul, both of which take longer
+    /// than climbing back onto a foil board.
+    public var foilMinimumRecovery: TimeInterval = 20
+
     /// Frequency band searched for pump / stroke cadence.
     public var cadenceBandHz: ClosedRange<Double>
 

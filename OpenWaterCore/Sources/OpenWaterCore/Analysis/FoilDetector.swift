@@ -24,13 +24,26 @@ public struct Flight: Hashable, Sendable, Codable, Identifiable {
     /// 0–1. Low when the call rests on speed alone with no motion data.
     public let confidence: Double
 
+    /// Sample ranges inside this flight where the speed dropped out of the
+    /// flying band but the rider never came off.
+    ///
+    /// A flight is what a rider counts as one ride; a dip is a moment inside
+    /// it. Both are true and they answer different questions, so both are
+    /// kept. "How many rides did I get" reads the flights; "was I up at this
+    /// instant" — the speed chart's shading, a gybe asking whether it stayed
+    /// dry — subtracts these.
+    ///
+    /// Empty for a flight that was never joined, which is most of them.
+    public var dips: [ClosedRange<Int>] = []
+
     public var duration: TimeInterval { endElapsed - startElapsed }
 
     public init(
         id: Int, startElapsed: TimeInterval, endElapsed: TimeInterval,
         startIndex: Int, endIndex: Int,
         distance: Double, averageSpeed: Double, maxSpeed: Double,
-        takeoffSpeed: Double, landingSpeed: Double, confidence: Double
+        takeoffSpeed: Double, landingSpeed: Double, confidence: Double,
+        dips: [ClosedRange<Int>] = []
     ) {
         self.id = id
         self.startElapsed = startElapsed
@@ -43,6 +56,41 @@ public struct Flight: Hashable, Sendable, Codable, Identifiable {
         self.takeoffSpeed = takeoffSpeed
         self.landingSpeed = landingSpeed
         self.confidence = confidence
+        self.dips = dips
+    }
+
+    /// Seconds inside this flight that the rider spent out of the flying band.
+    public func dippedSeconds(in track: Track) -> TimeInterval {
+        dips.reduce(0) { total, dip in
+            guard dip.lowerBound >= 0, dip.upperBound < track.count else { return total }
+            return total + (track.elapsed[dip.upperBound] - track.elapsed[dip.lowerBound])
+        }
+    }
+
+    // MARK: - Coding
+
+    /// Hand-written for one line of it: `dips` has to be optional on the way
+    /// in.
+    ///
+    /// A synthesised `Decodable` ignores property defaults and throws
+    /// `keyNotFound` — so adding this field with an `= []` default silently
+    /// made every archive and every stored summary written before it
+    /// undecodable. It fails at the top: the whole session refuses to load,
+    /// which reads as an empty library rather than as a new field.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        startElapsed = try c.decode(TimeInterval.self, forKey: .startElapsed)
+        endElapsed = try c.decode(TimeInterval.self, forKey: .endElapsed)
+        startIndex = try c.decode(Int.self, forKey: .startIndex)
+        endIndex = try c.decode(Int.self, forKey: .endIndex)
+        distance = try c.decode(Double.self, forKey: .distance)
+        averageSpeed = try c.decode(Double.self, forKey: .averageSpeed)
+        maxSpeed = try c.decode(Double.self, forKey: .maxSpeed)
+        takeoffSpeed = try c.decode(Double.self, forKey: .takeoffSpeed)
+        landingSpeed = try c.decode(Double.self, forKey: .landingSpeed)
+        confidence = try c.decode(Double.self, forKey: .confidence)
+        dips = try c.decodeIfPresent([ClosedRange<Int>].self, forKey: .dips) ?? []
     }
 }
 
@@ -159,6 +207,25 @@ public struct FoilDetector: Sendable {
     /// as a fraction of takeoff speed.
     public var shallowTouchdownFactor: Double
 
+    /// How long a rider needs to fall, swim to the board and get back up.
+    ///
+    /// Everything above is about the shape of the speed trace. This is about
+    /// the rider, and it is the one that a rider can simply tell us:
+    ///
+    /// > a person would not fall for just a second or two — it takes like at
+    /// > least 20 - 30 seconds to fall and get back up
+    ///
+    /// Below this, two flights are not two flights. Whatever happened between
+    /// them — a lull, a bad patch of fixes, a moment of sinking off the foil
+    /// and pumping straight back onto it — the rider did not go swimming and
+    /// come back, because there is not enough time in it. Measured on a
+    /// reported parawing run: one continuous ride, thirty "flights", and
+    /// twenty-four of the twenty-nine gaps between them under twenty seconds.
+    ///
+    /// This joins for *counting*. What happened moment to moment is kept on
+    /// `Flight.dips` and is not touched.
+    public var minimumRecovery: TimeInterval
+
     public init(
         thresholds: SportThresholds = SportThresholds.forSport(.wingfoil),
         entryFactor: Double = 1.0,
@@ -166,7 +233,8 @@ public struct FoilDetector: Sendable {
         minimumDuration: TimeInterval = 3,
         minimumTouchdown: TimeInterval = 1.5,
         shallowTouchdownWindow: TimeInterval = 5,
-        shallowTouchdownFactor: Double = 0.7
+        shallowTouchdownFactor: Double = 0.7,
+        minimumRecovery: TimeInterval = 20
     ) {
         self.thresholds = thresholds
         self.entryFactor = entryFactor
@@ -175,12 +243,14 @@ public struct FoilDetector: Sendable {
         self.minimumTouchdown = minimumTouchdown
         self.shallowTouchdownWindow = shallowTouchdownWindow
         self.shallowTouchdownFactor = shallowTouchdownFactor
+        self.minimumRecovery = minimumRecovery
     }
 
     public static func forSport(_ sport: Sport) -> FoilDetector {
         FoilDetector(
             thresholds: sport.thresholds,
-            minimumDuration: sport.thresholds.minFlightDuration
+            minimumDuration: sport.thresholds.minFlightDuration,
+            minimumRecovery: sport.thresholds.foilMinimumRecovery
         )
     }
 
@@ -290,7 +360,76 @@ public struct FoilDetector: Sendable {
             i = j + 1
         }
 
-        return flights
+        return join(flights, in: track)
+    }
+
+    /// Merge flights separated by less time than a fall takes.
+    ///
+    /// The pass above decides, sample by sample, whether the board is out of
+    /// the water — and it is good at that. This is a different question, and
+    /// the one a rider is actually asking when they read "30 flights": how
+    /// many times did I get up? A four-second drop out of the flying band on
+    /// a bumpy downwind run is not a ride ending and another beginning. It is
+    /// the trough between two bumps.
+    ///
+    /// The gap is not thrown away. It becomes a dip on the joined flight, so
+    /// the speed chart still shades it as off-foil and a gybe through it
+    /// still counts as wet. This is the whole design: one flight, and the
+    /// moments inside it still told honestly. Merging the two — letting the
+    /// join rewrite the instantaneous answer as well as the count — is what
+    /// made a gybe that dipped to three and a half knots score as dry.
+    func join(_ flights: [Flight], in track: Track) -> [Flight] {
+        guard minimumRecovery > 0, flights.count > 1 else { return flights }
+
+        var joined: [Flight] = []
+        for flight in flights {
+            guard var previous = joined.last,
+                  flight.startElapsed - previous.endElapsed < minimumRecovery
+            else {
+                joined.append(flight)
+                continue
+            }
+
+            var dips = previous.dips + flight.dips
+            if flight.startIndex > previous.endIndex {
+                dips.append(previous.endIndex...flight.startIndex)
+            }
+
+            let duration = flight.endElapsed - previous.startElapsed
+            let distance = track.cumulativeDistance[flight.endIndex]
+                - track.cumulativeDistance[previous.startIndex]
+
+            previous = Flight(
+                id: previous.id,
+                startElapsed: previous.startElapsed,
+                endElapsed: flight.endElapsed,
+                startIndex: previous.startIndex,
+                endIndex: flight.endIndex,
+                distance: distance,
+                averageSpeed: duration > 0 ? distance / duration : 0,
+                maxSpeed: max(previous.maxSpeed, flight.maxSpeed),
+                // The takeoff that started the ride, and the landing that
+                // ended it. The ones in between were never landings.
+                takeoffSpeed: previous.takeoffSpeed,
+                landingSpeed: flight.landingSpeed,
+                confidence: min(previous.confidence, flight.confidence),
+                dips: dips
+            )
+            joined[joined.count - 1] = previous
+        }
+
+        // Ids are a position in this list, and the list just got shorter.
+        return joined.enumerated().map { index, flight in
+            Flight(
+                id: index,
+                startElapsed: flight.startElapsed, endElapsed: flight.endElapsed,
+                startIndex: flight.startIndex, endIndex: flight.endIndex,
+                distance: flight.distance, averageSpeed: flight.averageSpeed,
+                maxSpeed: flight.maxSpeed, takeoffSpeed: flight.takeoffSpeed,
+                landingSpeed: flight.landingSpeed, confidence: flight.confidence,
+                dips: flight.dips
+            )
+        }
     }
 
     // MARK: - Summarise
@@ -305,7 +444,11 @@ public struct FoilDetector: Sendable {
             )
         }
 
-        let timeOnFoil = flights.reduce(0) { $0 + $1.duration }
+        // Dips come out. A joined flight spans its own troughs, and counting
+        // them as time on foil would inflate the headline number by exactly
+        // the seconds the rider was not on it.
+        let dipped = flights.reduce(0) { $0 + $1.dippedSeconds(in: track) }
+        let timeOnFoil = max(0, flights.reduce(0) { $0 + $1.duration } - dipped)
         let distanceOnFoil = flights.reduce(0) { $0 + $1.distance }
 
         // Time to first flight is measured from when the rider started moving,
@@ -367,6 +510,13 @@ public struct FoilDetector: Sendable {
     /// a session counts as having both.
     static let bimodalSpread: Double = 1.5
 
+    /// Was the rider up at this instant?
+    ///
+    /// Not the same question as "how many flights", and this is the one that
+    /// has to stay literal. Everything reading it — the speed chart's
+    /// shading, the map's colours, whether a gybe stayed dry, whether a glide
+    /// counts — is asking about a moment rather than about a ride, so a
+    /// flight's dips are subtracted back out.
     public func flyingMask(flights: [Flight], count: Int) -> [Bool] {
         var mask = [Bool](repeating: false, count: count)
         guard count > 0 else { return mask }
@@ -379,6 +529,16 @@ public struct FoilDetector: Sendable {
             let last = min(count - 1, f.endIndex)
             guard first <= last else { continue }
             for i in first...last { mask[i] = true }
+
+            for dip in f.dips {
+                let from = max(0, dip.lowerBound)
+                let to = min(count - 1, dip.upperBound)
+                guard from <= to else { continue }
+                // The ends of the dip are the last flying sample and the
+                // first flying sample after it, so only the interior is down.
+                guard from + 1 <= to - 1 else { continue }
+                for i in (from + 1)...(to - 1) { mask[i] = false }
+            }
         }
         return mask
     }

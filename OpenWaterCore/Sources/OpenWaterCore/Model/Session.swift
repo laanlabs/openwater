@@ -234,7 +234,11 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// invisible on every session a rider already has. That has now happened
     /// three times in one day — the glide floor, the pump threshold, and the
     /// smoothness bar — each time looking like the fix had not worked.
-    public static let currentVersion = 12
+    /// 13: flights joined across gaps too short to be a fall, with the gaps
+    /// kept on `Flight.dips` so the mask, `stayedOnFoil` and time on foil
+    /// still answer per-moment questions; the jump free-fall bar measured
+    /// against the session's own quiet instead of a fixed number.
+    public static let currentVersion = 13
 
     public let analysisVersion: Int
 

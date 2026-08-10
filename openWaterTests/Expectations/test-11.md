@@ -19,61 +19,60 @@ Parawing · 45:19 · 10.79 km · 15.6 kn max
 
 | | |
 |---|---|
-| On foil | 67% · 20:14 across 35 flights |
+| On foil | 67% · 20:14 across 10 flights |
 | Turns | 59 |
 | Falls | 1 |
-| Jumps | 10 |
+| Jumps | 0 |
 | Glides | 35 · 8:00 gliding |
 
 ## Runs
 
-The segmenter found **71 stretches**, which group into **34 runs**, **5 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **71 stretches**, which group into **16 runs**, **6 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
-### Downwind · 30
+### Downwind · 13
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
-| 1 | 127 m | 0:21 | 11.8 kn | 12.1 kn | 37° | 1 |
-| 2 | 209 m | 0:40 | 10.2 kn | 14.5 kn | 37° | 2 |
-| 3 | 106 m | 0:19 | 10.8 kn | 12.7 kn | 2° | 1 |
-| 4 | 417 m | 1:30 | 9.0 kn | 14.6 kn | 40° | 2 |
-| 5 | 135 m | 0:21 | 12.5 kn | 13.0 kn | 41° | 1 |
-| 6 | 142 m | 0:23 | 12.0 kn | 13.6 kn | 37° | 1 |
-| 7 | 111 m | 0:16 | 13.4 kn | 14.7 kn | 5° | 1 |
-| 8 | 108 m | 0:23 | 9.2 kn | 11.1 kn | 45° | 2 |
-| 9 | 209 m | 0:42 | 9.7 kn | 12.9 kn | 5° | 1 |
-| 10 | 107 m | 0:20 | 10.4 kn | 10.7 kn | 38° | 1 |
-| 11 | 81 m | 0:15 | 10.6 kn | 12.9 kn | 42° | 1 |
-| 12 | 326 m | 1:03 | 10.1 kn | 13.5 kn | 28° | 3 |
-| 13 | 269 m | 0:52 | 10.1 kn | 14.2 kn | 36° | 4 |
-| 14 | 195 m | 0:35 | 10.8 kn | 13.3 kn | 20° | 1 |
-| 15 | 61 m | 0:12 | 9.9 kn | 11.7 kn | 27° | 1 |
-| 16 | 87 m | 0:12 | 14.0 kn | 13.6 kn | 30° | 1 |
-| 17 | 141 m | 0:26 | 10.6 kn | 12.1 kn | 19° | 1 |
-| 18 | 430 m | 1:15 | 11.1 kn | 13.2 kn | 36° | 2 |
-| 19 | 134 m | 0:23 | 11.3 kn | 14.3 kn | 32° | 1 |
-| 20 | 59 m | 0:11 | 10.4 kn | 11.7 kn | 0° | 1 |
-| 21 | 58 m | 0:09 | 12.5 kn | 12.9 kn | 32° | 1 |
-| 22 | 162 m | 0:24 | 13.1 kn | 14.9 kn | 31° | 1 |
-| 23 | 864 m | 2:36 | 10.8 kn | 15.4 kn | 20° | 8 |
-| 24 | 219 m | 0:39 | 10.9 kn | 14.4 kn | 31° | 1 |
-| 25 | 362 m | 1:17 | 9.1 kn | 14.2 kn | 32° | 4 |
-| 26 | 250 m | 0:39 | 12.5 kn | 15.6 kn | 36° | 2 |
-| 27 | 966 m | 3:17 | 9.5 kn | 15.3 kn | 41° | 9 |
-| 28 | 387 m | 1:20 | 9.4 kn | 15.0 kn | 27° | 4 |
-| 29 | 196 m | 0:34 | 11.2 kn | 14.6 kn | 28° | 2 |
-| 30 | 376 m | 1:01 | 12.0 kn | 14.8 kn | 45° | 1 |
+| 1 | 336 m | 1:04 | 10.2 kn | 14.5 kn | 37° | 3 |
+| 2 | 106 m | 0:19 | 10.8 kn | 12.7 kn | 2° | 1 |
+| 3 | 417 m | 1:30 | 9.0 kn | 14.6 kn | 40° | 2 |
+| 4 | 135 m | 0:21 | 12.5 kn | 13.0 kn | 41° | 1 |
+| 5 | 200 m | 0:37 | 10.5 kn | 13.6 kn | 35° | 2 |
+| 6 | 219 m | 0:59 | 7.2 kn | 14.7 kn | 32° | 3 |
+| 7 | 1.48 km | 5:54 | 8.1 kn | 14.2 kn | 29° | 14 |
+| 8 | 430 m | 1:15 | 11.1 kn | 13.2 kn | 36° | 2 |
+| 9 | 134 m | 0:23 | 11.3 kn | 14.3 kn | 32° | 1 |
+| 10 | 1.42 km | 4:41 | 9.8 kn | 15.4 kn | 25° | 13 |
+| 11 | 1.58 km | 5:19 | 9.6 kn | 15.6 kn | 38° | 15 |
+| 12 | 583 m | 1:57 | 9.7 kn | 15.0 kn | 27° | 6 |
+| 13 | 376 m | 1:01 | 12.0 kn | 14.8 kn | 45° | 1 |
 
-### Reaching · 4
+### Reaching · 3
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
 | 1 | 69 m | 0:14 | 9.6 kn | 11.4 kn | 74° | 1 |
 | 2 | 121 m | 0:22 | 10.7 kn | 11.7 kn | 79° | 1 |
 | 3 | 79 m | 0:13 | 11.8 kn | 13.0 kn | 61° | 1 |
-| 4 | 53 m | 0:10 | 10.4 kn | 12.1 kn | 63° | 1 |
 
 <!-- Anything below this line is yours. Re-recording will not touch it. -->
+
+<!-- feedback:start -->
+
+## Feedback from the device
+
+_1 note(s), pulled from Firestore. Each carries the numbers the app was showing when it was written._
+
+### Runs — 2026-08-10 20:00
+
+> this should be all one single down wind run with no jumps
+
+_At the time: 25 downwind · 2 reaching · 0 upwind, from 59 stretches and 30 flights. Analysis v12, 1.0 (3)._
+
+**Recording attached** — `feedback/84f730eef1c94d9f8d50.openwater` in Storage. The rider chose to send it; treat it as their personal location data.
+
+<!-- feedback:end -->
+
 
 ## What this session actually was
 

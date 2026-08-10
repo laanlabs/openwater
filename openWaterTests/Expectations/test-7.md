@@ -18,7 +18,7 @@ Wingfoil · 1:25:58 · 29.88 km · 16.4 kn max
 
 | | |
 |---|---|
-| On foil | 93% · 1:15:22 across 16 flights |
+| On foil | 93% · 1:15:22 across 8 flights |
 | Turns | 125 |
 | Falls | 0 |
 | Jumps | 0 |
@@ -26,7 +26,7 @@ Wingfoil · 1:25:58 · 29.88 km · 16.4 kn max
 
 ## Runs
 
-The segmenter found **117 stretches**, which group into **114 runs**, **98 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **117 stretches**, which group into **113 runs**, **105 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
 ### Downwind · 5
 
@@ -124,7 +124,7 @@ The segmenter found **117 stretches**, which group into **114 runs**, **98 of th
 | 80 | 247 m | 0:40 | 12.0 kn | 14.2 kn | 71° | 1 |
 | 81 | 126 m | 0:21 | 11.7 kn | 13.0 kn | 73° | 1 |
 
-### Upwind · 28
+### Upwind · 27
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
@@ -153,9 +153,8 @@ The segmenter found **117 stretches**, which group into **114 runs**, **98 of th
 | 23 | 94 m | 0:16 | 11.4 kn | 13.0 kn | 103° | 1 |
 | 24 | 99 m | 0:16 | 12.0 kn | 12.4 kn | 100° | 1 |
 | 25 | 192 m | 0:31 | 12.0 kn | 13.7 kn | 109° | 1 |
-| 26 | 182 m | 0:26 | 13.6 kn | 15.1 kn | 121° | 1 |
-| 27 | 59 m | 0:09 | 12.7 kn | 12.6 kn | 100° | 1 |
-| 28 | 428 m | 1:04 | 13.0 kn | 15.2 kn | 102° | 1 |
+| 26 | 240 m | 0:49 | 9.5 kn | 15.1 kn | 110° | 2 |
+| 27 | 428 m | 1:04 | 13.0 kn | 15.2 kn | 102° | 1 |
 
 <!-- Anything below this line is yours. Re-recording will not touch it. -->
 

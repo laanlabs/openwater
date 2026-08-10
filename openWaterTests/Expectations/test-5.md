@@ -18,7 +18,7 @@ Wingfoil · 2:15:11 · 46.21 km · 17.8 kn max
 
 | | |
 |---|---|
-| On foil | 94% · 2:02:24 across 23 flights |
+| On foil | 94% · 2:02:24 across 7 flights |
 | Turns | 242 |
 | Falls | 2 |
 | Jumps | 0 |
@@ -26,7 +26,7 @@ Wingfoil · 2:15:11 · 46.21 km · 17.8 kn max
 
 ## Runs
 
-The segmenter found **246 stretches**, which group into **235 runs**, **212 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **246 stretches**, which group into **235 runs**, **228 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
 ### Downwind · 48
 

@@ -165,18 +165,49 @@ public struct JumpDetector: Sendable {
         return d
     }
 
+    /// The bar a sample has to be under to count as free fall, for this track.
+    ///
+    /// The fixed threshold is an absolute ceiling and, on its own, a fiction.
+    /// It assumes the rig reads a few m/s² of chop while riding, so that
+    /// anything under 2.5 must be air. Measured on a reported parawing
+    /// session: **982 of its 1,345 samples were under the bar**, the median
+    /// while flying was 1.62, and the free-fall clause was therefore true for
+    /// most of the session. What made nine of those stretches into "jumps"
+    /// was only the landing spike at the end — and on bumps, a chop hit
+    /// clears the spike bar all day. The rider's verdict was "no jumps"; one
+    /// of ours claimed nineteen metres of air.
+    ///
+    /// The fault is the same one `FoilDetector.smoothnessBar` was written for
+    /// and the same fix: a foil in the air is not quiet in absolute terms, it
+    /// is quiet *compared to this rider on this rig today*. So the bar comes
+    /// down to a fraction of the session's own quiet quarter. Real free fall
+    /// — the device unsupported, gravity removed — reads near zero and clears
+    /// it easily; ordinary smooth foiling does not.
+    func freeFallBar(for track: Track) -> Double {
+        let energies = track.points.compactMap(\.verticalAccelSD).sorted()
+        guard energies.count >= 8 else { return freeFallThreshold }
+        let quiet = energies[energies.count / 4]
+        return min(freeFallThreshold, quiet * Self.freeFallFraction)
+    }
+
+    /// How much quieter than the session's own quiet quarter a window has to
+    /// be. Half, which on a typical session puts the bar near 0.6 m/s² — low
+    /// enough that only something genuinely unsupported reaches it.
+    static let freeFallFraction: Double = 0.5
+
     public func detect(in track: Track) -> [Jump] {
         // Requires motion data. Without it we say nothing rather than guess.
         guard track.points.contains(where: { $0.verticalAccelPeak != nil }) else { return [] }
         guard track.count >= 3 else { return [] }
 
+        let bar = freeFallBar(for: track)
         var jumps: [Jump] = []
         var i = 0
 
         while i < track.count {
             guard let sd = track.points[i].verticalAccelSD,
                   let peak = track.points[i].verticalAccelPeak,
-                  sd <= freeFallThreshold, peak <= freeFallThreshold * 2,
+                  sd <= bar, peak <= bar * 2,
                   track.speed[i] >= minimumTakeoffSpeed else {
                 i += 1
                 continue
@@ -186,7 +217,7 @@ public struct JumpDetector: Sendable {
             var j = i
             while j + 1 < track.count,
                   let sd = track.points[j + 1].verticalAccelSD,
-                  sd <= freeFallThreshold,
+                  sd <= bar,
                   track.elapsed[j + 1] - track.elapsed[i] <= maximumAirtime {
                 j += 1
             }

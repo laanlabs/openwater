@@ -22,7 +22,7 @@ Parawing · 8:50 · 3.24 km · 15.8 kn max
 | On foil | 100% · 8:49 across 1 flights |
 | Turns | 18 |
 | Falls | 0 |
-| Jumps | 4 |
+| Jumps | 0 |
 | Glides | 23 · 5:07 gliding |
 
 ## Runs

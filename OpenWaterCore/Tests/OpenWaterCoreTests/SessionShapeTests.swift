@@ -395,11 +395,21 @@ struct ShallowDipTests {
         #expect(flightWithDip(to: 4.0, for: 4).count == 1)
     }
 
-    @Test("A deep four-second dip is a landing")
-    func deepDipLands() {
-        // Same length, but the speed fell away — which is what actually happens
-        // when a foil comes down, because the board is suddenly a boat.
-        #expect(flightWithDip(to: 1.5, for: 4).count == 2)
+    @Test("A deep four-second dip is kept, but does not end the ride")
+    func deepShortDipIsRecordedNotSplit() {
+        // The speed really did fall away — which is what happens when a foil
+        // comes down, because the board is suddenly a boat. But four seconds
+        // later the rider is up again, and nobody falls and recovers in four
+        // seconds. This used to be asserted as two flights, on nothing but
+        // intuition; a rider put the floor at twenty to thirty.
+        let flights = flightWithDip(to: 1.5, for: 4)
+        #expect(flights.count == 1, "four seconds is not a fall and a recovery")
+        #expect(flights.first?.dips.count == 1, "the dip is real and has to be kept")
+    }
+
+    @Test("A deep dip long enough to be a fall does split the flight")
+    func deepLongDipLands() {
+        #expect(flightWithDip(to: 1.5, for: 30).count == 2)
     }
 
     @Test("A long shallow dip is still a landing")

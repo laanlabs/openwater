@@ -19,7 +19,7 @@ Wingfoil · 1:49:02 · 24.45 km · 16.3 kn max
 
 | | |
 |---|---|
-| On foil | 59% · 53:39 across 21 flights |
+| On foil | 59% · 53:39 across 17 flights |
 | Turns | 70 |
 | Falls | 3 |
 | Jumps | 0 |
@@ -27,9 +27,9 @@ Wingfoil · 1:49:02 · 24.45 km · 16.3 kn max
 
 ## Runs
 
-The segmenter found **82 stretches**, which group into **29 runs**, **10 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **82 stretches**, which group into **27 runs**, **10 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
-### Downwind · 22
+### Downwind · 20
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
@@ -40,21 +40,19 @@ The segmenter found **82 stretches**, which group into **29 runs**, **10 of them
 | 5 | 1.03 km | 2:44 | 12.2 kn | 16.0 kn | 35° | 3 |
 | 6 | 1.87 km | 5:38 | 10.7 kn | 15.1 kn | 41° | 4 |
 | 7 | 613 m | 1:58 | 10.1 kn | 14.0 kn | 59° | 2 |
-| 8 | 1.13 km | 3:06 | 11.8 kn | 15.4 kn | 43° | 2 |
-| 9 | 327 m | 1:00 | 10.6 kn | 14.4 kn | 39° | 3 |
-| 10 | 1.01 km | 3:26 | 9.5 kn | 14.1 kn | 39° | 5 |
-| 11 | 586 m | 2:06 | 9.0 kn | 14.8 kn | 55° | 2 |
-| 12 | 863 m | 2:58 | 9.4 kn | 15.1 kn | 52° | 2 |
-| 13 | 435 m | 1:33 | 9.1 kn | 14.3 kn | 47° | 2 |
-| 14 | 535 m | 2:02 | 8.5 kn | 14.2 kn | 44° | 3 |
-| 15 | 103 m | 0:37 | 5.4 kn | 11.3 kn | 47° | 1 |
-| 16 | 152 m | 0:25 | 11.8 kn | 13.7 kn | 40° | 1 |
-| 17 | 189 m | 0:33 | 11.1 kn | 12.5 kn | 4° | 1 |
-| 18 | 1.47 km | 5:12 | 9.2 kn | 14.5 kn | 57° | 2 |
-| 19 | 625 m | 2:04 | 9.8 kn | 13.9 kn | 43° | 2 |
-| 20 | 838 m | 2:18 | 11.8 kn | 14.6 kn | 55° | 1 |
-| 21 | 2.62 km | 7:38 | 11.1 kn | 15.7 kn | 38° | 6 |
-| 22 | 157 m | 0:38 | 8.0 kn | 10.4 kn | 33° | 1 |
+| 8 | 2.46 km | 7:38 | 10.4 kn | 15.4 kn | 40° | 10 |
+| 9 | 586 m | 2:06 | 9.0 kn | 14.8 kn | 55° | 2 |
+| 10 | 863 m | 2:58 | 9.4 kn | 15.1 kn | 52° | 2 |
+| 11 | 435 m | 1:33 | 9.1 kn | 14.3 kn | 47° | 2 |
+| 12 | 535 m | 2:02 | 8.5 kn | 14.2 kn | 44° | 3 |
+| 13 | 103 m | 0:37 | 5.4 kn | 11.3 kn | 47° | 1 |
+| 14 | 152 m | 0:25 | 11.8 kn | 13.7 kn | 40° | 1 |
+| 15 | 189 m | 0:33 | 11.1 kn | 12.5 kn | 4° | 1 |
+| 16 | 1.47 km | 5:12 | 9.2 kn | 14.5 kn | 57° | 2 |
+| 17 | 625 m | 2:04 | 9.8 kn | 13.9 kn | 43° | 2 |
+| 18 | 838 m | 2:18 | 11.8 kn | 14.6 kn | 55° | 1 |
+| 19 | 2.62 km | 7:38 | 11.1 kn | 15.7 kn | 38° | 6 |
+| 20 | 157 m | 0:38 | 8.0 kn | 10.4 kn | 33° | 1 |
 
 ### Reaching · 7
 

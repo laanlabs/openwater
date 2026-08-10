@@ -60,17 +60,26 @@ struct FoilDetectorTests {
         #expect(flights.count == 1, "a 1 s touchdown split the flight into \(flights.count)")
     }
 
-    @Test("A real touchdown does split the flight")
-    func realTouchdownSplitsFlight() {
+    /// A flight, a slow patch of a given length, and a flight.
+    private func trackWithTouchdown(seconds: TimeInterval) -> Track {
         var raw = SyntheticTrack.generate(legs: [
             .init(speed: 9, heading: 90, duration: 60),
-            .init(speed: 2, heading: 90, duration: 15, transition: 2),
+            .init(speed: 2, heading: 90, duration: seconds, transition: 2),
             .init(speed: 9, heading: 90, duration: 60, transition: 3),
         ])
         for i in raw.indices {
             raw[i].verticalAccelSD = (raw[i].speed ?? 0) > 4.5 ? 0.4 : 2.5
         }
-        let t = builder.build(from: raw)
+        return builder.build(from: raw)
+    }
+
+    @Test("A real touchdown does split the flight")
+    func realTouchdownSplitsFlight() {
+        // Thirty seconds at walking pace. Long enough to have fallen, swum to
+        // the board and got back up, which is what makes it two rides rather
+        // than one — this test used to say fifteen, and a rider told us that
+        // is not enough time for anybody to do any of that.
+        let t = trackWithTouchdown(seconds: 30)
         let detector = FoilDetector.forSport(.wingfoil)
         let flights = detector.detect(in: t)
         #expect(flights.count == 2)
@@ -79,6 +88,31 @@ struct FoilDetectorTests {
         #expect(summary.touchdownCount == 1)
         #expect(summary.flightCount == 2)
         #expect(summary.foilingFraction > 0.5 && summary.foilingFraction < 1.0)
+    }
+
+    @Test("A touchdown too short to be a fall is one flight with a dip in it")
+    func briefLandingIsADipNotTwoRides() {
+        // The same shape, half the time in the water. Nobody falls and
+        // recovers in fifteen seconds, so this is one ride — but the fifteen
+        // seconds are real and every part of the analysis that asks about a
+        // moment rather than about a ride still has to see them.
+        let t = trackWithTouchdown(seconds: 15)
+        let detector = FoilDetector.forSport(.wingfoil)
+        let flights = detector.detect(in: t)
+
+        #expect(flights.count == 1, "fifteen seconds is not a fall and a recovery")
+        #expect(flights.first?.dips.count == 1, "the dip has to be kept, not swallowed")
+
+        let summary = detector.summarise(flights: flights, track: t, movingTime: t.duration)
+        #expect(summary.flightCount == 1)
+        #expect(summary.touchdownCount == 0)
+        #expect(summary.foilingFraction < 1.0,
+                "the dipped seconds are inside the flight and are not time on foil")
+
+        // And the instant-by-instant answer still says down in the middle.
+        let mask = detector.flyingMask(flights: flights, count: t.count)
+        let middle = t.count / 2
+        #expect(mask[middle] == false, "the mask must not claim the rider was up in the dip")
     }
 
     @Test("Non-foiling sports never report flights")

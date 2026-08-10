@@ -106,46 +106,67 @@ save a rider measuring a river.
 
 ---
 
-## 2. Flights break on dips that were never landings
+## 2. ~~Flights break on dips that were never landings~~ — done
 
-**A rider has given the ground truth and the current rule contradicts it.**
+**Fixed 10 August 2026, in `analysisVersion` 13.** Kept here because the
+design point cost two attempts to find and is easy to undo by accident.
 
-On test-11 the rider was on the foil continuously from 15:45 to 42:24. Inside
-that window the detector finds **thirty flights**, separated by gaps of 3, 4,
-4, 6, 6, 7, 8, 9, 9, 10, 12, 13, 14, 15, 16, 17 and 18 seconds, with several
-"flights" lasting three to ten seconds. Every one of those boundaries is
-invented. It reports 35 flights and 67% on foil for a session that was one
-ride.
+The rider's ground truth: on test-11 they were on the foil continuously, and
+the app reported thirty-five flights and, on the trimmed version they sent
+back, twenty-seven runs. Twenty-four of the twenty-nine gaps between those
+"flights" were under twenty seconds. The physical argument is theirs — coming
+off the foil and getting going again takes twenty to thirty seconds — so a
+shorter gap was a dip through the threshold, not a landing.
 
-The physical argument is the rider's: coming off the foil and getting going
-again takes twenty to thirty seconds. A gap shorter than that was a dip
-through the threshold — a lull, a gybe, the slow tack of a river, a short GPS
-sample — not a landing. `FoilDetector.minimumTouchdown` is 1.5 seconds, which
-is a claim about clipping a wingtip, not about a rider in the water.
+**The design point, which the first attempt got wrong.** Joining the flights
+outright made `flyingMask` claim the rider was up during the gaps, and a gybe
+that dipped to 1.8 m/s started scoring as dry. At three and a half knots
+nobody is flying. **How many rides** and **were you up at this instant** are
+two different questions, and they were reading one mask.
 
-**What was tried, and why it was backed out.** Adding a `minimumRecovery`
-floor of 20 s and joining flights across shorter gaps works, and three core
-tests fail against it — two of them fairly, because they assert that
-four-second and fifteen-second dips are landings, which is below what the
-rider says is possible. The third failure is the real problem:
+So the join keeps both answers. `FoilDetector.minimumRecovery` (per sport,
+`SportThresholds.foilMinimumRecovery`, 20 s) merges flights across gaps too
+short to be a fall, and the gap is kept on `Flight.dips`. `flyingMask`
+subtracts the dips; `summarise` subtracts their seconds from time on foil;
+`ManeuverDetector` requires a flight to span the turn *and* not dip inside
+it. Anything asking about a moment still gets the literal answer.
 
-> "A dry gybe scores above a wet one" starts passing for the wet gybe.
+What it moved: test-11 35 flights to 10 and 34 runs to 16, the reported
+trim 30 flights to 6, test-4 33 to 4, test-5 23 to 7. Time on foil is
+unchanged everywhere, which is the check that the dips are being subtracted.
+The two guardrails held — test-2 still six downwind runs, test-9 still one
+unbroken ride at 99%.
 
-Joining the flights makes `flyingMask` claim the rider was up during the gap,
-so a gybe that dipped to 1.8 m/s reads as having stayed on foil. It did not —
-at three and a half knots nobody is flying.
+---
 
-That is the design point the fix turns on, and it was not obvious until the
-test failed: **how many rides** and **were you up at this instant** are two
-different questions off one mask today. The join belongs to the first;
-`flyingMask`, maneuver `stayedOnFoil`, and anything else asking about a
-moment must keep using the unjoined pieces.
+## 2b. ~~A single-leg downwinder shows its stretches instead of itself~~ — done
 
-**Done looks like:** flights joined for counting and for run splitting, the
-instantaneous mask left alone, `minimumRecovery` exposed per sport beside the
-other thresholds, the two intuition-based tests rewritten against the rider's
-number, `analysisVersion` bumped, and all eleven expectations re-recorded —
-with test-2 and test-9 unmoved.
+Same report, same day. `RibbonView.showsLegs` required `legs.count > 1`, on
+the grounds that one leg spans the session and repeats the header. But a
+downwinder *is* one leg, and that rule threw away a correct answer the shape
+analysis had already worked out — `downwinder`, one leg, two degrees off dead
+downwind — in favour of counting stretches on a course that never changed
+tack. Repeating the header is a much smaller sin than inventing twenty-six
+runs. The row now expands into what is inside it when it is the only one, so
+nothing is lost.
+
+---
+
+## 2c. ~~Jumps invented from ordinary foiling~~ — done
+
+Same report: "no jumps", against nine. `JumpDetector` used a fixed free-fall
+bar of 2.5 m/s², and **982 of that session's 1,345 samples were under it** —
+the median while flying was 1.62. The free-fall clause was therefore true for
+most of the session, and the only thing making a stretch a "jump" was the
+landing spike at the end, which chop supplies all day. One of them claimed
+nineteen metres of air.
+
+Same fault and same fix as `FoilDetector.smoothnessBar`: a foil in the air is
+not quiet in absolute terms, it is quiet compared to this rider on this rig
+today. `freeFallBar(for:)` takes the session's own quiet quartile and halves
+it, never rising above the sport's ceiling. test-11 10 jumps to 0, test-9
+4 to 0, and `JumpDetectorTests` pins both directions — a silent window
+ending in a landing is still found.
 
 ---
 

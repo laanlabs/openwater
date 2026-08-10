@@ -914,6 +914,11 @@ struct Buoy: Identifiable, Hashable {
     let id: String
     let name: String
     let metres: Double
+    /// Where it is moored. Kept rather than discarded after the distance
+    /// sort, so a rider can be shown which piece of water it speaks for —
+    /// "12 km away" says nothing about whether it is outside the bar or
+    /// inside the bay, and those are different oceans.
+    var coordinate: Geo.Coordinate
     var reading: BuoyReading?
 
     var url: URL {
@@ -942,7 +947,8 @@ enum DataBuoyCenter {
             .filter { $0.metres < radius }
             .sorted { $0.metres < $1.metres }
             .prefix(limit)
-            .map { Buoy(id: $0.station.id, name: $0.station.name, metres: $0.metres) }
+            .map { Buoy(id: $0.station.id, name: $0.station.name,
+                        metres: $0.metres, coordinate: $0.station.coordinate) }
     }
 
     /// The index is XML with everything on the attributes of one tag, so each

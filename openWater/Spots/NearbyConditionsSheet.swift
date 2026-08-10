@@ -590,8 +590,18 @@ struct NearbyConditionsSheet: View {
 
         waveCard
 
-        section("BUOYS") {
-            let shownBuoys = buoys.filter { $0.metres <= radius }
+        let mappableBuoys = buoys.filter { $0.metres <= radius }
+        section("BUOYS", trailing: {
+            if !mappableBuoys.isEmpty {
+                NavigationLink {
+                    BuoyMapScreen(buoys: mappableBuoys, from: coordinate)
+                } label: {
+                    Label("Map", systemImage: "map")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+        }) {
+            let shownBuoys = mappableBuoys
             if shownBuoys.isEmpty {
                 note(isSearching
                      ? "Looking for buoys…"
@@ -682,8 +692,11 @@ struct NearbyConditionsSheet: View {
     }
 
     private func buoyRow(_ buoy: Buoy) -> some View {
-        Button {
-            openURL(buoy.url)
+        // To the buoy's own page rather than straight out to NDBC. Leaving
+        // the app was the only thing a rider could do with a buoy, which is a
+        // strange end for the one reading here that is actually measured.
+        NavigationLink {
+            BuoyDetailScreen(buoy: buoy, from: coordinate)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "dot.radiowaves.up.forward")
@@ -857,12 +870,28 @@ struct NearbyConditionsSheet: View {
     // MARK: Chrome
 
     @ViewBuilder
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        section(title, trailing: { EmptyView() }, content: content)
+    }
+
+    /// A section with a control beside its title — a map, usually, for the
+    /// rows that are places rather than numbers.
+    private func section<Content: View, Trailing: View>(
+        _ title: String,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 2)
+            HStack {
+                Text(title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                trailing()
+            }
+            .padding(.horizontal, 2)
             content()
         }
     }

@@ -271,7 +271,12 @@ struct NearbyConditionsSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        ProgressView()
+                        VStack(spacing: 12) {
+                            ForEach(0..<4, id: \.self) { _ in
+                                LoadingPlaceholder(height: 58, corner: 12)
+                            }
+                        }
+                        .padding(.horizontal)
                     }
                     if let weather = weather {
                         Text(weather.label + (weather.apparentC.map { ", feels \(Int($0.rounded()))°" } ?? ""))

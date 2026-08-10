@@ -396,12 +396,15 @@ struct ForecastScreen: View {
                 }
 
                 ZStack(alignment: .bottomLeading) {
-                    ChartGrid(peak: peak)
                     ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                         ModelTrace(speeds: model.speeds, peak: peak)
                             .stroke(Self.palette[index % Self.palette.count],
                                     style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
+                    // Over the traces, not under them. A rule you are reading
+                    // a value against is useless the moment four lines are
+                    // drawn across it.
+                    ChartGrid(peak: peak, times: outlook.hours, timeZone: outlook.timeZone)
                 }
                 .frame(height: 110)
 
@@ -650,6 +653,14 @@ struct ChartGrid: View {
     /// threshold, the same number the map pins and the wind cards use.
     var highlight: Double? = 15
 
+    /// The hours the chart spans, for vertical rules. Empty draws none.
+    ///
+    /// Without them a wind line is a shape with no when: a rider can see the
+    /// build but not whether it lands before or after they can get to the
+    /// beach, which is the only question the chart is being asked.
+    var times: [Date] = []
+    var timeZone: TimeZone?
+
     private var interval: Double {
         if let step { return step }
         return switch peak {
@@ -676,6 +687,8 @@ struct ChartGrid: View {
 
     var body: some View {
         GeometryReader { geometry in
+            timeRules(in: geometry.size)
+
             ForEach(levels, id: \.self) { level in
                 let isKey = highlight.map { abs($0 - level) < 0.01 } ?? false
                 ZStack(alignment: .topLeading) {
@@ -701,6 +714,53 @@ struct ChartGrid: View {
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// Vertical rules every six hours, with the day called out at midnight.
+    /// The spot's own calendar, so a rule labelled midnight is midnight
+    /// where the rider is sailing rather than where their phone thinks it is.
+    private var calendar: Calendar {
+        var calendar = Calendar.current
+        if let timeZone { calendar.timeZone = timeZone }
+        return calendar
+    }
+
+    private var marks: [Int] {
+        guard times.count > 1 else { return [] }
+        return times.indices.filter { calendar.component(.hour, from: times[$0]) % 6 == 0 }
+    }
+
+    @ViewBuilder
+    private func timeRules(in size: CGSize) -> some View {
+        if times.count > 1 {
+            ForEach(marks, id: \.self) { index in
+                let x = size.width * Double(index) / Double(times.count - 1)
+                let hour = calendar.component(.hour, from: times[index])
+                let isMidnight = hour == 0
+
+                Rectangle()
+                    .fill(Color(.systemGray3).opacity(isMidnight ? 0.55 : 0.3))
+                    .frame(width: isMidnight ? 1.5 : 1, height: size.height)
+                    .offset(x: x)
+
+                Text(stamp(times[index], midnight: isMidnight))
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    // Offset back by half its own width would need a
+                    // measurement; nudging right of the rule is enough and
+                    // never clips at the left edge.
+                    .offset(x: x + 3, y: size.height - 11)
+            }
+        }
+    }
+
+    private func stamp(_ date: Date, midnight: Bool) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate(midnight ? "EEE" : "ha")
+        return formatter.string(from: date)
     }
 
     private func label(_ level: Double) -> String {
@@ -772,7 +832,7 @@ struct ModelCompareScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             if isLoading {
-                ProgressView().frame(maxHeight: .infinity)
+                ForecastLoadingPlaceholder()
             } else if outlook.isEmpty {
                 ContentUnavailableView("No model data here",
                                        systemImage: "chart.xyaxis.line",
@@ -790,7 +850,7 @@ struct ModelCompareScreen: View {
         .task {
             outlook = await OpenMeteo.outlook(at: coordinate, days: 16, pastDays: 1)
             enabled = Set(outlook.models.map(\.id))
-            isLoading = false
+            withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
         }
     }
 

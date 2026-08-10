@@ -233,7 +233,10 @@ struct SpotDetailScreen: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        ProgressView()
+                        // Shaped like the wind reading it becomes, so the
+                        // card does not resize under the rider's thumb the
+                        // moment the forecast lands.
+                        LoadingPlaceholder(height: 22, width: 90)
                             .padding(.top, 6)
                     }
                 }

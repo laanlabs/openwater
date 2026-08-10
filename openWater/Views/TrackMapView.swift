@@ -545,13 +545,26 @@ struct TrackMapView: View {
         }
     }
 
+    /// How wide each state draws.
+    ///
+    /// Thinner than it was, by about a third. On a session of laps in one
+    /// small piece of water — test-5 is two and a quarter hours inside a few
+    /// hundred metres — five-point lines merge into a mat where no individual
+    /// pass can be picked out, which defeats the reason for drawing the track
+    /// rather than a summary. The hierarchy survives the reduction: flying is
+    /// still the widest thing on the map.
+    ///
+    /// Touch is unaffected. A tap is resolved by `nearestSample`, which
+    /// searches the track for the closest fix to where the finger landed —
+    /// it never hit-tests a stroke, so the target stays exactly as large as
+    /// it was.
     nonisolated static func lineWidth(for state: RideState) -> Double {
         switch state {
-        case .foiling: 5
-        case .riding: 3.5
-        case .slow: 2
-        case .stopped: 1.5
-        case .fall: 3
+        case .foiling: 3.2
+        case .riding: 2.4
+        case .slow: 1.5
+        case .stopped: 1.2
+        case .fall: 2.2
         }
     }
 

@@ -33,6 +33,8 @@ struct SpotsTabView: View {
     @State private var sharingLocation = false
     @State private var isShowingConditions = false
     @State private var localWeather: SpotWeather?
+    /// Drives the chip's fade while the weather is in flight.
+    @State private var isBreathing = false
     @State private var localWind: WindReading?
 
     /// A point the rider chose by holding a finger on the map.
@@ -124,6 +126,7 @@ struct SpotsTabView: View {
                                       coordinate: here)
             }
         }
+        .onAppear { isBreathing = true }
         .task(id: localWeatherKey) {
             guard let here = localCoordinate else { return }
             async let air = guide.weather(at: here)
@@ -318,15 +321,26 @@ struct SpotsTabView: View {
                         .font(.subheadline.weight(.bold))
                         .monospacedDigit()
                 } else {
+                    // Breathing rather than spinning. This chip is a corner of
+                    // a map somebody is panning, and a spinner in the corner of
+                    // a map reads as something being wrong; a symbol that
+                    // fades says "on its way" and gets out of the way.
                     Image(systemName: "cloud.sun")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .opacity(isBreathing ? 0.35 : 1)
+                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                                   value: isBreathing)
+                    LoadingPlaceholder(height: 13, width: 26, corner: 4)
                 }
                 if let reading = localWind {
                     Text("\(Int(reading.speedKn.rounded()))kn")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(reading.isFiring ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                         .monospacedDigit()
+                }
+                if localWeather == nil, localWind != nil {
+                    LoadingPlaceholder(height: 13, width: 22, corner: 4)
                 }
                 if pickedPoint != nil {
                     Divider().frame(height: 18)

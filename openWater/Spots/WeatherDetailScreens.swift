@@ -814,6 +814,12 @@ struct ModelCompareScreen: View {
     @State private var isLoading = true
     /// The hour under the finger, when there is one.
     @State private var probe: Int?
+    /// Drives the initial scroll. Anchor views cannot do it here: the ticks
+    /// are positioned with `.offset`, which moves them visually without
+    /// moving them in layout, so `scrollTo` saw every one of them at zero and
+    /// could only ever land on the first hour.
+    @State private var scroll = ScrollPosition()
+    @State private var hasLanded = false
 
     private static let palette: [Color] = [.blue, .orange, .green, .purple]
     /// Ten points an hour is roughly a day per screen — close enough to read
@@ -984,17 +990,8 @@ struct ModelCompareScreen: View {
                         // it the ends of the forecast are unreadable — the
                         // reading line can never reach them.
                         .padding(.horizontal, half)
-                        // Anchors every few hours, so the view can be sent to
-                        // "now" without scrolling by raw offset.
-                        .overlay(alignment: .leading) {
-                            ForEach(ticks, id: \.self) { hour in
-                                Color.clear
-                                    .frame(width: 1)
-                                    .id(hour)
-                                    .offset(x: CGFloat(hour) * Self.hourWidth)
-                            }
-                        }
                     }
+                    .scrollPosition($scroll)
                     .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                     // Whatever sits under the middle of the screen is what the
                     // header reads out. The line does not move; the forecast
@@ -1016,16 +1013,18 @@ struct ModelCompareScreen: View {
                             .frame(width: 1)
                             .allowsHitTesting(false)
                     }
-                    .onChange(of: outlook.hours.count) { _, _ in
-                        // Open on now, under the reading line. A day of
+                    .onChange(of: outlook.hours.count, initial: true) { _, _ in
+                        // Open with now under the reading line. A day of
                         // history stays to the left for anyone who wants to
                         // scroll back into it, but nobody opens a forecast to
                         // look at yesterday.
-                        guard let now = nowIndex else { return }
-                        let anchor = ticks.min {
-                            abs($0 - now) < abs($1 - now)
-                        } ?? 0
-                        scroller.scrollTo(anchor, anchor: .center)
+                        //
+                        // The probe reads `offset / hourWidth`, so the offset
+                        // that puts an hour under the line is simply that hour
+                        // times the column width — no anchor needed.
+                        guard !hasLanded, let now = nowIndex else { return }
+                        hasLanded = true
+                        scroll.scrollTo(x: CGFloat(now) * Self.hourWidth)
                     }
                     }
                 }
@@ -1163,6 +1162,12 @@ struct ModelCompareScreen: View {
 
         }
         .frame(width: width, height: height)
+        // Rasterised once instead of re-rasterising four full-width vector
+        // traces, a gust band and the rule set on every frame of a scroll.
+        // The plot only changes when a model is switched on or off, and a
+        // three-day forecast is three thousand points wide — redrawing that
+        // as paths at sixty frames a second is what made the drag stutter.
+        .drawingGroup()
     }
 
     /// The direction row.

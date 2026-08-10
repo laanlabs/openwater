@@ -216,7 +216,24 @@ struct SpotDetailScreen: View {
     /// Live wind and the next 12 hours. Model data, and it says so — the
     /// difference between a forecast grid and an anemometer on the beach is
     /// exactly the kind of thing this app refuses to blur.
+    /// The whole card opens the conditions, not just the weather glyph.
+    ///
+    /// A model estimate is the weakest reading on the page, so the useful
+    /// next move from it is always "show me something better" — the free
+    /// stations, the guide's meters, the cams. Making a 40-point symbol the
+    /// only way through to them hid the most-wanted action behind the
+    /// smallest target on the screen.
     private var windCard: some View {
+        Button {
+            isShowingConditions = true
+        } label: {
+            windCardBody
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens nearby stations, tides, surf and cameras")
+    }
+
+    private var windCardBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .lastTextBaseline) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -294,9 +311,10 @@ struct SpotDetailScreen: View {
     /// number leaves out — and, tapped, opens the sources that can do better:
     /// the free NOAA stations, the guide's meters, the cams.
     private var weatherButton: some View {
-        Button {
-            isShowingConditions = true
-        } label: {
+        // Not a Button any more: it sits inside one. A nested button steals
+        // the tap from the card around it, so the same action would only fire
+        // from part of the area it appears to cover.
+        Group {
             VStack(spacing: 1) {
                 if let weather {
                     Image(systemName: weather.symbol)
@@ -320,7 +338,6 @@ struct SpotDetailScreen: View {
             .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityLabel("Weather and nearby stations")
     }
 

@@ -100,6 +100,9 @@ struct NearbyConditionsSheet: View {
             }
         }
         .presentationDetents([.large])
+        .fullScreenCover(isPresented: $isShowingTideFullScreen) {
+            TideFullScreen(curve: tide, title: title)
+        }
         .task(id: taskKey) { await search() }
     }
 
@@ -527,10 +530,22 @@ struct NearbyConditionsSheet: View {
     /// against an ebb is a different run from the same one on a flood, and
     /// water temperature decides what a rider puts on, which in a lot of the
     /// places this app is used is a safety question rather than a comfort one.
+    @State private var isShowingTideFullScreen = false
+
     @ViewBuilder
     private var tideTab: some View {
         if !tide.isEmpty {
-            TideChart(curve: tide)
+            Button {
+                isShowingTideFullScreen = true
+            } label: {
+                VStack(alignment: .trailing, spacing: 4) {
+                    TideChart(curve: tide)
+                    Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .buttonStyle(.plain)
         } else if isSearching {
             note("Reading the tide…")
         }

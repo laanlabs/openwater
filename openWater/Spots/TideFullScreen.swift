@@ -1,0 +1,211 @@
+import OpenWaterCore
+import SwiftUI
+
+/// The tide, full screen, read against a line fixed to the middle.
+///
+/// The card version has to fit a curve for a day or more into the width of a
+/// phone, which is enough to see the shape and not enough to answer "what is
+/// it doing at four". This is the same interaction as the model comparison:
+/// the reading line does not move, the water does, and whatever sits under
+/// the line is what the header reads out.
+struct TideFullScreen: View {
+
+    let curve: TideCurve
+    let title: String
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppSettings.self) private var settings
+
+    /// The point under the reading line.
+    @State private var probe: Int?
+    @State private var scroll = ScrollPosition()
+    @State private var hasLanded = false
+
+    /// An hour of tide per this many points. The curve is sampled finely
+    /// enough to draw smoothly, which is far finer than anybody scrubs.
+    private static let pointWidth: CGFloat = 6
+
+    private var zone: TimeZone { curve.timeZone ?? .current }
+
+    private var span: (low: Double, high: Double) {
+        let low = curve.low, high = curve.high
+        let pad = max(0.1, (high - low) * 0.18)
+        return (low - pad, high + pad)
+    }
+
+    /// The sample nearest now, which is where the view opens.
+    private var nowIndex: Int? {
+        let moment = Date()
+        return curve.points.indices.min {
+            abs(curve.points[$0].at.timeIntervalSince(moment))
+                < abs(curve.points[$1].at.timeIntervalSince(moment))
+        }
+    }
+
+    private var reading: TideCurve.Point? {
+        probe.flatMap { curve.points[safe: $0] } ?? curve.now
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            chart
+            footer
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.headline)
+                        .padding(10)
+                        .background(.regularMaterial, in: Circle())
+                }
+                Spacer()
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Color.clear.frame(width: 44, height: 44)
+            }
+
+            if let reading {
+                Text(reading.at.formatted(.dateTime.weekday(.abbreviated)
+                    .month(.abbreviated).day().hour().minute()))
+                    .font(.subheadline.weight(.semibold))
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(Format.height(reading.metres, unit: settings.units.distance))
+                        .font(.system(size: 38, weight: .heavy, design: .rounded))
+                    Text(rising(at: probe) ? "rising" : "falling")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background)
+    }
+
+    private var chart: some View {
+        GeometryReader { outer in
+            let height = outer.size.height
+            let width = CGFloat(curve.points.count) * Self.pointWidth
+
+            ZStack {
+                GeometryReader { viewport in
+                    let half = viewport.size.width / 2
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        ZStack(alignment: .topLeading) {
+                            TideShape(points: curve.points, span: span)
+                                .fill(LinearGradient(
+                                    colors: [.teal.opacity(0.45), .teal.opacity(0.05)],
+                                    startPoint: .top, endPoint: .bottom))
+                            TideShape(points: curve.points, span: span, lineOnly: true)
+                                .stroke(.teal, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+
+                            dayRules(height: height)
+                        }
+                        .frame(width: width, height: height)
+                        // One layer instead of re-rasterising the curve on
+                        // every frame of a drag.
+                        .drawingGroup()
+                        .padding(.horizontal, half)
+                    }
+                    .scrollPosition($scroll)
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.contentOffset.x
+                    } action: { _, offset in
+                        let index = Int(offset / Self.pointWidth + 0.5)
+                        probe = min(max(0, index), max(0, curve.points.count - 1))
+                    }
+                    .onChange(of: curve.points.count, initial: true) { _, _ in
+                        guard !hasLanded, let now = nowIndex else { return }
+                        hasLanded = true
+                        scroll.scrollTo(x: CGFloat(now) * Self.pointWidth)
+                    }
+                }
+
+                // Fixed to the screen, not to the water.
+                Rectangle()
+                    .fill(Color.primary.opacity(0.45))
+                    .frame(width: 1)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    /// A rule at each midnight, so a curve two days long is readable as days.
+    @ViewBuilder
+    private func dayRules(height: CGFloat) -> some View {
+        var calendar = Calendar.current
+        let _ = calendar.timeZone = zone
+        let midnights = curve.points.indices.filter { index in
+            guard index > 0 else { return false }
+            return !calendar.isDate(curve.points[index].at,
+                                    inSameDayAs: curve.points[index - 1].at)
+        }
+
+        ForEach(midnights, id: \.self) { index in
+            let x = CGFloat(index) * Self.pointWidth
+            Rectangle()
+                .fill(Color(.systemGray3).opacity(0.6))
+                .frame(width: 1, height: height)
+                .offset(x: x)
+            Text(curve.points[index].at.formatted(.dateTime.weekday(.abbreviated)))
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .offset(x: x + 4, y: 4)
+        }
+    }
+
+    private var footer: some View {
+        Text("Heights are against mean sea level, so they will not match NOAA's, "
+             + "which are against mean lower low water. Scroll the water under the line.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background)
+    }
+
+    /// Whether the water is coming in at the sample under the line.
+    private func rising(at index: Int?) -> Bool {
+        guard let index, let here = curve.points[safe: index],
+              let next = curve.points[safe: index + 1] ?? curve.points[safe: index - 1]
+        else { return true }
+        return index + 1 < curve.points.count
+            ? next.metres >= here.metres
+            : here.metres >= next.metres
+    }
+}
+
+/// The tide as a filled shape across its own width.
+private struct TideShape: Shape {
+    let points: [TideCurve.Point]
+    let span: (low: Double, high: Double)
+    var lineOnly = false
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard points.count > 1 else { return path }
+        let range = max(0.001, span.high - span.low)
+
+        for (index, point) in points.enumerated() {
+            let x = rect.width * Double(index) / Double(points.count - 1)
+            let y = rect.height * (1 - (point.metres - span.low) / range)
+            if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
+            else { path.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        guard !lineOnly else { return path }
+
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        path.addLine(to: CGPoint(x: 0, y: rect.height))
+        path.closeSubpath()
+        return path
+    }
+}

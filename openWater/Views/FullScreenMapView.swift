@@ -24,7 +24,10 @@ struct FullScreenMapView: View {
     private var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
     @Environment(\.dismiss) private var dismiss
 
-    @State private var foilingOnly = false
+    /// The same three-way filter the Map tab has. A binary "Flying only"
+    /// could show the flying and the whole track but never the swim, which
+    /// is the half a rider is usually trying to find.
+    @State private var foilFilter: TrackMapView.FoilFilter = .everything
     @State private var showFalls = true
     @State private var showManeuvers = false
     @State private var showControls = true
@@ -71,7 +74,7 @@ struct FullScreenMapView: View {
                 showFalls: showFalls,
                 showManeuvers: showManeuvers,
                 minimumSpeed: minimumSpeed,
-                foilingOnly: foilingOnly,
+                foilFilter: foilFilter,
                 style: settings.mapStyle,
                 units: settings.units,
                 // Tapping the track used to isolate the run it belonged to.
@@ -103,11 +106,12 @@ struct FullScreenMapView: View {
                 }
             }
         }
-        // Tapping the map itself hides the chrome, so the track can be looked at
-        // with nothing on top of it.
-        .onTapGesture {
-            withAnimation(.snappy) { showControls.toggle() }
-        }
+        // Tapping the map used to hide every control. On a view that pans and
+        // zooms under the same finger that reads as the screen losing its
+        // buttons rather than as deliberate uncluttering, and the way back was
+        // another tap nobody knew to make. `showControls` stays so the chrome
+        // can still be animated away if a real gesture is ever chosen for it —
+        // nothing sets it false today.
         .statusBarHidden(!showControls)
         .fullScreenCover(isPresented: $isPlaying) {
             SessionPlaybackView(session: session, summary: summary)
@@ -150,7 +154,12 @@ struct FullScreenMapView: View {
             .accessibilityLabel("Replay session")
 
             Menu {
-                Toggle("Flying only", systemImage: "airplane", isOn: $foilingOnly)
+                Picker("Show", selection: $foilFilter) {
+                    ForEach(TrackMapView.FoilFilter.allCases) { filter in
+                        Label(filter.rawValue, systemImage: filter.symbol).tag(filter)
+                    }
+                }
+                Divider()
                 Toggle("Show falls", systemImage: "figure.fall", isOn: $showFalls)
                 Toggle("Show turns", systemImage: "arrow.triangle.turn.up.right.diamond", isOn: $showManeuvers)
                 Divider()

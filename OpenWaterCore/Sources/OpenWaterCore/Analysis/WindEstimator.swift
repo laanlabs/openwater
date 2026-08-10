@@ -187,7 +187,14 @@ public struct WindEstimator: Sendable {
 
         // A score near 1 means a clean no-go sector and a well-mirrored
         // distribution. Below about 0.35 the track simply is not telling us.
-        let confidence = max(0, min(1, (refinedScore - 0.2) / 0.65))
+        //
+        // Capped below 1 on purpose. A perfect score means the *track* is
+        // unambiguous, not that the wind is known — a rider sailing tidy
+        // reciprocals in a thirty-degree shift produces a beautiful
+        // distribution around a direction that was never true for more than
+        // a few minutes. Certainty belongs to a number somebody typed in, and
+        // the warning logic reads this value to decide how loudly to hedge.
+        let confidence = max(0, min(0.9, (refinedScore - 0.2) / 0.65))
         guard confidence > 0.12 else { return nil }
 
         return Wind(

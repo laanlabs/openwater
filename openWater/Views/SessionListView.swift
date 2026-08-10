@@ -182,6 +182,9 @@ struct SessionListView: View {
                     // three-hour FIT is a real amount of work — but it happens
                     // once, on an explicit action, and the result is cached.
                     library.save(track.makeSession(sport: sport))
+                    // Remembered, so the next file from the same source
+                    // arrives with the right thresholds already chosen.
+                    settings.lastSport = sport
                 }
             }
             .confirmationDialog(

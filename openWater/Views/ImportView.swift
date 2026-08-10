@@ -25,7 +25,14 @@ struct ImportView: View {
     init(imported: ImportedTrack, onImport: @escaping (Sport) -> Void) {
         self.imported = imported
         self.onImport = onImport
-        _sport = State(initialValue: imported.sportHint ?? .wingfoil)
+        // The rider's own last choice beats a constant. A file that does not
+        // name its sport is the common case, and sport sets every threshold
+        // for flights, turns and glides — so somebody importing a season of
+        // wingfoil sessions should not have to correct the picker each time.
+        _sport = State(initialValue: imported.sportHint
+                       ?? UserDefaults.standard.string(forKey: "lastSport")
+                           .flatMap(Sport.init(rawValue:))
+                       ?? .wingfoil)
     }
 
     private let ordered: [Sport] = [

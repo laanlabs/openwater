@@ -369,9 +369,16 @@ public struct FoilDetector: Sendable {
 
     public func flyingMask(flights: [Flight], count: Int) -> [Bool] {
         var mask = [Bool](repeating: false, count: count)
+        guard count > 0 else { return mask }
         for f in flights {
-            guard f.startIndex >= 0, f.endIndex < count else { continue }
-            for i in f.startIndex...f.endIndex { mask[i] = true }
+            // Clamped, not dropped. A flight whose end sits on the last
+            // sample is an ordinary session that stopped recording while
+            // still flying; dropping it silently erased the whole flight
+            // from the mask rather than trimming one index off it.
+            let first = max(0, f.startIndex)
+            let last = min(count - 1, f.endIndex)
+            guard first <= last else { continue }
+            for i in first...last { mask[i] = true }
         }
         return mask
     }

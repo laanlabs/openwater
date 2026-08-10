@@ -27,6 +27,19 @@ struct BuoyDetailScreen: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 if let reading = buoy.reading {
+                    if let direction = reading.meanDirectionDeg {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 15, weight: .bold))
+                                // Pointing the way the waves travel, which is
+                                // how an arrow on a swell chart is read.
+                                .rotationEffect(.degrees(direction + 180))
+                                .foregroundStyle(.teal)
+                            Text("Waves from \(Format.cardinal(direction))")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
                               spacing: 10) {
                         tile("Wave height", reading.waveHeightM.map {
@@ -34,6 +47,9 @@ struct BuoyDetailScreen: View {
                         })
                         tile("Dominant period", reading.dominantPeriodS.map {
                             "\(Int($0.rounded())) s"
+                        })
+                        tile("Mean direction", reading.meanDirectionDeg.map {
+                            "\(Format.cardinal($0)) \(Int($0.rounded()))°"
                         })
                         tile("Water", reading.waterTempC.map {
                             Format.temperature($0, unit: units.temperatureUnit)

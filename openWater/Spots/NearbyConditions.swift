@@ -929,6 +929,13 @@ struct Buoy: Identifiable, Hashable {
 struct BuoyReading: Hashable {
     let waveHeightM: Double?
     let dominantPeriodS: Double?
+    /// Mean wave direction, degrees the waves are coming *from*.
+    ///
+    /// The column a height leaves out. Two metres from the south-east and two
+    /// metres from the south-west are different days at the same beach, and
+    /// this is the one place on the screen where that is measured rather than
+    /// modelled.
+    var meanDirectionDeg: Double?
     let waterTempC: Double?
     let windKn: Double?
     let at: Date?
@@ -1029,6 +1036,7 @@ enum DataBuoyCenter {
         let reading = BuoyReading(
             waveHeightM: value(8),
             dominantPeriodS: value(9),
+            meanDirectionDeg: value(11),
             waterTempC: value(14),
             windKn: value(6).map { $0 * 3600 / 1852 },
             at: utc.date(from: stamp)

@@ -33,7 +33,12 @@ PROJECT="$(grep -oE 'project = "[^"]+"' openWater/Spots/SpotGuideStore.swift \
            | head -1 | sed -E 's/.*"([^"]+)"/\1/')"
 [ -n "$PROJECT" ] || { echo "Could not read the Firebase project id"; exit 1; }
 
-TOKEN="$(gcloud auth print-access-token 2>/dev/null || true)"
+# Either kind of gcloud credential will do. `gcloud auth login` and
+# `gcloud auth application-default login` write to different places, and a
+# machine that has only ever done the second — which is what the message
+# below asks for — has no token under the first.
+TOKEN="$(gcloud auth print-access-token 2>/dev/null \
+         || gcloud auth application-default print-access-token 2>/dev/null || true)"
 if [ -z "$TOKEN" ]; then
   cat <<'MSG'
 No gcloud access token.

@@ -12,6 +12,7 @@ either.
 """
 import json
 import pathlib
+import re
 import sys
 from collections import defaultdict
 
@@ -90,6 +91,28 @@ def splice(page, block):
         page.write_text(f"{text.rstrip()}\n\n{block}\n")
 
 
+def page_for(session):
+    """The expectation page a note belongs on, or None.
+
+    The title is not always the page name. A rider who trims a test session
+    is working on a copy — "test-11 (edited)", "test-5 copy", "test-8
+    (de-spiked)" — and the note is still about test-11, test-5, test-8. The
+    first version of this matched the title exactly and filed the most
+    useful report we have ever received as "unfiled", because the rider had
+    trimmed the session before writing it, which is exactly what somebody
+    does when they are being careful.
+    """
+    exact = EXPECTATIONS / f"{session}.md"
+    if exact.exists():
+        return exact
+    match = re.match(r"(test-\d+)\b", session.strip())
+    if match:
+        page = EXPECTATIONS / f"{match.group(1)}.md"
+        if page.exists():
+            return page
+    return None
+
+
 def main():
     raw = json.loads(pathlib.Path(sys.argv[1]).read_text())
     documents = raw.get("documents", [])
@@ -104,10 +127,10 @@ def main():
 
     unfiled = []
     for session, notes in sorted(by_session.items()):
-        page = EXPECTATIONS / f"{session}.md"
-        if page.exists():
+        page = page_for(session)
+        if page:
             splice(page, render(notes))
-            print(f"{session}: {len(notes)} note(s)")
+            print(f"{session}: {len(notes)} note(s) → {page.name}")
         else:
             unfiled.extend(notes)
             print(f"{session}: {len(notes)} note(s) — no page, filing as unfiled")

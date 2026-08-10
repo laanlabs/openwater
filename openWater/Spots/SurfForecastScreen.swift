@@ -29,12 +29,14 @@ struct SurfForecastScreen: View {
                 unavailable
             } else {
                 VStack(alignment: .leading, spacing: 18) {
+                    hourlyChart
                     ForEach(outlook.days) { day in
-                        dayCard(day)
+                        dayCard(day).padding(.horizontal)
                     }
                     provenance
+                        .padding(.horizontal)
                 }
-                .padding()
+                .padding(.vertical)
             }
         }
         .navigationTitle("Surf forecast")
@@ -43,6 +45,145 @@ struct SurfForecastScreen: View {
             outlook = await OpenMeteo.surfOutlook(at: coordinate)
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
         }
+    }
+
+    // MARK: The hourly chart
+
+    /// Swell and wind against one time axis, scrolling together.
+    ///
+    /// The shape is the point. A swell filling in over six hours and dropping
+    /// out overnight is a picture, and four rows a day cannot draw it — this
+    /// is the view somebody actually reads to pick a window, with the bands
+    /// below as the summary of what it says.
+    private var hourlyChart: some View {
+        let width = CGFloat(outlook.hours.count) * Self.hourWidth
+        let peakSwell = max(0.2, outlook.swellM.compactMap { $0 }.max() ?? 1)
+        let peakWind = max(5, outlook.windKn.compactMap { $0 }.max() ?? 15)
+
+        return ScrollView(.horizontal, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                dayHeaders(width: width)
+                bars(width: width, peak: peakSwell, series: outlook.swellM,
+                     tint: .teal, height: 92, label: swellLabel)
+                hourTicks(width: width)
+                bars(width: width, peak: peakWind, series: outlook.windKn,
+                     tint: Color(.systemBlue).opacity(0.55), height: 56, label: windLabel)
+                windArrows(width: width)
+            }
+            .frame(width: width, alignment: .leading)
+            .overlay(alignment: .leading) {
+                if let now = outlook.nowIndex {
+                    Rectangle()
+                        .fill(.orange)
+                        .frame(width: 2)
+                        .offset(x: CGFloat(now) * Self.hourWidth)
+                }
+            }
+            .drawingGroup()
+        }
+        .frame(height: 250)
+    }
+
+    private static let hourWidth: CGFloat = 9
+
+    private func dayHeaders(width: CGFloat) -> some View {
+        var calendar = Calendar.current
+        if let zone = outlook.timeZone { calendar.timeZone = zone }
+        let starts = outlook.hours.indices.filter {
+            $0 == 0 || !calendar.isDate(outlook.hours[$0],
+                                        inSameDayAs: outlook.hours[$0 - 1])
+        }
+        return ZStack(alignment: .topLeading) {
+            ForEach(starts, id: \.self) { index in
+                let x = CGFloat(index) * Self.hourWidth
+                Rectangle()
+                    .fill(.quaternary)
+                    .frame(width: 1, height: 18)
+                    .offset(x: x)
+                Text(dayName(outlook.hours[index]))
+                    .font(.caption.weight(.bold))
+                    .offset(x: x + 6)
+            }
+        }
+        .frame(height: 22, alignment: .topLeading)
+    }
+
+    /// A column per hour, with the value called out where it peaks.
+    private func bars(width: CGFloat, peak: Double, series: [Double?],
+                      tint: Color, height: CGFloat,
+                      label: @escaping (Int) -> String?) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            ForEach(outlook.hours.indices, id: \.self) { index in
+                let value = series[safe: index] ?? nil
+                Capsule()
+                    .fill(tint)
+                    .frame(width: Self.hourWidth - 3,
+                           height: max(1, height * (value ?? 0) / peak))
+                    .offset(x: CGFloat(index) * Self.hourWidth)
+            }
+            // Every sixth hour carries its number, which is enough to read a
+            // scale off without a stack of labels.
+            ForEach(Array(stride(from: 0, to: outlook.hours.count, by: 6)), id: \.self) { index in
+                if let text = label(index) {
+                    Text(text)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .offset(x: CGFloat(index) * Self.hourWidth,
+                                y: -height * ((series[safe: index] ?? nil) ?? 0) / peak - 10)
+                }
+            }
+        }
+        .frame(height: height + 12, alignment: .bottomLeading)
+    }
+
+    private func hourTicks(width: CGFloat) -> some View {
+        var calendar = Calendar.current
+        if let zone = outlook.timeZone { calendar.timeZone = zone }
+        let ticks = outlook.hours.indices.filter {
+            calendar.component(.hour, from: outlook.hours[$0]) % 6 == 0
+        }
+        return ZStack(alignment: .topLeading) {
+            ForEach(ticks, id: \.self) { index in
+                Text("\(calendar.component(.hour, from: outlook.hours[index]))")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                    .offset(x: CGFloat(index) * Self.hourWidth - 2)
+            }
+        }
+        .frame(height: 12, alignment: .topLeading)
+    }
+
+    private func windArrows(width: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(stride(from: 0, to: outlook.hours.count, by: 6)), id: \.self) { index in
+                if let from = outlook.windFromDeg[safe: index] ?? nil {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 9, weight: .bold))
+                        .rotationEffect(.degrees(from + 180))
+                        .foregroundStyle(.secondary)
+                        .offset(x: CGFloat(index) * Self.hourWidth - 3)
+                }
+            }
+        }
+        .frame(height: 16, alignment: .topLeading)
+    }
+
+    private func swellLabel(_ index: Int) -> String? {
+        guard let value = outlook.swellM[safe: index] ?? nil else { return nil }
+        return Format.height(value, unit: units.distance)
+    }
+
+    private func windLabel(_ index: Int) -> String? {
+        guard let value = outlook.windKn[safe: index] ?? nil else { return nil }
+        return "\(Int(value.rounded()))"
+    }
+
+    private func dayName(_ date: Date) -> String {
+        var calendar = Calendar.current
+        if let zone = outlook.timeZone { calendar.timeZone = zone }
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
+        return date.formatted(.dateTime.weekday(.abbreviated).month(.defaultDigits).day())
     }
 
     // MARK: A day
@@ -161,14 +302,6 @@ struct SurfForecastScreen: View {
             .foregroundStyle(wind ? AnyShapeStyle(.secondary)
                              : AnyShapeStyle(secondary ? Color.teal.opacity(0.6) : Color.teal))
             .opacity(fromDegrees == nil ? 0.25 : 1)
-    }
-
-    private func dayName(_ date: Date) -> String {
-        var calendar = Calendar.current
-        if let zone = outlook.timeZone { calendar.timeZone = zone }
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInTomorrow(date) { return "Tomorrow" }
-        return date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
     }
 
     // MARK: States

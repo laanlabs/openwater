@@ -47,6 +47,7 @@ struct NearbyConditionsSheet: View {
     @State private var alerts: [WeatherAlert] = []
     @State private var tides: [TideStation] = []
     @State private var buoys: [Buoy] = []
+    @State private var surfOutlook = SurfOutlook()
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var waves: [WaveHour] = []
     @State private var full = WeatherDetail()
@@ -590,6 +591,14 @@ struct NearbyConditionsSheet: View {
 
         waveCard
 
+        if !surfOutlook.isEmpty {
+            section("NEXT FEW DAYS") {
+                card {
+                    SurfOverviewStrip(outlook: surfOutlook)
+                }
+            }
+        }
+
         // The multi-day view, which is the question a surf tab is really
         // being asked: not "what is it doing" but "when should I go".
         NavigationLink {
@@ -981,6 +990,11 @@ struct NearbyConditionsSheet: View {
         (outlook, waves, full) = await (ahead, sea, everything)
         (surf, tide) = await (sea2, water)
         isSearching = false
+
+        // The multi-day outlook is two more calls, so it lands after the tab
+        // is usable rather than holding it blank — the strip appears when it
+        // arrives, in space the rest of the tab is not occupying.
+        surfOutlook = await OpenMeteo.surfOutlook(at: here)
 
         // Predictions and buoy rows come second, for the same reason station
         // readings do: the lists are useful the moment they exist, and half a

@@ -1360,6 +1360,27 @@ struct SurfOutlook {
     var days: [Day] = []
     var timeZone: TimeZone?
 
+    /// The hourly series behind the bands.
+    ///
+    /// Bands answer "when should I go"; the hours answer "what is it doing" —
+    /// a swell filling in over six hours is a shape, and four rows a day
+    /// cannot draw it. Kept alongside rather than instead, because the two
+    /// screens want different things from the same fetch.
+    var hours: [Date] = []
+    var swellM: [Double?] = []
+    var periodS: [Double?] = []
+    var swellFromDeg: [Double?] = []
+    var windKn: [Double?] = []
+    var windFromDeg: [Double?] = []
+
+    /// The hour nearest now, for the marker every surf chart carries.
+    var nowIndex: Int? {
+        let moment = Date()
+        return hours.indices.min {
+            abs(hours[$0].timeIntervalSince(moment)) < abs(hours[$1].timeIntervalSince(moment))
+        }
+    }
+
     /// Whether the wave model covers this water at all.
     ///
     /// Inland, the marine API answers with a full set of hours and a null in
@@ -1370,6 +1391,7 @@ struct SurfOutlook {
     var hasModel = false
 
     var isEmpty: Bool { days.isEmpty || !hasModel }
+
 }
 
 extension OpenMeteo {
@@ -1424,7 +1446,23 @@ extension OpenMeteo {
             }
         }
         let covered = sea.columns["swell_wave_height"]?.contains { $0 != nil } ?? false
-        return SurfOutlook(days: out, timeZone: sea.zone, hasModel: covered)
+
+        // The wind series resampled onto the wave model's hours, so the two
+        // can be drawn against one axis. They agree in practice; matching by
+        // time rather than by index keeps that from being an assumption.
+        let windSpeeds = sea.times.map { air.speeds[safe: air.index(of: $0)] ?? nil }
+        let windAngles = sea.times.map { air.directions[safe: air.index(of: $0)] ?? nil }
+
+        return SurfOutlook(
+            days: out, timeZone: sea.zone,
+            hours: sea.times,
+            swellM: sea.columns["swell_wave_height"] ?? [],
+            periodS: sea.columns["swell_wave_period"] ?? [],
+            swellFromDeg: sea.columns["swell_wave_direction"] ?? [],
+            windKn: windSpeeds,
+            windFromDeg: windAngles,
+            hasModel: covered
+        )
     }
 
     /// The wave model's hourly fields, kept as raw columns so a band can pull

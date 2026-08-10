@@ -74,6 +74,21 @@ xcodebuild -project openWater.xcodeproj \
 # disagreed before: Xcode silently drops UIBackgroundModes supplied as a build
 # setting, and a watch app missing WKBackgroundModes builds and runs and is then
 # rejected at upload.
+# The test recordings ride along with debug builds so the analysis can be
+# compared against sessions the pages describe. They are bundle resources, and
+# Xcode copies resources in every configuration — the `#if DEBUG` around the
+# seeding code keeps them from being *loaded* in release and does nothing to
+# keep them from being *shipped*. Verified: a release build contained all ten.
+#
+# They are other riders' GPS traces. Stripped here, where the archive is
+# already being opened, and then checked for below so a change to this script
+# cannot quietly stop stripping them.
+echo "==> Removing test recordings from the archive"
+APP="$ARCHIVE/Products/Applications/openWater.app"
+REMOVED=$(find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) | wc -l | tr -d ' ')
+find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) -delete
+echo "    removed $REMOVED"
+
 echo "==> Verifying the archive"
 python3 - "$ARCHIVE" <<'PY'
 import plistlib, sys, pathlib
@@ -83,6 +98,16 @@ phone = plistlib.loads((app / "Info.plist").read_bytes())
 watch_plists = list((app / "Watch").glob("*.app/Info.plist"))
 
 problems = []
+
+# Nothing that looks like somebody's session may leave this machine. The
+# stripping above should already have handled it; this is the check that makes
+# the stripping trustworthy rather than assumed.
+strays = [p for p in archive.rglob("*")
+          if p.suffix.lower() in {".openwater", ".gpx", ".fit", ".tcx"}]
+if strays:
+    problems.append("recordings left in the archive: "
+                    + ", ".join(sorted(p.name for p in strays)[:5]))
+
 for key in ("NSLocationWhenInUseUsageDescription",
             "NSLocationAlwaysAndWhenInUseUsageDescription",
             "NSMotionUsageDescription"):

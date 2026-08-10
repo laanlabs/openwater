@@ -14,6 +14,13 @@ files in a local `testdata/` as `test-1.gpx` … `test-10.gpx`; the
 expectations and the pages that describe them are committed, the recordings
 are not.
 
+**Debug builds carry the recordings; release builds must not.** They are
+bundle resources, and Xcode copies resources in every configuration — the
+`#if DEBUG` around `DevSeed` stops them being *loaded*, not *shipped*. A
+release build was verified to contain all ten. `scripts/testflight.sh` now
+strips them from the archive and fails the build if any survive, which is the
+only place that check belongs: it is the seam every upload passes through.
+
 **The test bed.** `scripts/record-expectations.sh` re-measures every
 recording and writes both the JSON a build checks against and a readable
 page per session. `scripts/load-simulator.sh` puts the whole set on a
@@ -25,7 +32,9 @@ simulator. A debug build carries them itself — see `openWater/DevSeed/`.
 
 Three things are finished on this side and waiting.
 
-**TestFlight has still not shipped.** Riders on the current build cannot open
+**TestFlight has still not shipped.** *(The recordings-in-release problem
+below is fixed — `scripts/testflight.sh` strips them and fails if any
+survive.)* Riders on the current build cannot open
 *any* session — fixed on `main` since 7 August, along with everything since.
 `scripts/testflight.sh`. `analysisVersion` has moved 4 → 12, so every stored
 session re-analyses on first open; that is the intended path.

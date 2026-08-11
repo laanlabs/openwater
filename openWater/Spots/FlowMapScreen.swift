@@ -7,14 +7,15 @@ import SwiftUI
 /// A single forecast says what the wind is here; a flow map says what it is
 /// doing — the sea breeze filling from the south shore, the gradient dying
 /// in the lee of the hills, the line where two of them argue. This is that
-/// view from the same free model the rest of the sheet reads: a grid of
-/// arrows over the water, coloured by strength, with a scrubber through the
-/// next day.
+/// view from the same free model the rest of the sheet reads: a colour wash
+/// of strength over the water with the model's own arrows on top, and a
+/// scrubber through the next day.
 ///
-/// Deliberately arrows at ~10 km spacing rather than smeared rasters and
-/// particle trails: that is the resolution the model actually computes, and
-/// drawing detail between grid points would be inventing wind. One batched
-/// request fetches the whole day for every arrow at once.
+/// The arrows sit at the ~10 km spacing the model actually computes and
+/// carry its real numbers. The colour between them is a smooth blend of
+/// those same values — the shading is interpolation for the eye, not extra
+/// detail, and the footnote says so. One batched request fetches the whole
+/// day for every point at once.
 struct FlowMapScreen: View {
 
     let title: String
@@ -23,9 +24,12 @@ struct FlowMapScreen: View {
     @State private var hours: [Date] = []
     @State private var grid: [GridPoint] = []
     @State private var hourIndex: Double = 0
+    @State private var raster: WindRasterOverlay?
     @State private var isLoading = true
 
     struct GridPoint: Identifiable {
+        /// Row-major position in the grid — the raster builder needs to
+        /// know which cell this is, not just where it sits.
         let id: Int
         let coordinate: Geo.Coordinate
         /// Knots and degrees-from, aligned to `hours`.
@@ -36,30 +40,12 @@ struct FlowMapScreen: View {
     private var hour: Int { Int(hourIndex.rounded()) }
 
     var body: some View {
-        Map(initialPosition: .region(MKCoordinateRegion(
-            center: coordinate.clCoordinate,
-            latitudinalMeters: Self.spanMetres * 1.15,
-            longitudinalMeters: Self.spanMetres * 1.15
-        ))) {
-            Annotation("", coordinate: coordinate.clCoordinate) {
-                Circle()
-                    .fill(.tint)
-                    .frame(width: 12, height: 12)
-                    .overlay(Circle().stroke(.white, lineWidth: 2))
-            }
-            .annotationTitles(.hidden)
-
-            ForEach(grid) { point in
-                Annotation("", coordinate: point.coordinate.clCoordinate) {
-                    if let speed = point.speeds[safe: hour] ?? nil,
-                       let direction = point.directions[safe: hour] ?? nil {
-                        FlowArrow(speedKn: speed, directionFromDeg: direction)
-                    }
-                }
-                .annotationTitles(.hidden)
-            }
-        }
-        .mapStyle(.standard(elevation: .flat))
+        WindFieldMapView(
+            centre: coordinate.clCoordinate,
+            spanMetres: Self.spanMetres,
+            raster: raster,
+            arrows: arrowStates
+        )
         .navigationTitle("Flow map")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Flow map")
@@ -72,6 +58,21 @@ struct FlowMapScreen: View {
             }
         }
         .task { await load() }
+        .onChange(of: hour) { _, _ in rebuildRaster() }
+    }
+
+    private var arrowStates: [WindFieldMapView.Arrow] {
+        grid.compactMap { point in
+            guard let speed = point.speeds[safe: hour] ?? nil,
+                  let direction = point.directions[safe: hour] ?? nil
+            else { return nil }
+            return WindFieldMapView.Arrow(
+                id: point.id,
+                coordinate: point.coordinate.clCoordinate,
+                speedKn: speed,
+                directionFromDeg: direction
+            )
+        }
     }
 
     // MARK: The scrubber
@@ -98,9 +99,10 @@ struct FlowMapScreen: View {
                 Slider(value: $hourIndex, in: 0...Double(hours.count - 1), step: 1)
             }
 
-            Text("Open-Meteo's blend, arrows at the ~10 km grid the model actually "
-                 + "computes — drawing wind between them would be inventing it. "
-                 + "Scrub through the next 24 hours.")
+            Text("Open-Meteo's blend. The arrows are the model's own values at its "
+                 + "~10 km grid; the colour between them is a smooth blend of those "
+                 + "values for the eye, not extra detail. Scrub through the next "
+                 + "24 hours.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -130,20 +132,20 @@ struct FlowMapScreen: View {
     }
 
     private static let legendSteps: [(label: String, colour: Color)] = [
-        ("<8", FlowArrow.colour(for: 5)),
-        ("8+", FlowArrow.colour(for: 10)),
-        ("12+", FlowArrow.colour(for: 13)),
-        ("15+", FlowArrow.colour(for: 17)),
-        ("21+", FlowArrow.colour(for: 22)),
+        ("<8", Color(uiColor: WindPalette.colour(for: 5))),
+        ("8+", Color(uiColor: WindPalette.colour(for: 10))),
+        ("12+", Color(uiColor: WindPalette.colour(for: 13))),
+        ("15+", Color(uiColor: WindPalette.colour(for: 17))),
+        ("21+", Color(uiColor: WindPalette.colour(for: 22))),
     ]
 
     // MARK: The field
 
     /// About sixty kilometres of coast — the water a rider would actually
     /// drive along, at a span where ~10 km arrows still read as a field.
-    private static let spanMetres: Double = 60_000
-    private static let columns = 7
-    private static let rows = 9
+    static let spanMetres: Double = 60_000
+    static let columns = 7
+    static let rows = 9
 
     private func load() async {
         let coords = gridCoordinates()
@@ -164,7 +166,16 @@ struct FlowMapScreen: View {
             return GridPoint(id: index, coordinate: coords[index],
                              speeds: speeds, directions: directions)
         }
+        rebuildRaster()
         withAnimation(.easeOut(duration: 0.2)) { isLoading = false }
+    }
+
+    private func rebuildRaster() {
+        raster = WindRasterOverlay.build(
+            grid: grid, hour: hour,
+            columns: Self.columns, rows: Self.rows,
+            centre: coordinate, spanMetres: Self.spanMetres
+        )
     }
 
     private func gridCoordinates() -> [Geo.Coordinate] {
@@ -185,38 +196,293 @@ struct FlowMapScreen: View {
     }
 }
 
-/// One arrow of the field: pointing the way the wind blows, coloured by how
-/// hard, with the knots underneath once there is anything worth reading.
-private struct FlowArrow: View {
+// MARK: - The colours
 
+/// One ramp for raster, arrows and legend, on the app's own thresholds:
+/// grey until it matters, the chart blues through the working range, the
+/// firing threshold at 15, and the strong end in the colours the strip
+/// already taught.
+enum WindPalette {
+    static func colour(for kn: Double) -> UIColor {
+        switch kn {
+        case ..<8: .systemGray
+        case ..<12: .systemTeal
+        case ..<15: UIColor(named: "AccentColor") ?? .systemBlue
+        case ..<21: .systemOrange
+        default: .systemPink
+        }
+    }
+}
+
+// MARK: - The map
+
+/// MKMapView under the SwiftUI: the one thing the SwiftUI `Map` cannot do
+/// yet is draw a geo-registered image, and the colour wash is exactly that.
+private struct WindFieldMapView: UIViewRepresentable {
+
+    struct Arrow {
+        let id: Int
+        let coordinate: CLLocationCoordinate2D
+        let speedKn: Double
+        let directionFromDeg: Double
+    }
+
+    let centre: CLLocationCoordinate2D
+    let spanMetres: Double
+    let raster: WindRasterOverlay?
+    let arrows: [Arrow]
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> MKMapView {
+        let map = MKMapView()
+        map.delegate = context.coordinator
+        map.setRegion(MKCoordinateRegion(
+            center: centre,
+            latitudinalMeters: spanMetres * 1.15,
+            longitudinalMeters: spanMetres * 1.15
+        ), animated: false)
+        map.pointOfInterestFilter = .excludingAll
+        map.showsCompass = false
+        map.isPitchEnabled = false
+        map.isRotateEnabled = false
+
+        let here = MKPointAnnotation()
+        here.coordinate = centre
+        map.addAnnotation(here)
+        context.coordinator.hereAnnotation = here
+        return map
+    }
+
+    func updateUIView(_ map: MKMapView, context: Context) {
+        if context.coordinator.rasterID != raster?.id {
+            context.coordinator.rasterID = raster?.id
+            map.removeOverlays(map.overlays)
+            if let raster { map.addOverlay(raster) }
+        }
+        // Rebuilt whole when the hour (or the data behind it) changes —
+        // sixty-odd tiny annotation views are cheap, and diffing them by
+        // hand would not be.
+        let key = arrows.map { "\($0.id):\(Int($0.speedKn)):\(Int($0.directionFromDeg))" }
+            .joined(separator: ",")
+        if context.coordinator.arrowsKey != key {
+            context.coordinator.arrowsKey = key
+            let keep = context.coordinator.hereAnnotation.map { [$0] } ?? []
+            map.removeAnnotations(map.annotations)
+            map.addAnnotations(keep)
+            map.addAnnotations(arrows.map(ArrowAnnotation.init))
+        }
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate {
+        var rasterID: UUID?
+        var arrowsKey = ""
+        var hereAnnotation: MKPointAnnotation?
+
+        func mapView(_ mapView: MKMapView,
+                     rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            (overlay as? WindRasterOverlay).map(WindRasterRenderer.init)
+                ?? MKOverlayRenderer(overlay: overlay)
+        }
+
+        func mapView(_ mapView: MKMapView,
+                     viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let arrow = annotation as? ArrowAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "arrow")
+                    ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "arrow")
+                view.annotation = annotation
+                view.image = ArrowSprite.image(speedKn: arrow.speedKn,
+                                               directionFromDeg: arrow.directionFromDeg)
+                view.isEnabled = false
+                return view
+            }
+            // The blue "you are here" dot.
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: "here")
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "here")
+            view.annotation = annotation
+            view.image = ArrowSprite.hereDot
+            view.isEnabled = false
+            return view
+        }
+    }
+}
+
+/// One arrow of the field as an annotation.
+private final class ArrowAnnotation: NSObject, MKAnnotation {
+    let coordinate: CLLocationCoordinate2D
     let speedKn: Double
     let directionFromDeg: Double
 
-    var body: some View {
-        VStack(spacing: 0) {
-            Image(systemName: speedKn < 2 ? "circle.dotted" : "arrow.up")
-                .font(.system(size: 15, weight: .bold))
-                .rotationEffect(.degrees(speedKn < 2 ? 0 : directionFromDeg + 180))
-            if speedKn >= 2 {
-                Text("\(Int(speedKn.rounded()))")
-                    .font(.system(size: 8, weight: .bold))
-                    .monospacedDigit()
+    init(_ arrow: WindFieldMapView.Arrow) {
+        self.coordinate = arrow.coordinate
+        self.speedKn = arrow.speedKn
+        self.directionFromDeg = arrow.directionFromDeg
+    }
+}
+
+/// The arrow images, drawn with plain UIKit: pointing the way the wind
+/// blows, coloured by how hard, the knots underneath — with a pale halo so
+/// they stay readable over any colour the wash puts behind them.
+private enum ArrowSprite {
+
+    static func image(speedKn: Double, directionFromDeg: Double) -> UIImage {
+        let size = CGSize(width: 36, height: 46)
+        let colour = WindPalette.colour(for: speedKn)
+        return UIGraphicsImageRenderer(size: size).image { rendererContext in
+            let cg = rendererContext.cgContext
+            cg.setShadow(offset: .zero, blur: 3,
+                         color: UIColor.white.withAlphaComponent(0.9).cgColor)
+
+            let configuration = UIImage.SymbolConfiguration(pointSize: 15, weight: .bold)
+            if speedKn < 2 {
+                // Near calm: a direction would be noise, so no arrow at all.
+                let dot = UIImage(systemName: "circle.dotted", withConfiguration: configuration)?
+                    .withTintColor(colour, renderingMode: .alwaysOriginal)
+                dot?.draw(at: CGPoint(x: (size.width - (dot?.size.width ?? 0)) / 2, y: 6))
+            } else if let arrow = UIImage(systemName: "arrow.up", withConfiguration: configuration)?
+                .withTintColor(colour, renderingMode: .alwaysOriginal) {
+                cg.saveGState()
+                cg.translateBy(x: size.width / 2, y: 15)
+                cg.rotate(by: (directionFromDeg + 180) * .pi / 180)
+                arrow.draw(in: CGRect(x: -arrow.size.width / 2, y: -arrow.size.height / 2,
+                                      width: arrow.size.width, height: arrow.size.height))
+                cg.restoreGState()
+
+                let text = "\(Int(speedKn.rounded()))" as NSString
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.monospacedDigitSystemFont(ofSize: 9, weight: .bold),
+                    .foregroundColor: colour,
+                ]
+                let width = text.size(withAttributes: attributes).width
+                text.draw(at: CGPoint(x: (size.width - width) / 2, y: 32),
+                          withAttributes: attributes)
             }
         }
-        .foregroundStyle(Self.colour(for: speedKn))
-        .shadow(color: .white.opacity(0.8), radius: 1.5)
     }
 
-    /// The ramp, on the app's own thresholds: grey until it matters, the
-    /// chart blues through the working range, the firing threshold at 15,
-    /// and the strong end in the colours the strip already taught.
-    static func colour(for kn: Double) -> Color {
-        switch kn {
-        case ..<8: Color(.systemGray)
-        case ..<12: .teal
-        case ..<15: Color.accentColor
-        case ..<21: .orange
-        default: .pink
+    static let hereDot: UIImage = {
+        let size = CGSize(width: 16, height: 16)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            let cg = context.cgContext
+            cg.setFillColor((UIColor(named: "AccentColor") ?? .systemBlue).cgColor)
+            cg.fillEllipse(in: CGRect(x: 2, y: 2, width: 12, height: 12))
+            cg.setStrokeColor(UIColor.white.cgColor)
+            cg.setLineWidth(2)
+            cg.strokeEllipse(in: CGRect(x: 2, y: 2, width: 12, height: 12))
         }
+    }()
+}
+
+// MARK: - The colour wash
+
+/// The speed field as a geo-registered image: the grid's values bilinearly
+/// blended to a small bitmap, stepped through the palette, drawn at ~45%
+/// over the map. Banding is deliberate — smooth contours between honest
+/// levels, the way every wind map draws them.
+final class WindRasterOverlay: NSObject, MKOverlay {
+
+    let image: CGImage
+    let coordinate: CLLocationCoordinate2D
+    let boundingMapRect: MKMapRect
+    let id = UUID()
+
+    private init(image: CGImage, coordinate: CLLocationCoordinate2D, rect: MKMapRect) {
+        self.image = image
+        self.coordinate = coordinate
+        self.boundingMapRect = rect
+    }
+
+    /// Nil until there is a field worth painting.
+    static func build(grid: [FlowMapScreen.GridPoint], hour: Int,
+                      columns: Int, rows: Int,
+                      centre: Geo.Coordinate, spanMetres: Double) -> WindRasterOverlay? {
+        guard !grid.isEmpty else { return nil }
+
+        // Speeds by grid cell, row-major as the fetch built them.
+        var speeds = [Double?](repeating: nil, count: columns * rows)
+        for point in grid where point.id < speeds.count {
+            speeds[point.id] = point.speeds[safe: hour] ?? nil
+        }
+        guard speeds.contains(where: { $0 != nil }) else { return nil }
+
+        // A small bitmap is plenty: the source is 7×9 numbers, and the
+        // upsampling is for smooth contours, not resolution.
+        let width = 168, height = 216
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let alpha: CGFloat = 0.45
+
+        func speed(atColumn column: Int, row: Int) -> Double? {
+            speeds[row * columns + column]
+        }
+
+        for py in 0..<height {
+            // Image row 0 is the north edge; grid row 0 is the south.
+            let gy = (1 - Double(py) / Double(height - 1)) * Double(rows - 1)
+            let row0 = min(Int(gy), rows - 2)
+            let ty = gy - Double(row0)
+            for px in 0..<width {
+                let gx = Double(px) / Double(width - 1) * Double(columns - 1)
+                let column0 = min(Int(gx), columns - 2)
+                let tx = gx - Double(column0)
+
+                guard let a = speed(atColumn: column0, row: row0),
+                      let b = speed(atColumn: column0 + 1, row: row0),
+                      let c = speed(atColumn: column0, row: row0 + 1),
+                      let d = speed(atColumn: column0 + 1, row: row0 + 1)
+                else { continue }
+                let blended = (a * (1 - tx) + b * tx) * (1 - ty)
+                    + (c * (1 - tx) + d * tx) * ty
+
+                var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, opacity: CGFloat = 0
+                WindPalette.colour(for: blended).getRed(&red, green: &green, blue: &blue, alpha: &opacity)
+                let offset = (py * width + px) * 4
+                // Premultiplied, so the renderer can draw it straight.
+                pixels[offset] = UInt8(red * alpha * 255)
+                pixels[offset + 1] = UInt8(green * alpha * 255)
+                pixels[offset + 2] = UInt8(blue * alpha * 255)
+                pixels[offset + 3] = UInt8(alpha * 255)
+            }
+        }
+
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+              let image = CGImage(
+                width: width, height: height,
+                bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: true,
+                intent: .defaultIntent)
+        else { return nil }
+
+        // The overlay's rect spans the outermost grid points.
+        let latSpan = spanMetres / 110_574
+        let lonSpan = spanMetres / (111_320 * cos(centre.latitude * .pi / 180))
+        let northWest = MKMapPoint(CLLocationCoordinate2D(
+            latitude: centre.latitude + latSpan / 2,
+            longitude: centre.longitude - lonSpan / 2))
+        let southEast = MKMapPoint(CLLocationCoordinate2D(
+            latitude: centre.latitude - latSpan / 2,
+            longitude: centre.longitude + lonSpan / 2))
+        let rect = MKMapRect(
+            x: northWest.x, y: northWest.y,
+            width: southEast.x - northWest.x, height: southEast.y - northWest.y)
+
+        return WindRasterOverlay(
+            image: image,
+            coordinate: centre.clCoordinate,
+            rect: rect)
+    }
+}
+
+private final class WindRasterRenderer: MKOverlayRenderer {
+    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
+        guard let overlay = overlay as? WindRasterOverlay else { return }
+        let rect = rect(for: overlay.boundingMapRect)
+        // UIImage.draw respects the renderer's flipped coordinates, which
+        // a bare CGContext.draw would not — the classic upside-down-overlay
+        // bug, avoided rather than debugged.
+        UIGraphicsPushContext(context)
+        UIImage(cgImage: overlay.image).draw(in: rect)
+        UIGraphicsPopContext()
     }
 }

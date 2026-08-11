@@ -440,6 +440,15 @@ struct RibbonView: View {
                            && $0.endElapsed <= leg.endElapsed + 1 }
     }
 
+    /// The fastest the rider went inside this leg.
+    ///
+    /// Taken from the stretches rather than stored on the leg: a leg is a
+    /// grouping of runs, and the runs already know. Every other row on this
+    /// tab shows a max, and a row that does not is the row that looks broken.
+    private func maxSpeed(in leg: SessionLeg) -> Double {
+        lanes(in: leg).map(\.maxSpeed).max() ?? leg.averageSpeed
+    }
+
     /// A stretch off the foil, and where it happened.
     ///
     /// Tappable for the same reason a run is: "I was down for three minutes"
@@ -924,7 +933,7 @@ struct RibbonView: View {
                 Text(showsGrouped
                      ? summaryLine
                      : showsLegs
-                     ? "\(legs.count) run\(legs.count == 1 ? "" : "s")"
+                     ? legSummaryLine
                      : "\(lanes.count) stretch\(lanes.count == 1 ? "" : "es")")
                     .font(.subheadline.weight(.semibold))
                 if filter != .all || order != .time {
@@ -1070,54 +1079,80 @@ struct RibbonView: View {
                         Image(systemName: expandedLeg == leg.id ? "chevron.down" : "chevron.right")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 30)
+                            .frame(width: 20, height: 28)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Color.clear.frame(width: 24)
+                    Color.clear.frame(width: 20)
                 }
 
+                // The same badge, in the same place, in the same colour as
+                // every other run row on this tab. A leg row used to say
+                // "Downwind run 1" in words while the row below it on another
+                // session wore a coloured number — two grammars for the same
+                // idea, and the map's badges only ever matched one of them.
+                Text("\(number)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(selection.isEmpty || selection.contains(drawnID)
+                                ? kind.colour
+                                : Color.secondary.opacity(0.35), in: Circle())
+
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(title(kind, number: number, of: total))
-                            .font(.subheadline.weight(.semibold))
-                        if let alignment = leg.alignment, leg.isRun, kind == .downwind {
-                            Text("\(Int(alignment.rounded()))° off downwind")
-                                .font(.caption2)
-                                .foregroundStyle(alignment <= 20 ? .green : .secondary)
-                        }
+                    Text("\(Format.distance(leg.distance, unit: units.distance)) · \(Format.shortDuration(leg.duration))")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                    HStack(spacing: 4) {
+                        Text(kind == .downwind ? "Downwind"
+                             : kind == .upwind ? "Upwind" : "Reaching")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(kind.colour)
+                        // On a beat the pieces are tacks and the count is the
+                        // point; on a downwind run they are weaves across the
+                        // bumps, and calling eighteen of those "tacks" would
+                        // say something untrue.
+                        Text("· \(Format.speed(leg.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(maxSpeed(in: leg), unit: units.speed, decimals: 1)) max"
+                             + (tacks > 0 ? " · \(tacks) \(kind == .upwind ? "tacks" : "stretches")" : ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
-                    Text("\(Format.distance(leg.distance, unit: units.distance)) · \(Format.shortDuration(leg.duration)) · \(Format.speed(leg.averageSpeed, unit: units.speed, decimals: 1)) avg")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 8)
 
-                // Named for what they are. On a beat they are tacks and the
-                // count is the point; on a downwind run they are weaves
-                // across the bumps, and calling eighteen of those "tacks"
-                // told the rider something that was not true.
-                if tacks > 0 {
-                    Text(kind == .upwind ? "\(tacks) tacks" : "\(tacks) stretches")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                if kind == .downwind, leg.isRun, let alignment = leg.alignment {
+                    Text("\(Int(alignment.rounded()))° off")
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(alignment <= 20 ? .green : .secondary)
                 }
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 9)
+            .padding(.horizontal, 6)
+            .background(selection.contains(drawnID)
+                        ? AnyShapeStyle(kind.colour.opacity(0.12))
+                        : AnyShapeStyle(Color.clear),
+                        in: RoundedRectangle(cornerRadius: 10))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func title(_ kind: Leg, number: Int, of total: Int) -> String {
-        let name = switch kind {
-        case .downwind: "Downwind run"
-        case .upwind: "Upwind run"
-        default: "Run"
+    /// The same sentence the grouped list writes, counted over legs.
+    ///
+    /// It used to say "4 runs" here and "1 downwind · 34 reaching · 5 upwind"
+    /// on the next session, which is two ways of answering one question. A
+    /// downwinder usually has one kind in it, so this reads "4 downwind" —
+    /// the same grammar, just with less to say.
+    private var legSummaryLine: String {
+        let counts = [Leg.downwind, .reaching, .upwind].compactMap { kind -> String? in
+            let n = legs.filter { type(of: $0) == kind }.count
+            return n > 0 ? "\(n) \(kind.rawValue.lowercased())" : nil
         }
-        return total > 1 ? "\(name) \(number)" : name
+        return counts.isEmpty ? "No runs" : counts.joined(separator: " · ")
     }
 
     /// How many of each, which is the whole question a rider brings here.

@@ -344,6 +344,21 @@ struct RibbonView: View {
 
     /// What kind of run a leg is, from the point of sail its stretches were
     /// mostly sailed on.
+    /// Seconds out of the water before this leg, when the row above it in the
+    /// list is the leg that really came before it.
+    ///
+    /// Nil for the first leg, and nil whenever the kind grouping has put a
+    /// different leg above this one — the break describes the time between
+    /// two runs, so it can only be drawn where the list is showing them in
+    /// that order.
+    private func offFoilBefore(_ leg: SessionLeg) -> TimeInterval? {
+        guard let index = legs.firstIndex(where: { $0.id == leg.id }), index > 0 else { return nil }
+        let previous = legs[index - 1]
+        guard type(of: previous) == type(of: leg) else { return nil }
+        let gap = leg.startElapsed - previous.endElapsed
+        return gap >= 1 ? gap : nil
+    }
+
     private func type(of leg: SessionLeg) -> Leg {
         let inside = lanes(in: leg)
         let upwind = inside.filter { Leg.upwind.matches($0.pointOfSail) }.count
@@ -417,6 +432,19 @@ struct RibbonView: View {
                                         .padding(.top, 12)
                                 }
                                 ForEach(Array(group.enumerated()), id: \.element.id) { index, leg in
+                                    // Why this is two runs and not one.
+                                    //
+                                    // A leg breaks where the rider stopped, so
+                                    // the break is the whole reason there is a
+                                    // second row — and without it said out
+                                    // loud the split looks arbitrary. Only
+                                    // between rows that really are adjacent in
+                                    // time: legs are grouped by kind, and a
+                                    // swim drawn between two rows that did not
+                                    // follow each other would be a fiction.
+                                    if let down = offFoilBefore(leg) {
+                                        OffFoilBreak(seconds: down)
+                                    }
                                     legRow(leg, number: index + 1, of: group.count)
                                     if expandedLeg == leg.id, canExpand(leg) {
                                         ForEach(lanes(in: leg), id: \.id) { lane in

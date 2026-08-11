@@ -226,6 +226,118 @@ struct WindOutlook {
     var isEmpty: Bool { models.isEmpty || hours.isEmpty }
 }
 
+extension WindOutlook {
+    /// The blend as core's vector series, m/s.
+    ///
+    /// Independent models only, so a composite cannot double-vote its own
+    /// ingredients into whatever consumes this. Knots are this struct's
+    /// display dialect; core speaks m/s, and the conversion happens here at
+    /// the border rather than scattered through the consumers.
+    var blendTimeline: WindTimeline {
+        let ids = Set(models.filter { !$0.isComposite }.map(\.id))
+        let speeds = blend(of: ids)
+        let directions = blendDirections(of: ids)
+        let gusts = blendGusts(of: ids)
+        let toMS = 1 / 1.94384
+        return WindTimeline(samples: hours.indices.compactMap { hour in
+            guard let speed = speeds[safe: hour] ?? nil,
+                  let direction = directions[safe: hour] ?? nil
+            else { return nil }
+            return WindTimeline.Sample(
+                time: hours[hour],
+                speed: speed * toMS,
+                directionFrom: direction,
+                gust: (gusts[safe: hour] ?? nil).map { $0 * toMS }
+            )
+        })
+    }
+}
+
+// MARK: - The forecast, nudged by a real anemometer
+
+/// The guide's 0–6 hour rule, wired to the sheet: when a station or buoy
+/// nearby has just read the wind, the most useful thing that reading can do
+/// is correct the models' next few hours — not sit in its own card being
+/// merely true. `WindNowcast` in core does the arithmetic; this picks the
+/// reading, runs it, and says the result in a sentence.
+struct NowcastAdjustment {
+
+    /// Who read the wind — a station name or a buoy's.
+    let sourceName: String
+    let ageMinutes: Int
+    /// Observed minus blended at the reading's moment, knots. Positive
+    /// means more wind on the water than in the models.
+    let deltaKn: Double
+    /// The blend with the innovation decayed through it, m/s.
+    let corrected: WindTimeline
+
+    /// Corrected knots this far ahead of now.
+    func correctedKn(hoursAhead: Double, from now: Date = Date()) -> Double? {
+        corrected.wind(at: now.addingTimeInterval(hoursAhead * 3600))
+            .map { $0.speed * 1.94384 }
+    }
+
+    /// The whole thing as one sentence a rider can act on.
+    var line: String {
+        let age = ageMinutes <= 1 ? "just now" : "\(ageMinutes) min ago"
+        guard abs(deltaKn) >= 1.5 else {
+            return "\(sourceName) read the wind \(age) and agrees with the models."
+        }
+        let sense = deltaKn > 0 ? "above" : "below"
+        var text = "\(sourceName) read \(Int(abs(deltaKn).rounded())) kn \(sense) the models \(age)."
+        if let soon = correctedKn(hoursAhead: 1), let later = correctedKn(hoursAhead: 3) {
+            text += " Next hours corrected to \(Int(soon.rounded())), then \(Int(later.rounded())) kn."
+        }
+        return text
+    }
+
+    /// Pick a reading, subtract the models, decay the difference.
+    ///
+    /// The nearest fresh reading wins rather than the freshest: inside the
+    /// two-hour bar they are all current enough, and a mile of distance
+    /// costs more representativeness than an hour of age. Stations correct
+    /// as full vectors; a buoy reports no wind direction, so it borrows the
+    /// model's own direction and corrects the strength alone — a smaller
+    /// claim, honestly limited to what was measured.
+    static func make(outlook: WindOutlook, stations: [FreeStation], buoys: [Buoy],
+                     at now: Date = Date()) -> NowcastAdjustment? {
+        let model = outlook.blendTimeline
+        guard !model.isEmpty else { return nil }
+        let toMS = 1 / 1.94384
+
+        var candidates: [(metres: Double, name: String, sample: WindTimeline.Sample)] = []
+        for station in stations {
+            guard let observation = station.observation,
+                  let kn = observation.windKn,
+                  let read = observation.at, now.timeIntervalSince(read) < 2 * 3600,
+                  let direction = observation.directionDeg ?? model.wind(at: read)?.directionFrom
+            else { continue }
+            candidates.append((station.metres, station.name, WindTimeline.Sample(
+                time: read, speed: kn * toMS, directionFrom: direction,
+                gust: observation.gustKn.map { $0 * toMS })))
+        }
+        for buoy in buoys {
+            guard let reading = buoy.reading,
+                  let kn = reading.windKn,
+                  let read = reading.at, now.timeIntervalSince(read) < 2 * 3600,
+                  let direction = model.wind(at: read)?.directionFrom
+            else { continue }
+            candidates.append((buoy.metres, buoy.name, WindTimeline.Sample(
+                time: read, speed: kn * toMS, directionFrom: direction)))
+        }
+
+        guard let chosen = candidates.min(by: { $0.metres < $1.metres }),
+              let modelled = model.wind(at: chosen.sample.time)
+        else { return nil }
+        return NowcastAdjustment(
+            sourceName: chosen.name,
+            ageMinutes: max(0, Int(now.timeIntervalSince(chosen.sample.time) / 60)),
+            deltaKn: (chosen.sample.speed - modelled.speed) * 1.94384,
+            corrected: WindNowcast().corrected(model, by: chosen.sample)
+        )
+    }
+}
+
 // MARK: - The forecast as a distribution
 
 /// One model run thirty-one times from nudged starting points.
@@ -280,6 +392,34 @@ struct EnsembleOutlook {
         // only answer for moments the ensemble actually covers.
         return date.timeIntervalSince(hours[index]) < 3_600 ? index : nil
     }
+}
+
+// MARK: - The next few hours, every quarter hour
+
+/// Wind at fifteen-minute grain, where a rapid-update model actually
+/// provides it.
+///
+/// An hourly forecast can hide a sixty-minute session inside one bar, and a
+/// front's arrival inside another. The rapid-update regionals — HRRR over
+/// North America, ICON-D2 over central Europe, AROME over France — publish
+/// native quarter-hour steps that can catch both. Deliberately absent
+/// elsewhere: Open-Meteo will happily interpolate hourly data to fifteen
+/// minutes anywhere on Earth, and a smooth curve pretending to be four
+/// times the information is exactly the false precision this app is
+/// against. No native model, no card.
+struct NearTermWind {
+    let times: [Date]
+    /// Knots, aligned to `times` — this is a display struct and stays in
+    /// the display dialect.
+    let speedsKn: [Double?]
+    let gustsKn: [Double?]
+    /// Degrees the wind comes from.
+    let directions: [Double?]
+    var timeZone: TimeZone?
+
+    var isEmpty: Bool { times.isEmpty || !speedsKn.contains { $0 != nil } }
+
+    var peakGustKn: Double? { gustsKn.compactMap { $0 }.max() }
 }
 
 // MARK: - The full picture
@@ -375,8 +515,7 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return WeatherDetail() }
 
@@ -537,8 +676,7 @@ enum OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ] + (pastDays > 0 ? [URLQueryItem(name: "past_days", value: String(pastDays))] : [])
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let times = hourly["time"] as? [Double]
@@ -567,6 +705,54 @@ enum OpenMeteo {
         )
     }
 
+    /// The quarter-hour models, asked together — see `NearTermWind`.
+    ///
+    /// All three rapid-update regionals go in one request. A model that
+    /// does not cover the point simply drops out of the response; when none
+    /// covers it the API answers with an error and the card stays off,
+    /// which is the design. When exactly one model has data its series
+    /// arrives on bare keys; where domains overlap the keys are suffixed
+    /// and the finer model is preferred.
+    static func nearTerm(at coordinate: Geo.Coordinate, hoursAhead: Int = 6) async -> NearTermWind {
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "minutely_15", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
+            .init(name: "models", value: "ncep_hrrr_conus,icon_d2,meteofrance_arome_france_hd"),
+            .init(name: "wind_speed_unit", value: "kn"),
+            .init(name: "forecast_minutely_15", value: String(hoursAhead * 4)),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
+        ]
+        let empty = NearTermWind(times: [], speedsKn: [], gustsKn: [], directions: [])
+        guard let url = components.url,
+              let data = await ForecastCache.data(from: url, ttl: 900),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let quarter = root["minutely_15"] as? [String: Any],
+              let times = quarter["time"] as? [Double]
+        else { return empty }
+
+        // Finest grid first for the overlap regions; bare key when a single
+        // model answered alone.
+        func series(_ field: String) -> [Double?] {
+            for suffix in ["_meteofrance_arome_france_hd", "_icon_d2", "_ncep_hrrr_conus", ""] {
+                if let row = quarter[field + suffix] as? [Any] {
+                    let values = row.map { $0 as? Double }
+                    if values.contains(where: { $0 != nil }) { return values }
+                }
+            }
+            return []
+        }
+        return NearTermWind(
+            times: times.map { Date(timeIntervalSince1970: $0) },
+            speedsKn: series("wind_speed_10m"),
+            gustsKn: series("wind_gusts_10m"),
+            directions: series("wind_direction_10m"),
+            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
+        )
+    }
+
     /// GEFS, thirty-one times over — see `EnsembleOutlook`.
     ///
     /// A separate endpoint and a separate call because it is a different
@@ -586,8 +772,7 @@ enum OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 3600),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let times = hourly["time"] as? [Double]
@@ -621,8 +806,7 @@ enum OpenMeteo {
             .init(name: "timeformat", value: "unixtime"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await ForecastCache.data(from: url, ttl: 3600)
         else { return [] }
 
         struct Payload: Decodable {
@@ -731,8 +915,7 @@ enum OpenMeteo {
             let hourly: Hourly?
         }
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 21_600),
               let hourly = (try? JSONDecoder().decode(Payload.self, from: data))?.hourly
         else { return nil }
 
@@ -785,8 +968,7 @@ enum OpenMeteo {
             let hourly: Hourly?
         }
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 21_600),
               let hourly = (try? JSONDecoder().decode(Payload.self, from: data))?.hourly
         else { return nil }
 
@@ -1188,9 +1370,10 @@ enum TidesAndCurrents {
             .init(name: "time_zone", value: "lst_ldt"),
             .init(name: "format", value: "json"),
         ]
+        // Predictions, not readings — the tide table was computed from the
+        // moon, and caching it wrongs nobody.
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await ForecastCache.data(from: url, ttl: 21_600)
         else { return [] }
 
         struct Payload: Decodable {
@@ -1455,8 +1638,7 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let current = root["current"] as? [String: Any]
         else { return nil }
@@ -1585,8 +1767,7 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 21_600),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let times = hourly["time"] as? [Double],
@@ -1823,8 +2004,7 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 10_800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let stamps = hourly["time"] as? [Double]
@@ -1854,8 +2034,7 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await ForecastCache.data(from: url, ttl: 10_800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let stamps = hourly["time"] as? [Double]

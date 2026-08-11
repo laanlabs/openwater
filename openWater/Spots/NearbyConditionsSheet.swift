@@ -53,6 +53,10 @@ struct NearbyConditionsSheet: View {
     @State private var full = WeatherDetail()
     @State private var surf: SurfConditions?
     @State private var tide = TideCurve(points: [])
+    /// The models minus what the nearest anemometer just disagreed by.
+    @State private var nowcast: NowcastAdjustment?
+    /// Quarter-hour wind, only where a rapid-update model natively has it.
+    @State private var nearTerm = NearTermWind(times: [], speedsKn: [], gustsKn: [], directions: [])
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -187,6 +191,8 @@ struct NearbyConditionsSheet: View {
         }
         .buttonStyle(.plain)
 
+        nearTermCard
+
         outlookCard
 
         section("REAL STATIONS NEARBY, FREE") {
@@ -319,6 +325,84 @@ struct NearbyConditionsSheet: View {
         }
     }
 
+    /// The next six hours at quarter-hour grain — only where HRRR, ICON-D2
+    /// or AROME natively resolve it, which is the whole point of showing it:
+    /// this is the card that can see a sea breeze switch on inside an hour,
+    /// and pretending to that grain from interpolated hourly data would be
+    /// the false precision the rest of the sheet is against.
+    @ViewBuilder
+    private var nearTermCard: some View {
+        if !nearTerm.isEmpty {
+            let peak = max(nearTerm.speedsKn.compactMap { $0 }.max() ?? 1, 1)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("NEXT SIX HOURS · EVERY 15 MIN")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let gust = nearTerm.peakGustKn {
+                        Text("gusts to \(Int(gust.rounded())) kn")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ZStack(alignment: .bottom) {
+                    ChartGrid(peak: peak)
+                    HStack(alignment: .bottom, spacing: 2) {
+                        ForEach(nearTerm.times.indices, id: \.self) { step in
+                            let speed = (nearTerm.speedsKn[safe: step] ?? nil) ?? 0
+                            RoundedRectangle(cornerRadius: 1.5)
+                                .fill(speed >= 15 ? AnyShapeStyle(.tint)
+                                      : AnyShapeStyle(Color.accentColor.opacity(0.35)))
+                                .frame(height: max(2, 54 * speed / peak))
+                                .frame(maxWidth: .infinity, alignment: .bottom)
+                        }
+                    }
+                }
+                .frame(height: 54, alignment: .bottom)
+
+                // An arrow on the hour, under the four bars it speaks for.
+                HStack(spacing: 2) {
+                    ForEach(nearTerm.times.indices, id: \.self) { step in
+                        Group {
+                            if step % 4 == 0,
+                               let direction = nearTerm.directions[safe: step] ?? nil {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .rotationEffect(.degrees(direction))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+
+                HStack {
+                    Text("now")
+                    Spacer()
+                    if let middle = nearTerm.times[safe: nearTerm.times.count / 2] {
+                        Text(middle.formatted(.dateTime.hour().minute()))
+                    }
+                    Spacer()
+                    if let last = nearTerm.times.last {
+                        Text(last.formatted(.dateTime.hour().minute()))
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+                Text("Quarter-hour steps straight from a rapid-update model — HRRR over North America, ICON-D2 and AROME over Europe. This card only exists where one of them actually resolves this water.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        }
+    }
+
     @ViewBuilder
     private var outlookCardBody: some View {
         if !outlook.isEmpty {
@@ -397,6 +481,21 @@ struct NearbyConditionsSheet: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                // A real anemometer against the models — the one line on
+                // this card that is measured rather than modelled, which is
+                // exactly why it gets to talk back to the chart above it.
+                if let nowcast {
+                    Label {
+                        Text(nowcast.line)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "gauge.with.needle")
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(abs(nowcast.deltaKn) < 1.5 ? AnyShapeStyle(.tint)
+                                     : AnyShapeStyle(Color.orange))
+                }
 
                 Text("Average of \(outlook.models.count) global models — tap for each of them, the hour by hour, and the week.")
                     .font(.caption2)
@@ -1012,7 +1111,9 @@ struct NearbyConditionsSheet: View {
         // The multi-day outlook is two more calls, so it lands after the tab
         // is usable rather than holding it blank — the strip appears when it
         // arrives, in space the rest of the tab is not occupying.
+        async let quarterly = OpenMeteo.nearTerm(at: here)
         surfOutlook = await OpenMeteo.surfOutlook(at: here)
+        nearTerm = await quarterly
 
         // Predictions and buoy rows come second, for the same reason station
         // readings do: the lists are useful the moment they exist, and half a
@@ -1053,5 +1154,11 @@ struct NearbyConditionsSheet: View {
         // A station with nothing to say is noise on a list whose whole point
         // is live readings — but only drop it once every reading is back.
         stations.removeAll { $0.observation == nil }
+
+        // With every reading home, the freshest nearby anemometer gets to
+        // correct the models' next few hours. Last on purpose: it needs the
+        // outlook and the observations both, and it is a sentence, not a
+        // card the sheet should wait for.
+        nowcast = NowcastAdjustment.make(outlook: outlook, stations: stations, buoys: buoys)
     }
 }

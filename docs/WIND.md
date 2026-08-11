@@ -106,10 +106,11 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
   null outside CONUS, so it simply does not appear elsewhere. Marked
   composite and left out of the app's own blend by default: averaging a
   blend with its own ingredients double-counts them.
-- [ ] **15-minute near-term.** `minutely_15` is native HRRR for North
-  America (with gusts) and ICON-D2/AROME for central Europe; interpolated
-  hourly data elsewhere, so it must be labelled where it is real. Worth
-  using for the 0–18 h window at spot detail and at record time.
+- [x] **15-minute near-term.** `minutely_15` is native HRRR for North
+  America (with gusts) and ICON-D2/AROME for central Europe. The
+  conditions sheet's "next six hours" card asks those three models
+  explicitly and does not exist anywhere else — no interpolated hourly
+  data dressed up as quarter-hour precision. `OpenMeteo.nearTerm`.
 - [ ] **Lead-time skill without an archive.** The
   [Previous Runs API](https://open-meteo.com/en/docs/previous-runs-api)
   exposes what each model said 1–7 days ahead of a given hour; the
@@ -123,9 +124,11 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
   quality station or buoy reading, subtract the model at that moment (in
   components), and decay the difference over lead time —
   `exp(-lead/tau)`, tau defaulting to three hours. Pure math, unit-tested.
-- [ ] **Nowcast in the UI.** Wire `WindNowcast` into the conditions sheet:
-  when a station or buoy is fresh and near, show the corrected next hours
-  and say why — "buoy reads 4 kn over the blend; next two hours adjusted."
+- [x] **Nowcast in the UI.** The outlook card now carries one measured
+  sentence: the nearest fresh station or buoy against the blend, with the
+  corrected next hours when they disagree — `NowcastAdjustment`. Stations
+  correct as vectors; a buoy has no wind vane, so it borrows the model's
+  direction and corrects the strength alone.
 - [ ] **Sessions as observations.** The estimator already extracts wind
   direction from track shape at the exact riding area. Keep small per-spot
   records — forecast u/v against session-estimated u/v by wind sector and
@@ -142,9 +145,12 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
 - [ ] **Modeled is not observed.** Open-Meteo "current" values are model
   output. Anywhere a current number is shown, say which it is, and how old.
   Stations and buoys are observations; the forecast endpoints never are.
-- [ ] **Cache the forecasts.** The conditions sheet refires ~10 concurrent
-  requests every open; outlooks are not cached at all. A short-TTL disk
-  cache gives an offline story and cuts the rate-limit exposure.
+- [x] **Cache the forecasts.** `ForecastCache`: every Open-Meteo request
+  (and the astronomical tide table) now reads from a short-TTL disk cache
+  keyed by the request URL, and a failed fetch serves an answer up to
+  three hours old rather than a blank. Observations are deliberately not
+  cached — a reading's whole value is being minutes old. Still to do:
+  surface the age when a stale answer is served.
 - [ ] **Distinguish failures.** Every fetcher collapses network failure,
   rate-limiting and "inland, no marine cell" into the same empty return.
   They are three different sentences to a rider.
@@ -169,9 +175,11 @@ configuration, not in logic.
 ## Order of work
 
 1. Tier 1 (done): the timeline type, the vector fixes, gusts, storage.
-2. Tier 2 ensembles + NBM (done); minutely_15 and previous-runs next.
-3. Analyzer integration of the timeline — behind an `analysisVersion` bump
+2. Tier 2 ensembles + NBM + minutely_15 (done); previous-runs skill next.
+3. Nowcast UI and forecast caching (done).
+4. Analyzer integration of the timeline — behind an `analysisVersion` bump
    with a full expectation re-record, per `docs/RUNS.md`.
-4. Nowcast UI, then per-spot bias records once there is a place to show
-   what they have learned.
-5. Tier 4 hygiene as it is touched: caching first, then error surfaces.
+5. Per-spot bias records once there is a place to show what they learned;
+   spot geometry and route sampling alongside.
+6. Remaining Tier 4 hygiene: stale/data-age labels, error surfaces, the
+   one historical-wind path, the licence registry.

@@ -1934,16 +1934,20 @@ struct SurfCard: View {
 
     private var heightCard: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("SURF HEIGHT")
+            // "EST." is load-bearing: this is a range derived from an
+            // offshore grid point, not a reading from the beach.
+            Text("SURF, EST.")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.secondary)
 
-            if let range = surf.surfRangeFt {
+            if let range = surf.faceRangeM {
                 HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text("\(range.low)-\(range.high)")
+                    Text(faceRange(range))
                         .font(.system(size: 30, weight: .heavy, design: .rounded))
                         .monospacedDigit()
-                    Text("ft")
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                    Text(settings.units.distance == .imperial ? "ft" : "m")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -1954,16 +1958,34 @@ struct SurfCard: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            if let period = surf.wavePeriodS {
-                Text("\(Int(period.rounded()))s combined sea")
+            // Where the estimate came from, so the range above is never
+            // mistaken for a measurement.
+            if let offshore = surf.waveHeightM {
+                Text("faces, from \(Format.height(offshore, unit: settings.units.distance))"
+                     + (surf.wavePeriodS.map { " @ \(Int($0.rounded()))s" } ?? "")
+                     + " offshore sea")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 148)
         .padding(14)
         .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// The face range in the rider's unit — whole feet, because surf is
+    /// quoted in whole feet, and tenths of a metre for everyone else.
+    private func faceRange(_ range: ClosedRange<Double>) -> String {
+        switch settings.units.distance {
+        case .imperial:
+            let low = max(0, Int((range.lowerBound / DistanceUnit.metresPerFoot).rounded(.down)))
+            let high = max(low + 1, Int((range.upperBound / DistanceUnit.metresPerFoot).rounded(.up)))
+            return "\(low)-\(high)"
+        case .metric, .nautical:
+            return String(format: "%.1f–%.1f", range.lowerBound, range.upperBound)
+        }
     }
 
     // MARK: Rose
@@ -2088,7 +2110,7 @@ struct SurfCard: View {
 
     private func trainRow(_ train: SurfConditions.Train, colour: Color, label: String? = nil) -> some View {
         HStack(spacing: 10) {
-            Text(String(format: "%.1f ft", train.heightFt))
+            Text(Format.height(train.heightM, unit: settings.units.distance))
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()
                 .frame(width: 58, alignment: .leading)
@@ -2162,6 +2184,17 @@ struct TideChart: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let age = curve.staleAge {
+                Label {
+                    Text("No network right now — this curve is the model from \(Format.duration(age)) ago.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "wifi.slash")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Color.harbourNavy)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

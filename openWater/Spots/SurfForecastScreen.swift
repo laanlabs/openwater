@@ -13,6 +13,11 @@ struct SurfForecastScreen: View {
 
     let coordinate: Geo.Coordinate
     let title: String
+    /// The outlook the conditions sheet already fetched, handed through so
+    /// opening this screen does not re-ask the API for the data on screen
+    /// behind it. Nil (or empty, if the sheet's fetch had not landed yet)
+    /// means fetch here.
+    var initial: SurfOutlook? = nil
 
     @Environment(AppSettings.self) private var settings
 
@@ -44,6 +49,11 @@ struct SurfForecastScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Surf forecast")
         .task {
+            if let initial, !initial.isEmpty {
+                outlook = initial
+                isLoading = false
+                return
+            }
             outlook = await OpenMeteo.surfOutlook(at: coordinate)
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
         }
@@ -420,13 +430,25 @@ struct SurfForecastScreen: View {
     }
 
     private var provenance: some View {
-        Text("Open-Meteo's global wave model, free and worldwide. It is deep-water swell "
-             + "at a grid point, not a break-by-break forecast: the size and timing of a "
-             + "swell filling in will be about right, the face height at any particular "
-             + "reef or sandbar will not. Wind is the same model that drives the wind "
-             + "screens.")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            if let age = outlook.staleAge {
+                Label {
+                    Text("No network right now — this is the wave model from \(Format.duration(age)) ago, not a fresh run.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "wifi.slash")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Color.harbourNavy)
+            }
+            Text("Open-Meteo's global wave model, free and worldwide. It is deep-water swell "
+                 + "at a grid point, not a break-by-break forecast: the size and timing of a "
+                 + "swell filling in will be about right, the face height at any particular "
+                 + "reef or sandbar will not. Wind is the same model that drives the wind "
+                 + "screens.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

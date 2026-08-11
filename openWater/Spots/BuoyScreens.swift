@@ -170,6 +170,105 @@ struct BuoyMapScreen: View {
     }
 }
 
+/// The measured swell split from a nearby buoy — the `.spec` file's answer,
+/// paired with the buoy it came from so the card can say whose water it is.
+struct MeasuredSwell {
+    let buoy: Buoy
+    let reading: NDBCSpectral.Reading
+}
+
+/// The one card on the surf tab that is measured rather than modelled.
+///
+/// It shows the same swell/wind-wave breakdown as the modelled card above
+/// it, from a wave sensor on real water — which is exactly why the footer
+/// must name the buoy and its distance. A buoy in deep water is not the
+/// beach, and presenting its reading as the spot would trade one kind of
+/// dishonesty for another.
+struct MeasuredSwellCard: View {
+
+    let measured: MeasuredSwell
+
+    @Environment(AppSettings.self) private var settings
+    private var units: UnitPreferences { settings.units }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("MEASURED SWELL")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let steepness = measured.reading.steepness {
+                    Text(steepness.lowercased())
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            if let swell = measured.reading.swell {
+                row(swell, colour: .orange, label: "swell")
+            }
+            if let windWave = measured.reading.windWave {
+                row(windWave, colour: .secondary, label: "wind wave")
+            }
+            if measured.reading.swell == nil, measured.reading.windWave == nil,
+               let height = measured.reading.waveHeightM {
+                // The buoy measured a sea but could not resolve the split.
+                Text("\(Format.height(height, unit: units.distance)) combined — this buoy is not resolving the split right now.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(footer)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func row(_ train: SwellTrain, colour: Color, label: String) -> some View {
+        HStack(spacing: 10) {
+            Text(Format.height(train.heightM, unit: units.distance))
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+                .frame(width: 58, alignment: .leading)
+
+            Text(train.periodS.map { "\(Int($0.rounded()))s" } ?? "—")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .leading)
+
+            if let direction = train.directionFromDeg {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 11, weight: .bold))
+                    .rotationEffect(.degrees(direction + 180))
+                    .foregroundStyle(colour)
+                Text("\(Format.cardinal(direction)) \(Int(direction.rounded()))°")
+                    .font(.subheadline.weight(.medium))
+            }
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var footer: String {
+        var text = "Measured at \(measured.buoy.name), "
+            + "\(Format.distance(measured.buoy.metres, unit: units.distance)) away — "
+            + "a wave sensor on deep water, not the beach."
+        let age = Date().timeIntervalSince(measured.reading.at)
+        if age > 60 {
+            text += " Read \(Format.duration(age)) ago."
+        }
+        return text
+    }
+}
+
 /// A buoy, with its wave height on it when it has one.
 struct BuoyPin: View {
     var waveHeightM: Double?

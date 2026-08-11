@@ -57,6 +57,8 @@ struct NearbyConditionsSheet: View {
     @State private var nowcast: NowcastAdjustment?
     /// Quarter-hour wind, only where a rapid-update model natively has it.
     @State private var nearTerm = NearTermWind(times: [], speedsKn: [], gustsKn: [], directions: [])
+    /// The nearest buoy's measured swell split, when one resolves it.
+    @State private var measuredSwell: MeasuredSwell?
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -756,6 +758,21 @@ struct NearbyConditionsSheet: View {
             SurfCard(surf: surf, windDirectionDeg: reading?.directionDeg)
         }
 
+        if let measuredSwell {
+            MeasuredSwellCard(measured: measuredSwell)
+        }
+
+        if let age = surf?.staleAge ?? surfOutlook.staleAge {
+            Label {
+                Text("No network right now — this is the wave model from \(Format.duration(age)) ago, not a fresh run.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "wifi.slash")
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(Color.harbourNavy)
+        }
+
         waveCard
 
         if !surfOutlook.isEmpty {
@@ -769,7 +786,7 @@ struct NearbyConditionsSheet: View {
         // The multi-day view, which is the question a surf tab is really
         // being asked: not "what is it doing" but "when should I go".
         NavigationLink {
-            SurfForecastScreen(coordinate: coordinate, title: title)
+            SurfForecastScreen(coordinate: coordinate, title: title, initial: surfOutlook)
         } label: {
             HStack {
                 Label("Multi-day forecast", systemImage: "calendar")
@@ -1201,6 +1218,20 @@ struct NearbyConditionsSheet: View {
         // than we show is the point: a buoy whose sensors are down should not
         // cost the list a slot.
         buoys = Array(buoys.filter { $0.reading != nil }.prefix(3))
+
+        // The measured swell split, from the nearest buoy whose .spec file
+        // resolves one. In order of distance because the question is "what
+        // is the sea here doing", and a fresher reading further away does
+        // not answer it better.
+        measuredSwell = nil
+        for buoy in buoys {
+            guard let spectral = await DataBuoyCenter.spectral(for: buoy.id),
+                  Date().timeIntervalSince(spectral.at) < 2 * 3600,
+                  spectral.swell != nil || spectral.windWave != nil
+            else { continue }
+            measuredSwell = MeasuredSwell(buoy: buoy, reading: spectral)
+            break
+        }
 
         await withTaskGroup(of: (String, StationObservation?).self) { group in
             for station in stations {

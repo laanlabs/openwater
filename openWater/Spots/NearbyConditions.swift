@@ -1755,6 +1755,24 @@ enum DataBuoyCenter {
         return reading
     }
 
+    /// The newest row of a station's spectral summary — the *measured*
+    /// swell/wind-wave split, from the `.spec` file that sits beside the
+    /// `.txt` the readings above come from.
+    ///
+    /// Not every wave buoy publishes one (the URL 404s, quietly), and on
+    /// plenty that do the split columns are all `MM` while the combined
+    /// height stays real — `NDBCSpectral` in core owns that raggedness.
+    /// Not cached: it is an observation, and its whole value is being
+    /// minutes old.
+    static func spectral(for stationId: String) async -> NDBCSpectral.Reading? {
+        guard let url = URL(string: "https://www.ndbc.noaa.gov/data/realtime2/\(stationId.uppercased()).spec"),
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        return NDBCSpectral.parse(text).first
+    }
+
     /// Every wind reading in the station's realtime file — about 45 days,
     /// newest first, mostly hourly.
     ///
@@ -1815,8 +1833,6 @@ struct SurfConditions {
         let heightM: Double
         let periodS: Double?
         let directionDeg: Double?
-
-        var heightFt: Double { heightM * 3.28084 }
     }
 
     let at: Date
@@ -1836,22 +1852,27 @@ struct SurfConditions {
     /// speed through water.
     let currentKn: Double?
     let currentDirectionDeg: Double?
+    /// Set when the network failed and this is the cache's last good
+    /// answer, this many seconds old — same contract as `WindOutlook`.
+    var staleAge: TimeInterval?
 
     var hasAnything: Bool { waveHeightM != nil || primarySwell != nil }
 
-    /// Surf height as a range, the way every report states it — a single
-    /// number implies a precision the ocean does not have.
-    var surfRangeFt: (low: Int, high: Int)? {
-        guard let waveHeightM else { return nil }
-        let feet = waveHeightM * 3.28084
-        let low = max(0, Int((feet * 0.8).rounded(.down)))
-        return (low, max(low + 1, Int((feet * 1.25).rounded(.up))))
+    /// Breaking-face height as a range in metres, the way every report
+    /// states it — a single number implies a precision the ocean does not
+    /// have. The conversion from offshore height is the one documented
+    /// heuristic, `SwellMath.faceHeightRange`; the rider's unit is the
+    /// view's business.
+    var faceRangeM: ClosedRange<Double>? {
+        guard let waveHeightM, waveHeightM > 0.01 else { return nil }
+        return SwellMath.faceHeightRange(offshoreHs: waveHeightM, periodS: wavePeriodS)
     }
 
     /// The body-part scale, which is how surfers actually talk about size.
     var sizeDescription: String? {
-        guard let range = surfRangeFt else { return nil }
-        return switch range.high {
+        guard let range = faceRangeM else { return nil }
+        let high = max(1, Int((range.upperBound / DistanceUnit.metresPerFoot).rounded(.up)))
+        return switch high {
         case ...1: "Ankle to knee"
         case 2: "Knee to thigh"
         case 3: "Thigh to waist"
@@ -1893,8 +1914,8 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let data = await ForecastCache.data(from: url, ttl: 1800),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let served = await ForecastCache.serve(from: url, ttl: 1800),
+              let root = try? JSONSerialization.jsonObject(with: served.data) as? [String: Any],
               let current = root["current"] as? [String: Any]
         else { return nil }
 
@@ -1918,7 +1939,8 @@ extension OpenMeteo {
             seaTemperatureC: number("sea_surface_temperature"),
             // Reported in km/h; knots is what the rest of the app speaks.
             currentKn: number("ocean_current_velocity").map { $0 / 1.852 },
-            currentDirectionDeg: number("ocean_current_direction")
+            currentDirectionDeg: number("ocean_current_direction"),
+            staleAge: served.staleAge
         )
         // Inland points answer with a full set of nulls rather than an error.
         return conditions.hasAnything ? conditions : nil
@@ -1952,6 +1974,8 @@ struct TideCurve {
 
     let points: [Point]
     var timeZone: TimeZone?
+    /// The offline-fallback age, seconds, when that is what this is.
+    var staleAge: TimeInterval?
 
     var isEmpty: Bool { points.count < 3 }
 
@@ -2022,8 +2046,8 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let data = await ForecastCache.data(from: url, ttl: 21_600),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let served = await ForecastCache.serve(from: url, ttl: 21_600),
+              let root = try? JSONSerialization.jsonObject(with: served.data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let times = hourly["time"] as? [Double],
               let heights = hourly["sea_level_height_msl"] as? [Any]
@@ -2035,7 +2059,8 @@ extension OpenMeteo {
         }
         return TideCurve(
             points: points,
-            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
+            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:)),
+            staleAge: served.staleAge
         )
     }
 }
@@ -2118,6 +2143,11 @@ struct SurfOutlook {
     var windKn: [Double?] = []
     var windFromDeg: [Double?] = []
     var tideM: [Double?] = []
+
+    /// Set when the wave model's answer is the cache's offline fallback,
+    /// this many seconds old — the screens say so rather than posing as
+    /// fresh, same contract as `WindOutlook`.
+    var staleAge: TimeInterval?
 
     /// The hour nearest now, for the marker every surf chart carries.
     var nowIndex: Int? {
@@ -2208,6 +2238,7 @@ extension OpenMeteo {
             windKn: windSpeeds,
             windFromDeg: windAngles,
             tideM: sea.columns["sea_level_height_msl"] ?? [],
+            staleAge: sea.staleAge,
             hasModel: covered
         )
     }
@@ -2218,6 +2249,7 @@ extension OpenMeteo {
         var times: [Date] = []
         var zone: TimeZone?
         var columns: [String: [Double?]] = [:]
+        var staleAge: TimeInterval?
 
         func train(at index: Int, prefix: String) -> SurfConditions.Train? {
             guard let height = columns["\(prefix)height"]?[safe: index] ?? nil,
@@ -2259,14 +2291,15 @@ extension OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ]
         guard let url = components.url,
-              let data = await ForecastCache.data(from: url, ttl: 10_800),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let served = await ForecastCache.serve(from: url, ttl: 10_800),
+              let root = try? JSONSerialization.jsonObject(with: served.data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let stamps = hourly["time"] as? [Double]
         else { return HourlyMarine() }
 
         var out = HourlyMarine()
         out.times = stamps.map { Date(timeIntervalSince1970: $0) }
+        out.staleAge = served.staleAge
         if let identifier = root["timezone"] as? String {
             out.zone = TimeZone(identifier: identifier)
         }

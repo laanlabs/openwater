@@ -39,6 +39,7 @@ struct SessionOverview: View {
             .padding(.bottom, 28)
         }
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .readableContentColumn()
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showingNotes) {
             MeasurementNotesView(session: session, summary: summary)

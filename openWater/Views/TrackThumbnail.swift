@@ -252,6 +252,10 @@ struct TrackThumbnail: View {
     var style: MapStyleOption = .standard
     var height: CGFloat = 132
 
+    // The window's scale, not `UIScreen.main`'s — on an iPad the app lives in
+    // a window that can sit on any display, including an external one.
+    @Environment(\.displayScale) private var displayScale
+
     @State private var image: UIImage?
 
     var body: some View {
@@ -283,7 +287,7 @@ struct TrackThumbnail: View {
                     samples: samples,
                     size: CGSize(width: proxy.size.width, height: proxy.size.height),
                     style: style,
-                    scale: UIScreen.main.scale
+                    scale: displayScale
                 )
             }
         }

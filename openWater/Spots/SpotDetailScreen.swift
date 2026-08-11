@@ -159,7 +159,7 @@ struct SpotDetailScreen: View {
         .sheet(isPresented: $isSuggesting) {
             SuggestSpotView(mode: .correction(spot))
         }
-        .sheet(isPresented: $isShowingConditions) {
+        .fullScreenSheet(isPresented: $isShowingConditions) {
             NearbyConditionsSheet(spot: spot)
         }
         .confirmationDialog("Open in", isPresented: $isChoosingMapApp, titleVisibility: .visible) {

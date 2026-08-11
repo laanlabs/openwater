@@ -184,6 +184,11 @@ struct OpenWaterTabBar: View {
                 .overlay { shape.stroke(Color(.separator).opacity(0.6), lineWidth: 0.5) }
                 .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
         }
+        // A floating capsule only floats if it is smaller than the water it
+        // sits on. Stretched across an iPad it reads as a wall again — five
+        // buttons adrift in it, thumbs' width apart — so the bar keeps a
+        // phone's proportions and centres itself, whatever the window does.
+        .frame(maxWidth: 520)
         .padding(.horizontal, 12)
         .padding(.bottom, 6)
     }

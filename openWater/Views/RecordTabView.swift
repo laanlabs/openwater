@@ -301,6 +301,10 @@ struct RecordTabView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
+        // On an iPad the map can run to the horizon, but a Start button the
+        // width of the window is a banner, not a button. The controls keep a
+        // phone's width and sit centred over the map.
+        .frame(maxWidth: 520)
     }
 
     private var gpsPill: some View {

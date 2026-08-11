@@ -107,6 +107,11 @@ struct NearbyConditionsSheet: View {
                     }
                 }
                 .padding(16)
+                // Full screen on an iPad, the cards keep a column instead of
+                // stretching a forecast label a foot from its number. Inside
+                // the pin below, so the scroll content still measures exactly
+                // the viewport and the no-sideways-pan guarantee holds.
+                .frame(maxWidth: 700)
                 // Pinned to the viewport's width. A vertical scroll view
                 // whose content measures even a point wider becomes
                 // horizontally draggable, and one over-wide child anywhere

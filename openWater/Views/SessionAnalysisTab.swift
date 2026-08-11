@@ -45,6 +45,7 @@ struct SessionAnalysisTab: View {
         }
         .listStyle(.insetGrouped)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .readableContentColumn()
         .task(id: session.swellDirection) {
             guard let swellFrom = session.swellDirection else {
                 waves = nil

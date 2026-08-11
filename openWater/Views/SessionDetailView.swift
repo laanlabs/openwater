@@ -436,6 +436,9 @@ struct SessionDetailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            // Four segments stay a hand's width apart on an iPad instead of
+            // stretching into a ruler across the whole window.
+            .frame(maxWidth: 480)
             .padding(.horizontal)
             .padding(.bottom, 6)
 

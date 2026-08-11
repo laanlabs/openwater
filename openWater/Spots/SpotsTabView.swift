@@ -128,7 +128,7 @@ struct SpotsTabView: View {
         .sheet(item: $addingPrivateSpot) { request in
             AddPrivateSpotSheet(coordinate: request.coordinate)
         }
-        .sheet(item: $selectedPrivateSpot) { spot in
+        .fullScreenSheet(item: $selectedPrivateSpot) { spot in
             NearbyConditionsSheet(title: spot.name, coordinate: spot.coordinate,
                                   shoreFacingDeg: spot.shoreFacingDeg)
         }
@@ -149,7 +149,7 @@ struct SpotsTabView: View {
         .sheet(isPresented: $isGivingFeedback) {
             AppFeedbackSheet(screen: "Spots")
         }
-        .sheet(isPresented: $isShowingConditions) {
+        .fullScreenSheet(isPresented: $isShowingConditions) {
             if let here = localCoordinate {
                 NearbyConditionsSheet(title: pickedPoint == nil ? "Conditions here" : "Conditions there",
                                       coordinate: here)

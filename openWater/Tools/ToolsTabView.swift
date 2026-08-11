@@ -153,6 +153,7 @@ struct ToolsTabView: View {
                 }
             }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+            .readableContentColumn()
     }
 
     private func toolRow(_ title: String, symbol: String, blurb: String) -> some View {

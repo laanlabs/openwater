@@ -655,6 +655,7 @@ struct RibbonView: View {
             .task(id: ribbon.lanes.count) { regroup() }
             .onChange(of: flights.count) { _, _ in regroup() }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+            .readableContentColumn()
             .sheet(isPresented: $showingKey) {
                 RibbonKeySheet(thresholds: thresholds)
                     .presentationDetents([.medium, .large])

@@ -116,6 +116,12 @@ struct LiveSessionScreen: View {
                 .padding(.horizontal)
                 .padding(.bottom, tabBarHeight + 10)
         }
+        // This screen is read at arm's length with spray on the glass, and its
+        // legibility comes from the tiles sitting in a tight block under the
+        // speed. Left to fill an iPad they string out into one long row —
+        // eight glances instead of one — so the whole column keeps a phone's
+        // proportions and centres itself in the window.
+        .frame(maxWidth: 600)
     }
 
     private var grid: some View {

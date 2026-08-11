@@ -137,6 +137,7 @@ struct SettingsView: View {
                 }
             }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+            .readableContentColumn()
             .navigationTitle("Settings")
             .feedbackButton("Settings")
             // A decimal pad has no return key, so without a way out the

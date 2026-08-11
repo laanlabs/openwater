@@ -428,6 +428,7 @@ struct SessionListView: View {
         .listRowSpacing(16)
         .scrollContentBackground(.hidden)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .readableContentColumn()
         .background(Color(.systemGroupedBackground))
     }
 

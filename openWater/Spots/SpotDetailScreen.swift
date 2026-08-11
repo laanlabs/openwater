@@ -55,6 +55,37 @@ struct SpotDetailScreen: View {
                 windCard
                     .padding(.horizontal, 16)
 
+                // The front door to everything this screen cannot fit —
+                // the wind card's quiet tap-through was the only way in,
+                // and a door nobody can see is a wall.
+                Button {
+                    isShowingConditions = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "water.waves")
+                            .font(.title3.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Get more info about this spot")
+                                .font(.body.weight(.bold))
+                            Text("Forecasts, surf, tides, buoys, stations and cams")
+                                .font(.caption)
+                                .opacity(0.85)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline.weight(.semibold))
+                            .opacity(0.7)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.tint, in: RoundedRectangle(cornerRadius: 14))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+
                 linksCard
                     .padding(.horizontal, 16)
 

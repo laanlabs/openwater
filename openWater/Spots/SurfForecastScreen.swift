@@ -13,6 +13,9 @@ struct SurfForecastScreen: View {
 
     let coordinate: Geo.Coordinate
     let title: String
+    /// Which way the beach faces, when the spot knows — applied to a fetch
+    /// this screen has to make itself.
+    var shoreFacingDeg: Double? = nil
     /// The outlook the conditions sheet already fetched, handed through so
     /// opening this screen does not re-ask the API for the data on screen
     /// behind it. Nil (or empty, if the sheet's fetch had not landed yet)
@@ -57,6 +60,7 @@ struct SurfForecastScreen: View {
                 return
             }
             outlook = await OpenMeteo.surfOutlook(at: coordinate)
+                .applyingShoreFacing(shoreFacingDeg)
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
         }
     }
@@ -464,14 +468,25 @@ struct SurfForecastScreen: View {
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(Color.harbourNavy)
             }
-            Text("Open-Meteo's global wave model, free and worldwide. It is deep-water swell "
-                 + "at a grid point, not a break-by-break forecast: the size and timing of a "
-                 + "swell filling in will be about right, the face height at any particular "
-                 + "reef or sandbar will not. Wind is the same model that drives the wind "
-                 + "screens.")
+            Text(provenanceText)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var provenanceText: String {
+        let model = "Open-Meteo's global wave model, free and worldwide. It is deep-water swell "
+            + "at a grid point, not a break-by-break forecast: the size and timing of a "
+            + "swell filling in will be about right, the face height at any particular "
+            + "reef or sandbar will not. Wind is the same model that drives the wind "
+            + "screens. "
+        guard let facing = outlook.shoreFacingDeg else {
+            return model + "With no beach facing set, offshore and onshore are judged "
+                + "against the swell — a proxy. Set the facing on a private spot to get "
+                + "the real thing."
+        }
+        return model + "Offshore and onshore are judged against this beach's own facing "
+            + "(\(Format.cardinal(facing)))."
     }
 }
 

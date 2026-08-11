@@ -17,6 +17,11 @@ struct PrivateSpot: Codable, Identifiable, Hashable {
     let latitude: Double
     let longitude: Double
     let createdAt: Date
+    /// Degrees true from the beach out toward open water. Optional twice
+    /// over: old saved spots decode without it, and nobody is made to
+    /// answer a question they are unsure of — the surf screens fall back
+    /// to their proxy and say so.
+    var shoreFacingDeg: Double?
 
     var coordinate: Geo.Coordinate {
         Geo.Coordinate(latitude: latitude, longitude: longitude)
@@ -39,6 +44,8 @@ struct AddPrivateSpotSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
+    @State private var hasFacing = false
+    @State private var facing: Double = 270
     @FocusState private var nameIsFocused: Bool
 
     var body: some View {
@@ -68,6 +75,17 @@ struct AddPrivateSpotSheet: View {
                 } footer: {
                     Text("Private to this phone. It lives in your favorites with the same nearby stations, forecasts and cams as any spot — nothing is submitted to the guide.")
                 }
+
+                Section {
+                    Toggle("Set which way the beach faces", isOn: $hasFacing.animation())
+                    if hasFacing {
+                        ShoreFacingControl(facing: $facing)
+                    }
+                } footer: {
+                    Text(hasFacing
+                         ? "Stand on the sand, look at the water — that bearing. It is what turns a forecast wind into \"offshore\" and tells the surf screens which swell can actually reach this beach."
+                         : "Optional, and worth it for surf: with a facing, the forecast can say offshore or onshore against this beach rather than guessing from the swell.")
+                }
             }
             .navigationTitle("New private spot")
             .navigationBarTitleDisplayMode(.inline)
@@ -82,7 +100,8 @@ struct AddPrivateSpotSheet: View {
                             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                             latitude: coordinate.latitude,
                             longitude: coordinate.longitude,
-                            createdAt: Date()
+                            createdAt: Date(),
+                            shoreFacingDeg: hasFacing ? facing : nil
                         ))
                         dismiss()
                     }
@@ -113,6 +132,102 @@ struct AddPrivateSpotSheet: View {
         if name.isEmpty, let suggestion {
             name = suggestion
         }
+    }
+}
+
+// MARK: - Which way the beach faces
+
+/// The one-drag compass: an arrow pointing from the sand out to sea, and a
+/// slider to swing it. Deliberately not auto-derived from map data — a
+/// wrong guess would wear the same confidence as a right one, and the rider
+/// standing on the beach knows the answer better than any coastline vector.
+struct ShoreFacingControl: View {
+
+    @Binding var facing: Double
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .strokeBorder(Color(.systemGray4), lineWidth: 1)
+                    .frame(width: 92, height: 92)
+                ForEach(Array(["N", "E", "S", "W"].enumerated()), id: \.offset) { index, label in
+                    Text(label)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(Double(index) * -90))
+                        .offset(y: -54)
+                        .rotationEffect(.degrees(Double(index) * 90))
+                }
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(.tint)
+                    .rotationEffect(.degrees(facing))
+                Text("water")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .offset(y: -54)
+                    .rotationEffect(.degrees(facing))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+
+            HStack {
+                Slider(value: $facing, in: 0...359, step: 1)
+                Text("\(Format.cardinal(facing)) \(Int(facing))°")
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                    .frame(width: 84, alignment: .trailing)
+            }
+        }
+    }
+}
+
+/// Editing the facing on a spot that already exists — the context menu's
+/// door to the same control the save dialog offers.
+struct ShoreFacingSheet: View {
+
+    let spot: PrivateSpot
+
+    @Environment(SpotGuideStore.self) private var guide
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var hasFacing: Bool
+    @State private var facing: Double
+
+    init(spot: PrivateSpot) {
+        self.spot = spot
+        _hasFacing = State(initialValue: spot.shoreFacingDeg != nil)
+        _facing = State(initialValue: spot.shoreFacingDeg ?? 270)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("This beach has a facing", isOn: $hasFacing.animation())
+                    if hasFacing {
+                        ShoreFacingControl(facing: $facing)
+                    }
+                } footer: {
+                    Text("Stand on the sand, look at the water — that bearing. The surf screens use it to judge the wind against this beach and to gate swell that cannot reach it.")
+                }
+            }
+            .navigationTitle(spot.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guide.setShoreFacing(spot.id, to: hasFacing ? facing : nil)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

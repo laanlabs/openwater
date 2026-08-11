@@ -30,6 +30,7 @@ struct SpotsTabView: View {
     @State private var addingPrivateSpot: NewPrivateSpotRequest?
     @State private var selectedPrivateSpot: PrivateSpot?
     @State private var renamingSpot: PrivateSpot?
+    @State private var editingFacingSpot: PrivateSpot?
     @State private var renameText = ""
     /// Wind for the private spots, fetched ad hoc — they have no spotId, so
     /// the guide's per-spot wind dictionary cannot carry them.
@@ -128,7 +129,11 @@ struct SpotsTabView: View {
             AddPrivateSpotSheet(coordinate: request.coordinate)
         }
         .sheet(item: $selectedPrivateSpot) { spot in
-            NearbyConditionsSheet(title: spot.name, coordinate: spot.coordinate)
+            NearbyConditionsSheet(title: spot.name, coordinate: spot.coordinate,
+                                  shoreFacingDeg: spot.shoreFacingDeg)
+        }
+        .sheet(item: $editingFacingSpot) { spot in
+            ShoreFacingSheet(spot: spot)
         }
         .alert("Rename spot", isPresented: isRenamingSpot, presenting: renamingSpot) { spot in
             TextField("Name", text: $renameText)
@@ -727,6 +732,11 @@ struct SpotsTabView: View {
                             renamingSpot = spot
                         } label: {
                             Label("Rename", systemImage: "pencil")
+                        }
+                        Button {
+                            editingFacingSpot = spot
+                        } label: {
+                            Label("Beach facing…", systemImage: "location.north.line")
                         }
                         Button(role: .destructive) {
                             guide.removePrivateSpot(spot.id)

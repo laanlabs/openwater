@@ -125,19 +125,19 @@ And the structural gaps, in the order they hurt:
 
 ### Tier 3 — spot geometry
 
-- [ ] **`ShoreGeometry` in core.** A water-facing bearing and a swell
+- [x] **`ShoreGeometry` in core.** A water-facing bearing and a swell
   window: `windRelation` says offshore/cross/onshore against the *shore*,
   `exposure` gates a swell train by direction with a cosine taper, widened
   for long period because refraction wraps long swell around corners.
   Pure, tested, and the same datum `WIND.md` Tier 3 wants for hazardous
   offshore sectors.
-- [ ] **Private spots know their beach.** `PrivateSpot.shoreFacingDeg`,
+- [x] **Private spots know their beach.** `PrivateSpot.shoreFacingDeg`,
   optional so old spots still decode, set with a compass control at
   creation or later — never auto-derived silently.
-- [ ] **Guide spots can learn theirs.** The app reads an optional
+- [x] **Guide spots can learn theirs.** The app reads an optional
   `shoreFacingDeg` from the guide when present. Populating it is a guide
   task, not an app task.
-- [ ] **`windEffect` prefers the shore.** With a bearing, offshore means
+- [x] **`windEffect` prefers the shore.** With a bearing, offshore means
   offshore; without one, the swell-relative proxy stands and the UI says
   which it is using — the proxy must never be mistaken for the real thing.
 
@@ -200,7 +200,7 @@ government data, free for any use.
    the measured split.
 2. Tier 2 (done): the model compare, the land-cell guard, buoy-verified
    wave skill with a persistence baseline.
-3. Tier 3: shore bearings — core geometry, the private-spot
+3. Tier 3 (done): shore bearings — core geometry, the private-spot
    compass, the guide field read.
 4. Tier 4: the rating with its reasons, and the buoy nowcast.
 5. Tier 5: the NWS surf zone card and the harmonic tide curve.

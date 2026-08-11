@@ -31,6 +31,11 @@ struct GuideSpot: Identifiable, Codable, Hashable {
     let bestWinds: String?
     let bestSeason: String?
     let waterState: String?
+    /// Degrees true from the beach out to open water, when the guide knows
+    /// it. Nobody writes this yet — the guide's editor has no field for it
+    /// — but the read side costs a line, and the day the guide grows one,
+    /// every spot's surf tab starts judging wind against its own shore.
+    let shoreFacingDeg: Double?
     let experienceLevel: String?
     let hazards: String?
     let parking: String?
@@ -181,6 +186,12 @@ final class SpotGuideStore {
     func renamePrivateSpot(_ id: UUID, to name: String) {
         guard let index = privateSpots.firstIndex(where: { $0.id == id }) else { return }
         privateSpots[index].name = name
+        savePrivateSpots()
+    }
+
+    func setShoreFacing(_ id: UUID, to degrees: Double?) {
+        guard let index = privateSpots.firstIndex(where: { $0.id == id }) else { return }
+        privateSpots[index].shoreFacingDeg = degrees
         savePrivateSpots()
     }
 
@@ -1123,6 +1134,7 @@ final class SpotGuideStore {
             bestWinds: conditions?["bestWinds"]?.stringValue,
             bestSeason: conditions?["bestSeason"]?.stringValue,
             waterState: conditions?["waterState"]?.stringValue,
+            shoreFacingDeg: conditions?["shoreFacingDeg"]?.number,
             experienceLevel: conditions?["experienceLevel"]?.stringValue,
             hazards: conditions?["hazards"]?.stringValue,
             parking: access?["parking"]?.stringValue,

@@ -22,16 +22,22 @@ struct NearbyConditionsSheet: View {
     /// region the resource query is scoped to; a bare coordinate borrows the
     /// nearest spot's.
     var spot: GuideSpot?
+    /// Which way the beach faces, when the spot knows — turns the surf
+    /// tab's offshore/onshore from a swell-relative proxy into the real
+    /// thing.
+    var shoreFacingDeg: Double?
 
     init(spot: GuideSpot) {
         self.title = spot.name
         self.coordinate = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
         self.spot = spot
+        self.shoreFacingDeg = spot.shoreFacingDeg
     }
 
-    init(title: String, coordinate: Geo.Coordinate) {
+    init(title: String, coordinate: Geo.Coordinate, shoreFacingDeg: Double? = nil) {
         self.title = title
         self.coordinate = coordinate
+        self.shoreFacingDeg = shoreFacingDeg
     }
 
     @Environment(SpotGuideStore.self) private var guide
@@ -820,7 +826,8 @@ struct NearbyConditionsSheet: View {
         // The multi-day view, which is the question a surf tab is really
         // being asked: not "what is it doing" but "when should I go".
         NavigationLink {
-            SurfForecastScreen(coordinate: coordinate, title: title, initial: surfOutlook)
+            SurfForecastScreen(coordinate: coordinate, title: title,
+                               shoreFacingDeg: shoreFacingDeg, initial: surfOutlook)
         } label: {
             HStack {
                 Label("Multi-day forecast", systemImage: "calendar")
@@ -1226,6 +1233,7 @@ struct NearbyConditionsSheet: View {
         async let quarterly = OpenMeteo.nearTerm(at: here)
         async let waveAgencies = OpenMeteo.swellOutlook(at: here)
         surfOutlook = await OpenMeteo.surfOutlook(at: here)
+            .applyingShoreFacing(shoreFacingDeg)
         nearTerm = await quarterly
         swellModels = await waveAgencies
 

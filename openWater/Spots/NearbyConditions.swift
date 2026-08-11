@@ -2084,19 +2084,33 @@ struct SurfOutlook {
         let secondary: SurfConditions.Train?
         let windKn: Double?
         let windFromDeg: Double?
+        /// The spot's shore, when the spot knows which way it faces. With
+        /// it, `windEffect` means what it says; without, the swell-relative
+        /// proxy below stands in.
+        var shore: ShoreGeometry?
 
         var id: Date { start }
 
-        /// Wind relative to the swell it is blowing across.
+        /// What the wind is doing to the surf.
         ///
         /// The single most important thing about a forecast day and the one
         /// a height alone cannot tell you: the same four feet is clean at
-        /// dawn and unrideable by noon. Nil when either is unknown, because a
-        /// guess here would be worse than a blank.
+        /// dawn and unrideable by noon. Judged against the beach's own
+        /// facing when the spot has one — the real offshore/onshore — and
+        /// against the swell when it does not, which is a proxy that calls
+        /// a side-shore day offshore whenever swell and wind happen to
+        /// oppose. Nil when the inputs are unknown, because a guess here
+        /// would be worse than a blank.
         var windEffect: WindEffect? {
-            guard let windFromDeg, let swellFrom = primary?.directionDeg,
-                  let windKn, windKn > 3
-            else { return nil }
+            guard let windFromDeg, let windKn, windKn > 3 else { return nil }
+            if let shore {
+                return switch shore.windRelation(windFromDeg: windFromDeg) {
+                case .offshore: .offshore
+                case .crossShore: .crossShore
+                case .onshore: .onshore
+                }
+            }
+            guard let swellFrom = primary?.directionDeg else { return nil }
             let raw = abs((windFromDeg - swellFrom).truncatingRemainder(dividingBy: 360))
             let between = raw > 180 ? 360 - raw : raw
             // Wind from the same quarter as the swell is behind it, blowing
@@ -2148,6 +2162,28 @@ struct SurfOutlook {
     /// this many seconds old — the screens say so rather than posing as
     /// fresh, same contract as `WindOutlook`.
     var staleAge: TimeInterval?
+
+    /// The facing every band was judged against, kept so the screens can
+    /// say which kind of "offshore" they are showing. Nil means the proxy.
+    var shoreFacingDeg: Double?
+
+    /// The same outlook with every band judging its wind against this
+    /// shore. The fetcher cannot do this itself — it knows a coordinate,
+    /// not a spot — so the sheet applies what the spot knows.
+    func applyingShoreFacing(_ degrees: Double?) -> SurfOutlook {
+        guard let degrees else { return self }
+        let shore = ShoreGeometry(waterFacingDeg: degrees)
+        var out = self
+        out.shoreFacingDeg = degrees
+        out.days = days.map { day in
+            Day(date: day.date, bands: day.bands.map { band in
+                var band = band
+                band.shore = shore
+                return band
+            })
+        }
+        return out
+    }
 
     /// The hour nearest now, for the marker every surf chart carries.
     var nowIndex: Int? {

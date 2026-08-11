@@ -209,17 +209,22 @@ struct FlowMapScreen: View {
         return spanRatio > 1.3 || spanRatio < 0.55 || centreShift > 0.3
     }
 
-    /// The field the view deserves, within reason: never tighter than the
-    /// model's own ~10 km grid can honestly fill, never wider than a
-    /// session plan. Zoomed out past the cap, the wash's feathered edge is
-    /// the box that says where the field ends.
+    /// The field the view deserves: a fifth wider than what is visible, so
+    /// the arrows run clean past the bezels and the wash's feathered edge
+    /// stays offscreen. Never tighter than the model's own ~10 km grid can
+    /// honestly fill, and capped only at continental scale — the fetch
+    /// costs the same sixty-three points at any span, so the cap exists
+    /// for sense, not thrift. Past it, the feathered edge is the box that
+    /// says where the field ends.
     private func clampedField(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
         var region = visible
+        region.span.latitudeDelta *= 1.2
+        region.span.longitudeDelta *= 1.2
         let latMetres = region.span.latitudeDelta * 110_574
-        let clamped = min(max(latMetres, 45_000), 600_000)
+        let clamped = min(max(latMetres, 45_000), 2_500_000)
         let scale = clamped / latMetres
-        region.span.latitudeDelta *= scale
-        region.span.longitudeDelta *= scale
+        region.span.latitudeDelta = min(region.span.latitudeDelta * scale, 120)
+        region.span.longitudeDelta = min(region.span.longitudeDelta * scale, 340)
         return region
     }
 
@@ -280,8 +285,9 @@ struct FlowMapScreen: View {
         for row in 0..<Self.rows {
             for column in 0..<Self.columns {
                 out.append(Geo.Coordinate(
-                    latitude: region.center.latitude - region.span.latitudeDelta / 2
-                        + region.span.latitudeDelta * Double(row) / Double(Self.rows - 1),
+                    latitude: max(-89, min(89,
+                        region.center.latitude - region.span.latitudeDelta / 2
+                        + region.span.latitudeDelta * Double(row) / Double(Self.rows - 1))),
                     longitude: region.center.longitude - region.span.longitudeDelta / 2
                         + region.span.longitudeDelta * Double(column) / Double(Self.columns - 1)
                 ))

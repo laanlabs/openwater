@@ -680,3 +680,47 @@ struct RoughnessDoesNotLandTests {
                 "a real landing is a real break")
     }
 }
+
+@Suite("A run ends where the rider stopped")
+struct RunEndsAtAStopTests {
+
+    let builder = TrackBuilder()
+    let wind = Wind(directionFrom: 270, speed: 10, source: .manual, confidence: 1)
+
+    /// A downwind ride, an interruption of a given speed and length, then more
+    /// of the same ride.
+    private func legs(interruptedAt speed: Double, for seconds: TimeInterval) -> [SessionLeg] {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 9, heading: 90, duration: 240),
+            .init(speed: speed, heading: 90, duration: seconds, transition: 3),
+            .init(speed: 9, heading: 90, duration: 600, transition: 3),
+        ]))
+        let runs = RunSegmenter.forSport(.parawing).segment(track)
+        return SessionShapeAnalyzer.legs(
+            track: track, runs: runs, wind: wind,
+            stoppedBelow: Sport.parawing.thresholds.movingSpeed,
+            minimumStop: Sport.parawing.thresholds.foilMinimumRecovery
+        )
+    }
+
+    @Test("Sinking off the foil and pumping back on is one run")
+    func sinkingIsNotAStop() {
+        // Measured on the session that prompted this: eight of the rider's
+        // nine drops off the foil bottomed out between three and six knots.
+        // They were on the board the whole time.
+        #expect(legs(interruptedAt: 2.0, for: 40).count == 1)
+    }
+
+    @Test("A swim in the middle of a downwinder ends the run")
+    func aStopSplitsTheLeg() {
+        // The ninth bottomed out at 0.2 knots, which is a person in the water,
+        // and the rider counted the session as two runs because of it.
+        #expect(legs(interruptedAt: 0.1, for: 60).count == 2)
+    }
+
+    @Test("A moment through the moving threshold is not a stop")
+    func aBriefStopIsNotAStop() {
+        // Long enough to be slow, far too short to have fallen and recovered.
+        #expect(legs(interruptedAt: 0.1, for: 5).count == 1)
+    }
+}

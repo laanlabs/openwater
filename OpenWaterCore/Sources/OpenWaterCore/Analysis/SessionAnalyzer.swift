@@ -179,7 +179,14 @@ public struct SessionAnalyzer: Sendable {
             segments: segments,
             fallSummary: fallSummary,
             ribbon: ribbon,
-            shape: SessionShapeAnalyzer.analyse(track: track, runs: runs, wind: wind),
+            shape: SessionShapeAnalyzer.analyse(
+                track: track, runs: runs, wind: wind,
+                // A run ends where the rider stopped, not merely where they
+                // came off the foil — the sport's own moving speed is already
+                // the line between under way and not.
+                stoppedBelow: thresholds.movingSpeed,
+                minimumStop: thresholds.foilMinimumRecovery
+            ),
             wind: wind,
             polar: polar,
             averageHeartRate: heartRates.isEmpty

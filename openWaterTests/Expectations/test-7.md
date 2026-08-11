@@ -4,7 +4,7 @@ Wingfoil · 1:25:58 · 29.88 km · 16.4 kn max
 
 ## The session
 
-- Shape: **At one spot**
+- Shape: **At one spot**, in 4 legs (split where the rider stopped or was carried)
 - Net displacement 0.08 km, straightness 0.00 _(0 = back where you started, 1 = a straight line)_
 - Average moving speed 11.9 kn
 

@@ -238,7 +238,10 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// kept on `Flight.dips` so the mask, `stayedOnFoil` and time on foil
     /// still answer per-moment questions; the jump free-fall bar measured
     /// against the session's own quiet instead of a fixed number.
-    public static let currentVersion = 13
+    /// 14: a leg breaks where the rider stopped, not only where they were
+    /// driven back up the road — so a downwinder with a swim in the middle of
+    /// it is the two runs the rider counts.
+    public static let currentVersion = 14
 
     public let analysisVersion: Int
 

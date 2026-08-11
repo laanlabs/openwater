@@ -178,7 +178,10 @@ public enum SessionShapeAnalyzer {
     /// rider stopped, and when they started again they were somewhere else.
     public static let transportJumpAfterGap: Double = 400
 
-    public static func analyse(track: Track, runs: [Run], wind: Wind?) -> SessionShape {
+    public static func analyse(
+        track: Track, runs: [Run], wind: Wind?,
+        stoppedBelow: Double = 0, minimumStop: TimeInterval = 20
+    ) -> SessionShape {
         guard let first = track.points.first?.coordinate,
               let last = track.points.last?.coordinate else { return .empty }
 
@@ -192,7 +195,8 @@ public enum SessionShapeAnalyzer {
             wind.map { Solar.runAlignment(bearing: bearing, windFrom: $0.directionFrom) }
         }
 
-        let legs = self.legs(track: track, runs: runs, wind: wind)
+        let legs = self.legs(track: track, runs: runs, wind: wind,
+                             stoppedBelow: stoppedBelow, minimumStop: minimumStop)
 
         // Where the session as a whole finished decides this, not any one leg
         // inside it. A first version asked whether *any* leg looked downwind,
@@ -237,7 +241,10 @@ public enum SessionShapeAnalyzer {
     /// the water can produce. Trying to classify the drive itself would mean
     /// guessing at road speeds and getting it wrong for anyone who paddles
     /// back.
-    static func legs(track: Track, runs: [Run], wind: Wind?) -> [SessionLeg] {
+    static func legs(
+        track: Track, runs: [Run], wind: Wind?,
+        stoppedBelow: Double = 0, minimumStop: TimeInterval = 20
+    ) -> [SessionLeg] {
         guard !runs.isEmpty else { return [] }
 
         var groups: [[Run]] = [[runs[0]]]
@@ -247,7 +254,11 @@ public enum SessionShapeAnalyzer {
             let jump = Geo.distance(previous.endCoordinate, run.startCoordinate)
             let carried = jump >= transportJump
                 || (silence >= transportGap && jump >= transportJumpAfterGap)
-            if carried {
+            let stopped = stoppedFor(
+                from: previous.endIndex, to: run.startIndex, in: track,
+                below: stoppedBelow, atLeast: minimumStop
+            )
+            if carried || stopped {
                 groups.append([run])
             } else {
                 groups[groups.count - 1].append(run)
@@ -257,6 +268,45 @@ public enum SessionShapeAnalyzer {
         return groups.enumerated().compactMap { index, group in
             leg(id: index, runs: group, track: track, wind: wind)
         }
+    }
+
+    /// Did the rider come to a stop between these two runs, long enough for
+    /// the run to be over?
+    ///
+    /// This is the difference between falling and sinking, and it is not a
+    /// question of *how long* — it is a question of how slow. Measured on a
+    /// reported parawing downwinder: the rider dropped off the foil nine
+    /// times, and in eight of them the slowest moment was three to six knots.
+    /// They were still on the board, sinking off the foil in a lull and
+    /// pumping back onto it. The ninth bottomed out at **0.2 knots**, which is
+    /// a person in the water. The rider's own account of that session — a
+    /// short ride, one fall, then a long run — matches the one gap, not the
+    /// nine.
+    ///
+    /// So the bar is the sport's own moving speed, which already means "this
+    /// rider is under way", and the duration floor only rules out a momentary
+    /// dip through it. No new number to tune: 0.2 against 2.9 is not a close
+    /// call.
+    private static func stoppedFor(
+        from start: Int, to end: Int, in track: Track,
+        below speed: Double, atLeast seconds: TimeInterval
+    ) -> Bool {
+        guard speed > 0, end > start,
+              start >= 0, end < track.count, track.count == track.elapsed.count
+        else { return false }
+
+        var stopStart: Int?
+        for i in start...end {
+            if track.speed[i] < speed {
+                if stopStart == nil { stopStart = i }
+                if let from = stopStart, track.elapsed[i] - track.elapsed[from] >= seconds {
+                    return true
+                }
+            } else {
+                stopStart = nil
+            }
+        }
+        return false
     }
 
     private static func leg(id: Int, runs: [Run], track: Track, wind: Wind?) -> SessionLeg? {

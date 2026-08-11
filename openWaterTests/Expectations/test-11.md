@@ -4,7 +4,7 @@ Parawing · 45:19 · 10.79 km · 15.6 kn max
 
 ## The session
 
-- Shape: **Downwinder**
+- Shape: **Downwinder**, in 2 legs (split where the rider stopped or was carried)
 - Net displacement 7.16 km, straightness 0.66 _(0 = back where you started, 1 = a straight line)_
 - 1° off dead downwind overall
 - Average moving speed 11.5 kn

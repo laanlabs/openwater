@@ -4,7 +4,7 @@ Wingfoil · 1:49:02 · 24.45 km · 16.3 kn max
 
 ## The session
 
-- Shape: **Downwinder**
+- Shape: **Downwinder**, in 4 legs (split where the rider stopped or was carried)
 - Net displacement 15.14 km, straightness 0.62 _(0 = back where you started, 1 = a straight line)_
 - 9° off dead downwind overall
 - Average moving speed 8.8 kn

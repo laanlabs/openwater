@@ -243,7 +243,7 @@ final class SessionExpectationTests: XCTestCase {
         out += "## The session\n\n"
         out += "- Shape: **\(summary.shape.kind.displayName)**"
         if summary.shape.legs.count > 1 {
-            out += ", in \(summary.shape.legs.count) legs (split where recording stopped)"
+            out += ", in \(summary.shape.legs.count) legs (split where the rider stopped or was carried)"
         }
         out += "\n"
         out += "- Net displacement \(kilometres(summary.shape.netDisplacement)), "

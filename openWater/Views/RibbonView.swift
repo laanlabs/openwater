@@ -938,20 +938,33 @@ struct RibbonView: View {
     private func legRow(_ leg: SessionLeg, number: Int, of total: Int) -> some View {
         let kind = type(of: leg)
         let tacks = canExpand(leg) ? lanes(in: leg).count : 0
+        // Where this leg sits on the map. `drawn` numbers legs by their
+        // position in `legs`, and the rows are grouped by kind, so the row's
+        // own number is not it.
+        let drawnID = legs.firstIndex { $0.id == leg.id } ?? 0
         return Button {
-            guard tacks > 0 else { return }
-            withAnimation(.snappy) {
-                expandedLeg = expandedLeg == leg.id ? nil : leg.id
-            }
+            // Tapping a run picks it out on the map — the same thing tapping a
+            // grouped run does, and the thing that was missing here: the row
+            // only ever toggled its own disclosure, so a rider who tapped the
+            // one run of a downwinder got no answer to "where was this".
+            select([drawnID])
         } label: {
             HStack(spacing: 10) {
                 if tacks > 0 {
-                    Image(systemName: expandedLeg == leg.id ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 12)
+                    Button {
+                        withAnimation(.snappy) {
+                            expandedLeg = expandedLeg == leg.id ? nil : leg.id
+                        }
+                    } label: {
+                        Image(systemName: expandedLeg == leg.id ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 } else {
-                    Color.clear.frame(width: 12)
+                    Color.clear.frame(width: 24)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -985,7 +998,6 @@ struct RibbonView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(tacks == 0)
     }
 
     private func title(_ kind: Leg, number: Int, of total: Int) -> String {

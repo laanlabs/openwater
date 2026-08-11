@@ -102,6 +102,12 @@ struct WindOutlook {
         var gusts: [Double?] = []
         /// Degrees the wind comes from, aligned to `hours`.
         var directions: [Double?] = []
+        /// A model that is already a blend of the others — NOAA's NBM
+        /// contains GFS and HRRR and dozens more, statistically corrected
+        /// against observations. Worth showing as its own line, wrong to
+        /// average into a blend alongside its own ingredients: that counts
+        /// the same physics twice and calls the double vote agreement.
+        var isComposite: Bool = false
     }
 
     let hours: [Date]
@@ -138,18 +144,30 @@ struct WindOutlook {
     /// Direction, averaged the only way a direction can be.
     ///
     /// A plain mean of 350° and 10° is 180° — due south, the exact opposite
-    /// of the northerly both models actually forecast. Averaging the unit
-    /// vectors and taking the angle back off avoids that, and also degrades
+    /// of the northerly both models actually forecast. Averaging the vectors
+    /// and taking the angle back off avoids that, and also degrades
     /// sensibly: models pointing every which way produce a short resultant,
     /// which is honestly what disagreement about direction looks like.
+    ///
+    /// Each model's vote is weighted by its own speed: a model calling 20 kn
+    /// from the west should out-vote one calling 3 kn from the south,
+    /// because near calm a modelled direction is close to noise. This is the
+    /// guide's rule of always working in components rather than averaging
+    /// compass points as if they were all equally meant.
     func blendDirections(of enabled: Set<String>) -> [Double?] {
         let chosen = models.filter { enabled.contains($0.id) }
         guard !chosen.isEmpty else { return [] }
         return hours.indices.map { hour in
-            let values = chosen.compactMap { $0.directions[safe: hour] ?? nil }
-            guard !values.isEmpty else { return nil }
-            let x = values.reduce(0.0) { $0 + cos($1 * .pi / 180) }
-            let y = values.reduce(0.0) { $0 + sin($1 * .pi / 180) }
+            var x = 0.0, y = 0.0
+            for model in chosen {
+                guard let direction = model.directions[safe: hour] ?? nil else { continue }
+                // A model with a direction but no speed still votes, at the
+                // weight of a light air — present, not dominant.
+                let weight = max((model.speeds[safe: hour] ?? nil) ?? 1, 0.0)
+                x += weight * cos(direction * .pi / 180)
+                y += weight * sin(direction * .pi / 180)
+            }
+            guard x != 0 || y != 0 else { return nil }
             let mean = atan2(y, x) * 180 / .pi
             return mean < 0 ? mean + 360 : mean
         }
@@ -163,10 +181,14 @@ struct WindOutlook {
         return hours[safe: last]
     }
 
+    /// The models that get a vote in the consensus and the spread — the
+    /// independent ones. A composite would double-count its ingredients.
+    private var independent: [Model] { models.filter { !$0.isComposite } }
+
     /// Mean across models at each hour — the consensus line.
     var consensus: [Double?] {
         hours.indices.map { hour in
-            let values = models.compactMap { $0.speeds[safe: hour] ?? nil }
+            let values = independent.compactMap { $0.speeds[safe: hour] ?? nil }
             guard !values.isEmpty else { return nil }
             return values.reduce(0, +) / Double(values.count)
         }
@@ -179,7 +201,7 @@ struct WindOutlook {
     var spreadKn: Double {
         let window = min(12, hours.count)
         return (0..<window).compactMap { hour -> Double? in
-            let values = models.compactMap { $0.speeds[safe: hour] ?? nil }
+            let values = independent.compactMap { $0.speeds[safe: hour] ?? nil }
             guard values.count > 1, let low = values.min(), let high = values.max() else { return nil }
             return high - low
         }
@@ -202,6 +224,62 @@ struct WindOutlook {
     }
 
     var isEmpty: Bool { models.isEmpty || hours.isEmpty }
+}
+
+// MARK: - The forecast as a distribution
+
+/// One model run thirty-one times from nudged starting points.
+///
+/// The model compare screen shows disagreement between agencies, which is a
+/// spread but not a distribution — four deterministic models make correlated
+/// errors, and their agreement understates the real uncertainty. An ensemble
+/// is the honest version: GEFS perturbs its own starting conditions and runs
+/// again, and the fraction of members clearing a threshold *is* a
+/// probability. "Seven in ten members say fifteen knots" is the sentence a
+/// rider deciding whether to drive two hours actually needs.
+struct EnsembleOutlook {
+
+    let hours: [Date]
+    /// Hourly wind in knots, one row per member, each aligned to `hours`.
+    let members: [[Double?]]
+    var timeZone: TimeZone?
+
+    var isEmpty: Bool { members.isEmpty || hours.isEmpty }
+    var memberCount: Int { members.count }
+
+    /// The member opinions for one hour, sorted and stripped of gaps.
+    private func opinions(at hour: Int) -> [Double] {
+        members.compactMap { $0[safe: hour] ?? nil }.sorted()
+    }
+
+    /// A percentile of what the members say at one hour, interpolated.
+    func percentile(_ p: Double, at hour: Int) -> Double? {
+        let values = opinions(at: hour)
+        guard !values.isEmpty else { return nil }
+        let rank = max(0, min(1, p / 100)) * Double(values.count - 1)
+        let low = Int(rank.rounded(.down))
+        let high = Int(rank.rounded(.up))
+        let t = rank - Double(low)
+        return values[low] * (1 - t) + values[high] * t
+    }
+
+    /// The chance of at least this much wind at one hour, 0–1: the fraction
+    /// of members that clear the bar. Crude and honest — no fitted curve,
+    /// just a show of hands.
+    func probabilityAtLeast(_ kn: Double, at hour: Int) -> Double? {
+        let values = opinions(at: hour)
+        guard !values.isEmpty else { return nil }
+        return Double(values.filter { $0 >= kn }.count) / Double(values.count)
+    }
+
+    /// The row for a moment on some other chart's clock, since the ensemble
+    /// runs a shorter horizon than the deterministic models beside it.
+    func hourIndex(of date: Date) -> Int? {
+        guard let index = hours.lastIndex(where: { $0 <= date }) else { return nil }
+        // An hour from a 16-day outlook can be far past the ensemble's end;
+        // only answer for moments the ensemble actually covers.
+        return date.timeIntervalSince(hours[index]) < 3_600 ? index : nil
+    }
 }
 
 // MARK: - The full picture
@@ -429,14 +507,20 @@ struct WaveHour: Identifiable, Hashable {
 /// simply has far more to give than the app was asking of it.
 enum OpenMeteo {
 
-    /// The four global models worth comparing. Each is run by a different
+    /// The four global models worth comparing, each run by a different
     /// meteorological agency on different physics, so where they agree is
-    /// genuinely more trustworthy than any of them alone.
-    private static let models: [(id: String, label: String)] = [
-        ("ecmwf_ifs025", "ECMWF"),
-        ("gfs_seamless", "GFS"),
-        ("icon_seamless", "ICON"),
-        ("gem_seamless", "GEM"),
+    /// genuinely more trustworthy than any of them alone — plus NOAA's
+    /// National Blend of Models, which is not independent physics at all
+    /// but dozens of models statistically corrected against real stations.
+    /// The NBM is the best single line there is over the US, a null grid
+    /// everywhere else (it simply vanishes from the response), and marked
+    /// composite so it never gets averaged in beside its own ingredients.
+    private static let models: [(id: String, label: String, isComposite: Bool)] = [
+        ("ecmwf_ifs025", "ECMWF", false),
+        ("gfs_seamless", "GFS", false),
+        ("icon_seamless", "ICON", false),
+        ("gem_seamless", "GEM", false),
+        ("ncep_nbm_conus", "NBM", true),
     ]
 
     static func outlook(at coordinate: Geo.Coordinate, days: Int = 1,
@@ -472,12 +556,55 @@ enum OpenMeteo {
             return WindOutlook.Model(
                 id: model.id, label: model.label, speeds: speeds,
                 gusts: series("wind_gusts_10m", model.id),
-                directions: series("wind_direction_10m", model.id)
+                directions: series("wind_direction_10m", model.id),
+                isComposite: model.isComposite
             )
         }
         return WindOutlook(
             hours: times.map { Date(timeIntervalSince1970: $0) },
             models: series,
+            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
+        )
+    }
+
+    /// GEFS, thirty-one times over — see `EnsembleOutlook`.
+    ///
+    /// A separate endpoint and a separate call because it is a different
+    /// question: the outlook asks four agencies for their best guess, this
+    /// asks one agency how sure it is. Seven days, since ensemble spread at
+    /// day ten is an honest shrug not worth the bytes.
+    static func ensemble(at coordinate: Geo.Coordinate, days: Int = 7) async -> EnsembleOutlook {
+        var components = URLComponents(string: "https://ensemble-api.open-meteo.com/v1/ensemble")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: "wind_speed_10m"),
+            .init(name: "models", value: "ncep_gefs025"),
+            .init(name: "wind_speed_unit", value: "kn"),
+            .init(name: "forecast_days", value: String(days)),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "auto"),
+        ]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hourly = root["hourly"] as? [String: Any],
+              let times = hourly["time"] as? [Double]
+        else { return EnsembleOutlook(hours: [], members: []) }
+
+        // The control run arrives on the bare key, the perturbed members on
+        // `_memberNN` suffixes. All of them are equally valid opinions.
+        let members = hourly.keys
+            .filter { $0.hasPrefix("wind_speed_10m") }
+            .sorted()
+            .compactMap { key -> [Double?]? in
+                let row = (hourly[key] as? [Any])?.map { $0 as? Double }
+                return row?.contains(where: { $0 != nil }) == true ? row : nil
+            }
+        return EnsembleOutlook(
+            hours: times.map { Date(timeIntervalSince1970: $0) },
+            members: members,
             timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
         )
     }
@@ -521,6 +648,188 @@ enum OpenMeteo {
         // Inland points come back as a full grid of nulls rather than an
         // error, which would otherwise render as an empty chart with axes.
         return rows.contains(where: { $0.heightM != nil }) ? rows : []
+    }
+
+    // MARK: - Looking a day up after the fact
+
+    /// What the models say a past session's hours were doing.
+    ///
+    /// Any of it can be missing on its own: the marine grid has no cell for
+    /// a river, the archive has not caught up to yesterday. What arrived is
+    /// offered; what did not stays silent.
+    struct Historical {
+        var windDirectionFrom: Double?
+        var windSpeedKn: Double?
+        var windGustKn: Double?
+        var swellMetres: Double?
+        var swellDirectionFrom: Double?
+        /// The hour-by-hour record the averages were taken from, worth
+        /// keeping on the session rather than dying in a label here.
+        var windTimeline: WindTimeline?
+
+        var isEmpty: Bool { windDirectionFrom == nil && swellMetres == nil }
+    }
+
+    /// Wind and swell for a session that already happened, averaged over the
+    /// hours it spanned.
+    static func historical(at coordinate: Geo.Coordinate,
+                           during window: DateInterval) async -> Historical {
+        async let wind = historicalWind(at: coordinate, during: window)
+        async let sea = historicalSwell(at: coordinate, during: window)
+        let (w, s) = await (wind, sea)
+        return Historical(windDirectionFrom: w?.directionFrom,
+                          windSpeedKn: (w?.speed).map { $0 * 1.94384 },
+                          windGustKn: (w?.gust).map { $0 * 1.94384 },
+                          swellMetres: s?.metres, swellDirectionFrom: s?.direction,
+                          windTimeline: w?.timeline)
+    }
+
+    private static func historicalWind(
+        at coordinate: Geo.Coordinate, during window: DateInterval
+    ) async -> (directionFrom: Double, speed: Double?, gust: Double?, timeline: WindTimeline)? {
+        // Two endpoints hold the past and neither holds all of it: the
+        // archive runs about five days behind the present, and the forecast
+        // endpoint keeps a rolling window whose depth is its own business —
+        // nominally ninety days, observed shallower. Not a date-arithmetic
+        // problem: ask the likelier one first, and when it answers 200 with
+        // a grid of nulls, ask the other.
+        let recent = window.start.timeIntervalSinceNow > -30 * 86_400
+        let endpoints = [
+            "https://api.open-meteo.com/v1/forecast",
+            "https://archive-api.open-meteo.com/v1/archive",
+        ]
+        for endpoint in recent ? endpoints : endpoints.reversed() {
+            if let found = await wind(from: endpoint, at: coordinate, during: window) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private static func wind(
+        from endpoint: String, at coordinate: Geo.Coordinate, during window: DateInterval
+    ) async -> (directionFrom: Double, speed: Double?, gust: Double?, timeline: WindTimeline)? {
+        var components = URLComponents(string: endpoint)!
+        let (from, to) = utcDays(of: window)
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: "wind_speed_10m,wind_direction_10m,wind_gusts_10m"),
+            .init(name: "start_date", value: from),
+            .init(name: "end_date", value: to),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "UTC"),
+        ]
+
+        struct Payload: Decodable {
+            struct Hourly: Decodable {
+                let time: [Double]
+                let wind_speed_10m: [Double?]?
+                let wind_direction_10m: [Double?]?
+                let wind_gusts_10m: [Double?]?
+            }
+            let hourly: Hourly?
+        }
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let hourly = (try? JSONDecoder().decode(Payload.self, from: data))?.hourly
+        else { return nil }
+
+        // The archive speaks km/h by default; the timeline is m/s like
+        // everything else in core, and knots happen at the display edge.
+        let kmh = 1.0 / 3.6
+        let samples = hours(in: hourly.time, of: window).compactMap { index -> WindTimeline.Sample? in
+            guard let speed = hourly.wind_speed_10m?[safe: index] ?? nil,
+                  let direction = hourly.wind_direction_10m?[safe: index] ?? nil
+            else { return nil }
+            return WindTimeline.Sample(
+                time: Date(timeIntervalSince1970: hourly.time[index]),
+                speed: speed * kmh,
+                directionFrom: direction,
+                gust: (hourly.wind_gusts_10m?[safe: index] ?? nil).map { $0 * kmh }
+            )
+        }
+        let timeline = WindTimeline(samples: samples)
+
+        // Direction off the mean vector, so the strong hours out-vote the
+        // light ones about which way the day blew — the old unweighted
+        // circular mean let a 2 kn zephyr count as hard as a 20 kn breeze.
+        guard let averaged = timeline.averaged(over: window) else { return nil }
+        return (averaged.directionFrom, averaged.speed, averaged.gust, timeline)
+    }
+
+    private static func historicalSwell(
+        at coordinate: Geo.Coordinate, during window: DateInterval
+    ) async -> (metres: Double, direction: Double?)? {
+        var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
+        let (from, to) = utcDays(of: window)
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: "swell_wave_height,swell_wave_direction,wave_height,wave_direction"),
+            .init(name: "start_date", value: from),
+            .init(name: "end_date", value: to),
+            .init(name: "timeformat", value: "unixtime"),
+            .init(name: "timezone", value: "UTC"),
+        ]
+
+        struct Payload: Decodable {
+            struct Hourly: Decodable {
+                let time: [Double]
+                let swell_wave_height: [Double?]?
+                let swell_wave_direction: [Double?]?
+                let wave_height: [Double?]?
+                let wave_direction: [Double?]?
+            }
+            let hourly: Hourly?
+        }
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let hourly = (try? JSONDecoder().decode(Payload.self, from: data))?.hourly
+        else { return nil }
+
+        let picked = hours(in: hourly.time, of: window)
+        // Swell proper first; total wave height only when the swell series is
+        // a wind-chop-only blank, which close to shore it often is.
+        var heights = picked.compactMap { hourly.swell_wave_height?[safe: $0] ?? nil }
+        var directions = picked.compactMap { hourly.swell_wave_direction?[safe: $0] ?? nil }
+        if heights.isEmpty {
+            heights = picked.compactMap { hourly.wave_height?[safe: $0] ?? nil }
+            directions = picked.compactMap { hourly.wave_direction?[safe: $0] ?? nil }
+        }
+        guard !heights.isEmpty else { return nil }
+        return (heights.reduce(0, +) / Double(heights.count), circularMean(of: directions))
+    }
+
+    /// Indices of the hours inside the window, padded so a forty-minute
+    /// session still catches the hour it sat in.
+    private static func hours(in times: [Double], of window: DateInterval) -> [Int] {
+        let from = window.start.timeIntervalSince1970 - 2_700
+        let to = window.end.timeIntervalSince1970 + 2_700
+        return times.indices.filter { times[$0] >= from && times[$0] <= to }
+    }
+
+    /// Mean of bearings the short way round — 350° and 10° average to 0°,
+    /// not 180°.
+    private static func circularMean(of degrees: [Double]) -> Double? {
+        guard !degrees.isEmpty else { return nil }
+        var x = 0.0, y = 0.0
+        for d in degrees {
+            x += sin(d * .pi / 180)
+            y += cos(d * .pi / 180)
+        }
+        guard x != 0 || y != 0 else { return nil }
+        return Geo.normalizeDegrees(atan2(x, y) * 180 / .pi)
+    }
+
+    private static func utcDays(of window: DateInterval) -> (String, String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return (formatter.string(from: window.start), formatter.string(from: window.end))
     }
 }
 

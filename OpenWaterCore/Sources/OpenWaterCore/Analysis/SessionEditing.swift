@@ -35,6 +35,11 @@ extension Session {
         public var windDirection: Double?
         /// Wind speed in m/s, if known. Never inferred from a track.
         public var windSpeed: Double?
+        /// The model's hourly account of the session's wind, when a lookup
+        /// fetched one. Reference material, not a rider assertion — it is
+        /// stored beside the wind and triggers no reanalysis. `nil` keeps
+        /// whatever the session already holds.
+        public var windTimeline: WindTimeline?
         /// Swell height in metres, if the rider called it.
         public var swellHeight: Double?
         /// Degrees the swell comes from, if the rider called it.
@@ -52,6 +57,7 @@ extension Session {
             foilTakeoffSpeed: Double? = nil,
             windDirection: Double? = nil,
             windSpeed: Double? = nil,
+            windTimeline: WindTimeline? = nil,
             swellHeight: Double? = nil,
             swellDirection: Double? = nil,
             equipment: Equipment? = nil
@@ -65,6 +71,7 @@ extension Session {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.windDirection = windDirection
             self.windSpeed = windSpeed
+            self.windTimeline = windTimeline
             self.swellHeight = swellHeight
             self.swellDirection = swellDirection
             self.equipment = equipment
@@ -85,6 +92,10 @@ extension Session {
             let wind = session.effectiveWind
             self.windDirection = wind?.source == .manual ? wind?.directionFrom : nil
             self.windSpeed = wind?.speed
+            // Deliberately not pre-filled: `nil` means "keep what is there",
+            // and echoing the stored timeline back through an edit would say
+            // nothing while risking staleness.
+            self.windTimeline = nil
             self.swellHeight = session.swellHeight
             self.swellDirection = session.swellDirection
             self.equipment = session.equipment
@@ -122,6 +133,9 @@ extension Session {
         result.swellHeight = edits.swellHeight
         result.swellDirection = edits.swellDirection
         result.equipment = edits.equipment.flatMap { $0.isEmpty ? nil : $0 }
+        // Reference data rides along with any edit and never forces a
+        // recompute — the analysis still runs on the scalar wind.
+        if let timeline = edits.windTimeline { result.windTimeline = timeline }
 
         guard requiresReanalysis(for: edits) else { return result }
 

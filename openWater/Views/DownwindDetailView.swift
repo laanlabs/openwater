@@ -264,24 +264,34 @@ struct DownwindDetailView: View {
                 .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
             // Each downwind run drawn whole and numbered, the way the upwind
-            // screen draws its beats.
-            ForEach(downwindRuns) { run in
-                let chosen = selectedRun == nil || selectedRun == run.id
+            // screen draws its beats. The others first, the chosen one last —
+            // map content paints in declaration order, and a run picked out
+            // of forty-eight was being painted over by every run after it,
+            // same as on the Runs tab's map.
+            ForEach(downwindRuns.filter { $0.id != selectedRun }) { run in
                 // The kind's own colour, shared with the Runs tab's map so a
                 // downwind run is the same orange on both. `.accentColor` was
                 // used here and resolves unreliably inside a MapPolyline —
                 // the same line drew orange unselected and system blue
                 // selected — which is the sibling of the `.tint` problem.
                 MapPolyline(coordinates: coordinates(of: run))
-                    .stroke(chosen ? GroupedRun.Kind.downwind.colour
+                    .stroke(selectedRun == nil ? GroupedRun.Kind.downwind.colour
                             : Color.secondary.opacity(0.22),
-                            style: StrokeStyle(lineWidth: selectedRun == run.id ? 7 : 5,
+                            style: StrokeStyle(lineWidth: 5,
+                                               lineCap: .round, lineJoin: .round))
+            }
+            ForEach(downwindRuns.filter { $0.id == selectedRun }) { run in
+                MapPolyline(coordinates: coordinates(of: run))
+                    .stroke(GroupedRun.Kind.downwind.colour,
+                            style: StrokeStyle(lineWidth: 7,
                                                lineCap: .round, lineJoin: .round))
             }
 
-            ForEach(downwindRuns) { run in
+            // Once one is chosen, only its own badge stays — the rest would
+            // pile over the line the rider just asked to see. Tapping the
+            // survivor deselects, as does "Show all".
+            ForEach(downwindRuns.filter { selectedRun == nil || $0.id == selectedRun }) { run in
                 if let start = midpoint(of: run) {
-                    let chosen = selectedRun == nil || selectedRun == run.id
                     Annotation("", coordinate: start, anchor: .center) {
                         Button { select(selectedRun == run.id ? nil : run.id) } label: {
                             Text("\(run.number)")
@@ -289,9 +299,7 @@ struct DownwindDetailView: View {
                                 .foregroundStyle(.white)
                                 .frame(width: selectedRun == run.id ? 24 : 18,
                                        height: selectedRun == run.id ? 24 : 18)
-                                .background(chosen ? GroupedRun.Kind.downwind.colour
-                                            : Color.secondary.opacity(0.35),
-                                            in: Circle())
+                                .background(GroupedRun.Kind.downwind.colour, in: Circle())
                                 .overlay(Circle().stroke(.white, lineWidth: 1.5))
                                 .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
                         }

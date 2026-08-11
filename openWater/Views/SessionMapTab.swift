@@ -585,6 +585,13 @@ struct WindDial: View {
     var swellFrom: Double? = nil
     let units: UnitPreferences
 
+    /// Diameter of the dial. 64 on the Map tab; smaller maps pass smaller —
+    /// the Runs tab's pinned map is a strip, and the full-size dial would be
+    /// a quarter of it. Everything inside scales with it.
+    var size: CGFloat = 64
+
+    private var f: CGFloat { size / 64 }
+
     var body: some View {
         // A column, not an overlay: hanging the swell capsule off the dial's
         // bottom edge put it across the cardinal and the edit badge. It gets
@@ -595,9 +602,9 @@ struct WindDial: View {
 
             if let swell, swell > 0.05 {
                 Text(swellText(swell))
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: max(9, 10 * f), weight: .semibold))
                     .monospacedDigit()
-                    .padding(.horizontal, 7)
+                    .padding(.horizontal, 7 * f)
                     .padding(.vertical, 2)
                     .background(.regularMaterial, in: Capsule())
             }
@@ -611,35 +618,46 @@ struct WindDial: View {
         ZStack {
             Circle()
                 .fill(.regularMaterial)
-                .frame(width: 64, height: 64)
+                .frame(width: size, height: size)
 
             // The arrow rides the rim rather than sitting in the middle, so it
             // does not collide with the numbers. It points the way the wind is
             // *going*, which is what a rider reads off a flag; the cardinal
             // underneath is the direction it comes from, which is what everyone
             // says out loud.
+            // The swell rides the same rim, in the swell arrow's teal — the
+            // direction without the height text, which is the part worth a
+            // glance and the part that costs no room.
+            if let swellFrom {
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 8 * f))
+                    .foregroundStyle(.teal)
+                    .offset(y: -24 * f)
+                    .rotationEffect(.degrees(swellFrom))
+            }
+
             Image(systemName: "arrowtriangle.down.fill")
-                .font(.system(size: 11))
+                .font(.system(size: 11 * f))
                 .foregroundStyle(.tint)
-                .offset(y: -24)
+                .offset(y: -24 * f)
                 .rotationEffect(.degrees(wind.directionFrom))
 
             VStack(spacing: -1) {
                 Text(speedText)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13 * f, weight: .semibold))
                 Text(Format.cardinal(wind.directionFrom))
-                    .font(.system(size: 10))
+                    .font(.system(size: max(8, 10 * f)))
                     .foregroundStyle(.secondary)
             }
 
             Image(systemName: "pencil")
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 8 * f, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 16, height: 16)
+                .frame(width: 16 * f, height: 16 * f)
                 .background(.tint, in: Circle())
-                .offset(x: 22, y: 22)
+                .offset(x: 22 * f, y: 22 * f)
         }
-        .frame(width: 64, height: 64)
+        .frame(width: size, height: size)
     }
 
     private var speedText: String {

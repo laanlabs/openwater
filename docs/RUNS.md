@@ -150,15 +150,39 @@ other.
 
 On a downwinder or a crossing the top level is not the run but the **leg**:
 the whole descent, with the runs inside it. A leg ends where the rider
-**stopped** — below the sport's moving speed for at least a recovery — or
-where they were **carried** (a transport jump of 800 m, or a two-minute
-silence and a 300 m jump: the drive back up the road on a shuttle day).
+**stopped** — their speed fell below the sport's moving speed — or where
+they were **carried** (a transport jump of 800 m, or a two-minute silence
+and a 400 m jump: the drive back up the road on a shuttle day).
 
 **Stopping is about how slow, not how long.** On test-11 the rider dropped
 off the foil nine times; eight of those bottomed out at 3–6 knots, still on
 the board, sinking off the foil and pumping back on. The ninth bottomed out
 at **0.2 knots**, which is a person in the water — and it is the only one
 the rider counted.
+
+**And the seconds below the bar count in total, not in a row.** A swimmer
+in open water does not read as still: on test-1 — 28 knots and nine feet of
+swell — every one of eight swims bottomed out between 0.3 and 1.7 knots,
+but the bobbing spiked the GPS over the bar every few seconds, and a rule
+that wanted twenty consecutive quiet seconds found one swim in eight and
+called a session of nine rides two runs. The floor is
+`SessionShapeAnalyzer.stopDip` — three seconds below the bar in total,
+enough to rule out one bad fix and nothing more. The pumping rider it must
+not catch never touches the bar at all: 2.9 knots was the slowest moment in
+any of test-11's nine gaps.
+
+Two consequences keep the sharper stop test honest, both found on test-6,
+the shuttle day:
+
+- **A leg never splits inside a flight.** The flights arrive already joined
+  across gaps too short to be a fall — the rider's own twenty seconds, §4.2
+  — so a dip below the moving floor with the ride carrying on either side
+  of it is a moment inside one ride, not one row ending and another
+  beginning.
+- **A leg that never flew is not a leg.** Splitting at stops leaves the
+  drift between two swims standing on its own — 57 m at three knots. Real
+  time, real distance, and the *between* of the session: it belongs to the
+  off-foil gap separating the legs either side, not to a row of its own.
 
 ---
 
@@ -169,22 +193,27 @@ are in `openWaterTests/Expectations/`.
 
 | | sport | duration | km | shape | legs | downwind | reaching | upwind | flights | on foil | falls | stretches |
 |---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| test-1 | wingfoil | 50:05 | 13.66 | Downwinder | 2 | 9 | 6 | 0 | 9 | 78% | 2 | 38 |
-| test-2 | wingfoil | 23:27 | 6.19 | Downwinder | 3 | **6** | 0 | 0 | 6 | 78% | 1 | 11 |
+| test-1 | wingfoil | 50:05 | 13.66 | Downwinder | **9** | 9 | 6 | 0 | 9 | 78% | 2 | 38 |
+| test-2 | wingfoil | 23:27 | 6.19 | Downwinder | 6 | **6** | 0 | 0 | 6 | 78% | 1 | 11 |
 | test-3 | wingfoil | 1:30:24 | 29.87 | At one spot | 3 | 8 | 49 | 64 | 4 | 96% | 0 | 141 |
 | test-4 | wingfoil | 2:38:15 | 44.91 | At one spot | 3 | 11 | 59 | 117 | 4 | 92% | 2 | 202 |
-| test-5 | wingfoil | 2:15:11 | 46.21 | At one spot | 3 | 48 | 31 | 156 | 7 | 94% | 2 | 246 |
-| test-6 | wingfoil | 1:49:02 | 24.45 | Downwinder | 4 | 20 | 6 | 1 | 17 | 59% | 3 | 82 |
-| test-7 | wingfoil | 1:25:58 | 29.88 | At one spot | 4 | 5 | 43 | 67 | 8 | 93% | 0 | 117 |
-| test-8 | wingfoil | 1:24:13 | 17.30 | At one spot | 5 | 5 | 2 | **26** | 8 | 77% | 2 | 67 |
+| test-5 | wingfoil | 2:15:11 | 46.21 | At one spot | 7 | 48 | 31 | 156 | 7 | 94% | 2 | 246 |
+| test-6 | wingfoil | 1:49:02 | 24.45 | Downwinder | 14 | 20 | 6 | 1 | 17 | 59% | 3 | 82 |
+| test-7 | wingfoil | 1:25:58 | 29.88 | At one spot | 5 | 5 | 43 | 67 | 8 | 93% | 0 | 117 |
+| test-8 | wingfoil | 1:24:13 | 17.30 | At one spot | 6 | 5 | 2 | **26** | 8 | 77% | 2 | 67 |
 | test-9 | parawing | 8:50 | 3.24 | Downwinder | **1** | 1 | 0 | 0 | 1 | 100% | 0 | 18 |
-| test-10 | wingfoil | 1:01:18 | 16.94 | At one spot | 4 | 1 | 19 | 21 | 7 | 91% | 3 | 43 |
+| test-10 | wingfoil | 1:01:18 | 16.94 | At one spot | 7 | 1 | 19 | 21 | 7 | 91% | 3 | 43 |
 | test-11 | parawing | 45:19 | 10.79 | Downwinder | **2** | 13 | 3 | 0 | 10 | 67% | 1 | 71 |
 
 ### What each session is, and what it proves
 
-**test-1** — Downwinder with laps in it. Nine downwind runs and six
-reaches, no upwind at all: a session sailed one way down the water.
+**test-1** — *The ocean reference.* A downwinder in nine rides — seven
+downwind rows and two brief reaches on the tab — with a swim between every
+pair: all eight gaps bottom out between 0.3 and 1.7 knots, a person in the
+water every time. In 28 knots and nine feet of swell none of those swims
+read as *still*, which is the session §5's total-not-consecutive stop rule
+was written from; before it, this reported as two rows. The rider's own
+count from the map was "probably six or seven".
 
 **test-2** — *Guardrail.* The cleanest downwinder in the set: straightness
 0.91, 0° off dead downwind, six downwind runs and **nothing else**. If a
@@ -198,8 +227,12 @@ rider working back and forth across a river actually does.
 **test-5** is the extreme case — 246 stretches, 46 km, 235 runs. The
 grouping and the cluster rows are what keep it usable.
 
-**test-6** — Shuttle day. Four legs, 59% on foil: the lowest in the set,
-because the drives back up the road are in the recording.
+**test-6** — Shuttle day. Fourteen rides, 59% on foil: the lowest in the
+set, because the drives back up the road are in the recording — they are
+the longest of the off-foil gaps between rows. Both of §5's consequences
+were found here: the stop test alone tried to split legs at eight-second
+dips inside a ride, and to give the drift between two swims — 57 m at
+three knots — a row of its own.
 
 **test-8** — *The upwind reference.* Twenty-six upwind runs against the
 Upwind screen's twenty-four legs. The remaining two are the run list also
@@ -211,9 +244,11 @@ one flight, no falls. **One leg, one run.** Anything that fragments this
 is wrong.
 
 **test-11** — *Signed off by the rider* (see `testdata/test-11.md`). Two
-downwind runs: a short first ride, a swim, then 9.55 km down the river.
-Off-foil rows of 12:33, 1:00 and 2:53 either side of them, summing with the
-runs to exactly 45:19. Zero jumps.
+rows on the tab — the legs, §5 — both downwind: a short first ride, a swim,
+then 9.55 km down the river. Off-foil rows of 12:33, 1:00 and 2:53 either
+side of them, summing with the runs to exactly 45:19. Inside those two
+rows the 71 stretches still group into 13 downwind and 3 reaching runs,
+which is what the run columns above count. Zero jumps.
 
 ---
 

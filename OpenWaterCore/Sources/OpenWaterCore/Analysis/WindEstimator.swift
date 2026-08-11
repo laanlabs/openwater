@@ -14,6 +14,13 @@ public struct Wind: Hashable, Sendable, Codable {
     /// otherwise would be a lie dressed up as a feature.
     public var speed: Double?
 
+    /// Gust in m/s, when a source supplied one. Same contract as `speed`:
+    /// a forecast or a station can say it, a track never can. The difference
+    /// between steady 18 and 10–30 cycling is the difference between a
+    /// session and a swim, and it deserves better than living only in the
+    /// forecast screens.
+    public var gust: Double?
+
     /// How the direction was arrived at.
     public var source: Source
 
@@ -56,9 +63,11 @@ public struct Wind: Hashable, Sendable, Codable {
         }
     }
 
-    public init(directionFrom: Double, speed: Double? = nil, source: Source, confidence: Double) {
+    public init(directionFrom: Double, speed: Double? = nil, gust: Double? = nil,
+                source: Source, confidence: Double) {
         self.directionFrom = Geo.normalizeDegrees(directionFrom)
         self.speed = speed
+        self.gust = gust
         self.source = source
         self.confidence = max(0, min(1, confidence))
     }

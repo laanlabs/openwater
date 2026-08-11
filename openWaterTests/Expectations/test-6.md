@@ -4,7 +4,7 @@ Wingfoil · 1:49:02 · 24.45 km · 16.3 kn max
 
 ## The session
 
-- Shape: **Downwinder**, in 4 legs (split where the rider stopped or was carried)
+- Shape: **Downwinder**, in 14 legs (split where the rider stopped or was carried)
 - Net displacement 15.14 km, straightness 0.62 _(0 = back where you started, 1 = a straight line)_
 - 9° off dead downwind overall
 - Average moving speed 8.8 kn
@@ -24,6 +24,41 @@ Wingfoil · 1:49:02 · 24.45 km · 16.3 kn max
 | Falls | 3 |
 | Jumps | 0 |
 | Glides | 24 · 52:41 gliding |
+
+## The Runs tab
+
+The top level here is the leg, with the runs inside it. Every second between the first fix and the last belongs to exactly one row, and the rows sum to 1:49:02.
+
+| | | |
+|---|---|---|
+| **1 · Downwind** | 837 m · 2:13 | 12.2 kn avg · 14.5 kn max |
+| off foil | 0:08 | |
+| **2 · Downwind** | 903 m · 2:58 | 9.9 kn avg · 14.0 kn max |
+| off foil | 0:14 | |
+| **3 · Downwind** | 1.65 km · 4:31 | 11.8 kn avg · 15.2 kn max · 14° off |
+| off foil | 0:47 | |
+| **4 · Downwind** | 4.12 km · 11:42 | 11.4 kn avg · 16.3 kn max · 16° off |
+| off foil | 0:14 | |
+| **5 · Downwind** | 3.44 km · 10:35 | 10.5 kn avg · 15.4 kn max · 12° off |
+| off foil | 0:10 | |
+| **6 · Downwind** | 604 m · 2:06 | 9.3 kn avg · 14.8 kn max |
+| off foil | 1:25 | |
+| **7 · Downwind** | 879 m · 2:58 | 9.6 kn avg · 15.1 kn max |
+| off foil | 0:54 | |
+| **8 · Downwind** | 1.04 km · 3:38 | 9.3 kn avg · 14.3 kn max |
+| off foil | 13:02 | |
+| **9 · Downwind** | 1.56 km · 5:12 | 9.7 kn avg · 13.7 kn max · 37° off |
+| off foil | 0:20 | |
+| **10 · Downwind** | 1.49 km · 5:12 | 9.3 kn avg · 14.5 kn max · 41° off |
+| off foil | 0:15 | |
+| **11 · Downwind** | 643 m · 2:04 | 10.1 kn avg · 13.9 kn max |
+| off foil | 6:36 | |
+| **12 · Downwind** | 1.26 km · 4:29 | 9.1 kn avg · 14.6 kn max |
+| off foil | 4:53 | |
+| **13 · Downwind** | 2.71 km · 7:38 | 11.5 kn avg · 15.7 kn max · 18° off |
+| off foil | 0:38 | |
+| **14 · Downwind** | 449 m · 1:41 | 8.6 kn avg · 11.9 kn max |
+| off foil | 12:29 | |
 
 ## Runs
 

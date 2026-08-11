@@ -28,16 +28,31 @@ struct SessionAnalysisTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
+    /// The waves ridden, worked out once for the row's headline. Not stored
+    /// on the summary: wave rides are a reading of the track against the
+    /// swell the rider set, and re-reading here means the row updates the
+    /// moment the swell does, with no analysis version to bump.
+    @State private var waves: WaveRideSummary?
+
     var body: some View {
         List {
             if showsRoute { routeSection }
             if showsWindSection { windSection }
             speedSection
             if showsTechniqueSection { techniqueSection }
+            wavesSection
             sessionSection
         }
         .listStyle(.insetGrouped)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .task(id: session.swellDirection) {
+            guard let swellFrom = session.swellDirection else {
+                waves = nil
+                return
+            }
+            waves = WaveRideFinder(thresholds: settings.thresholds(for: session.sport))
+                .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
+        }
     }
 
     // MARK: - Route
@@ -336,6 +351,41 @@ struct SessionAnalysisTab: View {
             return Format.distance(runs[0].distance, unit: settings.units.distance)
         }
         return "\(runs.count) runs"
+    }
+
+    // MARK: - Waves
+
+    /// Always offered, same reasoning as Downwind: a row that vanishes reads
+    /// as a failure, and the row itself is where a rider learns the feature
+    /// wants the swell direction.
+    private var wavesSection: some View {
+        Section("Waves") {
+            AnalysisRow(symbol: "figure.surfing", title: "Wave rides",
+                        value: waveValue, warning: swellWarning) {
+                WaveDetailView(session: session, summary: summary, onSetWind: onSetWind)
+            }
+        }
+    }
+
+    /// Wave rides are measured against the swell, deliberately not the wind —
+    /// a wave day is exactly the day the two disagree — so it is the swell
+    /// this row asks for: the direction to find the rides at all, and the
+    /// height so the day has a size.
+    private var swellWarning: String? {
+        if session.swellDirection == nil {
+            return "Set the swell direction — waves are read from it, not the wind"
+        }
+        if (session.swellHeight ?? 0) <= 0.05 {
+            return "Set the swell height — the size is half the story"
+        }
+        return nil
+    }
+
+    private var waveValue: String? {
+        guard session.swellDirection != nil else { return nil }
+        guard let waves else { return nil }
+        guard waves.count > 0 else { return "none found" }
+        return "\(waves.count) · longest \(Format.shortDuration(waves.longest?.duration ?? 0))"
     }
 
     // MARK: - Session

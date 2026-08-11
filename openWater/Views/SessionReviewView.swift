@@ -159,11 +159,12 @@ struct SessionReviewView: View {
             }
             .sheet(isPresented: $isSettingConditions) {
                 if let session {
-                    WindSetterView(session: sessionWithStagedEdits(session)) { direction, speed, swell, swellFrom in
+                    WindSetterView(session: sessionWithStagedEdits(session)) { direction, speed, swell, swellFrom, timeline in
                         windDirectionText = String(Int(direction.rounded()))
                         windSpeedText = speed.map {
                             String(Int(settings.units.speed.convert(fromMetresPerSecond: $0).rounded()))
                         } ?? ""
+                        edits.windTimeline = timeline
                         edits.swellHeight = swell
                         edits.swellDirection = swellFrom
                     }

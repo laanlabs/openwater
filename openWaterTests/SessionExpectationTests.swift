@@ -72,6 +72,16 @@ final class SessionExpectationTests: XCTestCase {
         /// Runs entered without touching down — the thing riders chase.
         var runsLinked: Int
 
+        /// What the Runs tab actually opens on. For a point-to-point session
+        /// the top level is the leg — the whole descent — and a change that
+        /// moves these is a change the rider meets before any other number
+        /// on the screen. `test-11` is signed off at exactly two.
+        var shape: String
+        var legs: Int
+        var legsDownwind: Int
+        var legsReaching: Int
+        var legsUpwind: Int
+
         var windDirection: Double?
         var windSource: String?
     }
@@ -135,6 +145,13 @@ final class SessionExpectationTests: XCTestCase {
         var byKind: [GroupedRun.Kind: Int] = [:]
         for run in runs { byKind[run.kind, default: 0] += 1 }
 
+        // The legs as the tab reads them, through the same extension the tab
+        // uses, so this record cannot drift from the screen.
+        var legsByKind: [GroupedRun.Kind: Int] = [:]
+        for leg in summary.shape.legs {
+            legsByKind[leg.kind(in: summary.ribbon), default: 0] += 1
+        }
+
         let expectation = Expectation(
             sport: session.sport.rawValue,
             points: session.track.points.count,
@@ -155,6 +172,11 @@ final class SessionExpectationTests: XCTestCase {
             runsReaching: byKind[.reaching] ?? 0,
             runsUpwind: byKind[.upwind] ?? 0,
             runsLinked: runs.filter(\.isLinked).count,
+            shape: summary.shape.kind.rawValue,
+            legs: summary.shape.legs.count,
+            legsDownwind: legsByKind[.downwind] ?? 0,
+            legsReaching: legsByKind[.reaching] ?? 0,
+            legsUpwind: legsByKind[.upwind] ?? 0,
             windDirection: summary.wind?.directionFrom,
             windSource: summary.wind?.source.rawValue
         )
@@ -289,6 +311,42 @@ final class SessionExpectationTests: XCTestCase {
         out += "| Jumps | \(summary.jumps.count) |\n"
         out += "| Glides | \(summary.downwind.glides.count) · \(duration(summary.downwind.glideTime)) gliding |\n"
         out += "\n"
+
+        // What the tab opens on. For a point-to-point session the top level
+        // is the leg — the whole descent — with the off-foil stretches
+        // between them: the rows a rider checks against their own memory of
+        // the day. The grouped runs below are the detail inside them. Built
+        // through the same `SessionLeg` extension the tab uses.
+        if summary.shape.isPointToPoint, !summary.shape.legs.isEmpty {
+            out += "## The Runs tab\n\n"
+            out += "The top level here is the leg, with the runs inside it. Every second "
+            out += "between the first fix and the last belongs to exactly one row, and the "
+            out += "rows sum to \(duration(summary.duration)).\n\n"
+            out += "| | | |\n|---|---|---|\n"
+
+            var seen: [GroupedRun.Kind: Int] = [:]
+            var previousEnd: TimeInterval = 0
+            for leg in summary.shape.legs {
+                if leg.startElapsed - previousEnd >= 1 {
+                    out += "| off foil | \(duration(leg.startElapsed - previousEnd)) | |\n"
+                }
+                let kind = leg.kind(in: summary.ribbon)
+                seen[kind, default: 0] += 1
+                var detail = "\(knots(leg.averageSpeed)) avg · "
+                detail += "\(knots(leg.maxSpeed(in: summary.ribbon))) max"
+                if kind == .downwind, leg.isRun, let alignment = leg.alignment {
+                    detail += " · \(Int(alignment.rounded()))° off"
+                }
+                out += "| **\(seen[kind]!) · \(kind.title)** "
+                out += "| \(metresOrKilometres(leg.distance)) · \(duration(leg.duration)) "
+                out += "| \(detail) |\n"
+                previousEnd = leg.endElapsed
+            }
+            if summary.duration - previousEnd >= 1 {
+                out += "| off foil | \(duration(summary.duration - previousEnd)) | |\n"
+            }
+            out += "\n"
+        }
 
         // The runs.
         out += "## Runs\n\n"
@@ -491,6 +549,12 @@ final class SessionExpectationTests: XCTestCase {
         check("reaching runs", actual.runsReaching, expected.runsReaching)
         check("upwind runs", actual.runsUpwind, expected.runsUpwind)
         check("linked runs", actual.runsLinked, expected.runsLinked)
+
+        XCTAssertEqual(actual.shape, expected.shape, "\(key) (\(file)): shape")
+        check("legs", actual.legs, expected.legs)
+        check("downwind legs", actual.legsDownwind, expected.legsDownwind)
+        check("reaching legs", actual.legsReaching, expected.legsReaching)
+        check("upwind legs", actual.legsUpwind, expected.legsUpwind)
 
         XCTAssertEqual(actual.windSource, expected.windSource, "\(key) (\(file)): wind source")
         if let a = actual.windDirection, let b = expected.windDirection {

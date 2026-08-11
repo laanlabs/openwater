@@ -25,6 +25,14 @@ Parawing · 8:50 · 3.24 km · 15.8 kn max
 | Jumps | 0 |
 | Glides | 23 · 5:07 gliding |
 
+## The Runs tab
+
+The top level here is the leg, with the runs inside it. Every second between the first fix and the last belongs to exactly one row, and the rows sum to 8:50.
+
+| | | |
+|---|---|---|
+| **1 · Downwind** | 3.24 km · 8:50 | 11.9 kn avg · 15.8 kn max · 5° off |
+
 ## Runs
 
 The segmenter found **18 stretches**, which group into **1 runs**, **0 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.

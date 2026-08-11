@@ -267,9 +267,9 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isSettingWind) {
             if let session {
-                WindSetterView(session: session) { direction, speed, swell, swellFrom in
+                WindSetterView(session: session) { direction, speed, swell, swellFrom, timeline in
                     applyWind(direction: direction, speed: speed, swell: swell,
-                              swellFrom: swellFrom, to: session)
+                              swellFrom: swellFrom, timeline: timeline, to: session)
                 }
             }
         }
@@ -343,7 +343,8 @@ struct SessionDetailView: View {
     }
 
     private func applyWind(direction: Double, speed: Double?, swell: Double?,
-                           swellFrom: Double?, to session: Session) {
+                           swellFrom: Double?, timeline: WindTimeline? = nil,
+                           to session: Session) {
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
         // Said before the work starts, not after it finishes.
@@ -359,6 +360,7 @@ struct SessionDetailView: View {
                 var edits = Session.Edits(session: session)
                 edits.windDirection = direction
                 edits.windSpeed = speed
+                edits.windTimeline = timeline
                 edits.swellHeight = swell
                 edits.swellDirection = swellFrom
                 return session.applying(edits, categories: categories, overrides: overrides)
@@ -511,6 +513,8 @@ struct SessionDetailView: View {
             thresholds: settings.thresholds(for: session.sport),
             windPrompt: runsWindPrompt(session),
             onSetWind: { isSettingWind = true },
+            wind: session.effectiveWind,
+            swellDirection: session.swellDirection,
             legs: summary.shape.legs,
             isPointToPoint: summary.shape.isPointToPoint,
             track: session.track,

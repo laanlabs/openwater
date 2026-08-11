@@ -4,7 +4,7 @@ Wingfoil · 50:05 · 13.66 km · 16.0 kn max
 
 ## The session
 
-- Shape: **Downwinder**, in 2 legs (split where the rider stopped or was carried)
+- Shape: **Downwinder**, in 9 legs (split where the rider stopped or was carried)
 - Net displacement 8.99 km, straightness 0.66 _(0 = back where you started, 1 = a straight line)_
 - 9° off dead downwind overall
 - Average moving speed 10.2 kn
@@ -24,6 +24,31 @@ Wingfoil · 50:05 · 13.66 km · 16.0 kn max
 | Falls | 2 |
 | Jumps | 0 |
 | Glides | 13 · 33:15 gliding |
+
+## The Runs tab
+
+The top level here is the leg, with the runs inside it. Every second between the first fix and the last belongs to exactly one row, and the rows sum to 50:05.
+
+| | | |
+|---|---|---|
+| **1 · Downwind** | 1.46 km · 4:55 | 9.6 kn avg · 14.5 kn max · 23° off |
+| off foil | 1:25 | |
+| **1 · Reaching** | 253 m · 1:21 | 6.1 kn avg · 11.9 kn max |
+| off foil | 0:21 | |
+| **2 · Downwind** | 871 m · 2:57 | 9.6 kn avg · 13.3 kn max |
+| off foil | 0:58 | |
+| **3 · Downwind** | 3.26 km · 9:27 | 11.2 kn avg · 14.7 kn max · 17° off |
+| off foil | 0:25 | |
+| **4 · Downwind** | 3.96 km · 11:09 | 11.5 kn avg · 16.0 kn max · 2° off |
+| off foil | 0:18 | |
+| **5 · Downwind** | 1.10 km · 3:03 | 11.7 kn avg · 15.5 kn max |
+| off foil | 0:40 | |
+| **6 · Downwind** | 1.23 km · 3:48 | 10.5 kn avg · 13.8 kn max |
+| off foil | 0:28 | |
+| **7 · Downwind** | 482 m · 1:50 | 8.5 kn avg · 12.9 kn max |
+| off foil | 0:07 | |
+| **2 · Reaching** | 563 m · 1:35 | 11.5 kn avg · 14.9 kn max |
+| off foil | 5:18 | |
 
 ## Runs
 
@@ -58,22 +83,20 @@ The segmenter found **38 stretches**, which group into **15 runs**, **6 of them 
 
 ## What this session actually was
 
-**A first read, from the numbers above — not from having been there.**
-Correct it; the rider's account is the ground truth, this is only a starting
-point so the page is not blank.
+**From the rider, 10 August 2026** — reading the app against the map view:
 
-A point-to-point downwinder — about 9 km of coast, 66% straight, 9° off dead
-downwind overall. Ridden in 12 flights, and the analysis reports 12 downwind
-runs, so the touchdown split is doing exactly what it should: one run per
-ride, twelve restarts.
+> we have what looks like more falls than just one interrupting the
+> downwind runs — it should be prob more like 6 or 7 runs with off foil in
+> between them
 
-**What looks off:** 6 reaching runs on a session that averaged 9° off dead
-downwind. If the whole thing was that square to the wind, very little should
-be classifying as a reach. Worth checking whether those six are real
-cross-shore stretches or the reaching band catching bear-aways.
+Before analysis v15 this session read as **two** rows, because every swim
+here bottoms out at 0.3–1.7 knots while drifting in 28 knots and nine feet
+of swell — never twenty *consecutive* seconds below the moving floor, which
+is what the old stop test wanted. Counting the seconds below the bar in
+total instead finds all eight swims, and the tab now shows the nine rides
+above: seven downwind and two short reaches, off foil between every pair.
 
-### Your call
-
-- Runs I'd count:
-- Conditions as I remember them:
-- What looks wrong:
+**Still to confirm with the rider:** nine rows against their "probably six
+or seven" — the two reaches and the two shortest downwind rows are the
+candidates if any of these should merge — and whether the two reaching rows
+are real cross-shore stretches or the reaching band catching bear-aways.

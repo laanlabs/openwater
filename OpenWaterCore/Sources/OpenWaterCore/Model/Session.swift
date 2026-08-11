@@ -82,6 +82,17 @@ public struct Session: Sendable, Codable, Identifiable {
     /// one through.
     public var wind: Wind?
 
+    /// The model's hour-by-hour account of the session's wind, kept when the
+    /// rider looks a past day up.
+    ///
+    /// Alongside `wind`, never instead of it: the scalar stays the rider's
+    /// call and the one number the analysis runs on, and this is the weather
+    /// archive's version of events — the record that can say the breeze
+    /// swung twenty degrees at four o'clock, which one number never can.
+    /// Optional in storage so archives written before it existed still
+    /// decode.
+    public var windTimeline: WindTimeline?
+
     /// Local filenames of attached photos, relative to the session's media
     /// directory. Never absolute paths: those break the moment the container
     /// identifier changes between launches.
@@ -167,6 +178,7 @@ public struct Session: Sendable, Codable, Identifiable {
         spotID: UUID? = nil,
         spotName: String? = nil,
         wind: Wind? = nil,
+        windTimeline: WindTimeline? = nil,
         photoNames: [String] = [],
         deviceModel: String? = nil,
         appVersion: String? = nil,
@@ -193,6 +205,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.spotID = spotID
         self.spotName = spotName
         self.wind = wind
+        self.windTimeline = windTimeline
         self.photoNames = photoNames
         self.deviceModel = deviceModel
         self.appVersion = appVersion
@@ -241,7 +254,12 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// 14: a leg breaks where the rider stopped, not only where they were
     /// driven back up the road — so a downwinder with a swim in the middle of
     /// it is the two runs the rider counts.
-    public static let currentVersion = 14
+    /// 15: seconds below the moving floor count in total rather than in a
+    /// row, because a swimmer bobbing in ocean swell spikes the GPS over the
+    /// bar every few seconds — an ocean downwinder with eight swims in it
+    /// read as two runs instead of nine. With that, a leg never splits
+    /// inside a joined flight, and a leg that never flew is not a leg.
+    public static let currentVersion = 15
 
     public let analysisVersion: Int
 

@@ -105,8 +105,9 @@ struct UpwindDetailView: View {
             samples = computeVMGSamples()
         }
         .sheet(isPresented: $isSettingWind) {
-            WindSetterView(session: session) { direction, speed, swell, swellFrom in
-                applyWind(direction: direction, speed: speed, swell: swell, swellFrom: swellFrom)
+            WindSetterView(session: session) { direction, speed, swell, swellFrom, timeline in
+                applyWind(direction: direction, speed: speed, swell: swell,
+                          swellFrom: swellFrom, timeline: timeline)
             }
         }
         .fullScreenCover(isPresented: $isMapFullScreen) {
@@ -133,7 +134,8 @@ struct UpwindDetailView: View {
     /// Every number on this screen is measured from one direction, so
     /// changing it re-runs the whole chain: analysis, polar, legs, samples —
     /// and the library keeps the saved result so the rest of the app agrees.
-    private func applyWind(direction: Double, speed: Double?, swell: Double?, swellFrom: Double?) {
+    private func applyWind(direction: Double, speed: Double?, swell: Double?,
+                           swellFrom: Double?, timeline: WindTimeline? = nil) {
         isRecomputing = true
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
@@ -143,6 +145,7 @@ struct UpwindDetailView: View {
                 var edits = Session.Edits(session: current)
                 edits.windDirection = direction
                 edits.windSpeed = speed
+                edits.windTimeline = timeline
                 edits.swellHeight = swell
                 edits.swellDirection = swellFrom
                 return current.applying(edits, categories: categories, overrides: overrides)

@@ -35,6 +35,15 @@ struct RibbonView: View {
     var windPrompt: WindPrompt?
     var onSetWind: () -> Void = {}
 
+    /// The conditions, for the dial on this tab's map — the same one the Map
+    /// tab wears, smaller because this map is a strip. Every angle in the
+    /// list below is measured from the wind, so the wind belongs in sight,
+    /// and tapping it edits it, exactly as it does there. Swell arrives as a
+    /// direction only: the height capsule earns its room on the Map tab and
+    /// not on a strip.
+    var wind: Wind?
+    var swellDirection: Double?
+
     /// What the runs list is missing, and how loudly to say so.
     ///
     /// This started as one line of orange caption text with a chevron, which
@@ -422,13 +431,14 @@ struct RibbonView: View {
         offFoilStretches.first { $0.id == Self.offFoilIDBase + shownSpans.count }
     }
 
+    /// Shared with the expectation recorder via `SessionLeg.kind(in:)`, so
+    /// the committed record of this tab cannot drift from the tab.
     private func type(of leg: SessionLeg) -> Leg {
-        let inside = lanes(in: leg)
-        let upwind = inside.filter { Leg.upwind.matches($0.pointOfSail) }.count
-        let downwind = inside.filter { Leg.downwind.matches($0.pointOfSail) }.count
-        if downwind > upwind, downwind > 0 { return .downwind }
-        if upwind > 0 { return .upwind }
-        return .reaching
+        switch leg.kind(in: ribbon) {
+        case .downwind: .downwind
+        case .upwind: .upwind
+        case .reaching: .reaching
+        }
     }
 
     /// Whether the pieces inside a leg are worth showing.
@@ -449,8 +459,7 @@ struct RibbonView: View {
     }
 
     private func lanes(in leg: SessionLeg) -> [SessionRibbon.Lane] {
-        ribbon.lanes.filter { $0.startElapsed >= leg.startElapsed - 1
-                           && $0.endElapsed <= leg.endElapsed + 1 }
+        leg.lanes(in: ribbon)
     }
 
     /// The fastest the rider went inside this leg.
@@ -459,7 +468,7 @@ struct RibbonView: View {
     /// grouping of runs, and the runs already know. Every other row on this
     /// tab shows a max, and a row that does not is the row that looks broken.
     private func maxSpeed(in leg: SessionLeg) -> Double {
-        lanes(in: leg).map(\.maxSpeed).max() ?? leg.averageSpeed
+        leg.maxSpeed(in: ribbon)
     }
 
     /// A stretch off the foil, and where it happened.
@@ -666,6 +675,19 @@ struct RibbonView: View {
         runsMap
             .frame(height: mapSize.height)
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(alignment: .topLeading) {
+                // The same dial as the Map tab, at strip size — and not in
+                // peek, where the map is a ribbon of water and the dial
+                // would be most of it.
+                if let wind, mapSize != .peek {
+                    Button(action: onSetWind) {
+                        WindDial(wind: wind, swellFrom: swellDirection,
+                                 units: units, size: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                }
+            }
             .overlay(alignment: .bottomLeading) {
                 if !selection.isEmpty {
                     Button("Show all") { select([]) }
@@ -738,44 +760,30 @@ struct RibbonView: View {
                 // No numbers at all once one is chosen. Forty-seven dimmed
                 // badges over a lapping session are what buried the answer in
                 // the first place, and the dimmed lines still give the shape
-                // of the rest of the day.
+                // of the rest of the day. This was the stated rule and not
+                // the built one: every badge kept drawing over the chosen
+                // run's pill, and on a hundred-run session the one thing the
+                // rider asked to see was the one thing they could not.
                 // Runs get a numbered badge; the off-foil stretches do not.
                 // They are the gaps between the numbers, and a badge on one
                 // would read as another run.
-                ForEach(drawn.filter { $0.number > 0 }) { run in
-                    if let middle = midpoint(of: run, in: track) {
-                        let chosen = selection.isEmpty || selection.contains(run.id)
-                        Annotation("", coordinate: middle, anchor: .center) {
-                            Button { select([run.id]) } label: {
-                                // The full label only when it is the one run
-                                // being shown. Five selected runs put five
-                                // pills on top of each other and on top of
-                                // the summary pill that already says "Upwind
-                                // · 5 runs"; the numbered badge is enough to
-                                // say which lines are the chosen ones.
-                                if selection.contains(run.id), selection.count == 1 {
-                                    Text("\(run.title) \(run.number) · \(Format.distance(run.distance, unit: units.distance))")
-                                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                                        .monospacedDigit()
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(run.colour, in: Capsule())
-                                        .foregroundStyle(.white)
-                                        .shadow(radius: 2)
-                                } else {
+                if selection.isEmpty {
+                    ForEach(drawn.filter { $0.number > 0 }) { run in
+                        if let middle = midpoint(of: run, in: track) {
+                            Annotation("", coordinate: middle, anchor: .center) {
+                                Button { select([run.id]) } label: {
                                     Text("\(run.number)")
                                         .font(.system(size: 10, weight: .bold, design: .rounded))
                                         .monospacedDigit()
                                         .foregroundStyle(.white)
                                         .frame(width: 18, height: 18)
-                                        .background(chosen ? run.colour
-                                                    : Color.secondary.opacity(0.35), in: Circle())
+                                        .background(run.colour, in: Circle())
                                         .overlay(Circle().stroke(.white, lineWidth: 1.5))
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                            .annotationTitles(.hidden)
                         }
-                        .annotationTitles(.hidden)
                     }
                 }
 
@@ -847,7 +855,12 @@ struct RibbonView: View {
     ///
     /// Only in time order: adjacency is the whole basis of a cluster, and two
     /// runs next to each other in a list sorted by speed were never next to
-    /// each other on the water.
+    /// each other on the water. Filtering breaks adjacency the same way —
+    /// with only the downwind runs showing, five runs from all over the
+    /// afternoon sit next to each other in the list and were never next to
+    /// each other on the water. Ids are positions in the unfiltered time
+    /// order, so consecutive ids is what "sequential" means, whatever the
+    /// filter removed.
     private var clusters: [RunCluster] {
         guard order == .time else {
             return orderedRuns.enumerated().map {
@@ -856,7 +869,8 @@ struct RibbonView: View {
         }
         var out: [RunCluster] = []
         for run in orderedRuns {
-            if let last = out.last, last.kind == run.kind {
+            if let last = out.last, last.kind == run.kind,
+               let previous = last.runs.last, run.id == previous.id + 1 {
                 out[out.count - 1] = RunCluster(id: last.id, kind: last.kind,
                                                 runs: last.runs + [run])
             } else {

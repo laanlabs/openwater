@@ -359,3 +359,43 @@ struct GroupedRun: Identifiable {
         return best?.index
     }
 }
+
+/// How a leg reads as a row on the Runs tab.
+///
+/// On a point-to-point session the tab's top level is the leg — the whole
+/// descent — and a leg row needs the same things a run row has: a kind, a
+/// max, and the stretches inside it. Those used to be worked out privately
+/// by the view, which is the shape of bug this project keeps re-finding: two
+/// readers each doing their own arithmetic on one word until they disagree
+/// in front of a rider. Here, so the tab and the expectation record read one
+/// copy.
+extension SessionLeg {
+
+    /// The ribbon stretches that fall inside this leg. A second of slop each
+    /// side, because leg and lane edges come from different passes over the
+    /// same track.
+    func lanes(in ribbon: SessionRibbon) -> [SessionRibbon.Lane] {
+        ribbon.lanes.filter { $0.startElapsed >= startElapsed - 1
+                           && $0.endElapsed <= endElapsed + 1 }
+    }
+
+    /// What kind of run this leg is, from the point of sail its stretches
+    /// were mostly sailed on.
+    func kind(in ribbon: SessionRibbon) -> GroupedRun.Kind {
+        let inside = lanes(in: ribbon)
+        let upwind = inside.filter { GroupedRun.Kind($0.pointOfSail) == .upwind }.count
+        let downwind = inside.filter { GroupedRun.Kind($0.pointOfSail) == .downwind }.count
+        if downwind > upwind, downwind > 0 { return .downwind }
+        if upwind > 0 { return .upwind }
+        return .reaching
+    }
+
+    /// The fastest the rider went inside this leg.
+    ///
+    /// Taken from the stretches rather than stored on the leg: a leg is a
+    /// grouping of runs, and the runs already know. Every other row on the
+    /// tab shows a max, and a row without one is the row that looks broken.
+    func maxSpeed(in ribbon: SessionRibbon) -> Double {
+        lanes(in: ribbon).map(\.maxSpeed).max() ?? averageSpeed
+    }
+}

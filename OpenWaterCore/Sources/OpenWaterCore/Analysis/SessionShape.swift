@@ -178,9 +178,14 @@ public enum SessionShapeAnalyzer {
     /// rider stopped, and when they started again they were somewhere else.
     public static let transportJumpAfterGap: Double = 400
 
+    /// How long the speed has to spend below the moving floor, in total,
+    /// before the rider counts as stopped. Long enough to rule out one bad
+    /// fix, and nothing more — see `stoppedFor` for why it is not longer.
+    public static let stopDip: TimeInterval = 3
+
     public static func analyse(
-        track: Track, runs: [Run], wind: Wind?,
-        stoppedBelow: Double = 0, minimumStop: TimeInterval = 20
+        track: Track, runs: [Run], wind: Wind?, flights: [Flight] = [],
+        stoppedBelow: Double = 0, minimumStop: TimeInterval = stopDip
     ) -> SessionShape {
         guard let first = track.points.first?.coordinate,
               let last = track.points.last?.coordinate else { return .empty }
@@ -195,7 +200,7 @@ public enum SessionShapeAnalyzer {
             wind.map { Solar.runAlignment(bearing: bearing, windFrom: $0.directionFrom) }
         }
 
-        let legs = self.legs(track: track, runs: runs, wind: wind,
+        let legs = self.legs(track: track, runs: runs, wind: wind, flights: flights,
                              stoppedBelow: stoppedBelow, minimumStop: minimumStop)
 
         // Where the session as a whole finished decides this, not any one leg
@@ -242,8 +247,8 @@ public enum SessionShapeAnalyzer {
     /// guessing at road speeds and getting it wrong for anyone who paddles
     /// back.
     static func legs(
-        track: Track, runs: [Run], wind: Wind?,
-        stoppedBelow: Double = 0, minimumStop: TimeInterval = 20
+        track: Track, runs: [Run], wind: Wind?, flights: [Flight] = [],
+        stoppedBelow: Double = 0, minimumStop: TimeInterval = stopDip
     ) -> [SessionLeg] {
         guard !runs.isEmpty else { return [] }
 
@@ -254,7 +259,19 @@ public enum SessionShapeAnalyzer {
             let jump = Geo.distance(previous.endCoordinate, run.startCoordinate)
             let carried = jump >= transportJump
                 || (silence >= transportGap && jump >= transportJumpAfterGap)
-            let stopped = stoppedFor(
+
+            // A leg never splits inside a flight. The flights arrive already
+            // joined across gaps too short to be a fall — that is the rider's
+            // own twenty seconds, §4 — so a dip below the moving floor with
+            // the ride carrying on either side of it is a moment inside one
+            // ride, not one ride ending and another beginning. On a reported
+            // shuttle day the stop test alone cut legs at eight-second dips
+            // the flight join had deliberately absorbed.
+            let insideOneRide = flights.contains {
+                previous.endElapsed >= $0.startElapsed - 1
+                    && run.startElapsed <= $0.endElapsed + 1
+            }
+            let stopped = !insideOneRide && stoppedFor(
                 from: previous.endIndex, to: run.startIndex, in: track,
                 below: stoppedBelow, atLeast: minimumStop
             )
@@ -265,7 +282,25 @@ public enum SessionShapeAnalyzer {
             }
         }
 
-        return groups.enumerated().compactMap { index, group in
+        // A leg is a ride. Splitting at stops leaves the groups between them
+        // standing on their own, and those are the drift between two swims,
+        // the paddle back out — real time and real distance, but the
+        // *between* of the session, not rows in it. They stay in the
+        // accounting as the off-foil gap separating the legs either side.
+        // With no flight data every group stays: nothing is known about
+        // touchdowns there, and silence is better than a guess.
+        var kept = groups
+        if !flights.isEmpty {
+            kept = kept.filter { group in
+                group.contains { run in
+                    flights.contains {
+                        run.endElapsed > $0.startElapsed && run.startElapsed < $0.endElapsed
+                    }
+                }
+            }
+        }
+
+        return kept.enumerated().compactMap { index, group in
             leg(id: index, runs: group, track: track, wind: wind)
         }
     }
@@ -284,9 +319,16 @@ public enum SessionShapeAnalyzer {
     /// nine.
     ///
     /// So the bar is the sport's own moving speed, which already means "this
-    /// rider is under way", and the duration floor only rules out a momentary
-    /// dip through it. No new number to tune: 0.2 against 2.9 is not a close
-    /// call.
+    /// rider is under way". The seconds below it are counted **in total, not
+    /// in a row**. A swimmer in open water does not read as still: on a
+    /// reported ocean downwinder — 28 knots and nine feet of swell — every
+    /// one of eight swims bottomed out between 0.3 and 1.7 knots, but the
+    /// bobbing spiked the GPS speed over the bar every few seconds, so a
+    /// rule that wanted twenty *consecutive* quiet seconds found one swim in
+    /// eight and reported a session of nine falls as two runs. The pumping
+    /// rider it must not catch never touches the bar at all — 2.9 knots was
+    /// the slowest in nine gaps — so the floor here only rules out a single
+    /// bad fix, and nothing more.
     private static func stoppedFor(
         from start: Int, to end: Int, in track: Track,
         below speed: Double, atLeast seconds: TimeInterval
@@ -295,16 +337,10 @@ public enum SessionShapeAnalyzer {
               start >= 0, end < track.count, track.count == track.elapsed.count
         else { return false }
 
-        var stopStart: Int?
-        for i in start...end {
-            if track.speed[i] < speed {
-                if stopStart == nil { stopStart = i }
-                if let from = stopStart, track.elapsed[i] - track.elapsed[from] >= seconds {
-                    return true
-                }
-            } else {
-                stopStart = nil
-            }
+        var below: TimeInterval = 0
+        for i in (start + 1)...end where track.speed[i] < speed {
+            below += track.elapsed[i] - track.elapsed[i - 1]
+            if below >= seconds { return true }
         }
         return false
     }

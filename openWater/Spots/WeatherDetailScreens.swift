@@ -812,6 +812,7 @@ struct ModelCompareScreen: View {
 
     @Environment(AppSettings.self) private var settings
     @State private var outlook = WindOutlook(hours: [], models: [])
+    @State private var ensemble = EnsembleOutlook(hours: [], members: [])
     @State private var enabled: Set<String> = []
     @State private var isLoading = true
     /// The hour under the reading line.
@@ -819,7 +820,7 @@ struct ModelCompareScreen: View {
     /// Everything derived from the forecast and the model switches.
     @State private var series = ModelSeries()
 
-    static let palette: [Color] = [.blue, .orange, .green, .purple]
+    static let palette: [Color] = [.blue, .orange, .green, .purple, .pink]
     /// Ten points an hour is roughly a day per screen — close enough to read
     /// a sea breeze, far enough that a week is a few flicks away.
     static let hourWidth: CGFloat = 10
@@ -855,10 +856,18 @@ struct ModelCompareScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Models")
         .task {
+            async let members = OpenMeteo.ensemble(at: coordinate)
             outlook = await OpenMeteo.outlook(at: coordinate, days: 16, pastDays: 1)
-            enabled = Set(outlook.models.map(\.id))
+            // Composites start switched off: the NBM already contains the
+            // other lines, and averaging it in with them counts the same
+            // physics twice. Its chip is right there for anyone who wants
+            // the comparison — or who trusts NOAA's blend over ours.
+            enabled = Set(outlook.models.filter { !$0.isComposite }.map(\.id))
             recompute()
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
+            // After the main chart is up — the probability line is a bonus,
+            // not something the screen should wait on.
+            ensemble = await members
         }
         .onChange(of: enabled) { _, _ in recompute() }
     }
@@ -937,10 +946,33 @@ struct ModelCompareScreen: View {
                     }
                 }
             }
+
+            if let chances = chances(at: hour) {
+                Text(chances)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground))
+    }
+
+    /// The hour as a distribution, when the ensemble covers it.
+    ///
+    /// The models above are four best guesses; this is one model's honest
+    /// range — thirty-one runs from nudged starting points, read out as a
+    /// show of hands over the bar a rider actually cares about.
+    private func chances(at hour: Int) -> String? {
+        guard let date = outlook.hours[safe: hour],
+              let index = ensemble.hourIndex(of: date),
+              let chance = ensemble.probabilityAtLeast(15, at: index),
+              let low = ensemble.percentile(10, at: index),
+              let high = ensemble.percentile(90, at: index)
+        else { return nil }
+        return "\(Int((chance * 100).rounded()))% chance of 15 kn or more · "
+            + "\(ensemble.memberCount) GEFS runs land \(Int(low.rounded()))–\(Int(high.rounded())) kn"
     }
 
     // MARK: Switching models
@@ -1009,9 +1041,12 @@ struct ModelCompareScreen: View {
             guard enabled.contains(model.id), let end = outlook.horizon(of: model) else { return nil }
             return "\(model.label) to \(end.formatted(Date.FormatStyle(timeZone: zone).weekday(.abbreviated)))"
         }
+        let nbm = outlook.models.contains { $0.isComposite }
+            ? " NBM is NOAA's own blend of dozens of models corrected against real stations — a benchmark line, off by default so it is not averaged in beside its own ingredients."
+            : ""
         return "The heavy line is the blend of whatever is switched on. Models run to different horizons — "
             + horizons.joined(separator: ", ")
-            + ". Free from Open-Meteo."
+            + ". Free from Open-Meteo." + nbm
     }
 }
 

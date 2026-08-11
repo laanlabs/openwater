@@ -31,11 +31,21 @@ struct WindSetterView: View {
     let initialSwellDirection: Double?
     let showsSwell: Bool
     /// Degrees the wind comes from, m/s (nil when the rider skips speed),
-    /// swell in metres, and degrees the swell comes from — the last two nil
-    /// when not offered, left at zero, or never pointed at.
-    let onApply: (Double, Double?, Double?, Double?) -> Void
+    /// swell in metres, degrees the swell comes from — the middle two nil
+    /// when not offered, left at zero, or never pointed at — and the hourly
+    /// timeline when a lookup fetched one. The timeline is the model's
+    /// record of the day and travels regardless of how far the rider drags
+    /// the dials away from it: their call and the archive's account are
+    /// allowed to disagree, and both are worth keeping.
+    let onApply: (Double, Double?, Double?, Double?, WindTimeline?) -> Void
 
-    init(session: Session, onApply: @escaping (Double, Double?, Double?, Double?) -> Void) {
+    /// Where and when the session happened, so the models can be asked what
+    /// that day was doing. Nil on the record screen — the forecast already
+    /// covers "now", and there is nothing historical about it yet.
+    let lookup: (coordinate: Geo.Coordinate, window: DateInterval)?
+
+    init(session: Session,
+         onApply: @escaping (Double, Double?, Double?, Double?, WindTimeline?) -> Void) {
         self.trackPoints = session.track.points
         self.reference = session.effectiveWind
         self.referenceLabel = "the estimate"
@@ -43,6 +53,12 @@ struct WindSetterView: View {
         self.initialSwellDirection = session.swellDirection
         self.showsSwell = true
         self.onApply = onApply
+        let points = session.track.points
+        self.lookup = points.isEmpty ? nil : (
+            points[points.count / 2].coordinate,
+            DateInterval(start: session.startDate,
+                         duration: max(600, session.track.duration))
+        )
     }
 
     init(initialWind: Wind?, initialSwell: Double? = nil,
@@ -55,7 +71,11 @@ struct WindSetterView: View {
         self.initialSwell = initialSwell
         self.initialSwellDirection = initialSwellDirection
         self.showsSwell = showsSwell
-        self.onApply = onApply
+        // No lookup on this path, so there is never a timeline to hand on.
+        self.onApply = { direction, speed, swell, swellFrom, _ in
+            onApply(direction, speed, swell, swellFrom)
+        }
+        self.lookup = nil
     }
 
     @Environment(AppSettings.self) private var settings
@@ -78,6 +98,12 @@ struct WindSetterView: View {
     /// untouched dial sitting at north is not a rider saying "north".
     @State private var hasSwellDirection = false
 
+    @State private var isLookingUp = false
+    @State private var lookupNote: String?
+    /// The hourly record behind the lookup's averages, held so Save can hand
+    /// it on rather than letting it die in the note below the dial.
+    @State private var fetchedTimeline: WindTimeline?
+
     private enum Pointing: String, CaseIterable, Identifiable {
         case wind = "Wind"
         case swell = "Swell"
@@ -97,6 +123,11 @@ struct WindSetterView: View {
 
     var body: some View {
         NavigationStack {
+            // A scroll view, not a fixed column. With the lookup row and its
+            // result this outgrew one screen, and a VStack that overflows
+            // centres itself — the prompt slid up underneath the toolbar and
+            // the buttons fell off the bottom edge.
+            ScrollView {
             VStack(spacing: 16) {
                 Text(prompt)
                     .font(.subheadline)
@@ -137,6 +168,18 @@ struct WindSetterView: View {
 
                 if showsSwell { swellRow }
 
+                // Above the buttons, not below them: the column runs tight on
+                // smaller screens and a result that renders off the bottom
+                // edge is a lookup that appears to have done nothing.
+                if let lookupNote {
+                    Text(lookupNote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                        .transition(.opacity)
+                }
+
                 if let estimate {
                     Button {
                         withAnimation(.snappy) {
@@ -150,9 +193,24 @@ struct WindSetterView: View {
                     }
                 }
 
-                Spacer(minLength: 0)
+                // Ask the weather models what that day was doing. It fills
+                // the dials rather than saving anything — the rider was
+                // there and the model was not, so the numbers arrive as a
+                // starting point, theirs to drag.
+                if let lookup {
+                    Button {
+                        Task { await lookUp(lookup) }
+                    } label: {
+                        Label(isLookingUp ? "Checking that day…" : "Look up that day's conditions",
+                              systemImage: "clock.arrow.circlepath")
+                            .font(.callout)
+                    }
+                    .disabled(isLookingUp)
+                }
             }
             .padding(.top, 12)
+            .padding(.bottom, 16)
+            }
             .navigationTitle(showsSwell ? "Conditions" : "Set the Wind")
             .navigationBarTitleDisplayMode(.inline)
             .feedbackButton("Set the wind")
@@ -165,7 +223,8 @@ struct WindSetterView: View {
                         onApply(direction,
                                 knots > 0.5 ? knots / 1.94384 : nil,
                                 showsSwell && swell > 0.05 ? swell : nil,
-                                showsSwell && hasSwellDirection ? swellDirection : nil)
+                                showsSwell && hasSwellDirection ? swellDirection : nil,
+                                fetchedTimeline)
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -243,7 +302,12 @@ struct WindSetterView: View {
                     .opacity(showsSwell && pointing == .swell ? 0.4 : 1)
             }
             .contentShape(Circle())
-            .gesture(
+            // High priority, because the dial now lives inside a scroll
+            // view: a plain gesture loses every vertical drag to the scroll
+            // pan, and pointing at a southerly wind is a vertical drag. The
+            // dial's circle is the one patch of the sheet that does not
+            // scroll, and it is the patch that is a control.
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         let dx = value.location.x - centre.x
@@ -266,6 +330,43 @@ struct WindSetterView: View {
         return trackPoints.isEmpty
             ? "Drag the arrow to point the way the wind is blowing."
             : "Drag the arrow to point the way the wind was blowing across your track."
+    }
+
+    /// Fetch the day and pour it into the dials.
+    private func lookUp(_ lookup: (coordinate: Geo.Coordinate, window: DateInterval)) async {
+        isLookingUp = true
+        defer { isLookingUp = false }
+
+        let found = await OpenMeteo.historical(at: lookup.coordinate, during: lookup.window)
+        guard !found.isEmpty else {
+            withAnimation(.snappy) {
+                lookupNote = "Nothing on record for that day here — the marine grid has no cell for some water, and the archive runs a few days behind."
+            }
+            return
+        }
+
+        withAnimation(.snappy) {
+            if let d = found.windDirectionFrom { direction = d }
+            if let kn = found.windSpeedKn { knots = kn.rounded() }
+            if showsSwell, let h = found.swellMetres { swell = min(5, h) }
+            if showsSwell, let d = found.swellDirectionFrom {
+                swellDirection = d
+                hasSwellDirection = true
+            }
+            fetchedTimeline = found.windTimeline
+
+            var parts: [String] = []
+            if let d = found.windDirectionFrom {
+                let speed = found.windSpeedKn.map { " \(Int($0.rounded())) kn" } ?? ""
+                let gust = found.windGustKn.map { " gusting \(Int($0.rounded()))" } ?? ""
+                parts.append("wind \(Format.cardinal(d))\(speed)\(gust)")
+            }
+            if let h = found.swellMetres {
+                let from = found.swellDirectionFrom.map { " from \(Format.cardinal($0))" } ?? ""
+                parts.append("swell \(Format.height(h, unit: settings.units.distance))\(from)")
+            }
+            lookupNote = "That day, by the model: \(parts.joined(separator: " · ")). Yours to correct."
+        }
     }
 
     /// Wind against swell, said the way a rider would say it.

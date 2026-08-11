@@ -4,7 +4,7 @@ Wingfoil · 23:27 · 6.19 km · 15.5 kn max
 
 ## The session
 
-- Shape: **Downwinder**, in 3 legs (split where the rider stopped or was carried)
+- Shape: **Downwinder**, in 6 legs (split where the rider stopped or was carried)
 - Net displacement 5.60 km, straightness 0.91 _(0 = back where you started, 1 = a straight line)_
 - 0° off dead downwind overall
 - Average moving speed 9.9 kn
@@ -24,6 +24,26 @@ Wingfoil · 23:27 · 6.19 km · 15.5 kn max
 | Falls | 1 |
 | Jumps | 0 |
 | Glides | 7 · 15:35 gliding |
+
+## The Runs tab
+
+The top level here is the leg, with the runs inside it. Every second between the first fix and the last belongs to exactly one row, and the rows sum to 23:27.
+
+| | | |
+|---|---|---|
+| off foil | 0:27 | |
+| **1 · Downwind** | 1.40 km · 4:28 | 10.2 kn avg · 14.7 kn max · 12° off |
+| off foil | 0:45 | |
+| **2 · Downwind** | 803 m · 2:20 | 11.2 kn avg · 14.4 kn max |
+| off foil | 0:16 | |
+| **3 · Downwind** | 428 m · 1:28 | 9.5 kn avg · 15.5 kn max |
+| off foil | 1:13 | |
+| **4 · Downwind** | 683 m · 1:55 | 11.5 kn avg · 15.1 kn max |
+| off foil | 2:05 | |
+| **5 · Downwind** | 1.86 km · 5:30 | 10.9 kn avg · 14.9 kn max · 8° off |
+| off foil | 0:28 | |
+| **6 · Downwind** | 660 m · 2:14 | 9.6 kn avg · 13.5 kn max |
+| off foil | 0:18 | |
 
 ## Runs
 

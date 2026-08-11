@@ -721,7 +721,15 @@ struct RibbonView: View {
                                 style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 }
 
-                if let chosen = selectedDrawnRuns.first {
+                // All of them, not the first of them.
+                //
+                // Tapping a block of five upwind runs drew one line and made
+                // the other four disappear: they are excluded from the
+                // unselected pass *because* they are selected, and only
+                // `.first` was drawn here — so choosing more of the session
+                // showed less of it. A cluster is one thing a rider points
+                // at, and all of it is the answer.
+                ForEach(selectedDrawnRuns) { chosen in
                     MapPolyline(coordinates: coordinates(of: chosen, in: track))
                         .stroke(chosen.colour,
                                 style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
@@ -739,7 +747,13 @@ struct RibbonView: View {
                         let chosen = selection.isEmpty || selection.contains(run.id)
                         Annotation("", coordinate: middle, anchor: .center) {
                             Button { select([run.id]) } label: {
-                                if selection.contains(run.id) {
+                                // The full label only when it is the one run
+                                // being shown. Five selected runs put five
+                                // pills on top of each other and on top of
+                                // the summary pill that already says "Upwind
+                                // · 5 runs"; the numbered badge is enough to
+                                // say which lines are the chosen ones.
+                                if selection.contains(run.id), selection.count == 1 {
                                     Text("\(run.title) \(run.number) · \(Format.distance(run.distance, unit: units.distance))")
                                         .font(.system(size: 11, weight: .bold, design: .rounded))
                                         .monospacedDigit()

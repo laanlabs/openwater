@@ -12,6 +12,11 @@ import SwiftUI
 struct OffFoilBreak: View {
     let seconds: TimeInterval
 
+    /// Picked out on the map, like a run. Time off the foil is part of the
+    /// session and a rider tracking the whole of it should be able to point
+    /// at this and be shown where it happened.
+    var isSelected = false
+
     private var text: String {
         let whole = Int(seconds.rounded())
         return whole < 60
@@ -24,11 +29,20 @@ struct OffFoilBreak: View {
             line
             Label(text, systemImage: "figure.pool.swim")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, isSelected ? 8 : 0)
+                .padding(.vertical, isSelected ? 3 : 0)
+                .background {
+                    if isSelected {
+                        Capsule().fill(Color(red: 0.45, green: 0.48, blue: 0.53))
+                    }
+                }
             line
         }
-        .padding(.vertical, 2)
+        // Room for a thumb: this is a control now, not only a caption.
+        .padding(.vertical, 7)
         .accessibilityLabel("Off the foil for \(text)")
+        .accessibilityAddTraits(.isButton)
     }
 
     private var line: some View {

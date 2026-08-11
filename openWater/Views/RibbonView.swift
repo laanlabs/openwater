@@ -344,19 +344,69 @@ struct RibbonView: View {
 
     /// What kind of run a leg is, from the point of sail its stretches were
     /// mostly sailed on.
-    /// Seconds out of the water before this leg, when the row above it in the
-    /// list is the leg that really came before it.
+    /// A stretch of the session that was not a run: the paddle out, a swim in
+    /// the middle, the drift in at the end.
     ///
-    /// Nil for the first leg, and nil whenever the kind grouping has put a
-    /// different leg above this one — the break describes the time between
-    /// two runs, so it can only be drawn where the list is showing them in
-    /// that order.
-    private func offFoilBefore(_ leg: SessionLeg) -> TimeInterval? {
-        guard let index = legs.firstIndex(where: { $0.id == leg.id }), index > 0 else { return nil }
-        let previous = legs[index - 1]
-        guard type(of: previous) == type(of: leg) else { return nil }
-        let gap = leg.startElapsed - previous.endElapsed
-        return gap >= 1 ? gap : nil
+    /// Named and given an id of its own because a rider tracking their whole
+    /// session wants to point at these too. Every second between the first
+    /// fix and the last belongs to exactly one row on this tab — a run or one
+    /// of these — and both kinds answer "where was that" on the map.
+    struct OffFoilStretch: Identifiable {
+        let id: Int
+        let startElapsed: TimeInterval
+        let endElapsed: TimeInterval
+        /// What it sits between, for the label on the map.
+        let title: String
+
+        var seconds: TimeInterval { endElapsed - startElapsed }
+    }
+
+    /// Ids well clear of the legs', so a selection can never mean both.
+    private static let offFoilIDBase = 10_000
+
+    /// The gap before this leg, when the row above it really is the leg that
+    /// came before it — plus the one before the first run and after the last.
+    ///
+    /// Legs are grouped by kind, so the row above a leg is not always its
+    /// predecessor in time; a swim drawn between two runs that did not follow
+    /// each other would be a fiction, and these are only drawn where the list
+    /// happens to be showing time order.
+    private var offFoilStretches: [OffFoilStretch] {
+        guard showsLegs, let first = legs.first, let last = legs.last else { return [] }
+        let duration = track?.duration ?? ribbon.lanes.last?.endElapsed ?? 0
+        var out: [OffFoilStretch] = []
+        var id = Self.offFoilIDBase
+
+        if first.startElapsed >= 1 {
+            out.append(OffFoilStretch(id: id, startElapsed: 0,
+                                      endElapsed: first.startElapsed, title: "Before the first run"))
+            id += 1
+        }
+        for (before, after) in zip(legs, legs.dropFirst()) {
+            guard type(of: before) == type(of: after),
+                  after.startElapsed - before.endElapsed >= 1 else { id += 1; continue }
+            out.append(OffFoilStretch(id: id, startElapsed: before.endElapsed,
+                                      endElapsed: after.startElapsed, title: "Between runs"))
+            id += 1
+        }
+        if duration - last.endElapsed >= 1 {
+            out.append(OffFoilStretch(id: id, startElapsed: last.endElapsed,
+                                      endElapsed: duration, title: "After the last run"))
+        }
+        return out
+    }
+
+    private func offFoilBefore(_ leg: SessionLeg) -> OffFoilStretch? {
+        guard let index = legs.firstIndex(where: { $0.id == leg.id }) else { return nil }
+        guard index > 0 else {
+            return offFoilStretches.first { $0.startElapsed == 0 && $0.endElapsed == leg.startElapsed }
+        }
+        return offFoilStretches.first { $0.endElapsed == leg.startElapsed && $0.startElapsed > 0 }
+    }
+
+    private func offFoilAfter(_ leg: SessionLeg) -> OffFoilStretch? {
+        guard legs.last?.id == leg.id else { return nil }
+        return offFoilStretches.first { $0.startElapsed == leg.endElapsed }
     }
 
     private func type(of leg: SessionLeg) -> Leg {
@@ -388,6 +438,22 @@ struct RibbonView: View {
     private func lanes(in leg: SessionLeg) -> [SessionRibbon.Lane] {
         ribbon.lanes.filter { $0.startElapsed >= leg.startElapsed - 1
                            && $0.endElapsed <= leg.endElapsed + 1 }
+    }
+
+    /// A stretch off the foil, and where it happened.
+    ///
+    /// Tappable for the same reason a run is: "I was down for three minutes"
+    /// is only half an answer, and the other half — whereabouts on the river —
+    /// is on the map right above it.
+    private func offFoilRow(_ piece: OffFoilStretch) -> some View {
+        Button {
+            select([piece.id])
+        } label: {
+            OffFoilBreak(seconds: piece.seconds,
+                         isSelected: selection.contains(piece.id))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Maneuvers describe what joined one run to the *next one in time*, so
@@ -432,18 +498,13 @@ struct RibbonView: View {
                                         .padding(.top, 12)
                                 }
                                 ForEach(Array(group.enumerated()), id: \.element.id) { index, leg in
-                                    // Why this is two runs and not one.
-                                    //
-                                    // A leg breaks where the rider stopped, so
-                                    // the break is the whole reason there is a
-                                    // second row — and without it said out
-                                    // loud the split looks arbitrary. Only
-                                    // between rows that really are adjacent in
-                                    // time: legs are grouped by kind, and a
-                                    // swim drawn between two rows that did not
-                                    // follow each other would be a fiction.
-                                    if let down = offFoilBefore(leg) {
-                                        OffFoilBreak(seconds: down)
+                                    // Why this is two runs and not one, and
+                                    // what the rider was doing either side of
+                                    // them. Between the first fix and the last
+                                    // every second belongs to exactly one row
+                                    // on this tab, so the session adds up.
+                                    if let piece = offFoilBefore(leg) {
+                                        offFoilRow(piece)
                                     }
                                     legRow(leg, number: index + 1, of: group.count)
                                     if expandedLeg == leg.id, canExpand(leg) {
@@ -452,6 +513,9 @@ struct RibbonView: View {
                                                 .padding(.leading, 14)
                                         }
                                         .transition(.opacity)
+                                    }
+                                    if let piece = offFoilAfter(leg) {
+                                        offFoilRow(piece)
                                     }
                                 }
                             }
@@ -620,7 +684,10 @@ struct RibbonView: View {
                 // badges over a lapping session are what buried the answer in
                 // the first place, and the dimmed lines still give the shape
                 // of the rest of the day.
-                ForEach(selection == nil ? drawn : []) { run in
+                // Runs get a numbered badge; the off-foil stretches do not.
+                // They are the gaps between the numbers, and a badge on one
+                // would read as another run.
+                ForEach(drawn.filter { $0.number > 0 }) { run in
                     if let middle = midpoint(of: run, in: track) {
                         let chosen = selection.isEmpty || selection.contains(run.id)
                         Annotation("", coordinate: middle, anchor: .center) {
@@ -655,7 +722,11 @@ struct RibbonView: View {
                    let middle = midpoint(of: chosen, in: track) {
                     Annotation("", coordinate: middle, anchor: .center) {
                         Button { select([]) } label: {
-                            Text(selectedDrawnRuns.count > 1
+                            // An off-foil stretch has no number and no
+                            // distance worth saying — how long, and where.
+                            Text(chosen.number == 0
+                                 ? "\(chosen.title) · \(Format.shortDuration(chosen.endElapsed - chosen.startElapsed))"
+                                 : selectedDrawnRuns.count > 1
                                  ? "\(chosen.title) · \(selectedDrawnRuns.count) runs"
                                  : "\(chosen.title) \(chosen.number) · \(Format.distance(chosen.distance, unit: units.distance))")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -745,14 +816,26 @@ struct RibbonView: View {
         }
         // Numbered within their own type, exactly as the rows below are.
         var seen: [Leg: Int] = [:]
-        return legs.enumerated().map { index, leg in
+        let runs = legs.enumerated().map { index, leg in
             let kind = type(of: leg)
             seen[kind, default: 0] += 1
             return Drawn(id: index, title: kind.rawValue, number: seen[kind]!,
                          distance: leg.distance, colour: kind.colour,
                          startElapsed: leg.startElapsed, endElapsed: leg.endElapsed)
         }
+        // The off-foil stretches are drawn too, so tapping one shows where it
+        // was. They carry no distance — what a rider wants to know about time
+        // off the foil is how long it was and where, not how far they drifted.
+        return runs + offFoilStretches.map { piece in
+            Drawn(id: piece.id, title: "Off foil", number: 0,
+                  distance: 0, colour: Self.offFoilColour,
+                  startElapsed: piece.startElapsed, endElapsed: piece.endElapsed)
+        }
     }
+
+    /// Grey, and deliberately not one of the run colours: this is the part of
+    /// the session that was not riding.
+    private static let offFoilColour = Color(red: 0.45, green: 0.48, blue: 0.53)
 
     /// The selection, but only while it still refers to something drawn.
     ///

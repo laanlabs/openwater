@@ -266,11 +266,18 @@ struct TrackMapView: View {
                     MapPolyline(coordinates: piece)
                         .stroke(
                             trimIsRemoval ? Color.red.opacity(0.8) : Color.black.opacity(0.55),
-                            style: StrokeStyle(
-                                lineWidth: 6,
-                                lineCap: .round,
-                                dash: trimIsRemoval ? [2, 8] : []
-                            )
+                            // Solid, and narrower than the track it marks.
+                            //
+                            // The removal overlay used to be dashed `[2, 8]`
+                            // at six points wide with round caps, which is not
+                            // a dashed line at all — a two-point dash under a
+                            // six-point round cap is a six-point dot, so what
+                            // it drew was a string of fat beads straddling the
+                            // track rather than the track in red. Where the
+                            // rider had turned inside one bead's width the
+                            // beads merged into a blob, and the shape a rider
+                            // was being asked to judge was gone.
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
                         )
                 }
             }
@@ -617,7 +624,11 @@ struct TrackMapView: View {
             .filter { $0.lowerBound < $0.upperBound }
             .map { range in
                 let points = session.track.points[range]
-                let step = max(1, points.count / 400)
+                // A thousand-odd points is nothing for one polyline and it is
+                // what keeps the drawn line on the track. Four hundred meant
+                // every ninth sample on a long cut, and every ninth sample
+                // through a gybe is a chord straight across it.
+                let step = max(1, points.count / 1200)
                 var result = stride(from: 0, to: points.count, by: step)
                     .map { points[points.startIndex + $0].clCoordinate }
                 if let last = points.last { result.append(last.clCoordinate) }

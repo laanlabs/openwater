@@ -26,6 +26,9 @@ struct FlowMapScreen: View {
     @State private var hourIndex: Double = 0
     @State private var raster: WindRasterOverlay?
     @State private var isLoading = true
+    /// The colour wash, on by default and remembered — some riders read
+    /// fields, some read arrows, and neither should have to re-choose.
+    @AppStorage("flowMap.colourWash") private var showWash = true
 
     struct GridPoint: Identifiable {
         /// Row-major position in the grid — the raster builder needs to
@@ -43,8 +46,9 @@ struct FlowMapScreen: View {
         WindFieldMapView(
             centre: coordinate.clCoordinate,
             spanMetres: Self.spanMetres,
-            raster: raster,
-            arrows: arrowStates
+            raster: showWash ? raster : nil,
+            arrows: arrowStates,
+            arrowsNeutral: showWash
         )
         .navigationTitle("Flow map")
         .navigationBarTitleDisplayMode(.inline)
@@ -92,12 +96,19 @@ struct FlowMapScreen: View {
                         .background(Color.orange, in: Capsule())
                 }
                 Spacer()
-                legend
+                Toggle(isOn: $showWash) {
+                    Label("Colour", systemImage: "square.3.layers.3d")
+                        .font(.caption.weight(.semibold))
+                }
+                .toggleStyle(.button)
+                .controlSize(.small)
             }
 
             if hours.count > 1 {
                 Slider(value: $hourIndex, in: 0...Double(hours.count - 1), step: 1)
             }
+
+            if showWash { washLegend } else { legend }
 
             Text("Open-Meteo's blend. The arrows are the model's own values at its "
                  + "~10 km grid; the colour between them is a smooth blend of those "
@@ -109,6 +120,37 @@ struct FlowMapScreen: View {
         }
         .padding(14)
         .background(.regularMaterial)
+    }
+
+    /// The wash's own key: the whole ramp as a bar, knots ticked under the
+    /// band edges a rider actually plans around.
+    private var washLegend: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 0) {
+                ForEach(Array(WindPalette.washBands.enumerated()), id: \.offset) { _, band in
+                    Rectangle()
+                        .fill(Color(uiColor: band.colour))
+                        .frame(height: 8)
+                }
+            }
+            .clipShape(Capsule())
+            .overlay(Capsule().strokeBorder(Color(.systemGray4), lineWidth: 0.5))
+
+            HStack {
+                Text("0")
+                Spacer()
+                Text("8")
+                Spacer()
+                Text("16")
+                Spacer()
+                Text("25")
+                Spacer()
+                Text("32+ kn")
+            }
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
     }
 
     private var hourLabel: String {
@@ -198,11 +240,46 @@ struct FlowMapScreen: View {
 
 // MARK: - The colours
 
-/// One ramp for raster, arrows and legend, on the app's own thresholds:
-/// grey until it matters, the chart blues through the working range, the
-/// firing threshold at 15, and the strong end in the colours the strip
-/// already taught.
+/// The flow map's colours, two ramps for two jobs.
+///
+/// The wash wears the classic wind-map ramp every forecaster's map has
+/// taught riders to read — white through lavender and cyan for the calms,
+/// greens through the working range, yellow to orange to red as it gets
+/// serious — in fine bands, because "8 or 11" is exactly the distinction a
+/// rider is squinting for. The arrow ramp is the app's own coarser
+/// thresholds, used when the wash is off and the arrows carry the colour
+/// themselves.
 enum WindPalette {
+
+    /// The wash bands, knots. Pale colours for light air on purpose: a
+    /// calm should let the map show through, not sit on it like a slab.
+    static let washBands: [(upTo: Double, colour: UIColor)] = [
+        (2, UIColor(red: 1.00, green: 1.00, blue: 1.00, alpha: 1)),
+        (4, UIColor(red: 0.90, green: 0.88, blue: 0.97, alpha: 1)),
+        (6, UIColor(red: 0.82, green: 0.94, blue: 0.97, alpha: 1)),
+        (8, UIColor(red: 0.69, green: 0.92, blue: 0.89, alpha: 1)),
+        (10, UIColor(red: 0.60, green: 0.90, blue: 0.68, alpha: 1)),
+        (12, UIColor(red: 0.36, green: 0.85, blue: 0.46, alpha: 1)),
+        (14, UIColor(red: 0.20, green: 0.78, blue: 0.36, alpha: 1)),
+        (16, UIColor(red: 0.56, green: 0.84, blue: 0.22, alpha: 1)),
+        (18, UIColor(red: 0.95, green: 0.90, blue: 0.25, alpha: 1)),
+        (20, UIColor(red: 0.96, green: 0.76, blue: 0.19, alpha: 1)),
+        (22, UIColor(red: 0.96, green: 0.60, blue: 0.17, alpha: 1)),
+        (25, UIColor(red: 0.93, green: 0.42, blue: 0.19, alpha: 1)),
+        (28, UIColor(red: 0.85, green: 0.22, blue: 0.16, alpha: 1)),
+        (32, UIColor(red: 0.80, green: 0.13, blue: 0.34, alpha: 1)),
+    ]
+
+    static func washColour(for kn: Double) -> UIColor {
+        for band in washBands where kn < band.upTo { return band.colour }
+        return UIColor(red: 0.76, green: 0.09, blue: 0.55, alpha: 1)
+    }
+
+    /// The arrows when the wash is carrying the colour: dark slate streaks
+    /// over the field, the way the reference maps draw them.
+    static let arrowNeutral = UIColor(white: 0.24, alpha: 1)
+
+    /// The coarser app-threshold ramp for wash-off arrows.
     static func colour(for kn: Double) -> UIColor {
         switch kn {
         case ..<8: .systemGray
@@ -231,6 +308,9 @@ private struct WindFieldMapView: UIViewRepresentable {
     let spanMetres: Double
     let raster: WindRasterOverlay?
     let arrows: [Arrow]
+    /// Dark slate arrows when the wash carries the colour; the app's own
+    /// speed ramp when the arrows are on their own.
+    let arrowsNeutral: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -263,10 +343,12 @@ private struct WindFieldMapView: UIViewRepresentable {
         // Rebuilt whole when the hour (or the data behind it) changes —
         // sixty-odd tiny annotation views are cheap, and diffing them by
         // hand would not be.
-        let key = arrows.map { "\($0.id):\(Int($0.speedKn)):\(Int($0.directionFromDeg))" }
+        let key = "\(arrowsNeutral):" + arrows
+            .map { "\($0.id):\(Int($0.speedKn)):\(Int($0.directionFromDeg))" }
             .joined(separator: ",")
         if context.coordinator.arrowsKey != key {
             context.coordinator.arrowsKey = key
+            context.coordinator.arrowsNeutral = arrowsNeutral
             let keep = context.coordinator.hereAnnotation.map { [$0] } ?? []
             map.removeAnnotations(map.annotations)
             map.addAnnotations(keep)
@@ -277,6 +359,7 @@ private struct WindFieldMapView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var rasterID: UUID?
         var arrowsKey = ""
+        var arrowsNeutral = true
         var hereAnnotation: MKPointAnnotation?
 
         func mapView(_ mapView: MKMapView,
@@ -292,7 +375,8 @@ private struct WindFieldMapView: UIViewRepresentable {
                     ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "arrow")
                 view.annotation = annotation
                 view.image = ArrowSprite.image(speedKn: arrow.speedKn,
-                                               directionFromDeg: arrow.directionFromDeg)
+                                               directionFromDeg: arrow.directionFromDeg,
+                                               neutral: arrowsNeutral)
                 view.isEnabled = false
                 return view
             }
@@ -325,9 +409,9 @@ private final class ArrowAnnotation: NSObject, MKAnnotation {
 /// they stay readable over any colour the wash puts behind them.
 private enum ArrowSprite {
 
-    static func image(speedKn: Double, directionFromDeg: Double) -> UIImage {
+    static func image(speedKn: Double, directionFromDeg: Double, neutral: Bool) -> UIImage {
         let size = CGSize(width: 36, height: 46)
-        let colour = WindPalette.colour(for: speedKn)
+        let colour = neutral ? WindPalette.arrowNeutral : WindPalette.colour(for: speedKn)
         return UIGraphicsImageRenderer(size: size).image { rendererContext in
             let cg = rendererContext.cgContext
             cg.setShadow(offset: .zero, blur: 3,
@@ -409,7 +493,10 @@ final class WindRasterOverlay: NSObject, MKOverlay {
         // upsampling is for smooth contours, not resolution.
         let width = 168, height = 216
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let alpha: CGFloat = 0.45
+        let washAlpha: CGFloat = 0.55
+        // The field fades out over its outer edge instead of ending on a
+        // hard rectangle — the model keeps going, this window just stops.
+        let featherPx: Double = 14
 
         func speed(atColumn column: Int, row: Int) -> Double? {
             speeds[row * columns + column]
@@ -420,6 +507,7 @@ final class WindRasterOverlay: NSObject, MKOverlay {
             let gy = (1 - Double(py) / Double(height - 1)) * Double(rows - 1)
             let row0 = min(Int(gy), rows - 2)
             let ty = gy - Double(row0)
+            let edgeY = min(Double(py), Double(height - 1 - py))
             for px in 0..<width {
                 let gx = Double(px) / Double(width - 1) * Double(columns - 1)
                 let column0 = min(Int(gx), columns - 2)
@@ -433,8 +521,11 @@ final class WindRasterOverlay: NSObject, MKOverlay {
                 let blended = (a * (1 - tx) + b * tx) * (1 - ty)
                     + (c * (1 - tx) + d * tx) * ty
 
+                let edge = min(edgeY, min(Double(px), Double(width - 1 - px)))
+                let alpha = washAlpha * CGFloat(min(1, edge / featherPx))
+
                 var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, opacity: CGFloat = 0
-                WindPalette.colour(for: blended).getRed(&red, green: &green, blue: &blue, alpha: &opacity)
+                WindPalette.washColour(for: blended).getRed(&red, green: &green, blue: &blue, alpha: &opacity)
                 let offset = (py * width + px) * 4
                 // Premultiplied, so the renderer can draw it straight.
                 pixels[offset] = UInt8(red * alpha * 255)

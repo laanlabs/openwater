@@ -213,6 +213,36 @@ struct NearbyConditionsSheet: View {
         }
         .buttonStyle(.plain)
 
+        NavigationLink {
+            FlowMapScreen(title: title, coordinate: coordinate)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "wind")
+                    .font(.subheadline)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.teal)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Flow map")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("The wind as arrows over the water, next 24 hours")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
         nearTermCard
 
         outlookCard

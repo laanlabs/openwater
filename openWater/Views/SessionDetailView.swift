@@ -39,6 +39,9 @@ struct SessionDetailView: View {
     @State private var isPlayingBack = false
     @State private var isEditing = false
     @State private var isSettingWind = false
+    /// True from the moment the rider sets the wind until the re-analysed
+    /// session is on screen.
+    @State private var isReanalysing = false
     @State private var isGivingFeedback = false
     @State private var isConfirmingDelete = false
     @State private var isConfirmingRemoveMax = false
@@ -343,7 +346,15 @@ struct SessionDetailView: View {
                            swellFrom: Double?, to session: Session) {
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
+        // Said before the work starts, not after it finishes.
+        //
+        // Re-analysing a long session takes a moment, and until it lands the
+        // view is still holding the old summary — so the orange "estimated
+        // from the shape of your track" notice sat there after the rider had
+        // just told us the wind by hand. It reads as the app ignoring them.
+        isReanalysing = true
         Task {
+            defer { isReanalysing = false }
             let edited = await Task.detached {
                 var edits = Session.Edits(session: session)
                 edits.windDirection = direction
@@ -467,6 +478,13 @@ struct SessionDetailView: View {
     /// filters are only as good as the direction they are measured from.
     private func runsWindPrompt(_ session: Session) -> RibbonView.WindPrompt? {
         guard session.sport.isWindPowered else { return nil }
+        if isReanalysing {
+            return RibbonView.WindPrompt(
+                title: "Working it out",
+                detail: "Re-reading the session against the wind you set.",
+                isBlocking: false, action: "", isWorking: true
+            )
+        }
         guard let wind = session.effectiveWind else {
             return RibbonView.WindPrompt(
                 title: "Wind direction not set",
@@ -478,9 +496,9 @@ struct SessionDetailView: View {
         guard wind.source.isEstimate else { return nil }
         return RibbonView.WindPrompt(
             title: "Wind direction estimated",
-            detail: "Estimated from the shape of your track — the upwind and downwind rows follow it.",
+            detail: "Wind estimated from your track. Every angle here follows it.",
             isBlocking: false,
-            action: "Set it"
+            action: "Set the wind"
         )
     }
 

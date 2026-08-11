@@ -51,6 +51,10 @@ struct RibbonView: View {
         /// What the button says. "Set the wind" when there is none; "Set it
         /// exactly" when the app has already guessed.
         let action: String
+        /// The rider has just set the wind and the session is being re-read.
+        /// Neither of the other two states is true yet, and showing the old
+        /// one reads as the app having ignored them.
+        var isWorking = false
     }
 
     /// The session's own runs — the whole way down a river, rather than the
@@ -361,52 +365,61 @@ struct RibbonView: View {
         var seconds: TimeInterval { endElapsed - startElapsed }
     }
 
-    /// Ids well clear of the legs', so a selection can never mean both.
+    /// Ids well clear of the runs', so a selection can never mean both.
     private static let offFoilIDBase = 10_000
 
-    /// The gap before this leg, when the row above it really is the leg that
-    /// came before it — plus the one before the first run and after the last.
+    /// The spans this list is calling runs, in time order.
     ///
-    /// Legs are grouped by kind, so the row above a leg is not always its
-    /// predecessor in time; a swim drawn between two runs that did not follow
-    /// each other would be a fiction, and these are only drawn where the list
-    /// happens to be showing time order.
+    /// Legs on a point-to-point session, clusters of grouped runs everywhere
+    /// else — so the off-foil rows are worked out once and read the same on
+    /// both. Empty unless the list really is in time order and unfiltered: a
+    /// swim drawn between two rows that did not follow each other is a
+    /// fiction, which is the same reason the connectors are hidden then.
+    private var shownSpans: [(start: TimeInterval, end: TimeInterval)] {
+        if showsLegs {
+            return legs.map { ($0.startElapsed, $0.endElapsed) }
+        }
+        guard showsGrouped, order == .time, filter == .all else { return [] }
+        return clusters.compactMap { cluster in
+            guard let first = cluster.runs.first, let last = cluster.runs.last else { return nil }
+            return (first.startElapsed, last.endElapsed)
+        }
+    }
+
+    /// Every stretch that was not a run, keyed by the row it sits above —
+    /// `base + i` precedes span `i`, and `base + count` is the one after the
+    /// last row.
     private var offFoilStretches: [OffFoilStretch] {
-        guard showsLegs, let first = legs.first, let last = legs.last else { return [] }
+        let spans = shownSpans
+        guard let first = spans.first, let last = spans.last else { return [] }
         let duration = track?.duration ?? ribbon.lanes.last?.endElapsed ?? 0
         var out: [OffFoilStretch] = []
-        var id = Self.offFoilIDBase
 
-        if first.startElapsed >= 1 {
-            out.append(OffFoilStretch(id: id, startElapsed: 0,
-                                      endElapsed: first.startElapsed, title: "Before the first run"))
-            id += 1
+        if first.start >= 1 {
+            out.append(OffFoilStretch(id: Self.offFoilIDBase, startElapsed: 0,
+                                      endElapsed: first.start, title: "Off foil"))
         }
-        for (before, after) in zip(legs, legs.dropFirst()) {
-            guard type(of: before) == type(of: after),
-                  after.startElapsed - before.endElapsed >= 1 else { id += 1; continue }
-            out.append(OffFoilStretch(id: id, startElapsed: before.endElapsed,
-                                      endElapsed: after.startElapsed, title: "Between runs"))
-            id += 1
+        for index in spans.indices.dropFirst() where spans[index].start - spans[index - 1].end >= 1 {
+            out.append(OffFoilStretch(id: Self.offFoilIDBase + index,
+                                      startElapsed: spans[index - 1].end,
+                                      endElapsed: spans[index].start, title: "Off foil"))
         }
-        if duration - last.endElapsed >= 1 {
-            out.append(OffFoilStretch(id: id, startElapsed: last.endElapsed,
-                                      endElapsed: duration, title: "After the last run"))
+        if duration - last.end >= 1 {
+            out.append(OffFoilStretch(id: Self.offFoilIDBase + spans.count,
+                                      startElapsed: last.end, endElapsed: duration, title: "Off foil"))
         }
         return out
     }
 
-    private func offFoilBefore(_ leg: SessionLeg) -> OffFoilStretch? {
-        guard let index = legs.firstIndex(where: { $0.id == leg.id }) else { return nil }
-        guard index > 0 else {
-            return offFoilStretches.first { $0.startElapsed == 0 && $0.endElapsed == leg.startElapsed }
-        }
-        return offFoilStretches.first { $0.endElapsed == leg.startElapsed && $0.startElapsed > 0 }
+    private func offFoilBefore(row index: Int) -> OffFoilStretch? {
+        offFoilStretches.first { $0.id == Self.offFoilIDBase + index }
     }
 
-    private func offFoilAfter(_ leg: SessionLeg) -> OffFoilStretch? {
-        guard legs.last?.id == leg.id else { return nil }
-        return offFoilStretches.first { $0.startElapsed == leg.endElapsed }
+    /// The last row's trailing stretch — the drift in, the walk back to the
+    /// car. Missing until now on every session that shows grouped runs, which
+    /// is every session at one spot.
+    private var offFoilAtTheEnd: OffFoilStretch? {
+        offFoilStretches.first { $0.id == Self.offFoilIDBase + shownSpans.count }
     }
 
     private func type(of leg: SessionLeg) -> Leg {
@@ -512,18 +525,35 @@ struct RibbonView: View {
                                     // them. Between the first fix and the last
                                     // every second belongs to exactly one row
                                     // on this tab, so the session adds up.
-                                    if let piece = offFoilBefore(leg) {
+                                    //
+                                    // Only where the row above really is the
+                                    // leg before it: legs are grouped by kind,
+                                    // and a swim between two runs that did not
+                                    // follow each other would be a fiction.
+                                    let position = legs.firstIndex { $0.id == leg.id } ?? 0
+                                    if index > 0 || position == 0,
+                                       let piece = offFoilBefore(row: position) {
                                         offFoilRow(piece)
                                     }
                                     legRow(leg, number: index + 1, of: group.count)
                                     if expandedLeg == leg.id, canExpand(leg) {
-                                        ForEach(lanes(in: leg), id: \.id) { lane in
+                                        let inside = lanes(in: leg)
+                                        ForEach(Array(inside.enumerated()), id: \.element.id) { i, lane in
+                                            // And the gaps between the pieces
+                                            // of a run, once it is opened.
+                                            if i > 0 {
+                                                let down = lane.startElapsed - inside[i - 1].endElapsed
+                                                if down >= 1 {
+                                                    OffFoilBreak(seconds: down)
+                                                        .padding(.leading, 14)
+                                                }
+                                            }
                                             laneRow(lane)
                                                 .padding(.leading, 14)
                                         }
                                         .transition(.opacity)
                                     }
-                                    if let piece = offFoilAfter(leg) {
+                                    if legs.last?.id == leg.id, let piece = offFoilAtTheEnd {
                                         offFoilRow(piece)
                                     }
                                 }
@@ -549,18 +579,26 @@ struct RibbonView: View {
                                 }
                             }
                         } else {
-                            ForEach(clusters) { cluster in
+                            // The same three off-foil rows the legs get:
+                            // before the first, between each, after the last.
+                            //
+                            // This list used to read `run.offFoilBefore`,
+                            // which only exists *between* two runs — so a
+                            // session at one spot never showed the paddle out
+                            // or the drift in, and a cluster row showed no
+                            // break at all. On a lapping afternoon that is
+                            // most of them.
+                            ForEach(Array(clusters.enumerated()), id: \.element.id) { index, cluster in
+                                if let piece = offFoilBefore(row: index) {
+                                    offFoilRow(piece)
+                                }
                                 if cluster.isGroup {
                                     clusterRow(cluster)
                                 } else if let run = cluster.runs.first {
-                                    // Only in time order: a break between two
-                                    // runs means nothing once the rows are
-                                    // sorted by speed, the same reason
-                                    // connectors are hidden.
-                                    if order == .time, let down = run.offFoilBefore {
-                                        OffFoilBreak(seconds: down)
-                                    }
                                     groupedRow(run)
+                                }
+                                if index == clusters.count - 1, let piece = offFoilAtTheEnd {
+                                    offFoilRow(piece)
                                 }
                             }
                         }
@@ -821,7 +859,7 @@ struct RibbonView: View {
                 Drawn(id: $0.id, title: $0.kind.title, number: $0.number,
                       distance: $0.distance, colour: $0.kind.colour,
                       startElapsed: $0.startElapsed, endElapsed: $0.endElapsed)
-            }
+            } + offFoilDrawn
         }
         // Numbered within their own type, exactly as the rows below are.
         var seen: [Leg: Int] = [:]
@@ -832,10 +870,16 @@ struct RibbonView: View {
                          distance: leg.distance, colour: kind.colour,
                          startElapsed: leg.startElapsed, endElapsed: leg.endElapsed)
         }
-        // The off-foil stretches are drawn too, so tapping one shows where it
-        // was. They carry no distance — what a rider wants to know about time
-        // off the foil is how long it was and where, not how far they drifted.
-        return runs + offFoilStretches.map { piece in
+        return runs + offFoilDrawn
+    }
+
+    /// The off-foil stretches, drawn so tapping one shows where it was.
+    ///
+    /// No distance — what a rider wants to know about time off the foil is
+    /// how long it was and whereabouts, not how far they drifted — and no
+    /// number, because it is the gap between the numbers.
+    private var offFoilDrawn: [Drawn] {
+        offFoilStretches.map { piece in
             Drawn(id: piece.id, title: "Off foil", number: 0,
                   distance: 0, colour: Self.offFoilColour,
                   startElapsed: piece.startElapsed, endElapsed: piece.endElapsed)
@@ -1218,7 +1262,15 @@ struct RibbonView: View {
         .buttonStyle(.plain)
 
         if isOpen {
-            ForEach(cluster.runs) { run in
+            // The swims inside the block, too. A cluster is several runs with
+            // gaps between them, and collapsing them into one row hid every
+            // one of those gaps — which is the one place time off the foil
+            // could still go missing from this tab.
+            ForEach(Array(cluster.runs.enumerated()), id: \.element.id) { index, run in
+                if index > 0, let down = run.offFoilBefore, down >= 1 {
+                    OffFoilBreak(seconds: down)
+                        .padding(.leading, 14)
+                }
                 groupedRow(run)
                     .padding(.leading, 14)
             }
@@ -1330,7 +1382,25 @@ struct RibbonView: View {
 
     @ViewBuilder
     private func windNotice(_ prompt: WindPrompt) -> some View {
-        if prompt.isBlocking {
+        if prompt.isWorking {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(prompt.title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(prompt.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            .transition(.opacity)
+        } else if prompt.isBlocking {
             // The button sits under the words rather than beside them. Beside,
             // it is at the mercy of the title's length and the rider's text
             // size — and the one thing this card exists to do is be a button
@@ -1365,28 +1435,34 @@ struct RibbonView: View {
             .padding(.horizontal)
             .padding(.bottom, 8)
         } else {
-            // A guess is not a blocker: the rows below are all classified,
-            // they are just classified off an inferred bearing. Said once,
-            // quietly, with the same one-tap fix.
-            Button(action: onSetWind) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wind")
-                        .font(.caption2)
-                    Text(prompt.detail)
-                        .font(.caption2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Text(prompt.action)
-                        .font(.caption2.weight(.semibold))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9))
-                }
-                .foregroundStyle(.orange)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .contentShape(Rectangle())
+            // A guess is not a blocker — every row below is classified, just
+            // off an inferred bearing — but it was said in caption2 grey-out
+            // orange with a chevron, which is the size of a footnote. Every
+            // angle on this tab rests on this one number, so it gets a
+            // readable line and a button that looks like a button.
+            HStack(spacing: 10) {
+                Image(systemName: "wind")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                    .frame(width: 24)
+
+                Text(prompt.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 8)
+
+                Button(prompt.action, action: onSetWind)
+                    .font(.callout.weight(.bold))
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .fixedSize()
             }
-            .buttonStyle(.plain)
+            .padding(12)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+            .padding(.bottom, 8)
         }
     }
 

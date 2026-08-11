@@ -125,7 +125,13 @@ final class SpotGuideStore {
         didSet { UserDefaults.standard.set(Array(favoriteIds), forKey: Self.favoritesKey) }
     }
 
+    /// Spots the rider saved for themselves — never sent anywhere, so they
+    /// live wholly in defaults rather than behind the Firestore door the
+    /// guide and suggestions go through.
+    private(set) var privateSpots: [PrivateSpot] = []
+
     private static let favoritesKey = "spotGuide.favorites"
+    private static let privateSpotsKey = "spotGuide.privateSpots"
     private static let cacheTTL: TimeInterval = 24 * 3600
     private static let windTTL: TimeInterval = 10 * 60
 
@@ -147,6 +153,10 @@ final class SpotGuideStore {
 
     init() {
         favoriteIds = Set(UserDefaults.standard.stringArray(forKey: Self.favoritesKey) ?? [])
+        if let data = UserDefaults.standard.data(forKey: Self.privateSpotsKey),
+           let saved = try? JSONDecoder().decode([PrivateSpot].self, from: data) {
+            privateSpots = saved
+        }
     }
 
     func toggleFavorite(_ spotId: String) {
@@ -156,6 +166,27 @@ final class SpotGuideStore {
 
     var favorites: [GuideSpot] {
         spots.filter { favoriteIds.contains($0.spotId) }
+    }
+
+    func addPrivateSpot(_ spot: PrivateSpot) {
+        privateSpots.append(spot)
+        savePrivateSpots()
+    }
+
+    func removePrivateSpot(_ id: UUID) {
+        privateSpots.removeAll { $0.id == id }
+        savePrivateSpots()
+    }
+
+    func renamePrivateSpot(_ id: UUID, to name: String) {
+        guard let index = privateSpots.firstIndex(where: { $0.id == id }) else { return }
+        privateSpots[index].name = name
+        savePrivateSpots()
+    }
+
+    private func savePrivateSpots() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(privateSpots),
+                                  forKey: Self.privateSpotsKey)
     }
 
     func spot(id: String) -> GuideSpot? {

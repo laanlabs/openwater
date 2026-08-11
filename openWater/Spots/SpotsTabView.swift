@@ -27,6 +27,13 @@ struct SpotsTabView: View {
     @State private var firingOnly = false
     @State private var pickingNewSpot = false
     @State private var addingSpot: NewSpotRequest?
+    @State private var addingPrivateSpot: NewPrivateSpotRequest?
+    @State private var selectedPrivateSpot: PrivateSpot?
+    @State private var renamingSpot: PrivateSpot?
+    @State private var renameText = ""
+    /// Wind for the private spots, fetched ad hoc — they have no spotId, so
+    /// the guide's per-spot wind dictionary cannot carry them.
+    @State private var privateWind: [UUID: WindReading] = [:]
     @State private var sharingLocation = false
     @State private var isGivingFeedback = false
     @State private var isShowingConditions = false
@@ -65,6 +72,13 @@ struct SpotsTabView: View {
     /// for "here", which lets the form use the live fix as it always has.
     struct NewSpotRequest: Identifiable {
         let place: PickedPlace?
+        let id = UUID()
+    }
+
+    /// A request to save a private spot, pinned to a coordinate at the
+    /// moment the menu was tapped so a wandering fix cannot move it.
+    struct NewPrivateSpotRequest: Identifiable {
+        let coordinate: Geo.Coordinate
         let id = UUID()
     }
 
@@ -110,6 +124,20 @@ struct SpotsTabView: View {
         .sheet(item: $addingSpot) { request in
             SuggestSpotView(mode: .newSpot(request.place))
         }
+        .sheet(item: $addingPrivateSpot) { request in
+            AddPrivateSpotSheet(coordinate: request.coordinate)
+        }
+        .sheet(item: $selectedPrivateSpot) { spot in
+            NearbyConditionsSheet(title: spot.name, coordinate: spot.coordinate)
+        }
+        .alert("Rename spot", isPresented: isRenamingSpot, presenting: renamingSpot) { spot in
+            TextField("Name", text: $renameText)
+            Button("Save") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { guide.renamePrivateSpot(spot.id, to: trimmed) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(isPresented: $sharingLocation) {
             ShareLocationSheet()
         }
@@ -134,6 +162,21 @@ struct SpotsTabView: View {
         .task(id: windRefreshKey) {
             await guide.refreshWind(for: pins + nearby.prefix(20) + guide.favorites)
         }
+        .task(id: privateWindKey) {
+            for spot in guide.privateSpots where privateWind[spot.id] == nil {
+                privateWind[spot.id] = await guide.currentWind(at: spot.coordinate)
+            }
+        }
+    }
+
+    /// The alert modifier wants a Boolean; the spot being renamed is the truth.
+    private var isRenamingSpot: Binding<Bool> {
+        Binding(get: { renamingSpot != nil },
+                set: { if !$0 { renamingSpot = nil } })
+    }
+
+    private var privateWindKey: String {
+        guide.privateSpots.map(\.id.uuidString).joined(separator: ",")
     }
 
     /// Wind is refetched when the viewport moves to new spots, not per frame.
@@ -215,6 +258,17 @@ struct SpotsTabView: View {
                 Annotation("", coordinate: spot.coordinate, anchor: .bottom) {
                     Button { path.append(.spot(spot)) } label: {
                         WindPin(reading: readings[spot.spotId])
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .annotationTitles(.hidden)
+            }
+
+            ForEach(guide.privateSpots) { spot in
+                Annotation("", coordinate: spot.clCoordinate, anchor: .bottom) {
+                    Button { selectedPrivateSpot = spot } label: {
+                        PrivateSpotPin()
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -413,12 +467,24 @@ struct SpotsTabView: View {
             Button {
                 addingSpot = NewSpotRequest(place: hereOrCentre)
             } label: {
-                Label("Add a spot here", systemImage: "plus.circle")
+                Label("Add a public spot here", systemImage: "plus.circle")
             }
             Button {
                 pickingNewSpot = true
             } label: {
                 Label("Pick the spot on the map", systemImage: "mappin.and.ellipse")
+            }
+            Divider()
+            // The other kind of spot: no submission, no review — saved on the
+            // phone, listed with the favorites. "Here" means what the weather
+            // chip means: the long-pressed point, else the fix, else the
+            // map's centre.
+            Button {
+                if let here = localCoordinate {
+                    addingPrivateSpot = NewPrivateSpotRequest(coordinate: here)
+                }
+            } label: {
+                Label("Add a private spot here", systemImage: "star.circle")
             }
             Divider()
             Button {
@@ -598,14 +664,14 @@ struct SpotsTabView: View {
     @ViewBuilder
     private var favoritesList: some View {
         let favorites = guide.favorites
-        if favorites.isEmpty {
+        if favorites.isEmpty && guide.privateSpots.isEmpty {
             VStack(spacing: 6) {
                 Image(systemName: "star")
                     .font(.title2)
                     .foregroundStyle(.secondary)
                 Text("No favorites yet")
                     .font(.subheadline.weight(.medium))
-                Text("Star a spot and it lives here with live wind, so \"is it on?\" is one glance.")
+                Text("Star a spot and it lives here with live wind, so \"is it on?\" is one glance. Private spots you save from the map land here too.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -640,7 +706,44 @@ struct SpotsTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
             }
+            if !guide.privateSpots.isEmpty {
+                Text("SAVED ON THIS PHONE")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, favorites.isEmpty ? 0 : 8)
+                    .padding(.bottom, 8)
+                ForEach(guide.privateSpots) { spot in
+                    Button { selectedPrivateSpot = spot } label: {
+                        PrivateSpotCard(spot: spot, reading: privateWind[spot.id],
+                                        distanceMetres: distanceFrom(spot.coordinate),
+                                        units: settings.units)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            renameText = spot.name
+                            renamingSpot = spot
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            guide.removePrivateSpot(spot.id)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                }
+            }
         }
+    }
+
+    private func distanceFrom(_ coordinate: Geo.Coordinate) -> Double? {
+        guard let here = recorder.location.lastCoordinate else { return nil }
+        return Geo.distance(here, coordinate)
     }
 
     // MARK: Destinations

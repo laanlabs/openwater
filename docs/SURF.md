@@ -143,7 +143,7 @@ And the structural gaps, in the order they hurt:
 
 ### Tier 4 — the app's opinion, and the buoy's correction
 
-- [ ] **A rating, labelled as ours.** `SurfRating` in core: 0–5 with every
+- [x] **A rating, labelled as ours.** `SurfRating` in core: 0–5 with every
   point earned or lost stated in words — "1.2 m at 14 s", "12 kn
   offshore", "swell mostly blocked at this facing". Energy after exposure
   sets the base; wind against the shore adds or subtracts; **no shore
@@ -152,14 +152,14 @@ And the structural gaps, in the order they hurt:
   score: alerts stay their own red row, a gate rather than a deduction.
   (`OPEN.md` called for exactly this: worth doing, worth labelling as
   ours.)
-- [ ] **`SwellNowcast` in core.** The wave version of the wind nowcast,
+- [x] **`SwellNowcast` in core.** The wave version of the wind nowcast,
   multiplicative where the wind's is additive — wave height is a positive
   scalar with proportional error, so the correction is a ratio, clamped to
   [0.5, 2], decaying over six hours rather than three because swell
   evolves slowly. Total height only: matching modelled trains to measured
   trains is an assignment problem the guide warns about, and the measured
   split is often absent.
-- [ ] **The buoy sentence.** The nearest wave buoy within 30 km with a
+- [x] **The buoy sentence.** The nearest wave buoy within 30 km with a
   reading under two hours old corrects the next hours of the blend, said
   the way the wind nowcast says it: "Buoy 46026 read 0.4 m above the model
   25 min ago."
@@ -202,7 +202,7 @@ government data, free for any use.
    wave skill with a persistence baseline.
 3. Tier 3 (done): shore bearings — core geometry, the private-spot
    compass, the guide field read.
-4. Tier 4: the rating with its reasons, and the buoy nowcast.
+4. Tier 4 (done): the rating with its reasons, and the buoy nowcast.
 5. Tier 5: the NWS surf zone card and the harmonic tide curve.
 6. With Tier 3's bearings in hand: `WIND.md` Tier 3's hazardous offshore
    sectors — the safety words — become one small step instead of a

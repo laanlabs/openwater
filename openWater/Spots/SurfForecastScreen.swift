@@ -399,6 +399,12 @@ struct SurfForecastScreen: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(effect.isFavourable ? .green : .secondary)
                 }
+                if band.primary != nil {
+                    Text("our call \(band.rating.score)/5")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
             }
         }
         .padding(.vertical, 8)
@@ -480,13 +486,15 @@ struct SurfForecastScreen: View {
             + "swell filling in will be about right, the face height at any particular "
             + "reef or sandbar will not. Wind is the same model that drives the wind "
             + "screens. "
+        let rating = "The n/5 numbers are our call — an opinion computed from swell "
+            + "energy, exposure and wind, capped at 3 when the beach facing is unknown. "
         guard let facing = outlook.shoreFacingDeg else {
-            return model + "With no beach facing set, offshore and onshore are judged "
-                + "against the swell — a proxy. Set the facing on a private spot to get "
-                + "the real thing."
+            return model + rating + "With no beach facing set, offshore and onshore are "
+                + "judged against the swell — a proxy. Set the facing on a private spot "
+                + "to get the real thing."
         }
-        return model + "Offshore and onshore are judged against this beach's own facing "
-            + "(\(Format.cardinal(facing)))."
+        return model + rating + "Offshore and onshore are judged against this beach's "
+            + "own facing (\(Format.cardinal(facing)))."
     }
 }
 

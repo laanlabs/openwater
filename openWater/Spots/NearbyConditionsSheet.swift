@@ -68,6 +68,8 @@ struct NearbyConditionsSheet: View {
     /// Four wave models side by side, for the agreement sentence and the
     /// compare screen behind it.
     @State private var swellModels = SwellOutlook(hours: [], models: [])
+    /// The wave model minus what the nearest wave buoy just disagreed by.
+    @State private var swellNowcast: SwellNowcastAdjustment?
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -765,10 +767,35 @@ struct NearbyConditionsSheet: View {
     private var surfTab: some View {
         if let surf {
             SurfCard(surf: surf, windDirectionDeg: reading?.directionDeg)
+
+            // The opinion, under the facts it was formed from.
+            SurfRatingCard(rating: SurfRating.rate(
+                trains: [surf.primarySwell, surf.secondarySwell].compactMap { $0?.core },
+                shore: shoreFacingDeg.map { ShoreGeometry(waterFacingDeg: $0) },
+                windKn: reading?.speedKn,
+                windFromDeg: reading?.directionDeg))
         }
 
         if let measuredSwell {
             MeasuredSwellCard(measured: measuredSwell)
+        }
+
+        // A real wave sensor against the model — the one sentence here
+        // that is measured, which is why it gets to talk back to the
+        // forecast below it.
+        if let swellNowcast {
+            Label {
+                Text(swellNowcast.line(unit: settings.units.distance))
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "water.waves")
+            }
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(abs(swellNowcast.deltaM) < 0.15 ? AnyShapeStyle(Color.harbourNavy)
+                             : AnyShapeStyle(Color.orange))
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
         }
 
         if let age = surf?.staleAge ?? surfOutlook.staleAge {
@@ -1296,6 +1323,8 @@ struct NearbyConditionsSheet: View {
         // outlook and the observations both, and it is a sentence, not a
         // card the sheet should wait for.
         nowcast = NowcastAdjustment.make(outlook: outlook, stations: stations, buoys: buoys)
+        // And the wave buoy gets the same say over the wave model.
+        swellNowcast = SwellNowcastAdjustment.make(outlook: surfOutlook, buoys: buoys)
     }
 }
 

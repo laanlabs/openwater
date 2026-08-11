@@ -1833,6 +1833,11 @@ struct SurfConditions {
         let heightM: Double
         let periodS: Double?
         let directionDeg: Double?
+
+        /// The same train in core's dialect, for the math that lives there.
+        var core: SwellTrain {
+            SwellTrain(heightM: heightM, periodS: periodS, directionFromDeg: directionDeg)
+        }
     }
 
     let at: Date
@@ -2121,6 +2126,14 @@ struct SurfOutlook {
             default: return .offshore
             }
         }
+
+        /// The app's own call for this band — the rules live in core's
+        /// `SurfRating`, and every appearance is labelled as an opinion.
+        var rating: SurfRating {
+            SurfRating.rate(
+                trains: [primary, secondary].compactMap { $0?.core },
+                shore: shore, windKn: windKn, windFromDeg: windFromDeg)
+        }
     }
 
     enum WindEffect: String {
@@ -2157,6 +2170,10 @@ struct SurfOutlook {
     var windKn: [Double?] = []
     var windFromDeg: [Double?] = []
     var tideM: [Double?] = []
+    /// Total sea — swell and wind waves together. The chart draws the
+    /// swell; this is what a buoy's height reading actually corresponds
+    /// to, so it is what the buoy nowcast corrects.
+    var totalM: [Double?] = []
 
     /// Set when the wave model's answer is the cache's offline fallback,
     /// this many seconds old — the screens say so rather than posing as
@@ -2274,6 +2291,7 @@ extension OpenMeteo {
             windKn: windSpeeds,
             windFromDeg: windAngles,
             tideM: sea.columns["sea_level_height_msl"] ?? [],
+            totalM: sea.columns["wave_height"] ?? [],
             staleAge: sea.staleAge,
             hasModel: covered
         )

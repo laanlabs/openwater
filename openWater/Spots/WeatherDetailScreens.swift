@@ -2139,6 +2139,61 @@ struct SurfCard: View {
     }
 }
 
+/// The app's call on the surf, worn openly as an opinion.
+///
+/// The strip's colours are facts about the wind; this is the opinion
+/// `docs/OPEN.md` asked for — "worth doing; worth labelling as ours" — and
+/// the label does half the work: a rating without its reasons is an oracle,
+/// and oracles are exactly what this app is against. Every point earned or
+/// lost is printed beside the number, in the words core's `SurfRating`
+/// computed them from.
+struct SurfRatingCard: View {
+
+    let rating: SurfRating
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("OUR CALL")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("an opinion, not a measurement")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    Text("\(rating.score)")
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    Text("/5")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 4) {
+                    ForEach(0..<5, id: \.self) { index in
+                        Circle()
+                            .fill(index < rating.score
+                                  ? AnyShapeStyle(.tint)
+                                  : AnyShapeStyle(Color(.systemGray4)))
+                            .frame(width: 8, height: 8)
+                    }
+                }
+            }
+
+            Text(rating.reasons.map(\.words).joined(separator: " · "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
 /// A narrow triangle pointing up — the swell arrow.
 private struct Triangle: Shape {
     func path(in rect: CGRect) -> Path {

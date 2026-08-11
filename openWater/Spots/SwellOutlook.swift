@@ -315,6 +315,73 @@ extension DataBuoyCenter {
     }
 }
 
+// MARK: - The forecast, nudged by a real wave buoy
+
+/// The surf tab's version of `NowcastAdjustment`: when a wave buoy nearby
+/// has just measured the sea, its disagreement with the model corrects the
+/// next hours — core's `SwellNowcast` does the arithmetic, this picks the
+/// buoy and says the result in a sentence.
+struct SwellNowcastAdjustment {
+
+    let buoyName: String
+    let ageMinutes: Int
+    /// Observed minus modelled at the reading's moment, metres. Positive
+    /// means more sea on the water than in the model.
+    let deltaM: Double
+    let corrected: [SwellNowcast.Sample]
+
+    /// The corrected sea this far ahead of now — nearest corrected hour.
+    func correctedM(hoursAhead: Double, from now: Date = Date()) -> Double? {
+        let target = now.addingTimeInterval(hoursAhead * 3600)
+        return corrected.min {
+            abs($0.at.timeIntervalSince(target)) < abs($1.at.timeIntervalSince(target))
+        }?.heightM
+    }
+
+    /// The whole thing as one sentence, in the rider's unit.
+    func line(unit: DistanceUnit) -> String {
+        let age = ageMinutes <= 1 ? "just now" : "\(ageMinutes) min ago"
+        guard abs(deltaM) >= 0.15 else {
+            return "\(buoyName) measured the sea \(age) and agrees with the wave model."
+        }
+        let sense = deltaM > 0 ? "above" : "below"
+        var text = "\(buoyName) read \(Format.height(abs(deltaM), unit: unit)) \(sense) the wave model \(age)."
+        if let soon = correctedM(hoursAhead: 2), let later = correctedM(hoursAhead: 6) {
+            text += " Next hours corrected to \(Format.height(soon, unit: unit)),"
+                + " then \(Format.height(later, unit: unit))."
+        }
+        return text
+    }
+
+    /// Pick the buoy, form the ratio, decay it. Nearest first, because the
+    /// question is what this water is doing — and thirty kilometres is the
+    /// same bar the verification uses, for the same reason.
+    static func make(outlook: SurfOutlook, buoys: [Buoy],
+                     at now: Date = Date()) -> SwellNowcastAdjustment? {
+        let series = outlook.hours.indices.compactMap { index -> SwellNowcast.Sample? in
+            guard let height = outlook.totalM[safe: index] ?? nil else { return nil }
+            return SwellNowcast.Sample(at: outlook.hours[index], heightM: height)
+        }
+        guard !series.isEmpty else { return nil }
+
+        for buoy in buoys.filter({ $0.metres < 30_000 }).sorted(by: { $0.metres < $1.metres }) {
+            guard let reading = buoy.reading,
+                  let observed = reading.waveHeightM,
+                  let read = reading.at, now.timeIntervalSince(read) < 2 * 3600,
+                  let correction = SwellNowcast()
+                      .corrected(series, byObservedHeight: observed, at: read)
+            else { continue }
+            return SwellNowcastAdjustment(
+                buoyName: buoy.name,
+                ageMinutes: max(0, Int(now.timeIntervalSince(read) / 60)),
+                deltaM: observed - correction.modelAtObservation,
+                corrected: correction.samples
+            )
+        }
+        return nil
+    }
+}
+
 // MARK: - The compare screen
 
 /// The wave models drawn against each other — a deliberately thinner

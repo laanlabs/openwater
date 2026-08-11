@@ -334,6 +334,10 @@ struct NearbyConditionsSheet: View {
     private var nearTermCard: some View {
         if !nearTerm.isEmpty {
             let peak = max(nearTerm.speedsKn.compactMap { $0 }.max() ?? 1, 1)
+            NavigationLink {
+                ForecastScreen(title: title, coordinate: coordinate, detail: full,
+                               outlook: outlook, waves: waves)
+            } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("NEXT SIX HOURS · EVERY 15 MIN")
@@ -345,6 +349,9 @@ struct NearbyConditionsSheet: View {
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(.secondary)
                     }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
 
                 ZStack(alignment: .bottom) {
@@ -354,7 +361,7 @@ struct NearbyConditionsSheet: View {
                             let speed = (nearTerm.speedsKn[safe: step] ?? nil) ?? 0
                             RoundedRectangle(cornerRadius: 1.5)
                                 .fill(speed >= 15 ? AnyShapeStyle(.tint)
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.35)))
+                                      : AnyShapeStyle(Color.accentColor.opacity(0.6)))
                                 .frame(height: max(2, 54 * speed / peak))
                                 .frame(maxWidth: .infinity, alignment: .bottom)
                         }
@@ -362,16 +369,20 @@ struct NearbyConditionsSheet: View {
                 }
                 .frame(height: 54, alignment: .bottom)
 
-                // An arrow on the hour, under the four bars it speaks for.
+                // On the hour, under the four bars it speaks for: the wind's
+                // arrow, and the sky it blows under.
                 HStack(spacing: 2) {
                     ForEach(nearTerm.times.indices, id: \.self) { step in
                         Group {
                             if step % 4 == 0,
                                let direction = nearTerm.directions[safe: step] ?? nil {
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .rotationEffect(.degrees(direction))
-                                    .foregroundStyle(.secondary)
+                                VStack(spacing: 4) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .rotationEffect(.degrees(direction))
+                                        .foregroundStyle(.secondary)
+                                    skyIcon(at: nearTerm.times[step])
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -390,17 +401,49 @@ struct NearbyConditionsSheet: View {
                     }
                 }
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
 
                 Text("Quarter-hour steps straight from a rapid-update model — HRRR over North America, ICON-D2 and AROME over Europe. This card only exists where one of them actually resolves this water.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    /// The sky over one moment of the forecast, from the full detail the
+    /// sheet already fetched — sun, cloud, rain, each in its own colours so
+    /// the row reads at a glance.
+    @ViewBuilder
+    private func skyIcon(at date: Date) -> some View {
+        if let code = skyCode(at: date) {
+            Image(systemName: SpotWeather.symbol(for: code, isDay: isDaylight(date)))
+                .font(.system(size: 11))
+                .symbolRenderingMode(.multicolor)
+        }
+    }
+
+    /// The WMO code for the hour nearest a moment, when the detail knows it.
+    private func skyCode(at date: Date) -> Int? {
+        full.hours
+            .min { abs($0.at.timeIntervalSince(date)) < abs($1.at.timeIntervalSince(date)) }
+            .flatMap { abs($0.at.timeIntervalSince(date)) <= 3600 ? $0.code : nil }
+    }
+
+    /// Sun or moon variants, decided by the day's own sunrise and sunset
+    /// when the forecast carries them, by a plain 7-to-7 otherwise.
+    private func isDaylight(_ date: Date) -> Bool {
+        if let day = full.days.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }),
+           let sunrise = day.sunrise, let sunset = day.sunset {
+            return date >= sunrise && date <= sunset
+        }
+        let hour = Calendar.current.component(.hour, from: date)
+        return hour >= 7 && hour < 19
     }
 
     @ViewBuilder
@@ -436,7 +479,7 @@ struct NearbyConditionsSheet: View {
                             let speed = (consensus[safe: hour] ?? nil) ?? 0
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(speed >= 15 ? AnyShapeStyle(.tint)
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.35)))
+                                      : AnyShapeStyle(Color.accentColor.opacity(0.6)))
                                 .frame(height: max(2, 62 * speed / peak))
                                 .frame(maxWidth: .infinity, alignment: .bottom)
                         }
@@ -444,19 +487,24 @@ struct NearbyConditionsSheet: View {
                 }
                 .frame(height: 62, alignment: .bottom)
 
-                // Arrows under the bars, every third hour. Speed decides
-                // whether you go and direction decides whether the spot works
-                // at all — a card that shows one without the other is half an
-                // answer.
-                let directions = outlook.blendDirections(of: Set(outlook.models.map(\.id)))
+                // Under the bars, every third hour: the wind's arrow and the
+                // sky's icon. Speed decides whether you go, direction decides
+                // whether the spot works at all, and the sky is the context
+                // both sit in — sea breezes live and die by the sun.
+                // Independent models only, matching the consensus above.
+                let directions = outlook.blendDirections(
+                    of: Set(outlook.models.filter { !$0.isComposite }.map(\.id)))
                 HStack(spacing: 3) {
                     ForEach(outlook.hours.indices, id: \.self) { hour in
                         Group {
                             if hour % 3 == 0, let direction = directions[safe: hour] ?? nil {
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .rotationEffect(.degrees(direction))
-                                    .foregroundStyle(.secondary)
+                                VStack(spacing: 4) {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .rotationEffect(.degrees(direction))
+                                        .foregroundStyle(.secondary)
+                                    skyIcon(at: outlook.hours[hour])
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -475,7 +523,7 @@ struct NearbyConditionsSheet: View {
                     }
                 }
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
 
                 if let age = outlook.staleAge {
                     Label {
@@ -510,7 +558,7 @@ struct NearbyConditionsSheet: View {
 
                 Text("Average of \(outlook.models.count) global models — tap for each of them, the hour by hour, and the week.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(14)

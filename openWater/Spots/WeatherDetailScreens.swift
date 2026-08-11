@@ -440,7 +440,9 @@ struct ForecastScreen: View {
         }
     }
 
-    private static let palette: [Color] = [.blue, .orange, .green, .purple]
+    // Kept in step with `ModelCompareScreen.palette` so a model wears the
+    // same colour on the thumbnail and the compare screen it opens into.
+    private static let palette: [Color] = ModelCompareScreen.palette
 
     // MARK: Hour by hour
 

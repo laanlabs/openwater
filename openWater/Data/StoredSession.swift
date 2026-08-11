@@ -123,6 +123,15 @@ final class StoredSession {
 
     var isTrashed: Bool { deletedAt != nil }
 
+    /// When the rider starred this session, if they did.
+    ///
+    /// A date rather than a flag so "favourites, most recently starred
+    /// first" stays possible later. Optional so every existing row decodes
+    /// as not-a-favourite, which is what it was.
+    var favoritedAt: Date?
+
+    var isFavorite: Bool { favoritedAt != nil }
+
     /// Days a trashed session survives before it is really gone.
     static let trashRetention: TimeInterval = 30 * 24 * 3600
 

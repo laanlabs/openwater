@@ -34,6 +34,17 @@ struct SessionListView: View {
     @State private var isImporting = false
     @State private var importMessage: String?
 
+    /// The search, folded away until the magnifier is tapped. One plain
+    /// field first — name, spot, date, sport, anything — with More opening
+    /// the structured filters for anyone whose memory is a place rather
+    /// than a word.
+    @State private var isSearching = false
+    @State private var query = ""
+    @State private var showMoreFilters = false
+    @State private var locationQuery = ""
+    @State private var favoritesOnly = false
+    @FocusState private var searchFocused: Bool
+
     /// The file currently awaiting sport confirmation, and the rest of the
     /// queue behind it — selecting several files at once is normal, and each one
     /// needs its own confirmation.
@@ -104,6 +115,9 @@ struct SessionListView: View {
         let matching = sessions.filter { session in
             period.includes(session.startDate)
                 && (sportFilter == nil || session.sport == sportFilter)
+                && (!favoritesOnly || session.isFavorite)
+                && matchesQuery(session)
+                && matchesLocation(session)
         }
         switch sort {
         case .newest: return matching
@@ -111,6 +125,53 @@ struct SessionListView: View {
         case .fastest: return matching.sorted { $0.maxSpeed > $1.maxSpeed }
         case .longest: return matching.sorted { $0.distance > $1.distance }
         }
+    }
+
+    /// Every word of the query must land somewhere in the session's story —
+    /// its name, its spot, its route, its sport, its notes, or its date in
+    /// any of the ways a person writes one. "gin august" finds the Gin
+    /// Beach sessions from August; "friday wingfoil" finds those.
+    private func matchesQuery(_ session: StoredSession) -> Bool {
+        let tokens = query.lowercased()
+            .split(whereSeparator: { $0 == " " || $0 == "," }).map(String.init)
+        guard !tokens.isEmpty else { return true }
+        let haystack = searchHaystack(session)
+        return tokens.allSatisfy { haystack.contains($0) }
+    }
+
+    private func searchHaystack(_ session: StoredSession) -> String {
+        var parts = [session.displayTitle, session.sport.displayName]
+        if let title = session.title { parts.append(title) }
+        if let spot = session.spotName { parts.append(spot) }
+        if let route = session.routeName { parts.append(route) }
+        if !session.notes.isEmpty { parts.append(session.notes) }
+        let date = session.startDate
+        parts.append(date.formatted(date: .abbreviated, time: .omitted))
+        parts.append(date.formatted(date: .long, time: .omitted))
+        parts.append(date.formatted(date: .numeric, time: .omitted))
+        parts.append(date.formatted(.dateTime.weekday(.wide)))
+        return parts.joined(separator: " ").lowercased()
+    }
+
+    /// The location filter matches only the places — spot and route — so
+    /// "hatchery" cannot accidentally match a session title.
+    private func matchesLocation(_ session: StoredSession) -> Bool {
+        let wanted = locationQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !wanted.isEmpty else { return true }
+        return [session.spotName, session.routeName]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+            .contains(wanted)
+    }
+
+    private func closeSearch() {
+        isSearching = false
+        showMoreFilters = false
+        query = ""
+        locationQuery = ""
+        favoritesOnly = false
+        searchFocused = false
     }
 
     /// Sports actually present in the library, so the filter never offers a
@@ -242,6 +303,12 @@ struct SessionListView: View {
     private var list: some View {
         List {
             Section {
+                if isSearching {
+                    searchBar
+                        .modifier(PlainRow())
+                        .padding(.bottom, 6)
+                }
+
                 HStack(spacing: 10) {
                     quickLink("Bests", symbol: "trophy") { showingBests = true }
                     quickLink("Trends", symbol: "chart.xyaxis.line") { showingTrends = true }
@@ -282,9 +349,20 @@ struct SessionListView: View {
                             pendingDeletion = [session]
                         }
                     }
-                    // Long-press offers the same thing, for anyone who never
-                    // discovers the swipe.
+                    .swipeActions(edge: .leading) {
+                        Button(session.isFavorite ? "Unfavorite" : "Favorite",
+                               systemImage: session.isFavorite ? "star.slash" : "star") {
+                            toggleFavorite(session)
+                        }
+                        .tint(.yellow)
+                    }
+                    // Long-press offers the same things, for anyone who never
+                    // discovers the swipes.
                     .contextMenu {
+                        Button(session.isFavorite ? "Unfavorite" : "Favorite",
+                               systemImage: session.isFavorite ? "star.slash" : "star") {
+                            toggleFavorite(session)
+                        }
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             pendingDeletion = [session]
                         }
@@ -298,6 +376,88 @@ struct SessionListView: View {
         .scrollContentBackground(.hidden)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// The plain field, and behind More the structured half: a place, an
+    /// activity, the favourites.
+    private var searchBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextField("Name, spot, date, activity…", text: $query)
+                        .font(.subheadline)
+                        .focused($searchFocused)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 40)
+                .background(.background, in: Capsule())
+
+                Button(showMoreFilters ? "Less" : "More") {
+                    withAnimation(.snappy) { showMoreFilters.toggle() }
+                }
+                .font(.subheadline.weight(.semibold))
+
+                Button {
+                    withAnimation(.snappy) { closeSearch() }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(9)
+                        .background(.background, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close search")
+            }
+
+            if showMoreFilters {
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("Location — spot or route", text: $locationQuery)
+                            .font(.subheadline)
+                            .autocorrectionDisabled()
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(.background, in: Capsule())
+
+                    Menu {
+                        Picker("Activity", selection: $sportFilter) {
+                            Text("All activities").tag(Sport?.none)
+                            ForEach(availableSports) { sport in
+                                Label(sport.displayName, systemImage: sport.symbolName)
+                                    .tag(Sport?.some(sport))
+                            }
+                        }
+                    } label: {
+                        FilterLabel(text: sportFilter?.displayName ?? "Any activity")
+                    }
+
+                    FilterChip(title: "Favorites", systemImage: "star.fill",
+                               isOn: favoritesOnly) {
+                        favoritesOnly.toggle()
+                    }
+                }
+            }
+        }
     }
 
     private func quickLink(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -373,6 +533,21 @@ struct SessionListView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                withAnimation(.snappy) {
+                    if isSearching {
+                        closeSearch()
+                    } else {
+                        isSearching = true
+                        searchFocused = true
+                    }
+                }
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .accessibilityLabel(isSearching ? "Close search" : "Search sessions")
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button("Import…", systemImage: "square.and.arrow.down") {
@@ -404,6 +579,11 @@ struct SessionListView: View {
     /// — which is precisely when nobody needs it. The case that matters is the
     /// rider who has a watch and no app on it yet, so the icon is now there in
     // MARK: - Actions
+
+    private func toggleFavorite(_ session: StoredSession) {
+        session.favoritedAt = session.isFavorite ? nil : Date()
+        try? session.modelContext?.save()
+    }
 
     private func confirmDeletion() {
         let removed = Set(pendingDeletion.map(\.id))

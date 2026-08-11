@@ -51,9 +51,17 @@ struct SessionCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(session.displayTitle)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        if session.isFavorite {
+                            Image(systemName: "star.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(.yellow)
+                                .accessibilityLabel("Favourite")
+                        }
+                        Text(session.displayTitle)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(1)
+                    }
                     HStack(spacing: 5) {
                         Text(session.startDate.formatted(
                             .dateTime.weekday(.abbreviated).day().month(.abbreviated).year().hour().minute()

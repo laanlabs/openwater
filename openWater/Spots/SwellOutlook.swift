@@ -246,7 +246,11 @@ extension OpenMeteo {
         let times = stamps.map { Date(timeIntervalSince1970: $0) }
         let now = Date()
         func series(_ lead: Int, _ model: String) -> [Double?] {
-            (hourly["wave_height_previous_day\(lead)_\(model)"] as? [Any])?
+            // The marine API answers `previous_day0` on the bare field name
+            // rather than a `_previous_day0` suffix — the freshest run is
+            // just the field itself.
+            let field = lead == 0 ? "wave_height" : "wave_height_previous_day\(lead)"
+            return (hourly["\(field)_\(model)"] as? [Any])?
                 .map { $0 as? Double } ?? []
         }
 

@@ -59,6 +59,9 @@ struct NearbyConditionsSheet: View {
     @State private var nearTerm = NearTermWind(times: [], speedsKn: [], gustsKn: [], directions: [])
     /// The nearest buoy's measured swell split, when one resolves it.
     @State private var measuredSwell: MeasuredSwell?
+    /// Four wave models side by side, for the agreement sentence and the
+    /// compare screen behind it.
+    @State private var swellModels = SwellOutlook(hours: [], models: [])
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -783,6 +786,37 @@ struct NearbyConditionsSheet: View {
             }
         }
 
+        // One sentence of error bar: how far apart four agencies' wave
+        // models sit here, with the full comparison a tap away.
+        if !swellModels.isEmpty {
+            NavigationLink {
+                SwellCompareScreen(title: title, coordinate: coordinate)
+            } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(swellModels.agreement.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(swellModels.agreement.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(12)
+                .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+        }
+
         // The multi-day view, which is the question a surf tab is really
         // being asked: not "what is it doing" but "when should I go".
         NavigationLink {
@@ -1190,8 +1224,10 @@ struct NearbyConditionsSheet: View {
         // is usable rather than holding it blank — the strip appears when it
         // arrives, in space the rest of the tab is not occupying.
         async let quarterly = OpenMeteo.nearTerm(at: here)
+        async let waveAgencies = OpenMeteo.swellOutlook(at: here)
         surfOutlook = await OpenMeteo.surfOutlook(at: here)
         nearTerm = await quarterly
+        swellModels = await waveAgencies
 
         // Predictions and buoy rows come second, for the same reason station
         // readings do: the lists are useful the moment they exist, and half a

@@ -102,7 +102,7 @@ And the structural gaps, in the order they hurt:
 
 ### Tier 2 — multi-model swell
 
-- [ ] **`SwellOutlook`.** GFS-Wave, ECMWF WAM, Météo-France MFWAM and DWD
+- [x] **`SwellOutlook`.** GFS-Wave, ECMWF WAM, Météo-France MFWAM and DWD
   GWAM side by side from the marine API's `models=` parameter — total
   height, period and direction per model, a blend, a spread over the next
   48 hours (waves move slower than wind; 12 would be too short), and an
@@ -110,12 +110,12 @@ And the structural gaps, in the order they hurt:
   sea — no partitions — so the compare runs on totals, and the bands keep
   `best_match`'s partitions rather than mixing partition sets across
   models.
-- [ ] **The land-cell guard.** A model whose nearest marine cell is dry
+- [x] **The land-cell guard.** A model whose nearest marine cell is dry
   land answers 0.0 every hour, not null — averaged naively, one dry model
   halves the blend. A model that never clears 0.05 m while a sibling
   clears 0.3 m is dropped, and the compare screen says why rather than
   silently showing three lines.
-- [ ] **Wave model verification.** The same buoy file that verifies the
+- [x] **Wave model verification.** The same buoy file that verifies the
   wind models carries WVHT and DPD: score each wave model's
   previous-day calls against a buoy within 30 km, with the persistence
   baseline printed beside them — a model that cannot beat "tomorrow =
@@ -198,7 +198,7 @@ government data, free for any use.
 
 1. Tier 1 (done): the math in core, units, staleness, the single fetch,
    the measured split.
-2. Tier 2: the model compare, the land-cell guard, buoy-verified
+2. Tier 2 (done): the model compare, the land-cell guard, buoy-verified
    wave skill with a persistence baseline.
 3. Tier 3: shore bearings — core geometry, the private-spot
    compass, the guide field read.

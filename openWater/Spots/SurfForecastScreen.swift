@@ -35,6 +35,8 @@ struct SurfForecastScreen: View {
             } else {
                 VStack(alignment: .leading, spacing: 18) {
                     hourlyChart
+                    compareLink
+                        .padding(.horizontal)
                     ForEach(outlook.days) { day in
                         dayCard(day).padding(.horizontal)
                     }
@@ -408,6 +410,27 @@ struct SurfForecastScreen: View {
             .foregroundStyle(wind ? AnyShapeStyle(.secondary)
                              : AnyShapeStyle(secondary ? Color.teal.opacity(0.6) : Color.teal))
             .opacity(fromDegrees == nil ? 0.25 : 1)
+    }
+
+    /// The error bar the chart above cannot draw: four agencies' wave
+    /// models side by side, and how each has been scoring here.
+    private var compareLink: some View {
+        NavigationLink {
+            SwellCompareScreen(title: title, coordinate: coordinate)
+        } label: {
+            HStack {
+                Label("Compare wave models", systemImage: "chart.xyaxis.line")
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(Color.deepCard,
+                        in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: States

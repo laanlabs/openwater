@@ -189,6 +189,10 @@ struct GroupedRun: Identifiable {
         // the mean around would blunt the very comparison it exists for.
         var bearings: [(x: Double, y: Double)] = []
 
+        /// The side of the wind each open run is being sailed on, once a
+        /// stretch long enough to establish it has arrived.
+        var sides: [Tack?] = []
+
         for lane in lanes.sorted(by: { $0.startElapsed < $1.startElapsed }) {
             let kind = Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail)
             let ride = ride(of: lane, in: flown)
@@ -197,19 +201,39 @@ struct GroupedRun: Identifiable {
                 separation(between: atan2($0.x, $0.y) * 180 / .pi, and: lane.heading) > reversal
             } ?? false
 
+            // A tack ends an upwind run, and only an upwind run.
+            //
+            // The Upwind screen breaks a leg every time the rider changes
+            // side, which is what makes its picture of a beat legible — and
+            // the run list did not, because a beat tacks through about a
+            // hundred degrees and the reversal test only fires past a hundred
+            // and twenty. So the whole of a beat came back as one run, and on
+            // test-8 nineteen upwind runs collapsed into a single row.
+            //
+            // Upwind only, deliberately. Beating, a tack is a real change of
+            // course and the legs either side of it are the thing a rider
+            // counts. Downwind, weaving across the bumps crosses the wind
+            // constantly and none of it is a change of course — splitting
+            // there would cut one river crossing into dozens of rows, which
+            // is the complaint this list started from.
+            let tacked = kind == .upwind && !brief
+                && sides.last.flatMap { $0 }.map { $0 != lane.tack && lane.tack != nil } ?? false
+
             if let current = kinds.last, ride == rides[rides.count - 1],
-               !(reversed && !brief),
+               !(reversed && !brief), !tacked,
                kind == current || brief {
                 groups[groups.count - 1].append(lane)
                 if !brief {
                     let radians = lane.heading * .pi / 180
                     bearings[bearings.count - 1].x += sin(radians) * lane.distance
                     bearings[bearings.count - 1].y += cos(radians) * lane.distance
+                    if sides[sides.count - 1] == nil { sides[sides.count - 1] = lane.tack }
                 }
             } else {
                 groups.append([lane])
                 kinds.append(kind)
                 rides.append(ride)
+                sides.append(brief ? nil : lane.tack)
                 let radians = lane.heading * .pi / 180
                 bearings.append((sin(radians) * lane.distance, cos(radians) * lane.distance))
             }
@@ -233,6 +257,7 @@ struct GroupedRun: Identifiable {
             groups.removeFirst()
             kinds.removeFirst()
             rides.removeFirst()
+            sides.removeFirst()
         }
 
         // A run is a ride.

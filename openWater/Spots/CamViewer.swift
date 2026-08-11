@@ -54,10 +54,19 @@ private struct YouTubeEmbedView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        // Zoom like Safari would: checking a cam is exactly the moment a
+        // rider wants to magnify one corner of the frame, and a page's own
+        // scale limits should not be able to say no.
+        configuration.ignoresViewportScaleLimits = true
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.isOpaque = false
         view.backgroundColor = .black
-        view.scrollView.isScrollEnabled = false
+        // Scrolling stays on for the pan half of pinch-and-pan; at 1× the
+        // page fits exactly, so nothing moves until a zoom gives it
+        // somewhere to go.
+        view.scrollView.showsVerticalScrollIndicator = false
+        view.scrollView.showsHorizontalScrollIndicator = false
+        view.scrollView.contentInsetAdjustmentBehavior = .never
         return view
     }
 
@@ -71,7 +80,7 @@ private struct YouTubeEmbedView: UIViewRepresentable {
         // so interpolating it into markup is safe.
         let html = """
         <!doctype html><html><head>
-        <meta name="viewport" content="initial-scale=1, maximum-scale=1">
+        <meta name="viewport" content="initial-scale=1">
         <style>html,body{margin:0;height:100%;background:#000}
         iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
         </head><body>

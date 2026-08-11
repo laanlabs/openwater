@@ -74,14 +74,14 @@ struct SessionCard: View {
                 HStack(alignment: .top, spacing: 0) {
                     CardStat(
                         group: "Speed",
-                        groupColour: .orange,
+                        groupColour: .harbourNavy,
                         label: "Max \(settings.units.speed.symbol)",
                         value: Format.speed(session.maxSpeed, unit: settings.units.speed,
                                             decimals: 1, includeSymbol: false)
                     )
                     CardStat(
                         group: " ",
-                        groupColour: .orange,
+                        groupColour: .harbourNavy,
                         // "Avg" next to a total duration invites the reader to
                         // divide distance by time and find it does not agree.
                         // It is the moving average, so it says so.

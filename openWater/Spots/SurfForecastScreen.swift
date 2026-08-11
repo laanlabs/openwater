@@ -39,6 +39,7 @@ struct SurfForecastScreen: View {
                 .padding(.vertical)
             }
         }
+        .background(Color.deepSurface)
         .navigationTitle("Surf forecast")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Surf forecast")
@@ -311,7 +312,7 @@ struct SurfForecastScreen: View {
             }
         }
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground),
+        .background(Color.deepCard,
                     in: RoundedRectangle(cornerRadius: 16))
     }
 

@@ -379,7 +379,7 @@ struct SessionMapTab: View {
         HStack(alignment: .top, spacing: 0) {
             CardStat(
                 group: "Speed",
-                groupColour: .orange,
+                groupColour: .harbourNavy,
                 label: settings.units.speed.symbol,
                 value: Format.speed(session.track.speed[safe: index] ?? 0,
                                     unit: settings.units.speed, decimals: 1, includeSymbol: false)

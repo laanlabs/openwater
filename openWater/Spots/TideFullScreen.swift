@@ -64,7 +64,7 @@ struct TideFullScreen: View {
             footer
             Spacer(minLength: 0)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.deepSurface)
         .sheet(isPresented: $isGivingFeedback) {
             AppFeedbackSheet(screen: "Tide chart")
         }

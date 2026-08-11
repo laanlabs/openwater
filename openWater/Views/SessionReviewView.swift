@@ -210,7 +210,7 @@ struct SessionReviewView: View {
             HStack(alignment: .top, spacing: 0) {
                 CardStat(
                     group: "Speed",
-                    groupColour: .orange,
+                    groupColour: .harbourNavy,
                     label: "Max \(settings.units.speed.symbol)",
                     value: Format.speed(stored.maxSpeed, unit: settings.units.speed,
                                         decimals: 1, includeSymbol: false)

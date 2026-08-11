@@ -238,7 +238,7 @@ struct TrendsView: View {
             let change = latest - previous
 
             HStack(alignment: .top, spacing: 0) {
-                trendStat("Best", format(best), colour: .orange)
+                trendStat("Best", format(best), colour: .harbourNavy)
                 trendStat("Latest", format(latest), colour: .blue)
                 trendStat(
                     "vs previous",
@@ -289,7 +289,7 @@ struct TrendsView: View {
                     y: .value(metric.rawValue, value(for: session))
                 )
                 .interpolationMethod(.monotone)
-                .foregroundStyle(.tint.opacity(0.4))
+                .foregroundStyle(Color.foam)
             }
         }
         .chartYAxisLabel(axisLabel)

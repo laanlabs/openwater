@@ -95,7 +95,7 @@ struct NearbyConditionsSheet: View {
                 }
                 .padding(16)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color.deepSurface)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .feedbackButton("Nearby conditions")
@@ -186,7 +186,7 @@ struct NearbyConditionsSheet: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -305,7 +305,7 @@ struct NearbyConditionsSheet: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     /// The next 24 hours, and how much the models argue about them.
@@ -333,7 +333,9 @@ struct NearbyConditionsSheet: View {
     @ViewBuilder
     private var nearTermCard: some View {
         if !nearTerm.isEmpty {
-            let peak = max(nearTerm.speedsKn.compactMap { $0 }.max() ?? 1, 1)
+            // Gusts set the scale, not the means — the caps have to fit
+            // under the same grid the bars use.
+            let peak = max((nearTerm.speedsKn + nearTerm.gustsKn).compactMap { $0 }.max() ?? 1, 1)
             NavigationLink {
                 ForecastScreen(title: title, coordinate: coordinate, detail: full,
                                outlook: outlook, waves: waves)
@@ -354,18 +356,17 @@ struct NearbyConditionsSheet: View {
                         .foregroundStyle(.tertiary)
                 }
 
+                // Grid above the bars, the way the comps draw it — the caps
+                // reach high enough that labels behind them would vanish.
                 ZStack(alignment: .bottom) {
-                    ChartGrid(peak: peak)
                     HStack(alignment: .bottom, spacing: 2) {
                         ForEach(nearTerm.times.indices, id: \.self) { step in
-                            let speed = (nearTerm.speedsKn[safe: step] ?? nil) ?? 0
-                            RoundedRectangle(cornerRadius: 1.5)
-                                .fill(speed >= 15 ? AnyShapeStyle(.tint)
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.6)))
-                                .frame(height: max(2, 54 * speed / peak))
-                                .frame(maxWidth: .infinity, alignment: .bottom)
+                            GustBar(meanKn: (nearTerm.speedsKn[safe: step] ?? nil) ?? 0,
+                                    gustKn: nearTerm.gustsKn[safe: step] ?? nil,
+                                    peak: peak, height: 54, cornerRadius: 1.5)
                         }
                     }
+                    ChartGrid(peak: peak)
                 }
                 .frame(height: 54, alignment: .bottom)
 
@@ -410,7 +411,7 @@ struct NearbyConditionsSheet: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
             }
             .buttonStyle(.plain)
         }
@@ -450,7 +451,8 @@ struct NearbyConditionsSheet: View {
     private var outlookCardBody: some View {
         if !outlook.isEmpty {
             let consensus = outlook.consensus
-            let peak = max(consensus.compactMap { $0 }.max() ?? 1, 1)
+            let gusts = outlook.consensusGusts
+            let peak = max((consensus + gusts).compactMap { $0 }.max() ?? 1, 1)
             let agreement = outlook.agreement
 
             VStack(alignment: .leading, spacing: 10) {
@@ -473,17 +475,14 @@ struct NearbyConditionsSheet: View {
                 // The disagreement is now one sentence below, and the per-model
                 // lines live on the detail screen where there is room for them.
                 ZStack(alignment: .bottom) {
-                    ChartGrid(peak: peak)
                     HStack(alignment: .bottom, spacing: 3) {
                         ForEach(outlook.hours.indices, id: \.self) { hour in
-                            let speed = (consensus[safe: hour] ?? nil) ?? 0
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(speed >= 15 ? AnyShapeStyle(.tint)
-                                      : AnyShapeStyle(Color.accentColor.opacity(0.6)))
-                                .frame(height: max(2, 62 * speed / peak))
-                                .frame(maxWidth: .infinity, alignment: .bottom)
+                            GustBar(meanKn: (consensus[safe: hour] ?? nil) ?? 0,
+                                    gustKn: gusts[safe: hour] ?? nil,
+                                    peak: peak, height: 62, cornerRadius: 2)
                         }
                     }
+                    ChartGrid(peak: peak)
                 }
                 .frame(height: 62, alignment: .bottom)
 
@@ -533,7 +532,7 @@ struct NearbyConditionsSheet: View {
                         Image(systemName: "wifi.slash")
                     }
                     .font(.caption2.weight(.medium))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.harbourNavy)
                 }
 
                 Text(agreement.detail)
@@ -551,9 +550,12 @@ struct NearbyConditionsSheet: View {
                     } icon: {
                         Image(systemName: "gauge.with.needle")
                     }
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(abs(nowcast.deltaKn) < 1.5 ? AnyShapeStyle(.tint)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(abs(nowcast.deltaKn) < 1.5 ? AnyShapeStyle(Color.harbourNavy)
                                      : AnyShapeStyle(Color.orange))
+                    .padding(11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
                 }
 
                 Text("Average of \(outlook.models.count) global models — tap for each of them, the hour by hour, and the week.")
@@ -563,7 +565,7 @@ struct NearbyConditionsSheet: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -608,7 +610,7 @@ struct NearbyConditionsSheet: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -778,7 +780,7 @@ struct NearbyConditionsSheet: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(14)
-            .background(Color(.secondarySystemGroupedBackground),
+            .background(Color.deepCard,
                         in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -1102,7 +1104,7 @@ struct NearbyConditionsSheet: View {
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) { content() }
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func note(_ text: String) -> some View {
@@ -1219,5 +1221,36 @@ struct NearbyConditionsSheet: View {
         // outlook and the observations both, and it is a sentence, not a
         // card the sheet should wait for.
         nowcast = NowcastAdjustment.make(outlook: outlook, stations: stations, buoys: buoys)
+    }
+}
+
+/// One forecast bar: solid to the mean, with a Foam cap up to the gust.
+///
+/// The cap is the headroom that knocks you over, so it gets its own colour
+/// on top of the bar rather than the old scheme of paling the whole bar —
+/// which flattened a gusty 8 kn and a steady 8 kn into the same picture.
+struct GustBar: View {
+
+    let meanKn: Double
+    let gustKn: Double?
+    /// The chart's full-scale value — the caller must fold gusts into it,
+    /// or the caps overflow the frame.
+    let peak: Double
+    let height: Double
+    let cornerRadius: Double
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let gustKn, gustKn > meanKn {
+                UnevenRoundedRectangle(topLeadingRadius: cornerRadius,
+                                       topTrailingRadius: cornerRadius)
+                    .fill(Color.foam)
+                    .frame(height: height * (gustKn - meanKn) / peak)
+            }
+            Rectangle()
+                .fill(Color.chartBar)
+                .frame(height: max(2, height * meanKn / peak))
+        }
+        .frame(maxWidth: .infinity, alignment: .bottom)
     }
 }

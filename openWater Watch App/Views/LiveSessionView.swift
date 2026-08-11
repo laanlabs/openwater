@@ -265,7 +265,7 @@ struct SessionPage: View {
             }
             .padding(.horizontal, 2)
         }
-        .containerBackground(.orange.gradient.opacity(0.18), for: .tabView)
+        .containerBackground(Color.accentColor.gradient.opacity(0.18), for: .tabView)
     }
 
     /// GPS quality stays visible during the session, not just before it — if the

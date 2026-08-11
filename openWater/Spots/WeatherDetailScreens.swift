@@ -54,7 +54,7 @@ struct CurrentConditionsScreen: View {
             }
             .padding(16)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.deepSurface)
         .navigationTitle("Now")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Current conditions")
@@ -99,7 +99,7 @@ struct CurrentConditionsScreen: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     @ViewBuilder
@@ -134,7 +134,7 @@ struct CurrentConditionsScreen: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -178,7 +178,7 @@ struct CurrentConditionsScreen: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
@@ -212,7 +212,7 @@ struct CurrentConditionsScreen: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -253,7 +253,7 @@ struct CurrentConditionsScreen: View {
                 }
             }
             .padding(14)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -330,7 +330,7 @@ struct ForecastScreen: View {
             }
             .padding(16)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.deepSurface)
         .navigationTitle("Forecast")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Forecast")
@@ -357,7 +357,7 @@ struct ForecastScreen: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -436,7 +436,7 @@ struct ForecastScreen: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 
@@ -631,7 +631,7 @@ struct ForecastScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
             }
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 }
@@ -854,7 +854,7 @@ struct ModelCompareScreen: View {
                 toggles
             }
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.deepSurface)
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Models")
@@ -961,7 +961,7 @@ struct ModelCompareScreen: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color.deepCard)
     }
 
     /// The hour as a distribution, when the ensemble covers it.
@@ -1004,7 +1004,7 @@ struct ModelCompareScreen: View {
                         }
                         .padding(.horizontal, 11)
                         .frame(height: 32)
-                        .background(on ? AnyShapeStyle(Color(.secondarySystemGroupedBackground))
+                        .background(on ? AnyShapeStyle(Color.deepCard)
                                     : AnyShapeStyle(Color(.systemGray6)),
                                     in: Capsule())
                     }
@@ -1015,7 +1015,7 @@ struct ModelCompareScreen: View {
 
             HStack(spacing: 14) {
                 key(Color.primary, "Blend", line: true)
-                key(Color.orange.opacity(0.35), "Gust range")
+                key(Color.foam.opacity(0.45), "Gust range")
                 key(Color.orange, "Now", line: true)
                 Spacer(minLength: 0)
             }
@@ -1031,7 +1031,7 @@ struct ModelCompareScreen: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGroupedBackground))
+        .background(Color.deepSurface)
     }
 
     /// Each model's recent record at this point — how far its two-day-ahead
@@ -1383,7 +1383,7 @@ private struct ModelChart: View, Equatable {
             // Gusts behind everything, as a filled band up from the blend —
             // the headroom above the average is the part that knocks you over.
             GustBand(speeds: series.blend, gusts: series.gusts, peak: series.peak)
-                .fill(Color.orange.opacity(0.16))
+                .fill(Color.foam.opacity(0.45))
 
             ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                 if enabled.contains(model.id) {
@@ -1593,7 +1593,7 @@ struct ForecastTable: View {
             }
         }
         .padding(.vertical, 10)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func isDayStart(_ index: Int) -> Bool {
@@ -1833,7 +1833,7 @@ struct ConditionsCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     /// The direction badge: a filled disc with the arrow, which is what makes
@@ -1869,7 +1869,7 @@ struct ConditionsCard: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 34)
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.deepSurface, in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -1963,7 +1963,7 @@ struct SurfCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 148)
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     // MARK: Rose
@@ -2019,7 +2019,7 @@ struct SurfCard: View {
         .frame(maxWidth: .infinity)
         .frame(height: 148)
         .padding(.vertical, 8)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     /// An arrow from the centre pointing the way the swell is travelling,
@@ -2083,7 +2083,7 @@ struct SurfCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func trainRow(_ train: SurfConditions.Train, colour: Color, label: String? = nil) -> some View {
@@ -2165,7 +2165,7 @@ struct TideChart: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var header: some View {

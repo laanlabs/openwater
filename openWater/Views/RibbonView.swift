@@ -1437,13 +1437,13 @@ struct RibbonView: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "wind")
                         .font(.title3)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.harbourNavy)
                         .frame(width: 24)
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(prompt.title)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.harbourNavy)
                         Text(prompt.detail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -1455,11 +1455,10 @@ struct RibbonView: View {
                 Button(prompt.action, systemImage: "location.north.line", action: onSetWind)
                     .font(.callout.weight(.semibold))
                     .buttonStyle(.borderedProminent)
-                    .tint(.orange)
                     .frame(maxWidth: .infinity)
             }
             .padding(12)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
             .padding(.bottom, 8)
         } else {
@@ -1471,7 +1470,7 @@ struct RibbonView: View {
             HStack(spacing: 10) {
                 Image(systemName: "wind")
                     .font(.title3)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.harbourNavy)
                     .frame(width: 24)
 
                 Text(prompt.detail)
@@ -1484,11 +1483,10 @@ struct RibbonView: View {
                 Button(prompt.action, action: onSetWind)
                     .font(.callout.weight(.bold))
                     .buttonStyle(.borderedProminent)
-                    .tint(.orange)
                     .fixedSize()
             }
             .padding(12)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
             .padding(.bottom, 8)
         }
@@ -1669,10 +1667,10 @@ struct LaneRow: View {
             if isBest {
                 Text("BEST")
                     .font(.system(size: 8, weight: .heavy))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.harbourNavy)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
-                    .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                    .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 3))
             }
 
             Spacer(minLength: 0)

@@ -752,13 +752,15 @@ struct MaxSpeedMarker: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.red, in: Capsule())
+            // Static navy, not `.harbourNavy`: the pill sits on map imagery,
+            // which never changes with the app's colour scheme.
+            .background(Color(red: 0.043, green: 0.290, blue: 0.471), in: Capsule())
             .overlay(Capsule().stroke(.white.opacity(onDark ? 0.7 : 0.9), lineWidth: 1.5))
 
             // A stem, so the capsule points at the sample rather than hovering
             // near it — at this zoom a few points of offset is tens of metres.
             Rectangle()
-                .fill(Color.red)
+                .fill(Color(red: 0.043, green: 0.290, blue: 0.471))
                 .frame(width: 2, height: 7)
         }
         .shadow(color: .black.opacity(0.35), radius: 3, y: 1)

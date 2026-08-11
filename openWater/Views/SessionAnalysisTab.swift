@@ -166,7 +166,7 @@ struct SessionAnalysisTab: View {
                     HStack(spacing: 12) {
                         Image(systemName: "gauge.with.dots.needle.33percent")
                             .font(.subheadline)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.harbourNavy)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 1) {
                             Text("No wind speed")

@@ -141,7 +141,7 @@ struct WindForecastBars: View {
                     let peak = max(forecast.map(\.speedKn).max() ?? 1, 1)
                     RoundedRectangle(cornerRadius: 3)
                         .fill(hour.speedKn >= 15 ? AnyShapeStyle(.tint)
-                              : AnyShapeStyle(Color.accentColor.opacity(0.3)))
+                              : AnyShapeStyle(Color.foam))
                         .frame(height: max(4, 44 * hour.speedKn / peak))
                         .frame(maxWidth: .infinity)
                 }

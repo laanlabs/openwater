@@ -62,7 +62,7 @@ struct SessionOverview: View {
                     if let wind = session.effectiveWind, wind.source.isEstimate {
                         Text("estimated")
                             .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.harbourNavy)
                     }
                 }
 
@@ -70,7 +70,7 @@ struct SessionOverview: View {
                     Image(systemName: "wind")
                         .font(.title3)
                         .foregroundStyle(conditionsAreComplete ? AnyShapeStyle(.tint)
-                                                              : AnyShapeStyle(.orange))
+                                                              : AnyShapeStyle(Color.harbourNavy))
                         .frame(width: 26)
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -80,13 +80,13 @@ struct SessionOverview: View {
                             if let note = conditionsNote {
                                 Text(note)
                                     .font(.caption)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color.harbourNavy)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         } else {
                             Text("No wind set")
                                 .font(.headline)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.harbourNavy)
                             Text("Angles, VMG, the polar and your glides are all measured from the wind. Tap to point at it.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -240,7 +240,7 @@ struct SessionOverview: View {
             HStack(alignment: .top, spacing: 0) {
                 DetailStat(
                     title: "Speed Max",
-                    colour: .orange,
+                    colour: .harbourNavy,
                     value: Format.speed(summary.maxSpeed, unit: settings.units.speed,
                                         decimals: 1, includeSymbol: false),
                     unit: settings.units.speed.symbol
@@ -300,7 +300,7 @@ struct SessionOverview: View {
             // broken; naming it settles which question each is answering.
             DetailStat(
                 title: slot.title,
-                colour: .orange,
+                colour: .harbourNavy,
                 value: Format.speed(summary.averageMovingSpeed, unit: settings.units.speed,
                                     decimals: 1, includeSymbol: false),
                 unit: settings.units.speed.symbol
@@ -497,10 +497,10 @@ struct BestSpeedsCard: View {
                                     Image(systemName: "arrow.up.right")
                                         .font(.caption2)
                                 }
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.harbourNavy)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
-                                .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 9))
+                                .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 9))
 
                                 Text(Format.speed(result.speed, unit: units.speed, decimals: 2))
                                     .font(.subheadline)

@@ -39,7 +39,7 @@ struct GroupedRun: Identifiable {
         /// `.tint` problem already found on the Downwind map.
         var colour: Color {
             switch self {
-            case .downwind: Color(red: 0.94, green: 0.35, blue: 0.20)
+            case .downwind: Color(red: 0.043, green: 0.420, blue: 0.796)
             case .reaching: .teal
             case .upwind: .indigo
             }

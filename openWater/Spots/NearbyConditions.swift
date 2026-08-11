@@ -198,6 +198,15 @@ struct WindOutlook {
         }
     }
 
+    /// Gusts, averaged over the same voters — what the Foam caps draw.
+    var consensusGusts: [Double?] {
+        hours.indices.map { hour in
+            let values = independent.compactMap { $0.gusts[safe: hour] ?? nil }
+            guard !values.isEmpty else { return nil }
+            return values.reduce(0, +) / Double(values.count)
+        }
+    }
+
     /// The widest disagreement between models over the useful window, in knots.
     ///
     /// Measured over the next twelve hours rather than the whole run, because

@@ -113,10 +113,10 @@ struct SplitsView: View {
                 HStack(spacing: 6) {
                     Text("BEST")
                         .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.harbourNavy)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                        .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 4))
                     Text("\(interval.label(unit)) in \(Format.duration(best.duration))")
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
@@ -139,9 +139,9 @@ struct SplitsView: View {
                         y: .value("Time", split.duration)
                     )
                     .foregroundStyle(
-                        split.number == best?.number ? Color.orange
+                        split.number == best?.number ? Color.harbourNavy
                         : split.isComplete ? Color.accentColor
-                        : Color.accentColor.opacity(0.45)
+                        : Color.foam
                     )
                     .cornerRadius(3)
                 }
@@ -188,10 +188,10 @@ struct SplitsView: View {
                             if split.number == best?.number {
                                 Text("BEST")
                                     .font(.system(size: 8, weight: .heavy))
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color.harbourNavy)
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)
-                                    .background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                                    .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 3))
                             }
                         }
                         if let heartRate = split.averageHeartRate {

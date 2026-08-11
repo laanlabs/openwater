@@ -548,14 +548,14 @@ struct LibraryStatsCard: View {
             HStack(alignment: .top, spacing: 0) {
                 CardStat(
                     group: "Speed",
-                    groupColour: .orange,
+                    groupColour: .harbourNavy,
                     label: "Max \(settings.units.speed.symbol)",
                     value: Format.speed(maxSpeed, unit: settings.units.speed,
                                         decimals: 1, includeSymbol: false)
                 )
                 CardStat(
                     group: " ",
-                    groupColour: .orange,
+                    groupColour: .harbourNavy,
                     label: "Average \(settings.units.speed.symbol)",
                     value: Format.speed(averageSpeed, unit: settings.units.speed,
                                         decimals: 1, includeSymbol: false)
@@ -592,7 +592,9 @@ struct LibraryStatsCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color(.darkGray))
+                // Static navy, not `.harbourNavy`: the dynamic colour turns
+                // pale in dark mode, which would sink the white text.
+                .background(Color(red: 0.043, green: 0.290, blue: 0.471))
         }
         .background(.background)
         .clipShape(RoundedRectangle(cornerRadius: 14))

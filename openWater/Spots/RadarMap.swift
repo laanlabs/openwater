@@ -632,7 +632,6 @@ struct RadarScreen: View {
                 Spacer(minLength: 0)
             }
             ProgressView(value: loaded)
-                .tint(.orange)
             Text("The whole loop is fetched before it plays, so it runs smoothly instead of flashing frames as they arrive.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

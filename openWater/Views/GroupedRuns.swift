@@ -78,19 +78,23 @@ struct GroupedRun: Identifiable {
         /// rider covers 8.2 km between 50° and 80° off the wind, every metre
         /// of it working upwind, and the run list called all of it reaching
         /// while the Upwind screen — which reads the angle — correctly called
-        /// it beating. Two screens describing the same water differently.
+        /// it beating.
         ///
-        /// 80° is where a wingfoiler stops making ground to windward and
-        /// starts merely crossing. The downwind boundary stays at 120° where
-        /// `PointOfSail` puts it, because nothing about that one was wrong.
+        /// The boundaries are `UpwindLegFinder`'s and not this list's own,
+        /// which is the second half of the same bug. Moving this to 80° left
+        /// the two screens still disagreeing: the Upwind screen counts a leg
+        /// as upwind below 90°, so on test-8 it reported twenty-four legs
+        /// where the run list reported thirteen upwind runs, the whole
+        /// difference being legs sailed at 69° to 78°. One word, one number,
+        /// read from one place.
         init(trueWindAngle: Double?, fallback point: PointOfSail?) {
             guard let angle = trueWindAngle.map({ abs($0) }) else {
                 self = Kind(point)
                 return
             }
             switch angle {
-            case ..<80: self = .upwind
-            case ..<120: self = .reaching
+            case ..<UpwindLegFinder.upwindLimit: self = .upwind
+            case ..<UpwindLegFinder.downwindLimit: self = .reaching
             default: self = .downwind
             }
         }

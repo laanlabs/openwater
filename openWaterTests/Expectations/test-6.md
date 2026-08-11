@@ -54,7 +54,7 @@ The segmenter found **82 stretches**, which group into **27 runs**, **10 of them
 | 19 | 2.62 km | 7:38 | 11.1 kn | 15.7 kn | 38° | 6 |
 | 20 | 157 m | 0:38 | 8.0 kn | 10.4 kn | 33° | 1 |
 
-### Reaching · 7
+### Reaching · 6
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
@@ -64,7 +64,12 @@ The segmenter found **82 stretches**, which group into **27 runs**, **10 of them
 | 4 | 596 m | 1:37 | 11.9 kn | 13.6 kn | 67° | 1 |
 | 5 | 315 m | 0:59 | 10.4 kn | 11.5 kn | 69° | 1 |
 | 6 | 404 m | 2:08 | 6.1 kn | 11.6 kn | 67° | 1 |
-| 7 | 276 m | 1:00 | 9.0 kn | 11.9 kn | 98° | 1 |
+
+### Upwind · 1
+
+| # | Distance | Duration | Avg | Max | Off downwind | Stretches |
+|--:|---:|---:|---:|---:|---:|---:|
+| 1 | 276 m | 1:00 | 9.0 kn | 11.9 kn | 98° | 1 |
 
 <!-- Anything below this line is yours. Re-recording will not touch it. -->
 

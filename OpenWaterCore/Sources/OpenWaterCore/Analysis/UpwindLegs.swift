@@ -60,6 +60,22 @@ public struct UpwindLeg: Hashable, Sendable, Identifiable {
 
 public enum UpwindLegFinder {
 
+    /// Where upwind stops and reaching begins, in degrees off the wind.
+    ///
+    /// Public and shared, because two screens using two numbers for one word
+    /// is how they came to disagree in front of a rider. The Upwind screen
+    /// found twenty-four legs on a session where the Runs tab found thirteen
+    /// upwind runs, and the whole of the difference was legs sailed at 69° to
+    /// 78°: beating by this measure, reaching by the run list's own eighty.
+    ///
+    /// Ninety is the honest line — above a beam reach is upwind — and the run
+    /// list reads it from here rather than keeping its own.
+    public static let upwindLimit: Double = 90
+
+    /// And where reaching stops and downwind begins. `PointOfSail` has always
+    /// put it here and nothing about that one was wrong.
+    public static let downwindLimit: Double = 120
+
     /// The upwind legs of a track, in sailed order.
     ///
     /// A sample belongs to a leg when the rider is moving and pointed above a
@@ -74,7 +90,7 @@ public enum UpwindLegFinder {
     public static func legs(
         track: Track,
         wind: Wind,
-        upwindLimit: Double = 90,
+        upwindLimit: Double = UpwindLegFinder.upwindLimit,
         minimumSpeed: Double = 2.0,
         minimumDistance: Double = 80,
         minimumDuration: TimeInterval = 12,

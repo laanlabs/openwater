@@ -29,10 +29,14 @@ struct SpotsSheet<Content: View>: View {
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
     enum Detent: CaseIterable {
-        case peek, half, full
+        case minimized, peek, half, full
 
+        /// Screen fraction — except `minimized`, which is "the grab bar and
+        /// nothing else" and is resolved in points, because the bar does not
+        /// scale with the screen.
         var fraction: CGFloat {
             switch self {
+            case .minimized: 0
             case .peek: 0.32
             case .half: 0.58
             case .full: 0.92
@@ -51,12 +55,14 @@ struct SpotsSheet<Content: View>: View {
     private var drag: CGFloat = 0
 
     private func height(for detent: Detent) -> CGFloat {
-        size.height * detent.fraction
+        // Minimized is the grab bar clear of the floating tab bar; everything
+        // else scales with the screen, but never below that floor.
+        max(tabBarHeight + 44, size.height * detent.fraction)
     }
 
     var body: some View {
         let live = min(height(for: .full),
-                       max(height(for: .peek), height(for: detent) - drag))
+                       max(height(for: .minimized), height(for: detent) - drag))
         VStack(spacing: 0) {
             grabBar
 
@@ -77,7 +83,9 @@ struct SpotsSheet<Content: View>: View {
         )
     }
 
-    /// The one handle that moves the sheet, generous enough to hit.
+    /// The one handle that moves the sheet, generous enough to hit — with
+    /// the chevron beside it doing the same job without a gesture at all,
+    /// since a drag you have to discover is not a control.
     private var grabBar: some View {
         Capsule()
             .fill(Color(.systemGray3))
@@ -85,6 +93,22 @@ struct SpotsSheet<Content: View>: View {
             .frame(maxWidth: .infinity)
             .frame(height: 36)
             .contentShape(Rectangle())
+            .overlay(alignment: .trailing) {
+                Button {
+                    withAnimation(.snappy) {
+                        detent = detent == .minimized ? .half : .minimized
+                    }
+                } label: {
+                    Image(systemName: detent == .minimized ? "chevron.up" : "chevron.down")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 28)
+                        .background(Color(.systemGray5), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 14)
+                .accessibilityLabel(detent == .minimized ? "Expand nearby" : "Minimize nearby")
+            }
             .gesture(dragGesture)
     }
 

@@ -103,7 +103,7 @@ struct NearbyConditionsSheet: View {
                     case .conditions: conditionsTab
                     case .water: tideTab
                     case .surf: surfTab
-                    case .cams: list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
+                    case .cams: camsTab
                     }
                 }
                 .padding(16)
@@ -127,6 +127,9 @@ struct NearbyConditionsSheet: View {
         .presentationDetents([.large])
         .fullScreenCover(isPresented: $isShowingTideFullScreen) {
             TideFullScreen(curve: tide, title: title)
+        }
+        .fullScreenCover(item: $watchingCam) { cam in
+            CamViewerSheet(name: cam.displayName, url: cam.url)
         }
         .task(id: taskKey) { await search() }
     }
@@ -214,7 +217,9 @@ struct NearbyConditionsSheet: View {
 
         outlookCard
 
-        section("REAL STATIONS NEARBY, FREE") {
+        section("REAL STATIONS NEARBY, FREE", trailing: {
+            mapLink("Wind stations", places: stationPlaces)
+        }) {
             let shown = stations.filter { $0.metres <= radius }
             if shown.isEmpty {
                 note(isSearching
@@ -234,7 +239,9 @@ struct NearbyConditionsSheet: View {
         }
 
         let meters = within(resources.filter { $0.kind == .wind })
-        section("WIND METERS IN THE GUIDE") {
+        section("WIND METERS IN THE GUIDE", trailing: {
+            mapLink("Wind stations", places: stationPlaces)
+        }) {
             if meters.isEmpty {
                 note(isSearching ? "Looking…" : "No wind meters this close in the guide. Widen the search, or add one from Improve this spot.")
             } else {
@@ -244,6 +251,112 @@ struct NearbyConditionsSheet: View {
                         if index < meters.count - 1 { Divider().padding(.leading, 14) }
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: Places on a map
+
+    /// Every wind sensor around this point — NOAA's free network and the
+    /// guide's meters, which are usually the paid networks — as one set of
+    /// pins. Together on purpose: "is there a station close enough to
+    /// believe" is one question, and the answer should not depend on which
+    /// list the station happened to be filed under.
+    private var stationPlaces: [PlacesMapScreen.Place] {
+        let free = stations.filter { $0.metres <= radius }.map { station in
+            PlacesMapScreen.Place(
+                id: "nws-\(station.id)",
+                name: station.name,
+                subtitle: [near(station.metres), "free NOAA station",
+                           station.observation?.windKn.map { "\(Int($0.rounded())) kn now" }]
+                    .compactMap { $0 }.joined(separator: " · "),
+                coordinate: station.coordinate,
+                symbol: "antenna.radiowaves.left.and.right",
+                pinText: station.observation?.windKn.map { "\(Int($0.rounded()))kn" },
+                url: station.url
+            )
+        }
+        let meters = within(resources.filter { $0.kind == .wind }).map { meter in
+            PlacesMapScreen.Place(
+                id: meter.id,
+                name: meter.displayName,
+                subtitle: "\(bearingAndDistance(meter)) · \(meter.providerLabel), from the guide",
+                coordinate: meter.coordinate,
+                symbol: "gauge.with.needle",
+                tint: .orange,
+                url: meter.url
+            )
+        }
+        return free + meters
+    }
+
+    /// NOAA's tide stations and the guide's tide charts, one map.
+    private var tidePlaces: [PlacesMapScreen.Place] {
+        let noaa = tides.filter { $0.metres <= radius }.map { station in
+            PlacesMapScreen.Place(
+                id: "noaa-\(station.id)",
+                name: station.name,
+                subtitle: "\(near(station.metres)) · NOAA harmonic predictions",
+                coordinate: station.coordinate,
+                symbol: "arrow.up.and.down",
+                url: station.url
+            )
+        }
+        let charts = within(resources.filter { $0.kind == .tide }).map { chart in
+            PlacesMapScreen.Place(
+                id: chart.id,
+                name: chart.displayName,
+                subtitle: "\(bearingAndDistance(chart)) · \(chart.providerLabel), from the guide",
+                coordinate: chart.coordinate,
+                symbol: "chart.xyaxis.line",
+                tint: .orange,
+                url: chart.url
+            )
+        }
+        return noaa + charts
+    }
+
+    /// The guide's surf pages for this stretch of coast.
+    private var surfPlaces: [PlacesMapScreen.Place] {
+        within(resources.filter { $0.kind == .surf }).map { page in
+            PlacesMapScreen.Place(
+                id: page.id,
+                name: page.displayName,
+                subtitle: "\(bearingAndDistance(page)) · \(page.providerLabel), from the guide",
+                coordinate: page.coordinate,
+                symbol: "figure.surfing",
+                tint: .orange,
+                url: page.url
+            )
+        }
+    }
+
+    /// The guide's cams, pinned where they point — and watched in the app.
+    private var camPlaces: [PlacesMapScreen.Place] {
+        within(resources.filter { $0.kind == .camera }).map { cam in
+            PlacesMapScreen.Place(
+                id: cam.id,
+                name: cam.displayName,
+                subtitle: "\(bearingAndDistance(cam)) · \(cam.providerLabel), from the guide",
+                coordinate: cam.coordinate,
+                symbol: "video.fill",
+                tint: .orange,
+                url: cam.url,
+                watchInApp: true
+            )
+        }
+    }
+
+    /// The little map beside a section title, when the section has places
+    /// worth seeing on one.
+    @ViewBuilder
+    private func mapLink(_ title: String, places: [PlacesMapScreen.Place]) -> some View {
+        if !places.isEmpty {
+            NavigationLink {
+                PlacesMapScreen(title: title, places: places, from: coordinate)
+            } label: {
+                Label("Map", systemImage: "map")
+                    .font(.caption2.weight(.semibold))
             }
         }
     }
@@ -480,9 +593,16 @@ struct NearbyConditionsSheet: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
                     Spacer()
+                    // Disagreement warns from the icon; the words stay in a
+                    // colour that can be read.
+                    if outlook.spreadKn >= 8 {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color.orange)
+                    }
                     Text(agreement.label)
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(outlook.spreadKn < 8 ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.orange))
+                        .foregroundStyle(outlook.spreadKn < 8 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -562,16 +682,22 @@ struct NearbyConditionsSheet: View {
                 // A real anemometer against the models — the one line on
                 // this card that is measured rather than modelled, which is
                 // exactly why it gets to talk back to the chart above it.
+                // The alert lives in the icon, never the type: orange words
+                // on the blue wash were unreadable, and a sentence a rider
+                // must actually read should not wear the warning colour.
                 if let nowcast {
                     Label {
                         Text(nowcast.line)
                             .fixedSize(horizontal: false, vertical: true)
                     } icon: {
-                        Image(systemName: "gauge.with.needle")
+                        Image(systemName: abs(nowcast.deltaKn) < 1.5
+                              ? "gauge.with.needle" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(abs(nowcast.deltaKn) < 1.5
+                                             ? AnyShapeStyle(Color.harbourNavy)
+                                             : AnyShapeStyle(Color.orange))
                     }
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(abs(nowcast.deltaKn) < 1.5 ? AnyShapeStyle(Color.harbourNavy)
-                                     : AnyShapeStyle(Color.orange))
+                    .foregroundStyle(Color.harbourNavy)
                     .padding(11)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
@@ -737,7 +863,9 @@ struct NearbyConditionsSheet: View {
             note("Reading the tide…")
         }
 
-        section("TIDE STATIONS") {
+        section("TIDE STATIONS", trailing: {
+            mapLink("Tide stations", places: tidePlaces)
+        }) {
             let shownTides = tides.filter { $0.metres <= radius }
             if shownTides.isEmpty {
                 note(isSearching
@@ -788,17 +916,21 @@ struct NearbyConditionsSheet: View {
 
         // A real wave sensor against the model — the one sentence here
         // that is measured, which is why it gets to talk back to the
-        // forecast below it.
+        // forecast below it. Same rule as the wind nowcast: the warning
+        // colour goes on the icon, the words stay legible.
         if let swellNowcast {
             Label {
                 Text(swellNowcast.line(unit: settings.units.distance))
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
-                Image(systemName: "water.waves")
+                Image(systemName: abs(swellNowcast.deltaM) < 0.15
+                      ? "water.waves" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(abs(swellNowcast.deltaM) < 0.15
+                                     ? AnyShapeStyle(Color.harbourNavy)
+                                     : AnyShapeStyle(Color.orange))
             }
             .font(.footnote.weight(.medium))
-            .foregroundStyle(abs(swellNowcast.deltaM) < 0.15 ? AnyShapeStyle(Color.harbourNavy)
-                             : AnyShapeStyle(Color.orange))
+            .foregroundStyle(Color.harbourNavy)
             .padding(11)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
@@ -907,7 +1039,9 @@ struct NearbyConditionsSheet: View {
 
         let allSurfLinks = resources.filter { $0.kind == .surf }
         let surfLinks = within(allSurfLinks)
-        section("SURF FORECASTS IN THE GUIDE") {
+        section("SURF FORECASTS IN THE GUIDE", trailing: {
+            mapLink("Surf pages", places: surfPlaces)
+        }) {
             if surfLinks.isEmpty {
                 // Say how far the nearest one is rather than only that there
                 // is none in range — "none this close" and "none at all" are
@@ -1083,6 +1217,18 @@ struct NearbyConditionsSheet: View {
 
     // MARK: Cams and surf
 
+    /// The cam a rider is watching right now, inside the app.
+    @State private var watchingCam: SpotGuideStore.GuideResource?
+
+    @ViewBuilder
+    private var camsTab: some View {
+        section("CAMS IN THE GUIDE", trailing: {
+            mapLink("Cams", places: camPlaces)
+        }) {
+            list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
+        }
+    }
+
     @ViewBuilder
     private func list(of kind: SpotGuideStore.SpotLink.Kind, empty: String) -> some View {
         let items = within(resources.filter { $0.kind == kind })
@@ -1101,7 +1247,14 @@ struct NearbyConditionsSheet: View {
 
     private func resourceRow(_ resource: SpotGuideStore.GuideResource) -> some View {
         Button {
-            openURL(resource.url)
+            // Cams stay in the app — YouTube embeds play right here, and
+            // everything else gets the in-app browser. The rest of the
+            // resources are reference pages, and those still hand off.
+            if resource.kind == .camera {
+                watchingCam = resource
+            } else {
+                openURL(resource.url)
+            }
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: resource.kind.symbol)
@@ -1127,7 +1280,9 @@ struct NearbyConditionsSheet: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "arrow.up.forward")
+                // A cam plays here; everything else leaves for its page —
+                // and the trailing icon says which before the tap.
+                Image(systemName: resource.kind == .camera ? "play.rectangle" : "arrow.up.forward")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

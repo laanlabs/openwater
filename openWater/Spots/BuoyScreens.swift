@@ -170,6 +170,126 @@ struct BuoyMapScreen: View {
     }
 }
 
+/// Any of the sheet's placed sources on one map.
+///
+/// The lists sort by distance, and distance is the wrong way to choose
+/// between places — the nearest station is often behind a headland, the
+/// second-nearest tide chart on the wrong bank of the inlet. Seen on a map
+/// the choice makes itself, which is why the buoys earned one first; this
+/// is the same screen for everything else that has a coordinate: wind
+/// stations free and paid, tide stations, the guide's surf pages.
+struct PlacesMapScreen: View {
+
+    struct Place: Identifiable {
+        let id: String
+        let name: String
+        /// The line under the name on the callout — distance, provider, a
+        /// reading when there is one.
+        let subtitle: String
+        let coordinate: Geo.Coordinate
+        /// The pin's symbol — the same one its list row wears.
+        let symbol: String
+        /// Free public sources wear the tint; guide sources (usually the
+        /// paid networks) wear orange, so the two read apart at a glance.
+        var tint: Color = .accentColor
+        /// Short text on the pin itself, when a number earns the space.
+        var pinText: String? = nil
+        /// Where "Open" goes, when the place has a page.
+        var url: URL? = nil
+        /// Cams play inside the app rather than handing off to a browser
+        /// or another app — see `CamViewerSheet`.
+        var watchInApp: Bool = false
+    }
+
+    let title: String
+    let places: [Place]
+    let from: Geo.Coordinate
+
+    @Environment(\.openURL) private var openURL
+    @State private var chosen: Place?
+    @State private var watching: Place?
+
+    var body: some View {
+        Map {
+            Annotation("Here", coordinate: from.clCoordinate) {
+                Circle()
+                    .fill(.tint)
+                    .frame(width: 14, height: 14)
+                    .overlay(Circle().stroke(.white, lineWidth: 2))
+            }
+            ForEach(places) { place in
+                Annotation(place.name, coordinate: place.coordinate.clCoordinate) {
+                    Button { chosen = place } label: {
+                        PlacePin(symbol: place.symbol, text: place.pinText, tint: place.tint)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat))
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Places map")
+        .sheet(item: $chosen) { place in
+            VStack(alignment: .leading, spacing: 10) {
+                Text(place.name)
+                    .font(.headline)
+                Text(place.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let url = place.url {
+                    Button {
+                        if place.watchInApp {
+                            chosen = nil
+                            watching = place
+                        } else {
+                            openURL(url)
+                        }
+                    } label: {
+                        Label(place.watchInApp ? "Watch" : "Open",
+                              systemImage: place.watchInApp ? "play.rectangle" : "arrow.up.right.square")
+                            .font(.callout.weight(.semibold))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+            .presentationDetents([.height(170)])
+        }
+        .fullScreenCover(item: $watching) { place in
+            if let url = place.url {
+                CamViewerSheet(name: place.name, url: url)
+            }
+        }
+    }
+}
+
+/// A place on the map, wearing its kind's symbol and colour.
+struct PlacePin: View {
+    let symbol: String
+    var text: String? = nil
+    var tint: Color = .accentColor
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .bold))
+            if let text {
+                Text(text)
+                    .font(.system(size: 10, weight: .bold))
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(tint, in: Capsule())
+        .foregroundStyle(.white)
+        .shadow(radius: 2)
+    }
+}
+
 /// The measured swell split from a nearby buoy — the `.spec` file's answer,
 /// paired with the buoy it came from so the card can say whose water it is.
 struct MeasuredSwell {

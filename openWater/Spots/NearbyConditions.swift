@@ -1487,6 +1487,9 @@ struct TideStation: Identifiable, Hashable {
     let id: String
     let name: String
     let metres: Double
+    /// Where it stands — kept for the map, because "8 km away" does not
+    /// say which side of the inlet, and tides differ across one.
+    let coordinate: Geo.Coordinate
     var events: [TideEvent] = []
 
     var url: URL {
@@ -1527,7 +1530,8 @@ enum TidesAndCurrents {
             .map { (station: $0, metres: Geo.distance(coordinate, $0.coordinate)) }
             .sorted { $0.metres < $1.metres }
             .prefix(limit)
-            .map { TideStation(id: $0.station.id, name: $0.station.name, metres: $0.metres) }
+            .map { TideStation(id: $0.station.id, name: $0.station.name,
+                               metres: $0.metres, coordinate: $0.station.coordinate) }
     }
 
     private static func loadIndex() async -> [(id: String, name: String, coordinate: Geo.Coordinate)] {

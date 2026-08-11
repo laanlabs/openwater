@@ -515,11 +515,21 @@ struct SessionMapTab: View {
     /// Cached rather than computed in `body`: it never changes for a given
     /// session, and it was being rebuilt on every frame of a trim drag along
     /// with everything else the timeline touches.
+    /// The fastest speed in each bucket, not one sample plucked out of it.
+    ///
+    /// This took every twentieth point on a long session and dropped the other
+    /// nineteen, which makes the drawn shape a lie in the one way that matters
+    /// here: a rider lines the handle up with where the fast part *looks* like
+    /// it starts. A picked sample can be a lull inside a fast passage or a
+    /// spike inside a slow one, so the shape they were aiming at was not the
+    /// shape of their session. The maximum per bucket cannot hide activity —
+    /// if anything happened in that column, the column is tall.
     static func makeChartSamples(_ track: Track) -> [(elapsed: TimeInterval, speed: Double)] {
         guard track.count > 1 else { return [] }
         let step = max(1, track.count / 400)
-        return stride(from: 0, to: track.count, by: step).map {
-            (track.elapsed[$0], track.speed[$0])
+        return stride(from: 0, to: track.count, by: step).map { start in
+            let end = min(start + step, track.count)
+            return (track.elapsed[start], track.speed[start..<end].max() ?? 0)
         }
     }
 
@@ -976,6 +986,22 @@ struct TrimTimeline: View {
     private let handleWidth: CGFloat = 16
     private let minimumSpan: TimeInterval = 10
 
+    /// The strip the speed profile is drawn in.
+    ///
+    /// Inset by a handle's width at each end, so the handles have a margin of
+    /// their own to sit in and never cover a sample. They used to be drawn
+    /// *inside* the selection — the start handle occupying the sixteen points
+    /// to the right of the cut, the end handle the sixteen to its left — which
+    /// hid the first and last stretch of what was being kept. A rider lining
+    /// the handle up with the visible edge of their session was cutting
+    /// somewhere else: on a two-hour recording in an eight-hundred-point bar,
+    /// sixteen points is over two minutes of riding they could not see.
+    ///
+    /// Now what is between the handles is what is kept, exactly.
+    private func plotBounds(in width: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
+        (handleWidth, max(handleWidth, width - handleWidth))
+    }
+
     /// Where the finger went down, and where the two ends were at that moment.
     ///
     /// A gesture keeps one `startLocation` for its whole life, so a change in it
@@ -994,6 +1020,8 @@ struct TrimTimeline: View {
             let startX = x(for: start, in: width)
             let endX = x(for: end, in: width)
 
+            let plot = plotBounds(in: width)
+
             ZStack(alignment: .topLeading) {
                 sparkline(size: geometry.size)
 
@@ -1005,24 +1033,27 @@ struct TrimTimeline: View {
                 } else {
                     Rectangle()
                         .fill(.black.opacity(0.35))
-                        .frame(width: max(0, startX))
+                        .frame(width: max(0, startX - plot.leading))
+                        .offset(x: plot.leading)
                     Rectangle()
                         .fill(.black.opacity(0.35))
-                        .frame(width: max(0, width - endX))
+                        .frame(width: max(0, plot.trailing - endX))
                         .offset(x: endX)
                 }
 
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(invertSelection ? Color.red : Color.yellow, lineWidth: 3)
-                    .frame(width: max(handleWidth * 2, endX - startX), height: height)
+                    .frame(width: max(0, endX - startX), height: height)
                     .offset(x: startX)
 
+                // Each handle in its own margin, on the discarded side of its
+                // own cut, so the kept data is never underneath one.
                 handle(isStart: true, isActive: active == .start)
                     .frame(height: height)
-                    .offset(x: startX)
+                    .offset(x: startX - handleWidth)
                 handle(isStart: false, isActive: active == .end)
                     .frame(height: height)
-                    .offset(x: max(0, endX - handleWidth))
+                    .offset(x: endX)
             }
             .frame(width: width, height: height)
             .contentShape(.rect)
@@ -1043,7 +1074,7 @@ struct TrimTimeline: View {
                             let x = value.startLocation.x
                             active = abs(x - grabbedStartX) <= abs(x - grabbedEndX) ? .start : .end
                         }
-                        let time = TimeInterval(value.location.x / max(width, 1)) * duration
+                        let time = self.time(atX: value.location.x, in: width)
                         switch active {
                         case .start:
                             // `end - minimumSpan` goes negative on a session
@@ -1066,11 +1097,20 @@ struct TrimTimeline: View {
         }
     }
 
-    /// Seconds to points, clamped so a handle can never be drawn off the bar.
+    /// Seconds to points, inside the plot strip.
     private func x(for time: TimeInterval, in width: CGFloat) -> CGFloat {
-        guard duration > 0, width > 0 else { return 0 }
+        let plot = plotBounds(in: width)
+        guard duration > 0, plot.trailing > plot.leading else { return plot.leading }
         let fraction = min(max(0, time / duration), 1)
-        return CGFloat(fraction) * width
+        return plot.leading + CGFloat(fraction) * (plot.trailing - plot.leading)
+    }
+
+    /// And back, so the finger lands on the second it is pointing at.
+    private func time(atX x: CGFloat, in width: CGFloat) -> TimeInterval {
+        let plot = plotBounds(in: width)
+        let span = plot.trailing - plot.leading
+        guard span > 0 else { return 0 }
+        return TimeInterval(min(max(0, (x - plot.leading) / span), 1)) * duration
     }
 
     /// The speed profile, filled. Not a chart — just the shape, so the rider can
@@ -1079,15 +1119,20 @@ struct TrimTimeline: View {
         Canvas { context, canvasSize in
             guard samples.count > 1, duration > 0 else { return }
             let peak = max(samples.map(\.speed).max() ?? 1, 0.1)
+            // Drawn in the same strip the handles are measured against, so a
+            // column of the profile and the cut beside it mean the same second.
+            let plot = plotBounds(in: canvasSize.width)
+            let span = plot.trailing - plot.leading
 
             var path = Path()
-            path.move(to: CGPoint(x: 0, y: canvasSize.height))
+            path.move(to: CGPoint(x: plot.leading, y: canvasSize.height))
             for sample in samples {
-                let px = CGFloat(min(max(0, sample.elapsed / duration), 1)) * canvasSize.width
+                let fraction = CGFloat(min(max(0, sample.elapsed / duration), 1))
+                let px = plot.leading + fraction * span
                 let py = canvasSize.height * (1 - CGFloat(sample.speed / peak) * 0.92)
                 path.addLine(to: CGPoint(x: px, y: py))
             }
-            path.addLine(to: CGPoint(x: canvasSize.width, y: canvasSize.height))
+            path.addLine(to: CGPoint(x: plot.trailing, y: canvasSize.height))
             path.closeSubpath()
 
             context.fill(path, with: .color(.accentColor.opacity(0.25)))

@@ -89,7 +89,17 @@ struct SpotsSheet<Content: View>: View {
     }
 
     private var dragGesture: some Gesture {
-        DragGesture()
+        // Global space, and this is load-bearing. A `DragGesture` measures in
+        // the attached view's own space by default, and the grab bar *moves*
+        // as the sheet resizes — so a stationary finger's position gets
+        // re-read against a view that just slid under it, and the sheet's own
+        // motion feeds back into the translation. That is jitter under the
+        // thumb, and it is much worse at a real screen's 120 Hz than under
+        // synthetic test touches, which is exactly the shape of a bug that
+        // glitches on the phone and films clean on the simulator. Global
+        // coordinates measure the finger against the screen, which does not
+        // move.
+        DragGesture(coordinateSpace: .global)
             .updating($drag) { value, state, _ in
                 state = value.translation.height
             }

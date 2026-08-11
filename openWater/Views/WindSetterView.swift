@@ -99,6 +99,7 @@ struct WindSetterView: View {
     @State private var hasSwellDirection = false
 
     @State private var isLookingUp = false
+    @State private var isRestoringEstimate = false
     @State private var lookupNote: String?
     /// The hourly record behind the lookup's averages, held so Save can hand
     /// it on rather than letting it die in the note below the dial.
@@ -144,8 +145,41 @@ struct WindSetterView: View {
                     .padding(.horizontal, 40)
                 }
 
+                // The two ways to fill these dials without guessing — snap
+                // back to the model's number, or ask the archive what that
+                // day was doing — lived at the bottom of the column, under
+                // two sliders, off the bottom edge of most screens. Nobody
+                // scrolls a dial screen to find out what else it can do, so
+                // the app's two best answers to "I don't remember" went
+                // unfound. They flank the dial now, in the corners the
+                // circle leaves empty: beside the control they fill is the
+                // one place a rider is already looking.
                 dial
                     .frame(width: 300, height: 300)
+                    .overlay(alignment: .bottomLeading) {
+                        if let estimate {
+                            dialAction(isRestoringEstimate ? "Setting…" : estimateCaption,
+                                       symbol: "wand.and.sparkles",
+                                       busy: isRestoringEstimate) {
+                                Task { await restoreEstimate(estimate) }
+                            }
+                            .offset(x: -22)
+                            .disabled(isRestoringEstimate)
+                            .accessibilityLabel("Back to \(referenceLabel), \(Format.cardinal(estimate.directionFrom)) \(Int(estimate.directionFrom.rounded())) degrees")
+                        }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if let lookup {
+                            dialAction(isLookingUp ? "Checking…" : "Look up",
+                                       symbol: "clock.arrow.circlepath",
+                                       busy: isLookingUp) {
+                                Task { await lookUp(lookup) }
+                            }
+                            .offset(x: 22)
+                            .disabled(isLookingUp)
+                            .accessibilityLabel("Look up that day's conditions")
+                        }
+                    }
 
                 HStack(spacing: 6) {
                     Text(Format.cardinal(pointed))
@@ -164,13 +198,9 @@ struct WindSetterView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                speedRow
-
-                if showsSwell { swellRow }
-
-                // Above the buttons, not below them: the column runs tight on
-                // smaller screens and a result that renders off the bottom
-                // edge is a lookup that appears to have done nothing.
+                // Right under the readout, where the eye lands after the
+                // lookup snaps the dial — a result that renders below the
+                // sliders is a lookup that appears to have done nothing.
                 if let lookupNote {
                     Text(lookupNote)
                         .font(.caption)
@@ -180,33 +210,9 @@ struct WindSetterView: View {
                         .transition(.opacity)
                 }
 
-                if let estimate {
-                    Button {
-                        withAnimation(.snappy) {
-                            direction = estimate.directionFrom
-                            if let s = estimate.speed { knots = s * 1.94384 }
-                        }
-                    } label: {
-                        Label("Back to \(referenceLabel) (\(Format.cardinal(estimate.directionFrom)) \(Int(estimate.directionFrom.rounded()))°)",
-                              systemImage: "wand.and.sparkles")
-                            .font(.callout)
-                    }
-                }
+                speedRow
 
-                // Ask the weather models what that day was doing. It fills
-                // the dials rather than saving anything — the rider was
-                // there and the model was not, so the numbers arrive as a
-                // starting point, theirs to drag.
-                if let lookup {
-                    Button {
-                        Task { await lookUp(lookup) }
-                    } label: {
-                        Label(isLookingUp ? "Checking that day…" : "Look up that day's conditions",
-                              systemImage: "clock.arrow.circlepath")
-                            .font(.callout)
-                    }
-                    .disabled(isLookingUp)
-                }
+                if showsSwell { swellRow }
             }
             .padding(.top, 12)
             .padding(.bottom, 16)
@@ -250,6 +256,47 @@ struct WindSetterView: View {
     }
 
     // MARK: - Dial
+
+    /// What the left-hand action restores, in a word. The reference is "the
+    /// estimate" on a recorded session and "the forecast" before one.
+    private var estimateCaption: String {
+        referenceLabel.hasSuffix("forecast") ? "Forecast" : "Estimate"
+    }
+
+    /// A round control at the dial's corner: the icon in a dial-coloured
+    /// circle, what it does in a word underneath. Sized and placed so it
+    /// stays clear of the circle itself — the corner is outside the drag
+    /// surface, so a tap here can never be mistaken for pointing at a wind.
+    private func dialAction(_ caption: String, symbol: String,
+                            busy: Bool = false,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(Color(.secondarySystemGroupedBackground))
+                    Circle()
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                    if busy {
+                        ProgressView()
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.tint)
+                    }
+                }
+                .frame(width: 46, height: 46)
+
+                Text(caption)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
 
     private var dial: some View {
         GeometryReader { geometry in
@@ -332,12 +379,39 @@ struct WindSetterView: View {
             : "Drag the arrow to point the way the wind was blowing across your track."
     }
 
+    /// Snap the dials back to the reference.
+    ///
+    /// The work is instant and local, but the button still shows a beat of
+    /// progress: when the dial is already sitting on the estimate the snap
+    /// moves nothing, and a tap with no visible answer reads as a broken
+    /// button. The dial snaps immediately — the beat is feedback, never a
+    /// delay on the answer.
+    private func restoreEstimate(_ estimate: Wind) async {
+        withAnimation(.snappy) {
+            isRestoringEstimate = true
+            direction = estimate.directionFrom
+            if let s = estimate.speed { knots = s * 1.94384 }
+        }
+        try? await Task.sleep(for: .seconds(1))
+        withAnimation(.snappy) { isRestoringEstimate = false }
+    }
+
     /// Fetch the day and pour it into the dials.
     private func lookUp(_ lookup: (coordinate: Geo.Coordinate, window: DateInterval)) async {
-        isLookingUp = true
-        defer { isLookingUp = false }
+        withAnimation(.snappy) { isLookingUp = true }
+        defer { withAnimation(.snappy) { isLookingUp = false } }
 
+        // The archive often answers in a blink, and a spinner that lives for
+        // a frame reads as a tap that did nothing — the rider looks at the
+        // dial, sees the same number arrive, and cannot tell the model was
+        // asked at all. The fetch takes as long as it takes; the spinner is
+        // held up to a full second so the asking is visible.
+        let started = ContinuousClock.now
         let found = await OpenMeteo.historical(at: lookup.coordinate, during: lookup.window)
+        let elapsed = started.duration(to: .now)
+        if elapsed < .seconds(1) {
+            try? await Task.sleep(for: .seconds(1) - elapsed)
+        }
         guard !found.isEmpty else {
             withAnimation(.snappy) {
                 lookupNote = "Nothing on record for that day here — the marine grid has no cell for some water, and the archive runs a few days behind."

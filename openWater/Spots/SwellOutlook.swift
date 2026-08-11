@@ -426,6 +426,9 @@ struct SwellCompareScreen: View {
                 }
             }
             .padding(16)
+            // Only the chart pans sideways, inside its own scroll view —
+            // the page itself must not. Same guard as the conditions sheet.
+            .containerRelativeFrame(.horizontal)
         }
         .background(Color.deepSurface)
         .navigationTitle("Wave models")

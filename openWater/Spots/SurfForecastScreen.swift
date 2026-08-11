@@ -47,6 +47,10 @@ struct SurfForecastScreen: View {
                         .padding(.horizontal)
                 }
                 .padding(.vertical)
+                // Only the chart scrolls sideways, inside its own scroll
+                // view — the page itself must not. Same guard as the
+                // conditions sheet.
+                .containerRelativeFrame(.horizontal)
             }
         }
         .background(Color.deepSurface)

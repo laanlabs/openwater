@@ -107,6 +107,12 @@ struct NearbyConditionsSheet: View {
                     }
                 }
                 .padding(16)
+                // Pinned to the viewport's width. A vertical scroll view
+                // whose content measures even a point wider becomes
+                // horizontally draggable, and one over-wide child anywhere
+                // in four tabs is all it takes — this makes the sideways
+                // pan impossible rather than hunting the child.
+                .containerRelativeFrame(.horizontal)
             }
             .background(Color.deepSurface)
             .navigationTitle(title)

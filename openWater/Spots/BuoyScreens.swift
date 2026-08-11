@@ -261,9 +261,8 @@ struct MeasuredSwellCard: View {
         var text = "Measured at \(measured.buoy.name), "
             + "\(Format.distance(measured.buoy.metres, unit: units.distance)) away — "
             + "a wave sensor on deep water, not the beach."
-        let age = Date().timeIntervalSince(measured.reading.at)
-        if age > 60 {
-            text += " Read \(Format.duration(age)) ago."
+        if Date().timeIntervalSince(measured.reading.at) > 60 {
+            text += " Read \(measured.reading.at.formatted(.relative(presentation: .named)))."
         }
         return text
     }

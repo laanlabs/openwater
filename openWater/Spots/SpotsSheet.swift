@@ -21,9 +21,13 @@ import SwiftUI
 ///   are cached.
 /// - Phase 3: drags on the content, and pull-past-the-top to collapse.
 /// - Phase 4: Favorites and Destinations return.
-struct SpotsSheet<Content: View>: View {
+struct SpotsSheet<Header: View, Content: View>: View {
 
     let size: CGSize
+    /// Pinned between the grab bar and the list — the mode switch lives
+    /// here, because a control that scrolls away with the thing it switches
+    /// is not a control.
+    @ViewBuilder var header: Header
     @ViewBuilder var content: Content
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
@@ -55,9 +59,10 @@ struct SpotsSheet<Content: View>: View {
     private var drag: CGFloat = 0
 
     private func height(for detent: Detent) -> CGFloat {
-        // Minimized is the grab bar clear of the floating tab bar; everything
-        // else scales with the screen, but never below that floor.
-        max(tabBarHeight + 44, size.height * detent.fraction)
+        // Minimized is the grab bar and the header clear of the floating tab
+        // bar — the mode switch stays reachable, the map gets everything
+        // else. Everything else scales with the screen, never below that.
+        max(tabBarHeight + 84, size.height * detent.fraction)
     }
 
     var body: some View {
@@ -65,6 +70,7 @@ struct SpotsSheet<Content: View>: View {
                        max(height(for: .minimized), height(for: detent) - drag))
         VStack(spacing: 0) {
             grabBar
+            header
 
             ScrollView {
                 VStack(spacing: 0) {

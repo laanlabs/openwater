@@ -47,6 +47,12 @@ struct SpotsTabView: View {
     @State private var pins: [GuideSpot] = []
     @State private var nearby: [GuideSpot] = []
 
+    enum PanelMode: String, CaseIterable {
+        case nearby = "Nearby", favorites = "Favorites", destinations = "Destinations"
+    }
+
+    @State private var panelMode: PanelMode = .nearby
+
     /// A point the rider chose by holding a finger on the map.
     ///
     /// The chip has always followed the GPS, which is right when you are
@@ -517,6 +523,15 @@ struct SpotsTabView: View {
     /// real phone before the next. `SpotsSheet` is the rebuild.
     private func panel(in size: CGSize) -> some View {
         SpotsSheet(size: size) {
+            Picker("Mode", selection: $panelMode) {
+                ForEach(PanelMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+        } content: {
             if guide.spots.isEmpty {
                 VStack(spacing: 8) {
                     if guide.isLoading {
@@ -535,7 +550,11 @@ struct SpotsTabView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 30)
             } else {
-                nearbyList
+                switch panelMode {
+                case .nearby: nearbyList
+                case .favorites: favoritesList
+                case .destinations: destinationsList
+                }
             }
         }
     }

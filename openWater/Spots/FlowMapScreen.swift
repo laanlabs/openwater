@@ -26,6 +26,10 @@ struct FlowMapScreen: View {
     @State private var hourIndex: Double = 0
     @State private var raster: WindRasterOverlay?
     @State private var isLoading = true
+    /// What the field currently covers. Pan or zoom far enough outside it
+    /// and the whole thing refetches to match the new view.
+    @State private var fieldRegion: MKCoordinateRegion?
+    @State private var loadTask: Task<Void, Never>?
     /// The colour wash, on by default and remembered — some riders read
     /// fields, some read arrows, and neither should have to re-choose.
     @AppStorage("flowMap.colourWash") private var showWash = true
@@ -48,7 +52,10 @@ struct FlowMapScreen: View {
             spanMetres: Self.spanMetres,
             raster: showWash ? raster : nil,
             arrows: arrowStates,
-            arrowsNeutral: showWash
+            arrowsNeutral: showWash,
+            onRegionSettled: { visible in
+                if needsReload(for: visible) { reload(for: visible) }
+            }
         )
         .navigationTitle("Flow map")
         .navigationBarTitleDisplayMode(.inline)
@@ -110,10 +117,11 @@ struct FlowMapScreen: View {
 
             if showWash { washLegend } else { legend }
 
-            Text("Open-Meteo's blend. The arrows are the model's own values at its "
-                 + "~10 km grid; the colour between them is a smooth blend of those "
-                 + "values for the eye, not extra detail. Scrub through the next "
-                 + "24 hours.")
+            Text("Open-Meteo's blend. The arrows are the model's own values; the "
+                 + "colour between them is a smooth blend of those values for the "
+                 + "eye, not extra detail. Pan or zoom and the field refetches to "
+                 + "match — far out, the wash's edge marks the area it covers. "
+                 + "Scrub through the next 24 hours.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -189,48 +197,93 @@ struct FlowMapScreen: View {
     static let columns = 7
     static let rows = 9
 
-    private func load() async {
-        let coords = gridCoordinates()
-        let field = await OpenMeteo.windAlong(coords, hours: 24)
-        // The time axis from the densest answer — cells the model has no
-        // data for simply keep their nils.
-        let axis = field.max(by: { $0.count < $1.count })?.map(\.date) ?? []
-        hours = axis
-        grid = coords.indices.compactMap { index -> GridPoint? in
-            guard let rows = field[safe: index], !rows.isEmpty else { return nil }
-            var speeds = [Double?](repeating: nil, count: axis.count)
-            var directions = [Double?](repeating: nil, count: axis.count)
-            for row in rows {
-                guard let slot = axis.firstIndex(of: row.date) else { continue }
-                speeds[slot] = row.speedKn
-                directions[slot] = row.directionDeg
+    /// Whether the view has wandered far enough from the loaded field to
+    /// deserve a fresh one. Nil field means nothing loaded yet — the first
+    /// settle after the map lays out triggers the first fetch.
+    private func needsReload(for visible: MKCoordinateRegion) -> Bool {
+        guard let field = fieldRegion else { return true }
+        let spanRatio = visible.span.latitudeDelta / field.span.latitudeDelta
+        let centreShift =
+            abs(visible.center.latitude - field.center.latitude) / field.span.latitudeDelta
+            + abs(visible.center.longitude - field.center.longitude) / field.span.longitudeDelta
+        return spanRatio > 1.3 || spanRatio < 0.55 || centreShift > 0.3
+    }
+
+    /// The field the view deserves, within reason: never tighter than the
+    /// model's own ~10 km grid can honestly fill, never wider than a
+    /// session plan. Zoomed out past the cap, the wash's feathered edge is
+    /// the box that says where the field ends.
+    private func clampedField(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
+        var region = visible
+        let latMetres = region.span.latitudeDelta * 110_574
+        let clamped = min(max(latMetres, 45_000), 600_000)
+        let scale = clamped / latMetres
+        region.span.latitudeDelta *= scale
+        region.span.longitudeDelta *= scale
+        return region
+    }
+
+    private func reload(for visible: MKCoordinateRegion) {
+        let target = clampedField(for: visible)
+        loadTask?.cancel()
+        loadTask = Task {
+            isLoading = true
+            let coords = gridCoordinates(for: target)
+            let field = await OpenMeteo.windAlong(coords, hours: 24)
+            guard !Task.isCancelled else { return }
+            // The time axis from the densest answer — cells the model has
+            // no data for simply keep their nils.
+            let axis = field.max(by: { $0.count < $1.count })?.map(\.date) ?? []
+            hours = axis
+            hourIndex = min(hourIndex, Double(max(0, axis.count - 1)))
+            grid = coords.indices.compactMap { index -> GridPoint? in
+                guard let rows = field[safe: index], !rows.isEmpty else { return nil }
+                var speeds = [Double?](repeating: nil, count: axis.count)
+                var directions = [Double?](repeating: nil, count: axis.count)
+                for row in rows {
+                    guard let slot = axis.firstIndex(of: row.date) else { continue }
+                    speeds[slot] = row.speedKn
+                    directions[slot] = row.directionDeg
+                }
+                return GridPoint(id: index, coordinate: coords[index],
+                                 speeds: speeds, directions: directions)
             }
-            return GridPoint(id: index, coordinate: coords[index],
-                             speeds: speeds, directions: directions)
+            fieldRegion = target
+            rebuildRaster()
+            withAnimation(.easeOut(duration: 0.2)) { isLoading = false }
         }
-        rebuildRaster()
-        withAnimation(.easeOut(duration: 0.2)) { isLoading = false }
+    }
+
+    private func load() async {
+        // The map's first settle normally triggers the first fetch; this is
+        // the belt for the day layout never reports one.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        if fieldRegion == nil, loadTask == nil {
+            reload(for: MKCoordinateRegion(
+                center: coordinate.clCoordinate,
+                latitudinalMeters: Self.spanMetres,
+                longitudinalMeters: Self.spanMetres))
+        }
     }
 
     private func rebuildRaster() {
+        guard let fieldRegion else { return }
         raster = WindRasterOverlay.build(
             grid: grid, hour: hour,
             columns: Self.columns, rows: Self.rows,
-            centre: coordinate, spanMetres: Self.spanMetres
+            region: fieldRegion
         )
     }
 
-    private func gridCoordinates() -> [Geo.Coordinate] {
-        let latSpan = Self.spanMetres / 110_574
-        let lonSpan = Self.spanMetres / (111_320 * cos(coordinate.latitude * .pi / 180))
+    private func gridCoordinates(for region: MKCoordinateRegion) -> [Geo.Coordinate] {
         var out: [Geo.Coordinate] = []
         for row in 0..<Self.rows {
             for column in 0..<Self.columns {
                 out.append(Geo.Coordinate(
-                    latitude: coordinate.latitude - latSpan / 2
-                        + latSpan * Double(row) / Double(Self.rows - 1),
-                    longitude: coordinate.longitude - lonSpan / 2
-                        + lonSpan * Double(column) / Double(Self.columns - 1)
+                    latitude: region.center.latitude - region.span.latitudeDelta / 2
+                        + region.span.latitudeDelta * Double(row) / Double(Self.rows - 1),
+                    longitude: region.center.longitude - region.span.longitudeDelta / 2
+                        + region.span.longitudeDelta * Double(column) / Double(Self.columns - 1)
                 ))
             }
         }
@@ -311,6 +364,8 @@ private struct WindFieldMapView: UIViewRepresentable {
     /// Dark slate arrows when the wash carries the colour; the app's own
     /// speed ramp when the arrows are on their own.
     let arrowsNeutral: Bool
+    /// Called when a pan or zoom settles, with the region now on screen.
+    let onRegionSettled: (MKCoordinateRegion) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -335,6 +390,7 @@ private struct WindFieldMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.onRegionSettled = onRegionSettled
         if context.coordinator.rasterID != raster?.id {
             context.coordinator.rasterID = raster?.id
             map.removeOverlays(map.overlays)
@@ -361,6 +417,11 @@ private struct WindFieldMapView: UIViewRepresentable {
         var arrowsKey = ""
         var arrowsNeutral = true
         var hereAnnotation: MKPointAnnotation?
+        var onRegionSettled: (MKCoordinateRegion) -> Void = { _ in }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            onRegionSettled(mapView.region)
+        }
 
         func mapView(_ mapView: MKMapView,
                      rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -479,7 +540,7 @@ final class WindRasterOverlay: NSObject, MKOverlay {
     /// Nil until there is a field worth painting.
     static func build(grid: [FlowMapScreen.GridPoint], hour: Int,
                       columns: Int, rows: Int,
-                      centre: Geo.Coordinate, spanMetres: Double) -> WindRasterOverlay? {
+                      region: MKCoordinateRegion) -> WindRasterOverlay? {
         guard !grid.isEmpty else { return nil }
 
         // Speeds by grid cell, row-major as the fetch built them.
@@ -546,21 +607,19 @@ final class WindRasterOverlay: NSObject, MKOverlay {
         else { return nil }
 
         // The overlay's rect spans the outermost grid points.
-        let latSpan = spanMetres / 110_574
-        let lonSpan = spanMetres / (111_320 * cos(centre.latitude * .pi / 180))
         let northWest = MKMapPoint(CLLocationCoordinate2D(
-            latitude: centre.latitude + latSpan / 2,
-            longitude: centre.longitude - lonSpan / 2))
+            latitude: region.center.latitude + region.span.latitudeDelta / 2,
+            longitude: region.center.longitude - region.span.longitudeDelta / 2))
         let southEast = MKMapPoint(CLLocationCoordinate2D(
-            latitude: centre.latitude - latSpan / 2,
-            longitude: centre.longitude + lonSpan / 2))
+            latitude: region.center.latitude - region.span.latitudeDelta / 2,
+            longitude: region.center.longitude + region.span.longitudeDelta / 2))
         let rect = MKMapRect(
             x: northWest.x, y: northWest.y,
             width: southEast.x - northWest.x, height: southEast.y - northWest.y)
 
         return WindRasterOverlay(
             image: image,
-            coordinate: centre.clCoordinate,
+            coordinate: region.center,
             rect: rect)
     }
 }

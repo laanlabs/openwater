@@ -23,8 +23,6 @@ struct SpotsTabView: View {
     @State private var path: [SpotsRoute] = []
     @State private var isSearching = false
     @State private var controlsExpanded = false
-    @State private var panelMode: PanelMode = .nearby
-    @State private var panelDetent: PanelDetent = .peek
     @State private var disciplineFilter: String?
     @State private var firingOnly = false
     @State private var pickingNewSpot = false
@@ -56,29 +54,6 @@ struct SpotsTabView: View {
     /// where to drive. Long-press anywhere and everything — the weather, the
     /// wind, the conditions sheet — is about that point instead.
     @State private var pickedPoint: Geo.Coordinate?
-
-    enum PanelMode: String, CaseIterable {
-        case nearby = "Nearby", favorites = "Favorites", destinations = "Destinations"
-    }
-
-    /// Four snap points, not three. The old floor was 30% of the screen, so
-    /// "get out of my way" was not a thing the panel could do — dragging it
-    /// down just sprang it back, which is what "the nearby tab doesn't slide
-    /// down" meant. `.minimized` is the header alone: the mode switch stays
-    /// reachable and the map gets everything else.
-    enum PanelDetent: CaseIterable {
-        case minimized, peek, half, full
-        /// Zero means "as small as the header allows" — resolved in points,
-        /// because the header does not scale with the screen.
-        var fraction: CGFloat {
-            switch self {
-            case .minimized: 0
-            case .peek: 0.32
-            case .half: 0.58
-            case .full: 0.92
-            }
-        }
-    }
 
     /// A request to add a spot: either at a place picked on the map, or `nil`
     /// for "here", which lets the form use the live fix as it always has.
@@ -536,81 +511,31 @@ struct SpotsTabView: View {
 
     // MARK: - Panel
 
-    /// The header's own height: the grab bar plus the mode switch. This is
-    /// what `.minimized` resolves to, plus room for the tab bar that floats
-    /// over the panel — without that the switch would sit behind it.
-    private var collapsedHeight: CGFloat { 76 + tabBarHeight }
-
-    /// The panel, with its own drag.
-    ///
-    /// The live drag offset lives inside `SpotsPanel` rather than here, and
-    /// that is the fix for the flicker: as state on this view it invalidated
-    /// the whole body — map included — on every touch-move, so a slow drag up
-    /// or down tore down and rebuilt fifty map annotations sixty times a
-    /// second. Only the panel's own height changes during a drag, so only the
-    /// panel needs to know about it.
+    /// The panel is being rebuilt from nothing, one measured step at a time,
+    /// after three fixes to the old one each moved the flicker without
+    /// killing it. Each phase adds exactly one moving part and goes to a
+    /// real phone before the next. `SpotsSheet` is the rebuild.
     private func panel(in size: CGSize) -> some View {
-        SpotsPanel(detent: $panelDetent, size: size, collapsedHeight: collapsedHeight) {
-            VStack(spacing: 0) {
-                Picker("Mode", selection: $panelMode) {
-                    ForEach(PanelMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+        SpotsSheet(size: size) {
+            if guide.spots.isEmpty {
+                VStack(spacing: 8) {
+                    if guide.isLoading {
+                        ProgressView()
+                        Text("Loading the spot guide…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let error = guide.loadError {
+                        Text("Couldn't load the spot guide.")
+                            .font(.subheadline)
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-
-                panelContent
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var panelContent: some View {
-        if guide.spots.isEmpty {
-            VStack(spacing: 8) {
-                if guide.isLoading {
-                    ProgressView()
-                    Text("Loading the spot guide…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if let error = guide.loadError {
-                    Text("Couldn't load the spot guide.")
-                        .font(.subheadline)
-                    Text(error)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 30)
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    switch panelMode {
-                    case .nearby: nearbyList
-                    case .favorites: favoritesList
-                    case .destinations: destinationsList
-                    }
-                }
-                .padding(.bottom, tabBarHeight + 12)
-            }
-            .scrollDisabled(panelDetent != .full)
-            // Pull-to-collapse, which is what a drag down the list *is*.
-            //
-            // At full the list owns vertical drags, so a rider sliding the
-            // panel down the natural way — a finger down the rows — was
-            // fought by the scroll: the list rubber-banded to -78 points and
-            // oscillated back over thirty frames while the panel sat still.
-            // Measured; that oscillation is the "glitch" riders reported. A
-            // firm pull past the top now reads as what it means. Gated on the
-            // *interacting* phase so a fast scroll-to-top's momentum
-            // overshoot, which also dips negative, cannot trigger it.
-            .onScrollPhaseChange { old, _, context in
-                guard old == .interacting,
-                      context.geometry.contentOffset.y < -60 else { return }
-                withAnimation(.snappy) { panelDetent = .half }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 30)
+            } else {
+                nearbyList
             }
         }
     }
@@ -737,160 +662,6 @@ struct SpotsTabView: View {
 }
 
 // MARK: - The panel
-
-/// The draggable sheet over the spots map, and the only thing that knows how
-/// far the thumb has moved.
-///
-/// It is its own view for exactly one reason: a live drag is sixty or a
-/// hundred and twenty state writes a second, and every one of them invalidates
-/// the body that owns the state. When that body also built the map, the drag
-/// cost a full rebuild of every annotation on it — which is what a rider saw
-/// as the panel flickering. Here, the writes land on a view whose body is a
-/// frame height and a `VStack`, and the map never hears about them.
-private struct SpotsPanel<Content: View>: View {
-
-    @Binding var detent: SpotsTabView.PanelDetent
-    let size: CGSize
-    let collapsedHeight: CGFloat
-    @ViewBuilder var content: Content
-
-    /// The live drag, in a `@GestureState` rather than a `@State`.
-    ///
-    /// The difference is what happens when the system cancels a drag rather
-    /// than ending it — a phone call, a scroll stealing the touches, an edge
-    /// gesture. `onEnded` never runs on a cancel, so a plain `@State` kept
-    /// its last value and the panel sat parked partway between detents,
-    /// misaligned with everything keyed to the detent — filmed doing exactly
-    /// that. A gesture state resets itself no matter how the gesture dies,
-    /// and the transaction makes the reset glide instead of snap.
-    @GestureState(resetTransaction: Transaction(animation: .snappy))
-    private var drag: CGFloat = 0
-
-    private func height(for detent: SpotsTabView.PanelDetent) -> CGFloat {
-        max(collapsedHeight, size.height * detent.fraction)
-    }
-
-    /// Everywhere but full, a drag anywhere on the panel moves the panel.
-    ///
-    /// This used to flip at half, on the theory that a tall panel's list
-    /// should scroll. What that actually built was a fight: at half and full
-    /// the natural gesture for "get this out of my way" — a finger dragged
-    /// down the rows — went to the scroll instead, which rubber-banded and
-    /// oscillated while the panel refused to move. Measured at -78 points of
-    /// rubber band on one such drag. So the rule is now one sentence: the
-    /// list scrolls only at full, where a pull past its top collapses the
-    /// panel; at every other height the panel is the thing under your thumb.
-    private var dragsFromContent: Bool {
-        detent != .full
-    }
-
-    /// The panel slides, and it is opaque.
-    ///
-    /// Both halves of that were found by measuring rather than by guessing,
-    /// after two fixes that were aimed at the wrong thing.
-    ///
-    /// **It slides.** Driving the panel's *height* from the drag re-proposes a
-    /// size to the `ScrollView` inside on every frame, so its `LazyVStack`
-    /// rebuilds the rows at the boundary. The content is laid out once at its
-    /// tallest and `offset` moves it, which is a draw-time transform: nothing
-    /// is re-proposed and no row is rebuilt. Logging every body call through a
-    /// drag confirms it — ten panel renders for ten touch points, and one row,
-    /// once, as it came into view.
-    ///
-    /// **It is opaque.** Which left the flicker, because the flicker was never
-    /// a rebuild. The background was `.regularMaterial` with a fifteen-point
-    /// shadow, and a translucent blur sliding over a live `Map` has to
-    /// re-sample and re-blur what is behind it on every frame, with the shadow
-    /// forcing an offscreen pass on top. An opaque layer cannot shimmer: there
-    /// is nothing behind it to sample. It also takes the map's greens and
-    /// blues out from under the list, which were bleeding through the rows and
-    /// making them hard to read.
-    ///
-    /// The map is still alive — above the panel, which is the part of it the
-    /// rider is looking at.
-    var body: some View {
-        let full = height(for: .full)
-        let resting = height(for: detent)
-        let live = min(full, max(collapsedHeight, resting - drag))
-        VStack(spacing: 0) {
-            grabBar
-            content
-                // The panel is laid out at its tallest but only `resting` of
-                // it is on screen, so without this the last rows of the list
-                // sit in the part that is below the bottom edge and no amount
-                // of scrolling can reach them. Keyed to the detent, not to the
-                // drag, so it changes once on release rather than per frame.
-                .contentMargins(.bottom, full - resting, for: .scrollContent)
-                .gesture(dragGesture, isEnabled: dragsFromContent)
-        }
-        .frame(height: full, alignment: .top)
-        .frame(maxWidth: .infinity)
-        .background(
-            UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22)
-                .fill(Color(.systemBackground))
-                // Tighter than it was. A wide blur radius on a layer that
-                // moves every frame is the second most expensive thing here,
-                // and at the top edge of a panel nobody is admiring it.
-                .shadow(color: .black.opacity(0.18), radius: 6, y: -2)
-                .ignoresSafeArea(edges: .bottom)
-        )
-        .offset(y: full - live)
-    }
-
-    /// The one part of the panel that drags.
-    ///
-    /// It used to be the whole panel, which is why the list underneath fought
-    /// the sheet for every swipe. A grab bar the width of the panel is the
-    /// same target every map app uses, and it leaves the list free to scroll.
-    /// The chevron beside it does the same job without a gesture at all —
-    /// which is the point, since a drag you have to discover is not a control.
-    private var grabBar: some View {
-        Capsule()
-            .fill(Color(.systemGray3))
-            .frame(width: 38, height: 5)
-            .frame(maxWidth: .infinity)
-            .frame(height: 30)
-            .padding(.top, 4)
-            .contentShape(Rectangle())
-            .overlay(alignment: .trailing) {
-                Button { toggle() } label: {
-                    Image(systemName: detent == .minimized ? "chevron.up" : "chevron.down")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, height: 28)
-                        .background(Color(.systemGray5), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 14)
-                .accessibilityLabel(detent == .minimized ? "Expand nearby" : "Minimize nearby")
-            }
-            .onTapGesture { toggle() }
-            .gesture(dragGesture)
-    }
-
-    private func toggle() {
-        withAnimation(.snappy) {
-            detent = detent == .minimized ? .half : .minimized
-        }
-    }
-
-    /// Drag to the nearest snap point, thrown rather than dropped — the
-    /// projected end of the flick decides, so a fast flick down minimizes
-    /// from full without stopping at every detent on the way.
-    private var dragGesture: some Gesture {
-        DragGesture()
-            .updating($drag) { value, state, _ in state = value.translation.height }
-            .onEnded { value in
-                let projected = height(for: detent) - value.predictedEndTranslation.height
-                let nearest = SpotsTabView.PanelDetent.allCases.min {
-                    abs(height(for: $0) - projected) < abs(height(for: $1) - projected)
-                } ?? .peek
-                // `drag` resets itself through its own transaction; this and
-                // that animate together to the same place.
-                withAnimation(.snappy) { detent = nearest }
-            }
-    }
-}
 
 // MARK: - Pieces
 

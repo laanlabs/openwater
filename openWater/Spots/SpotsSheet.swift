@@ -8,12 +8,17 @@ import SwiftUI
 /// is added. Whichever phase brings the flicker back is the cause, by
 /// construction.
 ///
-/// - **Phase 1 (this one): nothing moves.** An opaque sheet fixed at 55% of
-///   the screen over the live map, a plain `ScrollView` with a plain
-///   `VStack` of rows — not even lazy — and scrolling as the only
-///   interaction. If this flickers, the problem was never the panel: it is
-///   the rows, the scroll, or compositing over the map.
-/// - Phase 2: the slide — detents, a drag on the grab bar only.
+/// - Phase 1: nothing moves. An opaque sheet fixed over the live map, a
+///   plain scroll of plain rows. **Tested clean on the phone.**
+/// - **Phase 2 (this one): the slide.** Three detents, and one way to move
+///   between them: a drag on the grab bar. The list keeps its own scroll at
+///   every height, and because the two gestures live on different views they
+///   cannot fight — the fight was the old panel's disease. The height is
+///   driven directly, which is the obvious code the old panel avoided; what
+///   made direct height-driving churn back then was a lazy stack realizing
+///   rows per frame and `AsyncImage` restarting per rebuild, and both of
+///   those are gone by construction — the stack is plain and the thumbnails
+///   are cached.
 /// - Phase 3: drags on the content, and pull-past-the-top to collapse.
 /// - Phase 4: Favorites and Destinations return.
 struct SpotsSheet<Content: View>: View {
@@ -23,13 +28,37 @@ struct SpotsSheet<Content: View>: View {
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
+    enum Detent: CaseIterable {
+        case peek, half, full
+
+        var fraction: CGFloat {
+            switch self {
+            case .peek: 0.32
+            case .half: 0.58
+            case .full: 0.92
+            }
+        }
+    }
+
+    @State private var detent: Detent = .peek
+
+    /// The live drag, in a `@GestureState` so it resets however the gesture
+    /// dies. A cancelled drag — a call, a system gesture, anything stealing
+    /// the touches — never runs `onEnded`, and the old panel's plain `@State`
+    /// kept its last value and parked the sheet between detents. The reset
+    /// transaction makes a cancelled drag glide home instead of snapping.
+    @GestureState(resetTransaction: Transaction(animation: .snappy))
+    private var drag: CGFloat = 0
+
+    private func height(for detent: Detent) -> CGFloat {
+        size.height * detent.fraction
+    }
+
     var body: some View {
+        let live = min(height(for: .full),
+                       max(height(for: .peek), height(for: detent) - drag))
         VStack(spacing: 0) {
-            Capsule()
-                .fill(Color(.systemGray3))
-                .frame(width: 38, height: 5)
-                .padding(.top, 10)
-                .padding(.bottom, 12)
+            grabBar
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -38,7 +67,7 @@ struct SpotsSheet<Content: View>: View {
                 .padding(.bottom, tabBarHeight + 12)
             }
         }
-        .frame(height: size.height * 0.55, alignment: .top)
+        .frame(height: live, alignment: .top)
         .frame(maxWidth: .infinity)
         .background(
             UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22)
@@ -46,5 +75,32 @@ struct SpotsSheet<Content: View>: View {
                 .shadow(color: .black.opacity(0.18), radius: 6, y: -2)
                 .ignoresSafeArea(edges: .bottom)
         )
+    }
+
+    /// The one handle that moves the sheet, generous enough to hit.
+    private var grabBar: some View {
+        Capsule()
+            .fill(Color(.systemGray3))
+            .frame(width: 38, height: 5)
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .contentShape(Rectangle())
+            .gesture(dragGesture)
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .updating($drag) { value, state, _ in
+                state = value.translation.height
+            }
+            .onEnded { value in
+                // The projected end of the flick decides, so a fast flick
+                // crosses detents without stopping at each one.
+                let projected = height(for: detent) - value.predictedEndTranslation.height
+                let nearest = Detent.allCases.min {
+                    abs(height(for: $0) - projected) < abs(height(for: $1) - projected)
+                } ?? .peek
+                withAnimation(.snappy) { detent = nearest }
+            }
     }
 }

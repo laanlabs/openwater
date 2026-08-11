@@ -43,7 +43,19 @@ struct SessionListView: View {
     @State private var showMoreFilters = false
     @State private var locationQuery = ""
     @State private var favoritesOnly = false
+    /// The map's answer to "I don't remember what it was called": a pin
+    /// and a radius, matched against where each session actually happened.
+    @State private var areaPlace: PickedPlace?
+    @State private var areaRadiusKm: Double = 5
+    /// `item:` rather than `isPresented:` on purpose — presented with a
+    /// boolean, this sheet could come up with its content unbuilt: an
+    /// invisible layer that silently ate every tap on the screen under it.
+    @State private var areaPicker: AreaPickerRequest?
     @FocusState private var searchFocused: Bool
+
+    private struct AreaPickerRequest: Identifiable {
+        let id = UUID()
+    }
 
     /// The file currently awaiting sport confirmation, and the rest of the
     /// queue behind it — selecting several files at once is normal, and each one
@@ -118,6 +130,7 @@ struct SessionListView: View {
                 && (!favoritesOnly || session.isFavorite)
                 && matchesQuery(session)
                 && matchesLocation(session)
+                && matchesArea(session)
         }
         switch sort {
         case .newest: return matching
@@ -165,12 +178,29 @@ struct SessionListView: View {
             .contains(wanted)
     }
 
+    /// Where the session happened, from the preview already sitting on the
+    /// row — its first fix, which is the launch. No archive decoding.
+    private func sessionCoordinate(_ session: StoredSession) -> Geo.Coordinate? {
+        guard session.previewTrack.count >= 3 else { return nil }
+        return Geo.Coordinate(latitude: session.previewTrack[0],
+                              longitude: session.previewTrack[1])
+    }
+
+    /// Inside the pinned circle. A session with no GPS cannot be inside
+    /// any circle, so an area filter honestly excludes it.
+    private func matchesArea(_ session: StoredSession) -> Bool {
+        guard let place = areaPlace else { return true }
+        guard let coordinate = sessionCoordinate(session) else { return false }
+        return Geo.distance(place.coordinate, coordinate) <= areaRadiusKm * 1000
+    }
+
     private func closeSearch() {
         isSearching = false
         showMoreFilters = false
         query = ""
         locationQuery = ""
         favoritesOnly = false
+        areaPlace = nil
         searchFocused = false
     }
 
@@ -269,6 +299,19 @@ struct SessionListView: View {
                 BulkExportView(sessions: filtered)
             }
             .sheet(isPresented: $showingBests) { RecordsView() }
+            // At screen level with its siblings, not down on the search
+            // row — a sheet presented from inside a `List` row is dropped
+            // whenever the row happens to be mid-rebuild.
+            .sheet(item: $areaPicker) { _ in
+                // Open where the library lives: the newest session's water
+                // is a far better first guess than wherever the phone is.
+                LocationPickerSheet(title: "Sessions near…",
+                                    initial: areaPlace?.coordinate
+                                        ?? sessions.first.flatMap(sessionCoordinate),
+                                    radiusKm: $areaRadiusKm) { place in
+                    areaPlace = place
+                }
+            }
             .sheet(isPresented: $showingTrends) { TrendsView() }
             .sheet(isPresented: $showingTrash) {
                 NavigationStack {
@@ -307,6 +350,16 @@ struct SessionListView: View {
                     searchBar
                         .modifier(PlainRow())
                         .padding(.bottom, 6)
+
+                    // Its own row, never a growth spurt of the row above:
+                    // a `List` row that changes height under an animation
+                    // keeps hit-testing at the old height, which left this
+                    // panel visible but untappable.
+                    if showMoreFilters {
+                        searchFilters
+                            .modifier(PlainRow())
+                            .padding(.bottom, 6)
+                    }
                 }
 
                 HStack(spacing: 10) {
@@ -408,10 +461,22 @@ struct SessionListView: View {
                 .frame(height: 40)
                 .background(.background, in: Capsule())
 
-                Button(showMoreFilters ? "Less" : "More") {
+                Button {
+                    // The keyboard gives way to the panel — while a field
+                    // has focus, buttons in the list lose their first tap
+                    // to dismissing it.
+                    searchFocused = false
                     withAnimation(.snappy) { showMoreFilters.toggle() }
+                } label: {
+                    Image(systemName: hasStructuredFilters || showMoreFilters
+                          ? "line.3.horizontal.decrease.circle.fill"
+                          : "line.3.horizontal.decrease.circle")
+                        .font(.title3)
+                        .padding(6)
+                        .background(.background, in: Circle())
                 }
-                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
+                .accessibilityLabel(showMoreFilters ? "Hide filters" : "Filters")
 
                 Button {
                     withAnimation(.snappy) { closeSearch() }
@@ -424,8 +489,13 @@ struct SessionListView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close search")
             }
+        }
+    }
 
-            if showMoreFilters {
+    /// The structured half, its own list row — see the note at the call
+    /// site for why it must not share one with the field above.
+    private var searchFilters: some View {
+        VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     HStack(spacing: 6) {
                         Image(systemName: "mappin.and.ellipse")
@@ -438,6 +508,32 @@ struct SessionListView: View {
                     .padding(.horizontal, 12)
                     .frame(height: 36)
                     .background(.background, in: Capsule())
+
+                    // For the sessions whose name is gone but whose water
+                    // is not: a pin and a radius instead of a word.
+                    Button {
+                        searchFocused = false
+                        areaPicker = AreaPickerRequest()
+                    } label: {
+                        Image(systemName: areaPlace == nil ? "map" : "map.fill")
+                            .font(.subheadline.weight(.medium))
+                            .padding(9)
+                            .background(.background, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Pick an area on the map")
+                }
+
+                HStack(spacing: 8) {
+                    if let place = areaPlace {
+                        FilterChip(
+                            title: "\(Format.distance(areaRadiusKm * 1000, unit: settings.units.distance)) of \(place.name)",
+                            systemImage: "xmark",
+                            isOn: true
+                        ) {
+                            areaPlace = nil
+                        }
+                    }
 
                     Menu {
                         Picker("Activity", selection: $sportFilter) {
@@ -455,9 +551,17 @@ struct SessionListView: View {
                                isOn: favoritesOnly) {
                         favoritesOnly.toggle()
                     }
+
+                    Spacer(minLength: 0)
                 }
-            }
         }
+    }
+
+    /// Whether any of the structured filters is doing something — the
+    /// filters icon fills in to say so even while the panel is folded away.
+    private var hasStructuredFilters: Bool {
+        sportFilter != nil || favoritesOnly || areaPlace != nil
+            || !locationQuery.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private func quickLink(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {

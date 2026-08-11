@@ -49,10 +49,15 @@ struct LocationPickerSheet: View {
 
     let title: String
     let initial: Geo.Coordinate?
+    /// Set to pick an *area* rather than a point: the sheet draws a circle
+    /// of this many kilometres around the pin and offers a dial for it.
+    /// Nil keeps the classic point picker for every existing caller.
+    var radiusKm: Binding<Double>? = nil
     let onPick: (PickedPlace) -> Void
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(PhoneRecorder.self) private var recorder
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
     @State private var camera: MapCameraPosition = .automatic
@@ -103,7 +108,15 @@ struct LocationPickerSheet: View {
     // MARK: Map
 
     private var map: some View {
-        Map(position: $camera)
+        Map(position: $camera) {
+            // The area being chosen, when a radius is in play — the circle
+            // follows the pin as the map settles under it.
+            if let radiusKm, let centre {
+                MapCircle(center: centre, radius: radiusKm.wrappedValue * 1000)
+                    .foregroundStyle(Color.accentColor.opacity(0.14))
+                    .stroke(Color.accentColor.opacity(0.7), lineWidth: 1.5)
+            }
+        }
             .mapControlVisibility(.hidden)
             .ignoresSafeArea(edges: .bottom)
             .onMapCameraChange(frequency: .onEnd) { context in
@@ -263,6 +276,20 @@ struct LocationPickerSheet: View {
                 Spacer(minLength: 0)
             }
 
+            if let radiusKm {
+                HStack(spacing: 10) {
+                    Text("Within")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Slider(value: radiusKm, in: 1...50, step: 1)
+                    Text(Format.distance(radiusKm.wrappedValue * 1000,
+                                         unit: settings.units.distance))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .frame(width: 72, alignment: .trailing)
+                }
+            }
+
             Button {
                 guard let centre else { return }
                 onPick(PickedPlace(
@@ -272,7 +299,7 @@ struct LocationPickerSheet: View {
                 ))
                 dismiss()
             } label: {
-                Text("Use This Spot")
+                Text(radiusKm == nil ? "Use This Spot" : "Use This Area")
                     .font(.body.weight(.bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)

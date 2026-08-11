@@ -36,25 +36,40 @@ enum ForecastCache {
         return directory.appending(path: "\(name).json")
     }
 
+    /// A response body plus the honesty about where it came from.
+    struct Served {
+        let data: Data
+        /// Only set on the fallback path: the network failed and this is
+        /// the last good answer, this many seconds old. `nil` means fresh —
+        /// straight from the network, or from disk well inside its
+        /// time-to-live, which is the same thing to the rider.
+        let staleAge: TimeInterval?
+    }
+
     /// The response body: from disk while fresh, from the network when not,
-    /// from disk again — older, within reason — when the network fails.
-    static func data(from url: URL, ttl: TimeInterval) async -> Data? {
+    /// from disk again — older, and saying so — when the network fails.
+    static func serve(from url: URL, ttl: TimeInterval) async -> Served? {
         let path = file(for: url)
         if let age = age(of: path), age < ttl,
            let cached = try? Data(contentsOf: path) {
-            return cached
+            return Served(data: cached, staleAge: nil)
         }
         if let (data, response) = try? await URLSession.shared.data(from: url),
            (response as? HTTPURLResponse)?.statusCode == 200 {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try? data.write(to: path)
-            return data
+            return Served(data: data, staleAge: nil)
         }
         if let age = age(of: path), age < staleLimit,
            let cached = try? Data(contentsOf: path) {
-            return cached
+            return Served(data: cached, staleAge: age)
         }
         return nil
+    }
+
+    /// `serve` for the callers whose cards have nowhere to put an age.
+    static func data(from url: URL, ttl: TimeInterval) async -> Data? {
+        await serve(from: url, ttl: ttl)?.data
     }
 
     private static func age(of path: URL) -> TimeInterval? {

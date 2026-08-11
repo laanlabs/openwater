@@ -111,12 +111,15 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
   conditions sheet's "next six hours" card asks those three models
   explicitly and does not exist anywhere else — no interpolated hourly
   data dressed up as quarter-hour precision. `OpenMeteo.nearTerm`.
-- [ ] **Lead-time skill without an archive.** The
+- [x] **Lead-time steadiness without an archive.** The
   [Previous Runs API](https://open-meteo.com/en/docs/previous-runs-api)
-  exposes what each model said 1–7 days ahead of a given hour; the
-  [Historical Forecast API](https://open-meteo.com/en/docs/historical-forecast-api)
-  keeps the as-issued forecasts. Together they answer "how wrong is GFS at
-  this spot at two days out" with API calls alone.
+  exposes what each model said 1–3 days ahead of every past hour.
+  `OpenMeteo.modelRecord` scores two weeks of each model's forecasts and
+  the model-compare screen crowns the winner. Where a met buoy sits
+  within 30 km, the reference is the buoy's own 45-day reading history
+  from NDBC — real verification, and the screen says "against a real
+  anemometer". Elsewhere the reference is each model's freshest run, and
+  the screen owns that it is measuring steadiness, not accuracy.
 
 ### Tier 3 — the app's unfair advantage
 
@@ -135,10 +138,15 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
   lead — and maintain the guide's exponentially weighted bias correction.
   A few floats per spot/sector bucket, entirely on-device. This is the
   guide's "largest early accuracy gain", and no weather site can copy it.
+- [x] **Route sampling in the shuttle planner.** `OpenMeteo.windAlong`
+  asks one batched request for launch, midpoint and takeout, this hour
+  and two ahead; the run card shows all three with per-point alignment,
+  and a verdict line speaks up only when the route disagrees with itself
+  — "the wind bends 25° at the takeout" is the sentence that saves a
+  wasted shuttle.
 - [ ] **Spot geometry.** A water-facing bearing and safe/hazardous sectors
   per spot turn a forecast direction into "cross-on" or "straight
-  offshore" — the safety words — and the shuttle planner should sample the
-  wind *along the route at transit time*, not at one point now.
+  offshore" — the safety words.
 
 ### Tier 4 — hygiene the guide insists on
 
@@ -148,9 +156,10 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
 - [x] **Cache the forecasts.** `ForecastCache`: every Open-Meteo request
   (and the astronomical tide table) now reads from a short-TTL disk cache
   keyed by the request URL, and a failed fetch serves an answer up to
-  three hours old rather than a blank. Observations are deliberately not
-  cached — a reading's whole value is being minutes old. Still to do:
-  surface the age when a stale answer is served.
+  three hours old rather than a blank — with the age said out loud: the
+  outlook card carries a "no network, model from N ago" line whenever it
+  is showing the fallback. Observations are deliberately not cached — a
+  reading's whole value is being minutes old.
 - [ ] **Distinguish failures.** Every fetcher collapses network failure,
   rate-limiting and "inland, no marine cell" into the same empty return.
   They are three different sentences to a rider.
@@ -175,11 +184,16 @@ configuration, not in logic.
 ## Order of work
 
 1. Tier 1 (done): the timeline type, the vector fixes, gusts, storage.
-2. Tier 2 ensembles + NBM + minutely_15 (done); previous-runs skill next.
-3. Nowcast UI and forecast caching (done).
-4. Analyzer integration of the timeline — behind an `analysisVersion` bump
-   with a full expectation re-record, per `docs/RUNS.md`.
-5. Per-spot bias records once there is a place to show what they learned;
-   spot geometry and route sampling alongside.
-6. Remaining Tier 4 hygiene: stale/data-age labels, error surfaces, the
+2. Tier 2 (done): ensembles, NBM, minutely_15, model steadiness.
+3. Nowcast UI, forecast caching with stale labels, and route sampling in
+   the shuttle planner (done).
+4. Buoy-verified model skill (done) — where a buoy sits within 30 km, the
+   scorecard's reference is its real 45-day reading history, not the
+   model's own final run.
+5. Spot geometry: water-facing bearings and hazardous offshore sectors.
+6. Analyzer integration of the timeline — behind an `analysisVersion`
+   bump with a full expectation re-record, per `docs/RUNS.md`. Touches
+   recorded sessions, so it waits for an explicit go-ahead.
+7. Per-spot bias records learned from sessions — same caveat as 6.
+8. Remaining Tier 4 hygiene: error surfaces beyond the outlook card, the
    one historical-wind path, the licence registry.

@@ -28,6 +28,9 @@ struct ShuttlePlannerView: View {
     @State private var takeout: PickedPlace?
     @State private var picking: End?
     @State private var wind: WindReading?
+    /// The next hours at launch, midpoint and takeout — the run sampled
+    /// along its own length instead of judged from one point.
+    @State private var routeWinds: [[WindForecastHour]] = []
 
     enum End: String, Identifiable {
         case launch = "Launch", takeout = "Takeout"
@@ -82,7 +85,9 @@ struct ShuttlePlannerView: View {
             guard let from = launch?.coordinate, let to = takeout?.coordinate else { return }
             let mid = Geo.Coordinate(latitude: (from.latitude + to.latitude) / 2,
                                      longitude: (from.longitude + to.longitude) / 2)
+            async let along = OpenMeteo.windAlong([from, mid, to])
             wind = await guide.currentWind(at: mid)
+            routeWinds = await along
         }
         .sheet(item: $picking) { end in
             LocationPickerSheet(
@@ -186,14 +191,98 @@ struct ShuttlePlannerView: View {
                 )
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(off <= 15 ? Color.green : off <= 30 ? .orange : .red)
-                Text("Model wind at the midpoint of the run — check a meter before committing a shuttle.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
+
+            if routeWinds.count == 3 {
+                routeStrip(bearing: bearing)
+            }
+
+            Text(routeWinds.count == 3
+                 ? "Model wind sampled along the run, this hour and two ahead — check a meter before committing a shuttle."
+                 : "Model wind at the midpoint of the run — check a meter before committing a shuttle.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// The run judged along its own length, not from one point.
+    ///
+    /// Launch, middle and takeout each get this hour's wind and the wind two
+    /// hours on — roughly rigging plus the run itself — with the alignment
+    /// against the route under each. The verdict line only speaks up when
+    /// the three points disagree, because "the wind bends 25° at the
+    /// takeout" is exactly the sentence that saves a wasted shuttle, and
+    /// "steady down the line" is one worth a moment of relief.
+    private func routeStrip(bearing: Double) -> some View {
+        let labels = ["Launch", "Middle", "Takeout"]
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach(routeWinds.indices, id: \.self) { index in
+                    let hours = routeWinds[index]
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(labels[index].uppercased())
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        pointLine(hours.first, bearing: bearing)
+                        pointLine(hours[safe: 2], bearing: bearing, faded: true)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            if let verdict = routeVerdict(bearing: bearing) {
+                Text(verdict)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// One point-hour: speed, arrow, and degrees off the run.
+    @ViewBuilder
+    private func pointLine(_ hour: WindForecastHour?, bearing: Double,
+                           faded: Bool = false) -> some View {
+        if let hour {
+            let off = Solar.runAlignment(bearing: bearing, windFrom: hour.directionDeg)
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(hour.directionDeg))
+                Text("\(Int(hour.speedKn.rounded()))kn")
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+                Text("\(Int(off.rounded()))°off")
+                    .font(.system(size: 9))
+                    .foregroundStyle(off <= 15 ? Color.green : off <= 30 ? .orange : .red)
+            }
+            .foregroundStyle(faded ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            .opacity(faded ? 0.75 : 1)
+        }
+    }
+
+    /// A sentence only when the route disagrees with itself.
+    private func routeVerdict(bearing: Double) -> String? {
+        let labels = ["the launch", "the middle", "the takeout"]
+        let now = routeWinds.map(\.first)
+        let offs = now.compactMap { $0.map { Solar.runAlignment(bearing: bearing, windFrom: $0.directionDeg) } }
+        let speeds = now.compactMap { $0?.speedKn }
+        guard offs.count == 3, speeds.count == 3 else { return nil }
+
+        if let worst = offs.max(), let best = offs.min(), worst - best > 20,
+           let at = offs.firstIndex(of: worst) {
+            return "The wind bends \(Int((worst - best).rounded()))° along the run — worst at \(labels[at])."
+        }
+        if let high = speeds.max(), let low = speeds.min(), high - low > 5,
+           let at = speeds.firstIndex(of: low) {
+            return "\(Int((high - low).rounded())) kn lighter at \(labels[at]) than the rest of the run."
+        }
+        return nil
     }
 
     private func tile(_ label: String, _ value: String) -> some View {

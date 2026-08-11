@@ -477,6 +477,17 @@ struct NearbyConditionsSheet: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
+                if let age = outlook.staleAge {
+                    Label {
+                        Text("No network right now — this is the model from \(Format.duration(age)) ago, not a fresh run.")
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "wifi.slash")
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.orange)
+                }
+
                 Text(agreement.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)

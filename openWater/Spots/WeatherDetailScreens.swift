@@ -813,6 +813,7 @@ struct ModelCompareScreen: View {
     @Environment(AppSettings.self) private var settings
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var ensemble = EnsembleOutlook(hours: [], members: [])
+    @State private var steadiness = ModelSteadiness(rows: [])
     @State private var enabled: Set<String> = []
     @State private var isLoading = true
     /// The hour under the reading line.
@@ -865,9 +866,11 @@ struct ModelCompareScreen: View {
             enabled = Set(outlook.models.filter { !$0.isComposite }.map(\.id))
             recompute()
             withAnimation(.easeOut(duration: 0.25)) { isLoading = false }
-            // After the main chart is up — the probability line is a bonus,
-            // not something the screen should wait on.
+            // After the main chart is up — the probability line and the
+            // track record are bonuses, not something the screen waits on.
+            async let record = OpenMeteo.modelRecord(near: coordinate)
             ensemble = await members
+            steadiness = await record
         }
         .onChange(of: enabled) { _, _ in recompute() }
     }
@@ -1015,6 +1018,10 @@ struct ModelCompareScreen: View {
                 Spacer(minLength: 0)
             }
 
+            if !steadiness.isEmpty {
+                steadinessRows
+            }
+
             Text(footnote)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -1023,6 +1030,57 @@ struct ModelCompareScreen: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// Each model's recent record at this point — how far its two-day-ahead
+    /// call has typically drifted from its own final hour.
+    ///
+    /// Everybody who watches forecasts closely has an opinion about which
+    /// model to trust at their spot; this is that opinion, measured. Said
+    /// plainly as steadiness rather than accuracy, because the reference is
+    /// the model's freshest run and not an anemometer — a steady model can
+    /// still be steadily wrong, and the caption owns that.
+    private var steadinessRows: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(steadiness.verifiedAgainst == nil
+                 ? "TWO DAYS OUT, PAST TWO WEEKS"
+                 : "AGAINST A REAL ANEMOMETER, TWO DAYS OUT")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                ForEach(steadiness.rows) { row in
+                    if let drift = row.twoDaysOutKn {
+                        HStack(spacing: 3) {
+                            if row.id == steadiness.steadiest?.id {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tint)
+                            }
+                            Text(row.label)
+                                .font(.caption2.weight(.semibold))
+                            Text("±\(drift, specifier: "%.1f") kn")
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            Text(steadinessCaption)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var steadinessCaption: String {
+        if let buoy = steadiness.verifiedAgainst {
+            return "Each model's two-day-ahead call scored against what the \(buoy.name) buoy"
+                + " (\(Format.distance(buoy.metres, unit: settings.units.distance)) from here)"
+                + " actually measured over the past two weeks. Real verification, not model self-agreement."
+        }
+        return "How far each model's two-day-ahead call here has drifted from its own final hour. Steadiness, not verified truth — but the one that keeps changing its story has told you something."
     }
 
     private func key(_ colour: Color, _ label: String, line: Bool = false) -> some View {

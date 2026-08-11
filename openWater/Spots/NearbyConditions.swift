@@ -113,6 +113,10 @@ struct WindOutlook {
     let hours: [Date]
     let models: [Model]
     var timeZone: TimeZone?
+    /// Set when the network failed and this outlook is the cache's last
+    /// good answer, this many seconds old. The card says so — a stale
+    /// forecast posing as fresh is the one dishonesty worse than a blank.
+    var staleAge: TimeInterval?
 
     /// The mean of just the models a rider has left switched on.
     ///
@@ -335,6 +339,51 @@ struct NowcastAdjustment {
             deltaKn: (chosen.sample.speed - modelled.speed) * 1.94384,
             corrected: WindNowcast().corrected(model, by: chosen.sample)
         )
+    }
+}
+
+// MARK: - How the models have been landing here
+
+/// Each model's recent record at one point: how far its call made days
+/// ahead typically drifted from its own final hour.
+///
+/// Two flavours, and the struct says which it is. With a met buoy near the
+/// spot, the reference is that buoy's own anemometer over the past two
+/// weeks — real verification, the strongest sentence this screen can say.
+/// Without one, the reference is each model's freshest run, which makes
+/// this a *steadiness* measure: honest about being weaker, still worth
+/// having, because a rider choosing which line to believe on Thursday for
+/// Saturday wants to know that ICON has been rewriting its story here all
+/// month while ECMWF has not. Both are free: Open-Meteo keeps every
+/// model's previous runs, and NDBC's realtime files carry 45 days of
+/// readings.
+struct ModelSteadiness {
+
+    struct Row: Identifiable {
+        let id: String
+        let label: String
+        /// Mean absolute error, knots, by days of lead. `[1]` is the
+        /// day-ahead call, `[3]` three days out. Against the buoy when
+        /// verified, against the model's own final run when not — and in
+        /// the verified case `[0]` exists too: how wrong the freshest run
+        /// still is at this water.
+        let revisionKn: [Int: Double]
+
+        /// The headline number: two days out, the lead a rider actually
+        /// plans a weekend around.
+        var twoDaysOutKn: Double? { revisionKn[2] }
+    }
+
+    let rows: [Row]
+    /// Set when the reference was a real anemometer: the buoy's name and
+    /// how far it sits from the point being forecast.
+    var verifiedAgainst: (name: String, metres: Double)? = nil
+    var isEmpty: Bool { rows.isEmpty }
+
+    /// The model that has moved its story least at two days.
+    var steadiest: Row? {
+        rows.filter { $0.twoDaysOutKn != nil }
+            .min { ($0.twoDaysOutKn ?? .infinity) < ($1.twoDaysOutKn ?? .infinity) }
     }
 }
 
@@ -676,8 +725,8 @@ enum OpenMeteo {
             .init(name: "timezone", value: "auto"),
         ] + (pastDays > 0 ? [URLQueryItem(name: "past_days", value: String(pastDays))] : [])
         guard let url = components.url,
-              let data = await ForecastCache.data(from: url, ttl: 1800),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let served = await ForecastCache.serve(from: url, ttl: 1800),
+              let root = try? JSONSerialization.jsonObject(with: served.data) as? [String: Any],
               let hourly = root["hourly"] as? [String: Any],
               let times = hourly["time"] as? [Double]
         else { return WindOutlook(hours: [], models: []) }
@@ -701,7 +750,8 @@ enum OpenMeteo {
         return WindOutlook(
             hours: times.map { Date(timeIntervalSince1970: $0) },
             models: series,
-            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
+            timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:)),
+            staleAge: served.staleAge
         )
     }
 
@@ -751,6 +801,161 @@ enum OpenMeteo {
             directions: series("wind_direction_10m"),
             timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
         )
+    }
+
+    /// The next few hours of wind at several points, in one request.
+    ///
+    /// Open-Meteo takes comma-joined coordinate lists and answers with one
+    /// forecast per point, which is exactly the shape of a downwind route:
+    /// launch, middle, takeout. One reading at the midpoint can call a run
+    /// fair while the takeout sits in a headland's shadow — the whole point
+    /// of asking three times is catching the route's disagreements with
+    /// itself.
+    static func windAlong(_ coordinates: [Geo.Coordinate],
+                          hours: Int = 4) async -> [[WindForecastHour]] {
+        guard !coordinates.isEmpty else { return [] }
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude",
+                  value: coordinates.map { String(format: "%.4f", $0.latitude) }.joined(separator: ",")),
+            .init(name: "longitude",
+                  value: coordinates.map { String(format: "%.4f", $0.longitude) }.joined(separator: ",")),
+            .init(name: "hourly", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
+            .init(name: "wind_speed_unit", value: "kn"),
+            .init(name: "forecast_hours", value: String(hours)),
+            .init(name: "timeformat", value: "unixtime"),
+        ]
+        guard let url = components.url,
+              let data = await ForecastCache.data(from: url, ttl: 1800),
+              let root = try? JSONSerialization.jsonObject(with: data)
+        else { return [] }
+
+        // One point answers as an object, several as an array — normalise.
+        let points = (root as? [[String: Any]]) ?? (root as? [String: Any]).map { [$0] } ?? []
+        return points.map { point -> [WindForecastHour] in
+            guard let hourly = point["hourly"] as? [String: Any],
+                  let times = hourly["time"] as? [Double],
+                  let speeds = (hourly["wind_speed_10m"] as? [Any])?.map({ $0 as? Double }),
+                  let directions = (hourly["wind_direction_10m"] as? [Any])?.map({ $0 as? Double })
+            else { return [] }
+            let gusts = (hourly["wind_gusts_10m"] as? [Any])?.map { $0 as? Double }
+            return times.indices.compactMap { hour in
+                guard let speed = speeds[safe: hour] ?? nil,
+                      let direction = directions[safe: hour] ?? nil
+                else { return nil }
+                return WindForecastHour(
+                    date: Date(timeIntervalSince1970: times[hour]),
+                    speedKn: speed,
+                    gustKn: gusts?[safe: hour] ?? nil,
+                    directionDeg: direction
+                )
+            }
+        }
+    }
+
+    /// Every model's recent record near a point — verified against a buoy
+    /// when one is close enough to speak for the water, self-consistency
+    /// otherwise. See `ModelSteadiness` for what each flavour means.
+    static func modelRecord(near coordinate: Geo.Coordinate) async -> ModelSteadiness {
+        // Thirty kilometres, because past that a buoy's wind is a different
+        // piece of weather, and a "verified" badge on the wrong water would
+        // be worse than the humbler measure.
+        if let buoy = await DataBuoyCenter.buoys(near: coordinate, limit: 1,
+                                                radius: 30_000).first {
+            let observations = await DataBuoyCenter.windHistory(for: buoy.id)
+            // Two weeks of mostly-hourly readings; much less and the score
+            // is an anecdote.
+            if observations.count >= 150 {
+                var verified = await steadiness(at: buoy.coordinate, against: observations)
+                if !verified.isEmpty {
+                    verified.verifiedAgainst = (buoy.name, buoy.metres)
+                    return verified
+                }
+            }
+        }
+        return await steadiness(at: coordinate, against: nil)
+    }
+
+    /// Two weeks of every model's forecasts at one point, scored.
+    ///
+    /// The previous-runs endpoint serves, for any past hour, what each model
+    /// said one to three days beforehand alongside its final call. With
+    /// `reference` observations the score is each forecast's gap from what
+    /// an anemometer then measured; without, its gap from the model's own
+    /// final call. Cached six hours: the past does not move quickly.
+    private static func steadiness(
+        at coordinate: Geo.Coordinate,
+        against reference: [(at: Date, windKn: Double)]?
+    ) async -> ModelSteadiness {
+        let leads = [0, 1, 2, 3]
+        let independents = models.filter { !$0.isComposite }
+        var components = URLComponents(string: "https://previous-runs-api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
+            .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
+            .init(name: "hourly", value: leads.map { "wind_speed_10m_previous_day\($0)" }
+                .joined(separator: ",")),
+            .init(name: "models", value: independents.map(\.id).joined(separator: ",")),
+            .init(name: "wind_speed_unit", value: "kn"),
+            .init(name: "past_days", value: "14"),
+            .init(name: "forecast_days", value: "1"),
+            .init(name: "timeformat", value: "unixtime"),
+        ]
+        guard let url = components.url,
+              let data = await ForecastCache.data(from: url, ttl: 21_600),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hourly = root["hourly"] as? [String: Any],
+              let times = hourly["time"] as? [Double]
+        else { return ModelSteadiness(rows: []) }
+
+        // Only hours that have actually happened: the request's tail is
+        // still forecast, where neither reference means anything yet.
+        let now = Date().timeIntervalSince1970
+        func series(_ lead: Int, _ model: String) -> [Double?] {
+            (hourly["wind_speed_10m_previous_day\(lead)_\(model)"] as? [Any])?
+                .map { $0 as? Double } ?? []
+        }
+        // Observations bucketed to the nearest hour mark, averaged when a
+        // station reports more often — NDBC's standard rows land at :50,
+        // which rounds to the hour they were nearly measuring.
+        let observed: [Int: Double]? = reference.map { readings in
+            var buckets: [Int: (total: Double, count: Int)] = [:]
+            for reading in readings {
+                let hour = Int((reading.at.timeIntervalSince1970 / 3600).rounded())
+                let sum = buckets[hour] ?? (0, 0)
+                buckets[hour] = (sum.total + reading.windKn, sum.count + 1)
+            }
+            return buckets.mapValues { $0.total / Double($0.count) }
+        }
+
+        let scoredLeads = observed == nil ? Array(leads.dropFirst()) : leads
+        let rows = independents.compactMap { model -> ModelSteadiness.Row? in
+            let final = series(0, model.id)
+            guard final.contains(where: { $0 != nil }) else { return nil }
+            var revisions: [Int: Double] = [:]
+            for lead in scoredLeads {
+                let forecast = lead == 0 ? final : series(lead, model.id)
+                let gaps = times.indices.compactMap { hour -> Double? in
+                    guard times[hour] <= now,
+                          let was = forecast[safe: hour] ?? nil
+                    else { return nil }
+                    if let observed {
+                        guard let truth = observed[Int((times[hour] / 3600).rounded())]
+                        else { return nil }
+                        return abs(was - truth)
+                    }
+                    guard let became = final[safe: hour] ?? nil else { return nil }
+                    return abs(was - became)
+                }
+                // A couple of days of overlap is noise, not a record.
+                if gaps.count >= 48 {
+                    revisions[lead] = gaps.reduce(0, +) / Double(gaps.count)
+                }
+            }
+            guard !revisions.isEmpty else { return nil }
+            return ModelSteadiness.Row(id: model.id, label: model.label, revisionKn: revisions)
+        }
+        return ModelSteadiness(rows: rows)
     }
 
     /// GEFS, thirty-one times over — see `EnsembleOutlook`.
@@ -1539,6 +1744,47 @@ enum DataBuoyCenter {
         // water temperature is just a second copy of it.
         guard reading.waveHeightM != nil || reading.waterTempC != nil else { return nil }
         return reading
+    }
+
+    /// Every wind reading in the station's realtime file — about 45 days,
+    /// newest first, mostly hourly.
+    ///
+    /// The same file `latest` reads the first row of; the rest of it is the
+    /// spot's recent truth, and it is what turns "the models have been
+    /// steady here" into "the models have been *right* here". Goes through
+    /// the forecast cache despite being observations — the exception that
+    /// proves that rule, because nothing here is presented as a current
+    /// reading: this feeds a two-week score, where an hour of staleness
+    /// changes nothing and a 300 KB re-download per screen would.
+    static func windHistory(for stationId: String) async -> [(at: Date, windKn: Double)] {
+        guard let url = URL(string: "https://www.ndbc.noaa.gov/data/realtime2/\(stationId.uppercased()).txt"),
+              let data = await ForecastCache.data(from: url, ttl: 3600),
+              let text = String(data: data, encoding: .utf8)
+        else { return [] }
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+
+        return text.split(separator: "\n")
+            .filter { !$0.hasPrefix("#") }
+            .compactMap { row -> (at: Date, windKn: Double)? in
+                let columns = row.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+                guard columns.count >= 7 else { return nil }
+                func value(_ index: Int) -> Double? {
+                    guard let raw = columns[safe: index], raw != "MM" else { return nil }
+                    return Double(raw)
+                }
+                // YY MM DD hh mm WDIR WSPD — same columns as `latest`.
+                guard let speed = value(6) else { return nil }
+                var stamp = DateComponents()
+                stamp.year = value(0).map(Int.init)
+                stamp.month = value(1).map(Int.init)
+                stamp.day = value(2).map(Int.init)
+                stamp.hour = value(3).map(Int.init)
+                stamp.minute = value(4).map(Int.init)
+                guard let at = utc.date(from: stamp) else { return nil }
+                return (at, speed * 3600 / 1852)
+            }
     }
 }
 

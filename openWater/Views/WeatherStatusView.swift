@@ -25,6 +25,27 @@ struct WeatherStatusView: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            status
+            // The mark and legal link stay put whatever the service says.
+            // This section is about Apple Weather either way — and attribution
+            // that only appears when the service happens to answer is
+            // invisible to exactly the reviewer who came looking for it.
+            AppleWeatherAttribution(showsLegalLabel: true, prefix: "Weather data provided by")
+                .font(.caption)
+        }
+        // Runs itself rather than waiting to be asked. Somebody opening
+        // Settings after finding no wind reading has already asked the
+        // question; making them find a button to ask it again is one step too
+        // many, and the call is a few hundred bytes against a monthly
+        // allowance of half a million.
+        .task {
+            if check == .idle { await runCheck() }
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
         Group {
             switch check {
             case .idle:
@@ -58,14 +79,6 @@ struct WeatherStatusView: View {
                         .font(.caption)
                 }
             }
-        }
-        // Runs itself rather than waiting to be asked. Somebody opening
-        // Settings after finding no wind reading has already asked the
-        // question; making them find a button to ask it again is one step too
-        // many, and the call is a few hundred bytes against a monthly
-        // allowance of half a million.
-        .task {
-            if check == .idle { await runCheck() }
         }
     }
 

@@ -113,7 +113,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Weather")
                 } footer: {
-                    Text("Apple's weather service supplies the conditions on the Record tab and the observed wind offered for a saved session. Without it a session's wind is estimated from the shape of the track, and every angle and polar figure is measured from that estimate.\n\nIt is a model on a roughly 2 km grid, not an anemometer on the beach.")
+                    Text("Apple's weather service supplies the observed wind offered for a saved session — the \"Use recorded conditions\" button when setting a session's wind. Without it a session's wind is estimated from the shape of the track, and every angle and polar figure is measured from that estimate.\n\nIt is a model on a roughly 2 km grid, not an anemometer on the beach.")
                 }
 
                 Section {

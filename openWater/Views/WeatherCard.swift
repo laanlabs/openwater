@@ -47,10 +47,6 @@ final class WeatherLookup {
 
     private(set) var state: State = .idle
 
-    /// Apple's legal attribution page, which must be reachable from anywhere
-    /// WeatherKit data is displayed. Fetched alongside the first reading.
-    private(set) var attributionURL: URL?
-
     private var lastRequestedCoordinate: Geo.Coordinate?
 
     /// The wind that was actually blowing while a session was recorded.
@@ -159,9 +155,6 @@ final class WeatherLookup {
                 condition: weather.condition.description,
                 retrievedAt: weather.date
             ))
-            if attributionURL == nil {
-                attributionURL = try? await WeatherService.shared.attribution.legalPageURL
-            }
         } catch {
             // Not fatal and not worth a dialog: the app's entire purpose works
             // without it. Say plainly that conditions are unavailable.
@@ -247,18 +240,12 @@ struct WeatherCard: View {
             Spacer(minLength: 0)
 
             // Attribution and retrieval time. Both required by WeatherKit's
-            // terms — the mark *and* a link to Apple's legal page, which is the
-            // half that was missing and is the kind of thing App Review
-            // rejects for — and both things a rider should see anyway: a wind
-            // reading with no timestamp is not much use.
+            // terms — the mark *and* a link to Apple's legal page — and both
+            // things a rider should see anyway: a wind reading with no
+            // timestamp is not much use.
             VStack(alignment: .trailing, spacing: 1) {
-                if let legal = lookup.attributionURL {
-                    Link(" Weather", destination: legal)
-                        .font(.system(size: 9))
-                } else {
-                    Text(" Weather")
-                        .font(.system(size: 9))
-                }
+                AppleWeatherAttribution()
+                    .font(.system(size: 9))
                 Text(conditions.retrievedAt.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 9))
             }

@@ -33,6 +33,19 @@ struct RecordedWindRow: View {
     @State private var lookup: Lookup = .idle
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            content
+            // The row's source is Apple Weather from the moment the button
+            // is offered, not only once data arrives — so the mark and legal
+            // link stand here before, during and after the lookup
+            // (Guideline 5.2.5).
+            AppleWeatherAttribution(showsLegalLabel: true, prefix: "Weather data provided by")
+                .font(.caption2)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch lookup {
         case .idle:
             Button {
@@ -40,6 +53,7 @@ struct RecordedWindRow: View {
             } label: {
                 Label("Use recorded conditions", systemImage: "cloud.sun")
             }
+            .buttonStyle(.borderless)
             .disabled(session == nil)
 
         case .loading:
@@ -56,10 +70,9 @@ struct RecordedWindRow: View {
                     systemImage: "checkmark.circle"
                 )
                 .foregroundStyle(.green)
-                // Attribution is required by WeatherKit's terms wherever its
-                // data is shown, and it doubles as the honest caveat: this is
-                // a forecast model for the area, not a reading from the beach.
-                Text("From  Weather for this spot and time. Edit above if it was not what you felt.")
+                // The honest caveat: this is a forecast model for the area,
+                // not a reading from the beach.
+                Text("From Apple Weather for this spot and time. Edit above if it was not what you felt.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -71,6 +84,9 @@ struct RecordedWindRow: View {
                 Text(reason)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                Button("Try again") { Task { await fetch() } }
+                    .buttonStyle(.borderless)
+                    .font(.caption2)
             }
         }
     }
@@ -108,14 +124,15 @@ struct RecordedWindRow: View {
 
     /// Turn WeatherKit's errors into something a rider can act on.
     ///
-    /// The common one by far is the app not having the WeatherKit capability on
-    /// its App ID, which surfaces as "WDSJWTAuthenticatorServiceListener error
-    /// 2" — true, and useless to everybody. It is also not the rider's problem
-    /// to solve, so it says so plainly rather than inviting them to try again.
+    /// The common one is Apple's service refusing to answer for this app —
+    /// "WDSJWTAuthenticatorServiceListener error 2" — which is true and
+    /// useless to everybody. It is Apple's side, not the rider's phone and
+    /// not this copy of the app, so the message says what still works
+    /// instead of pointing the finger anywhere the rider can reach.
     static func explain(_ error: Error) -> String {
         let text = error.localizedDescription
         if text.contains("WDSJWTAuthenticator") || text.contains("WeatherDaemon") {
-            return "Weather is not available in this build of openWater."
+            return "Apple Weather is not answering right now. Enter the wind you remember above, or try again later."
         }
         return text
     }

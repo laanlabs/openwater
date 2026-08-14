@@ -13,8 +13,15 @@ struct SettingsView: View {
     @State private var distanceProblem: String?
     @State private var justAdded: Double?
     @FocusState private var distanceFieldFocused: Bool
-    @State private var isExporting = false
-    @State private var exportURL: URL?
+    /// The written backup, once it exists. Identity is the path so
+    /// `sheet(item:)` can present it — a URL alone is not `Identifiable`.
+    private struct ExportedArchive: Identifiable {
+        let url: URL
+        var id: String { url.path }
+    }
+
+    @State private var exportedArchive: ExportedArchive?
+    @State private var exportProblem: String?
     @State private var recomputeMessage: String?
 
     var body: some View {
@@ -122,7 +129,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Your data")
                 } footer: {
-                    Text("Exports are complete — every sample and every channel, in the documented openWater format. Nothing about this app requires an account, and nothing leaves this device unless you send it.")
+                    Text("Exports are complete — every sample and every channel, in the documented openWater format. Nothing about this app requires an account, and nothing leaves this device unless you send it.\n\nTo restore a backup, or move it to a new phone, open the Sessions tab and choose + → Import…, then pick the exported file. Every session in it comes back.")
                 }
 
                 Section {
@@ -170,14 +177,22 @@ struct SettingsView: View {
             } message: {
                 Text(recomputeMessage ?? "")
             }
-            .sheet(isPresented: $isExporting) {
-                if let exportURL {
-                    ShareLink(item: exportURL) {
-                        Label("Export openWater archive", systemImage: "square.and.arrow.up")
-                    }
-                    .padding()
-                    .presentationDetents([.medium])
+            // Driven by the archive itself, not a separate flag. With
+            // `isPresented` plus an optional URL the sheet's body could
+            // evaluate before the URL write landed, and the `if let` fell
+            // through to a blank sheet. `sheet(item:)` cannot present without
+            // its content.
+            .sheet(item: $exportedArchive) { archive in
+                ShareLink(item: archive.url) {
+                    Label("Export openWater archive", systemImage: "square.and.arrow.up")
                 }
+                .padding()
+                .presentationDetents([.medium])
+            }
+            .alert("Export failed", isPresented: .constant(exportProblem != nil)) {
+                Button("OK") { exportProblem = nil }
+            } message: {
+                Text(exportProblem ?? "")
             }
         }
     }
@@ -311,10 +326,11 @@ struct SettingsView: View {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("openWater-backup.openwater")
             try data.write(to: url, options: .atomic)
-            exportURL = url
-            isExporting = true
+            exportedArchive = ExportedArchive(url: url)
         } catch {
-            exportURL = nil
+            // A backup that fails silently is worse than one that fails
+            // loudly — the rider walks away believing they have a copy.
+            exportProblem = error.localizedDescription
         }
     }
 }

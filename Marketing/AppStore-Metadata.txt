@@ -52,10 +52,15 @@ Secondary Category
 
 Editable without a new build — use it for seasonal or release messaging.
 
-    Every feature free: speed categories, foiling analysis, gybe stats,
-    splits, replay and a race countdown. No subscription, ever.
+No price words here — "free" included. App Review treats them as price
+references in metadata and rejects under Guideline 2.3.7; the description is
+the one field Apple sanctions for pricing talk, and it already says it there.
 
-    (131 characters)
+    Speed categories, foiling analysis, gybe stats, splits, replay and a
+    race countdown — plus live spot forecasts, tides and buoys. No account,
+    no server.
+
+    (151 characters)
 
 
 --------------------------------------------------------------------------
@@ -345,6 +350,19 @@ Permission strings shipping in the build:
     OPEN SOURCE
     Full source: https://github.com/laanlabs/openwater             [VERIFY]
 
+    WEATHERKIT / APPLE WEATHER (Guideline 5.2.5)
+    The app uses WeatherKit in two places, each showing the " Weather"
+    mark linked to https://weatherkit.apple.com/legal-attribution.html:
+    1. Saving or editing a session → "Use recorded conditions" — fills the
+       session's wind from Apple Weather's hourly history for that time and
+       place; the attribution sits directly under the result.
+    2. Settings → Weather — a live service-status reading.
+    A screen recording from a physical device showing both is attached per
+    the review request of Aug 14, 2026 (submission de7fc7ff). The wind on
+    the Record tab and everything in Spots (forecasts, buoys, tides) comes
+    from non-Apple sources (Open-Meteo, NOAA/NDBC), credited on their own
+    screens.
+
 Demo account          Not required
 Contact               [VERIFY — name, email, phone]
 
@@ -380,9 +398,14 @@ Order (most compelling first — most viewers never scroll past the third):
     3. Runs, unstacked              (Ribbon)
     4. Replay the whole session
     5. Angles, gybes and time on foil
-    6. Your record book
-    7. Progress that keeps moving   (trends)
-    8. Your data, your device
+    6. Know before you drive        (Spots)
+    7. Tools for the beach
+    8. One tap and you're riding    (Record)
+    9. Your data, your device
+
+No screenshot may show a price reference — "free" counts (Guideline 2.3.7,
+rejected for it Aug 2026). The composed panels carry no price words; keep it
+that way when editing Compose.swift.
 
 Regenerate the raw captures at any time with:
 
@@ -390,7 +413,7 @@ Regenerate the raw captures at any time with:
 
 Compose the marketing versions with:
 
-    Marketing/compose-screenshots.sh
+    Marketing/build-appstore-assets.sh
 
 
 --------------------------------------------------------------------------

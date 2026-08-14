@@ -34,12 +34,16 @@ struct Panel {
     var cta: String? = nil
 }
 
+// No price words anywhere on these panels — "free" included. App Review reads
+// any of them as a price reference in screenshots and rejects under Guideline
+// 2.3.7; pricing talk belongs in the description, which is the one metadata
+// field Apple sanctions for it.
 let panels: [Panel] = [
     Panel(
         source: "02-map",
         headline: "Every speed that counts",
         subhead: "2 s, 5 × 10 s, 500 m, alpha, nautical mile — and any distance you add",
-        cta: "Free · Open source · No account"
+        cta: "Open source · No account"
     ),
     Panel(
         source: "06-fullmap",
@@ -57,25 +61,30 @@ let panels: [Panel] = [
         subhead: "Speed heatmap, live readout, scrub to any moment"
     ),
     Panel(
-        source: "04-charts",
+        source: "04-analysis",
         headline: "Angles, gybes and time on foil",
         subhead: "Wind worked out from your own track — no signal needed"
     ),
     Panel(
-        source: "07-records",
-        headline: "Your record book",
-        subhead: "Personal bests across every category, all time"
+        source: "07-spots",
+        headline: "Know before you drive",
+        subhead: "Wind, swell, tide, buoys and cams for the spots you ride"
     ),
     Panel(
-        source: "08-trends",
-        headline: "Progress you can actually see",
-        subhead: "Dry gybes and time on foil keep climbing after speed plateaus"
+        source: "08-tools",
+        headline: "Tools for the beach",
+        subhead: "Float plan, shuttle planner, daylight, share your location"
+    ),
+    Panel(
+        source: "09-record",
+        headline: "One tap and you're riding",
+        subhead: "On your phone, or standalone on your Apple Watch"
     ),
     Panel(
         source: "01-sessions",
         headline: "No account. No server.",
         subhead: "Works offline, exports everything, open source",
-        cta: "Download openWater — free"
+        cta: "Download openWater"
     ),
 ]
 

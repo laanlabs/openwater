@@ -253,7 +253,7 @@ struct NearbyConditionsSheet: View {
         outlookCard
 
         section("REAL STATIONS NEARBY, FREE", trailing: {
-            mapLink("Wind stations", places: stationPlaces)
+            mapLink("Wind stations", places: stationPlaces, search: searchStations)
         }) {
             let shown = stations.filter { $0.metres <= radius }
             if shown.isEmpty {
@@ -275,7 +275,7 @@ struct NearbyConditionsSheet: View {
 
         let meters = within(resources.filter { $0.kind == .wind })
         section("WIND METERS IN THE GUIDE", trailing: {
-            mapLink("Wind stations", places: stationPlaces)
+            mapLink("Wind stations", places: stationPlaces, search: searchStations)
         }) {
             if meters.isEmpty {
                 note(isSearching ? "Looking…" : "No wind meters this close in the guide. Widen the search, or add one from Improve this spot.")
@@ -298,7 +298,13 @@ struct NearbyConditionsSheet: View {
     /// believe" is one question, and the answer should not depend on which
     /// list the station happened to be filed under.
     private var stationPlaces: [PlacesMapScreen.Place] {
-        let free = stations.filter { $0.metres <= radius }.map { station in
+        stationPlaces(free: stations.filter { $0.metres <= radius },
+                      meters: within(resources.filter { $0.kind == .wind }))
+    }
+
+    private func stationPlaces(free: [FreeStation],
+                               meters: [SpotGuideStore.GuideResource]) -> [PlacesMapScreen.Place] {
+        let free = free.map { station in
             PlacesMapScreen.Place(
                 id: "nws-\(station.id)",
                 name: station.name,
@@ -311,7 +317,7 @@ struct NearbyConditionsSheet: View {
                 url: station.url
             )
         }
-        let meters = within(resources.filter { $0.kind == .wind }).map { meter in
+        let meters = meters.map { meter in
             PlacesMapScreen.Place(
                 id: meter.id,
                 name: meter.displayName,
@@ -327,7 +333,13 @@ struct NearbyConditionsSheet: View {
 
     /// NOAA's tide stations and the guide's tide charts, one map.
     private var tidePlaces: [PlacesMapScreen.Place] {
-        let noaa = tides.filter { $0.metres <= radius }.map { station in
+        tidePlaces(noaa: tides.filter { $0.metres <= radius },
+                   charts: within(resources.filter { $0.kind == .tide }))
+    }
+
+    private func tidePlaces(noaa: [TideStation],
+                            charts: [SpotGuideStore.GuideResource]) -> [PlacesMapScreen.Place] {
+        let noaa = noaa.map { station in
             PlacesMapScreen.Place(
                 id: "noaa-\(station.id)",
                 name: station.name,
@@ -337,7 +349,7 @@ struct NearbyConditionsSheet: View {
                 url: station.url
             )
         }
-        let charts = within(resources.filter { $0.kind == .tide }).map { chart in
+        let charts = charts.map { chart in
             PlacesMapScreen.Place(
                 id: chart.id,
                 name: chart.displayName,
@@ -353,7 +365,11 @@ struct NearbyConditionsSheet: View {
 
     /// The guide's surf pages for this stretch of coast.
     private var surfPlaces: [PlacesMapScreen.Place] {
-        within(resources.filter { $0.kind == .surf }).map { page in
+        surfPlaces(from: within(resources.filter { $0.kind == .surf }))
+    }
+
+    private func surfPlaces(from pages: [SpotGuideStore.GuideResource]) -> [PlacesMapScreen.Place] {
+        pages.map { page in
             PlacesMapScreen.Place(
                 id: page.id,
                 name: page.displayName,
@@ -368,7 +384,11 @@ struct NearbyConditionsSheet: View {
 
     /// The guide's cams, pinned where they point — and watched in the app.
     private var camPlaces: [PlacesMapScreen.Place] {
-        within(resources.filter { $0.kind == .camera }).map { cam in
+        camPlaces(from: within(resources.filter { $0.kind == .camera }))
+    }
+
+    private func camPlaces(from cams: [SpotGuideStore.GuideResource]) -> [PlacesMapScreen.Place] {
+        cams.map { cam in
             PlacesMapScreen.Place(
                 id: cam.id,
                 name: cam.displayName,
@@ -382,13 +402,73 @@ struct NearbyConditionsSheet: View {
         }
     }
 
+    // MARK: - Search this area
+
+    // The maps open on what was fetched around this sheet's own point. When
+    // the rider pans to the next bay, these repeat the relevant fetch around
+    // wherever the map is looking — the same sources, a new centre. The
+    // radius slider deliberately does not gate these: a rider who has panned
+    // three bays over has already said the slider's answer is not the one
+    // they want.
+
+    private func searchStations(near centre: Geo.Coordinate) async -> [PlacesMapScreen.Place] {
+        async let guided = guide.nearbyResources(near: centre, radius: Self.maxRadius)
+        var free = await NationalWeatherService.stations(near: centre, limit: 15)
+        // The same fill the sheet does: a station is only worth a pin if it
+        // is reporting, and the reading is what the pin wears.
+        await withTaskGroup(of: (String, StationObservation?).self) { group in
+            for station in free {
+                group.addTask { (station.id, await NationalWeatherService.latest(for: station.id)) }
+            }
+            for await (id, observation) in group {
+                guard let at = free.firstIndex(where: { $0.id == id }) else { continue }
+                free[at].observation = observation
+            }
+        }
+        free.removeAll { $0.observation == nil }
+        return await stationPlaces(free: free, meters: guided.filter { $0.kind == .wind })
+    }
+
+    private func searchTides(near centre: Geo.Coordinate) async -> [PlacesMapScreen.Place] {
+        async let noaa = TidesAndCurrents.stations(near: centre)
+        async let guided = guide.nearbyResources(near: centre, radius: Self.maxRadius)
+        return await tidePlaces(noaa: noaa, charts: guided.filter { $0.kind == .tide })
+    }
+
+    private func searchSurf(near centre: Geo.Coordinate) async -> [PlacesMapScreen.Place] {
+        surfPlaces(from: await guide.nearbyResources(near: centre, radius: Self.maxRadius)
+            .filter { $0.kind == .surf })
+    }
+
+    private func searchCams(near centre: Geo.Coordinate) async -> [PlacesMapScreen.Place] {
+        camPlaces(from: await guide.nearbyResources(near: centre, radius: Self.maxRadius)
+            .filter { $0.kind == .camera })
+    }
+
+    private func searchBuoys(near centre: Geo.Coordinate) async -> [Buoy] {
+        var found = await DataBuoyCenter.buoys(near: centre, limit: 14, radius: Self.maxRadius)
+        await withTaskGroup(of: (String, BuoyReading?).self) { group in
+            for buoy in found {
+                group.addTask { (buoy.id, await DataBuoyCenter.latest(for: buoy.id)) }
+            }
+            for await (id, reading) in group {
+                guard let at = found.firstIndex(where: { $0.id == id }) else { continue }
+                found[at].reading = reading
+            }
+        }
+        // Reporting ones only, but no prefix(3) here — three is a list's
+        // budget, and a map has room for every buoy that answers.
+        return found.filter { $0.reading != nil }
+    }
+
     /// The little map beside a section title, when the section has places
     /// worth seeing on one.
     @ViewBuilder
-    private func mapLink(_ title: String, places: [PlacesMapScreen.Place]) -> some View {
+    private func mapLink(_ title: String, places: [PlacesMapScreen.Place],
+                         search: ((Geo.Coordinate) async -> [PlacesMapScreen.Place])? = nil) -> some View {
         if !places.isEmpty {
             NavigationLink {
-                PlacesMapScreen(title: title, places: places, from: coordinate)
+                PlacesMapScreen(title: title, places: places, from: coordinate, search: search)
             } label: {
                 Label("Map", systemImage: "map")
                     .font(.caption2.weight(.semibold))
@@ -899,7 +979,7 @@ struct NearbyConditionsSheet: View {
         }
 
         section("TIDE STATIONS", trailing: {
-            mapLink("Tide stations", places: tidePlaces)
+            mapLink("Tide stations", places: tidePlaces, search: searchTides)
         }) {
             let shownTides = tides.filter { $0.metres <= radius }
             if shownTides.isEmpty {
@@ -1047,7 +1127,7 @@ struct NearbyConditionsSheet: View {
         section("BUOYS", trailing: {
             if !mappableBuoys.isEmpty {
                 NavigationLink {
-                    BuoyMapScreen(buoys: mappableBuoys, from: coordinate)
+                    BuoyMapScreen(buoys: mappableBuoys, from: coordinate, search: searchBuoys)
                 } label: {
                     Label("Map", systemImage: "map")
                         .font(.caption2.weight(.semibold))
@@ -1075,7 +1155,7 @@ struct NearbyConditionsSheet: View {
         let allSurfLinks = resources.filter { $0.kind == .surf }
         let surfLinks = within(allSurfLinks)
         section("SURF FORECASTS IN THE GUIDE", trailing: {
-            mapLink("Surf pages", places: surfPlaces)
+            mapLink("Surf pages", places: surfPlaces, search: searchSurf)
         }) {
             if surfLinks.isEmpty {
                 // Say how far the nearest one is rather than only that there
@@ -1258,7 +1338,7 @@ struct NearbyConditionsSheet: View {
     @ViewBuilder
     private var camsTab: some View {
         section("CAMS IN THE GUIDE", trailing: {
-            mapLink("Cams", places: camPlaces)
+            mapLink("Cams", places: camPlaces, search: searchCams)
         }) {
             list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
         }

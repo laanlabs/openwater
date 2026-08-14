@@ -135,9 +135,20 @@ struct BuoyMapScreen: View {
 
     let buoys: [Buoy]
     let from: Geo.Coordinate
+    /// Fetch the buoys around a new centre, once the rider pans away.
+    var search: ((Geo.Coordinate) async -> [Buoy])? = nil
 
     @Environment(AppSettings.self) private var settings
     @State private var chosen: Buoy?
+    /// What "Search this area" found, shown in place of the originals.
+    @State private var refreshed: [Buoy]?
+
+    /// The fetch dressed for the modifier: nil stays nil, so the button
+    /// never appears on a map with nothing to refetch.
+    private var areaSearch: ((Geo.Coordinate) async -> Void)? {
+        guard let search else { return nil }
+        return { centre in refreshed = await search(centre) }
+    }
 
     var body: some View {
         Map {
@@ -147,7 +158,7 @@ struct BuoyMapScreen: View {
                     .frame(width: 14, height: 14)
                     .overlay(Circle().stroke(.white, lineWidth: 2))
             }
-            ForEach(buoys) { buoy in
+            ForEach(refreshed ?? buoys) { buoy in
                 Annotation(buoy.name, coordinate: buoy.coordinate.clCoordinate) {
                     Button { chosen = buoy } label: {
                         BuoyPin(waveHeightM: buoy.reading?.waveHeightM,
@@ -158,6 +169,7 @@ struct BuoyMapScreen: View {
             }
         }
         .mapStyle(.standard(elevation: .flat))
+        .searchThisArea(areaSearch)
         .navigationTitle("Buoys nearby")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Buoys nearby")
@@ -204,10 +216,22 @@ struct PlacesMapScreen: View {
     let title: String
     let places: [Place]
     let from: Geo.Coordinate
+    /// Fetch this map's kind of places around a new centre, once the rider
+    /// pans away from where the originals were gathered.
+    var search: ((Geo.Coordinate) async -> [Place])? = nil
 
     @Environment(\.openURL) private var openURL
     @State private var chosen: Place?
     @State private var watching: Place?
+    /// What "Search this area" found, shown in place of the originals.
+    @State private var refreshed: [Place]?
+
+    /// The fetch dressed for the modifier: nil stays nil, so the button
+    /// never appears on a map with nothing to refetch.
+    private var areaSearch: ((Geo.Coordinate) async -> Void)? {
+        guard let search else { return nil }
+        return { centre in refreshed = await search(centre) }
+    }
 
     var body: some View {
         Map {
@@ -217,7 +241,7 @@ struct PlacesMapScreen: View {
                     .frame(width: 14, height: 14)
                     .overlay(Circle().stroke(.white, lineWidth: 2))
             }
-            ForEach(places) { place in
+            ForEach(refreshed ?? places) { place in
                 Annotation(place.name, coordinate: place.coordinate.clCoordinate) {
                     Button { chosen = place } label: {
                         PlacePin(symbol: place.symbol, text: place.pinText, tint: place.tint)
@@ -227,6 +251,7 @@ struct PlacesMapScreen: View {
             }
         }
         .mapStyle(.standard(elevation: .flat))
+        .searchThisArea(areaSearch)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Places map")
@@ -263,6 +288,123 @@ struct PlacesMapScreen: View {
                 CamViewerSheet(name: place.name, url: url)
             }
         }
+    }
+}
+
+// MARK: - Search this area
+
+/// The "redo the search where I'm looking" mechanic, shared by the maps
+/// that show fetched places.
+///
+/// Every map here opens on results gathered around one point. The moment the
+/// rider pans down the coast or zooms out past the fetch radius, the pins
+/// stop describing what the screen shows — and nothing says so. The fix is
+/// the one Maps taught everyone: a button appears once the view has
+/// wandered, and tapping it repeats the search around wherever the map is
+/// looking now.
+private struct SearchThisArea: ViewModifier {
+
+    /// Repeat the search around this centre and swap in what it finds.
+    /// Nil disables the mechanic entirely — a caller with nothing sensible
+    /// to refetch never shows the button.
+    let perform: ((Geo.Coordinate) async -> Void)?
+
+    /// The framing the current results were gathered for. Drift is measured
+    /// against this, and it rebases every time a search runs. Nil until the
+    /// camera first settles — the map decides its own opening frame, and
+    /// that frame is the baseline, not the coordinate the pins came from.
+    @State private var searched: MKCoordinateRegion?
+    @State private var visible: MKCoordinateRegion?
+    @State private var isOffered = false
+    @State private var isSearching = false
+
+    func body(content: Content) -> some View {
+        content
+            .onMapCameraChange(frequency: .onEnd) { context in
+                visible = context.region
+                guard let searched else {
+                    searched = context.region
+                    return
+                }
+                withAnimation(.snappy) {
+                    isOffered = hasDrifted(from: searched, to: context.region)
+                }
+            }
+            .overlay(alignment: .top) {
+                if isOffered, perform != nil {
+                    button
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+    }
+
+    private var button: some View {
+        Button {
+            Task { await search() }
+        } label: {
+            HStack(spacing: 6) {
+                if isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                }
+                Text(isSearching ? "Searching…" : "Search this area")
+                    .font(.callout.weight(.semibold))
+            }
+            .foregroundStyle(.tint)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().stroke(Color(.separator).opacity(0.5), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSearching)
+    }
+
+    /// Far enough that the results no longer describe the view: the centre
+    /// has moved a quarter of the screen in either axis, or the zoom has
+    /// changed by half. Measured in fractions of the *visible* span, so the
+    /// same finger's travel means the same thing at every zoom.
+    private func hasDrifted(from searched: MKCoordinateRegion,
+                            to region: MKCoordinateRegion) -> Bool {
+        let dLat = abs(region.center.latitude - searched.center.latitude)
+        let dLon = abs(region.center.longitude - searched.center.longitude)
+        if dLat > region.span.latitudeDelta * 0.25 || dLon > region.span.longitudeDelta * 0.25 {
+            return true
+        }
+        let scale = region.span.latitudeDelta / searched.span.latitudeDelta
+        return scale > 1.5 || scale < 0.66
+    }
+
+    private func search() async {
+        guard let perform, let region = visible else { return }
+        withAnimation(.snappy) { isSearching = true }
+        // The same beat the wind setter holds: a fetch that answers within
+        // a frame reads as a button that did nothing.
+        let started = ContinuousClock.now
+        await perform(Geo.Coordinate(latitude: region.center.latitude,
+                                     longitude: region.center.longitude))
+        let elapsed = started.duration(to: .now)
+        if elapsed < .seconds(1) {
+            try? await Task.sleep(for: .seconds(1) - elapsed)
+        }
+        withAnimation(.snappy) {
+            searched = region
+            isOffered = false
+            isSearching = false
+        }
+    }
+}
+
+extension View {
+    /// Offer a "Search this area" button over a `Map` once its camera has
+    /// wandered from the view the current results were fetched for.
+    func searchThisArea(_ perform: ((Geo.Coordinate) async -> Void)?) -> some View {
+        modifier(SearchThisArea(perform: perform))
     }
 }
 

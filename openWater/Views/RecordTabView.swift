@@ -52,9 +52,9 @@ struct RecordTabView: View {
     /// The session just saved, awaiting its debrief.
     @State private var reviewing: StoredSession?
 
-    /// Owned here, not by `WeatherCard`, because the card draws nothing until a
-    /// reading arrives and SwiftUI will not run a `task` attached to a view that
-    /// resolves to `EmptyView`. See the note on `WeatherCard`.
+    /// The model wind at the launch, as fetched. `recorder.wind` may hold the
+    /// rider's correction on top of it; this keeps what the forecast said, so
+    /// the wind setter can start from it when there is nothing else.
     @State private var launchWind: WindReading?
     @State private var launchSpotName: String?
     @State private var isSettingWind = false
@@ -164,7 +164,7 @@ struct RecordTabView: View {
             controls
                 .padding(.bottom, tabBarHeight)
         }
-        .task(id: WeatherCard.coordinateKey(recorder.location.lastCoordinate)) {
+        .task(id: Self.coordinateKey(recorder.location.lastCoordinate)) {
             await loadLaunchWind()
         }
         .sheet(isPresented: $isSettingWind) {
@@ -178,6 +178,14 @@ struct RecordTabView: View {
                 recorder.swellDirection = swellFrom
             }
         }
+    }
+
+    /// Re-runs the launch-wind lookup when the position changes meaningfully,
+    /// not on every fix. `task(id:)` compares this key, so it is rounded —
+    /// about a kilometre, comfortably inside the grid the forecast comes on.
+    private static func coordinateKey(_ coordinate: Geo.Coordinate?) -> String {
+        guard let coordinate else { return "none" }
+        return String(format: "%.2f,%.2f", coordinate.latitude, coordinate.longitude)
     }
 
     /// The model wind at the launch, named after the nearest guide spot.

@@ -1278,6 +1278,19 @@ enum NationalWeatherService {
 
     private static let agent = "openWater/1.0 (openwaterapp.com; support@openwaterapp.com)"
 
+    /// Marine and PORTS stations are readable through the NWS observation API,
+    /// but are not consistently returned by the forecast-office `/points/.../stations`
+    /// lookup. Keep the active New York Harbor network in discovery so those real
+    /// anemometers are not hidden behind nearby airport stations.
+    private static let supplementalStations: [(id: String, name: String, coordinate: Geo.Coordinate)] = [
+        ("ROBN4", "Robbins Reef", .init(latitude: 40.657, longitude: -74.065)),
+        ("BATN6", "The Battery", .init(latitude: 40.701, longitude: -74.014)),
+        ("MHRN6", "Mariners Harbor", .init(latitude: 40.641, longitude: -74.162)),
+        ("SDHN4", "Sandy Hook", .init(latitude: 40.467, longitude: -74.009)),
+        ("KPTN6", "Kings Point", .init(latitude: 40.811, longitude: -73.765)),
+        ("44065", "New York Harbor Entrance Buoy", .init(latitude: 40.368, longitude: -73.701)),
+    ]
+
     private static func get(_ url: URL) async -> Data? {
         var request = URLRequest(url: url)
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
@@ -1315,7 +1328,7 @@ enum NationalWeatherService {
             return []
         }
 
-        return features
+        let forecastOfficeStations = features
             .compactMap { feature -> FreeStation? in
                 guard let id = feature.properties?.stationIdentifier,
                       let pair = feature.geometry?.coordinates, pair.count >= 2
@@ -1330,6 +1343,23 @@ enum NationalWeatherService {
                     metres: Geo.distance(coordinate, here)
                 )
             }
+
+        // The normal lookup can occasionally include one of these itself. Merge
+        // by station identifier so it never creates a duplicate pin.
+        let returnedIds = Set(forecastOfficeStations.map(\.id))
+        let supplements = supplementalStations.compactMap { station -> FreeStation? in
+            guard !returnedIds.contains(station.id) else { return nil }
+            let metres = Geo.distance(coordinate, station.coordinate)
+            guard metres <= 160_000 else { return nil }
+            return FreeStation(
+                id: station.id,
+                name: station.name,
+                coordinate: station.coordinate,
+                metres: metres
+            )
+        }
+
+        return (forecastOfficeStations + supplements)
             .sorted { $0.metres < $1.metres }
             .prefix(limit)
             .map { $0 }

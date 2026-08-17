@@ -413,12 +413,12 @@ struct NearbyConditionsSheet: View {
 
     private func searchStations(near centre: Geo.Coordinate) async -> [PlacesMapScreen.Place] {
         async let guided = guide.nearbyResources(near: centre, radius: Self.maxRadius)
-        var free = await NationalWeatherService.stations(near: centre, limit: 15)
+        var free = await FreeStations.near(centre, limit: 15, radius: Self.maxRadius)
         // The same fill the sheet does: a station is only worth a pin if it
         // is reporting, and the reading is what the pin wears.
         await withTaskGroup(of: (String, StationObservation?).self) { group in
             for station in free {
-                group.addTask { (station.id, await NationalWeatherService.latest(for: station.id)) }
+                group.addTask { (station.id, await FreeStations.latest(for: station)) }
             }
             for await (id, observation) in group {
                 guard let at = free.firstIndex(where: { $0.id == id }) else { continue }
@@ -1513,7 +1513,7 @@ struct NearbyConditionsSheet: View {
         let here = coordinate
 
         async let nearby = findResources(here)
-        async let found = NationalWeatherService.stations(near: here, limit: 15)
+        async let found = FreeStations.near(here, limit: 15, radius: Self.maxRadius)
         async let air = findWeather(here)
         async let blowing = findWind(here)
         async let warnings = NationalWeatherService.alerts(at: here)
@@ -1582,7 +1582,7 @@ struct NearbyConditionsSheet: View {
 
         await withTaskGroup(of: (String, StationObservation?).self) { group in
             for station in stations {
-                group.addTask { (station.id, await NationalWeatherService.latest(for: station.id)) }
+                group.addTask { (station.id, await FreeStations.latest(for: station)) }
             }
             for await (id, observation) in group {
                 guard let index = stations.firstIndex(where: { $0.id == id }) else { continue }

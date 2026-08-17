@@ -1239,19 +1239,41 @@ enum OpenMeteo {
 /// airfields, road-weather sensors, marine buoys — and near a lot of launches
 /// one of them is close enough to be worth a look before paying for anything.
 ///
-/// `api.weather.gov` is free, keyless, and United States only. Outside it this
-/// simply finds nothing, and the sheet says so rather than pretending.
+/// They arrive from two of NOAA's networks, which `FreeStations` merges: the
+/// forecast office's list and the buoy centre's index. Both are free, keyless,
+/// and effectively United States only. Outside it this finds close to nothing,
+/// and the sheet says so rather than pretending.
 struct FreeStation: Identifiable, Hashable {
+    /// Which of the two free networks answers for this one.
+    ///
+    /// It decides where the reading is read from and which page a rider is
+    /// sent to, and those differ enough to be worth carrying: the forecast
+    /// office publishes JSON observations and a timeseries page, the buoy
+    /// centre publishes a fixed-width text file and a station page.
+    enum Source: Hashable {
+        case weatherService
+        case dataBuoyCenter
+    }
+
     let id: String
     let name: String
     let coordinate: Geo.Coordinate
     let metres: Double
+    var source: Source = .weatherService
 
     /// Filled in lazily — the list arrives first, readings trickle in after.
     var observation: StationObservation?
 
     var url: URL {
-        URL(string: "https://www.weather.gov/wrh/timeseries?site=\(id)")!
+        switch source {
+        case .weatherService:
+            URL(string: "https://www.weather.gov/wrh/timeseries?site=\(id)")!
+        case .dataBuoyCenter:
+            // Lower case, to match the ids the index publishes: the station
+            // page is where a rider goes to see the last day of this sensor,
+            // and the timeseries page has nothing for these.
+            URL(string: "https://www.ndbc.noaa.gov/station_page.php?station=\(id.lowercased())")!
+        }
     }
 }
 
@@ -1270,6 +1292,55 @@ struct StationObservation: Hashable {
     }
 }
 
+/// Every free anemometer near a point, from both of the networks that have
+/// one — which is the question the sheet is actually asking.
+///
+/// NOAA publishes these in two places that do not know about each other. The
+/// forecast office's station list is the obvious one and is mostly airfields;
+/// the buoy centre's index is the one with the piers, bridges, light towers and
+/// PORTS masts, standing in the water people sail on. Asking only the first,
+/// which is what this app did, means a rider at the Battery is shown Newark
+/// airport while an anemometer 400 m away goes unmentioned — and the same at
+/// Fort Point, Annapolis, Puget Sound and every other PORTS coast.
+///
+/// So both are asked, merged by identifier, and sorted by distance together. A
+/// station is a station; which agency happens to file it is not the rider's
+/// problem.
+enum FreeStations {
+
+    /// Nearest first, capped at `limit` across both networks.
+    ///
+    /// The cap is applied after the merge, so a marine station close to the
+    /// launch takes the slot of an airfield far from it. That is the trade
+    /// this is for: the far end of a distance-sorted list is the part nobody
+    /// reads.
+    static func near(_ coordinate: Geo.Coordinate, limit: Int = 8,
+                     radius: Double = 250_000) async -> [FreeStation] {
+        async let office = NationalWeatherService.stations(near: coordinate, limit: limit)
+        async let marine = DataBuoyCenter.metStations(near: coordinate, limit: limit, radius: radius)
+
+        let stations = await office
+        // A handful of buoy-centre stations do reach the forecast office's
+        // list — SFOC1 at San Francisco is one — so the merge is by identifier
+        // rather than by hope. Case-folded: the two agencies disagree about it.
+        let known = Set(stations.map { $0.id.uppercased() })
+        let supplements = await marine.filter { !known.contains($0.id.uppercased()) }
+
+        return (stations + supplements)
+            .sorted { $0.metres < $1.metres }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// The station's own network answers for it.
+    static func latest(for station: FreeStation) async -> StationObservation? {
+        switch station.source {
+        case .weatherService: await NationalWeatherService.latest(for: station.id)
+        case .dataBuoyCenter: await DataBuoyCenter.windReading(for: station.id)
+        }
+    }
+}
+
 /// Reads NOAA's public observation network.
 ///
 /// NWS asks every caller to identify itself in `User-Agent` and will refuse
@@ -1277,26 +1348,6 @@ struct StationObservation: Hashable {
 enum NationalWeatherService {
 
     private static let agent = "openWater/1.0 (openwaterapp.com; support@openwaterapp.com)"
-
-    /// Marine and PORTS stations are readable through the NWS observation API,
-    /// but are not consistently returned by the forecast-office `/points/.../stations`
-    /// lookup. Keep the active New York Harbor network in discovery so those real
-    /// anemometers are not hidden behind nearby airport stations.
-    ///
-    /// Only the three that report wind and nothing else are listed. The Battery,
-    /// Sandy Hook and the harbour entrance buoy sit on the same water and are just
-    /// as missing from this lookup, but they carry water temperature too, so
-    /// `DataBuoyCenter` already surfaces them in the buoy list — naming them here
-    /// as well would show one anemometer twice under two different names.
-    ///
-    /// Which is the shape of the real bug: every PORTS coast has this hole, and
-    /// what decides whether a sensor reaches the screen today is `latest(for:)`
-    /// wanting sea state rather than anything about the harbour.
-    private static let supplementalStations: [(id: String, name: String, coordinate: Geo.Coordinate)] = [
-        ("ROBN4", "Robbins Reef", .init(latitude: 40.657, longitude: -74.065)),
-        ("MHRN6", "Mariner Harbor", .init(latitude: 40.641, longitude: -74.162)),
-        ("KPTN6", "Kings Point", .init(latitude: 40.811, longitude: -73.765)),
-    ]
 
     private static func get(_ url: URL) async -> Data? {
         var request = URLRequest(url: url)
@@ -1335,7 +1386,7 @@ enum NationalWeatherService {
             return []
         }
 
-        let forecastOfficeStations = features
+        return features
             .compactMap { feature -> FreeStation? in
                 guard let id = feature.properties?.stationIdentifier,
                       let pair = feature.geometry?.coordinates, pair.count >= 2
@@ -1350,23 +1401,6 @@ enum NationalWeatherService {
                     metres: Geo.distance(coordinate, here)
                 )
             }
-
-        // The normal lookup can occasionally include one of these itself. Merge
-        // by station identifier so it never creates a duplicate pin.
-        let returnedIds = Set(forecastOfficeStations.map(\.id))
-        let supplements = supplementalStations.compactMap { station -> FreeStation? in
-            guard !returnedIds.contains(station.id) else { return nil }
-            let metres = Geo.distance(coordinate, station.coordinate)
-            guard metres <= 160_000 else { return nil }
-            return FreeStation(
-                id: station.id,
-                name: station.name,
-                coordinate: station.coordinate,
-                metres: metres
-            )
-        }
-
-        return (forecastOfficeStations + supplements)
             .sorted { $0.metres < $1.metres }
             .prefix(limit)
             .map { $0 }
@@ -1691,7 +1725,48 @@ struct BuoyReading: Hashable {
 /// NOAA's National Data Buoy Center. Free, keyless, fixed-width text.
 enum DataBuoyCenter {
 
-    private static var cached: [(id: String, name: String, coordinate: Geo.Coordinate)] = []
+    /// One row of the index: what a station is called and where it stands.
+    private typealias Station = (id: String, name: String, coordinate: Geo.Coordinate)
+
+    private static var cached: [Station] = []
+    private static var loading: Task<[Station], Never>?
+
+    /// The same index, read as anemometers rather than as buoys.
+    ///
+    /// Most of what NDBC calls a station is not a hull in the ocean: a good
+    /// share of the network is piers, bridges, light towers and PORTS masts,
+    /// standing in exactly the water people launch into. The forecast office's
+    /// `/points/.../stations` list does not carry them — it answers with
+    /// airfields — so without this the nearest real anemometer to a launch is
+    /// routinely invisible while an airport 20 km inland is offered instead.
+    ///
+    /// Which of the two lists one of these lands in is decided by what it
+    /// reports rather than by what it is called: see `windReading(for:)`.
+    static func metStations(near coordinate: Geo.Coordinate, limit: Int,
+                            radius: Double = 250_000) async -> [FreeStation] {
+        let index = await loadIndex()
+        return index
+            .map { (station: $0, metres: Geo.distance(coordinate, $0.coordinate)) }
+            .filter { $0.metres < radius }
+            .sorted { $0.metres < $1.metres }
+            .prefix(limit)
+            .map { FreeStation(id: $0.station.id.uppercased(),
+                               name: displayName($0.station.name),
+                               coordinate: $0.station.coordinate,
+                               metres: $0.metres,
+                               source: .dataBuoyCenter) }
+    }
+
+    /// The index names NOS stations "8518750 - The Battery, NY". The number is
+    /// the tide-gauge id and means nothing to a rider, so a row says "The
+    /// Battery, NY" and the id travels in `FreeStation.id` where it is used.
+    private static func displayName(_ raw: String) -> String {
+        guard let separator = raw.range(of: " - "),
+              raw[..<separator.lowerBound].allSatisfy(\.isNumber),
+              !raw[separator.upperBound...].isEmpty
+        else { return raw }
+        return String(raw[separator.upperBound...])
+    }
 
     static func buoys(near coordinate: Geo.Coordinate, limit: Int = 3,
                       radius: Double = 150_000) async -> [Buoy] {
@@ -1705,6 +1780,67 @@ enum DataBuoyCenter {
                         metres: $0.metres, coordinate: $0.station.coordinate) }
     }
 
+    /// Where every station is, kept for a month.
+    ///
+    /// Two lists on the sheet are now built from this — the buoys and the
+    /// marine half of the stations — so it is worth being careful about. It is
+    /// 270 KB of XML describing hardware bolted to piers and moored to the
+    /// seabed: NOAA commissions and retires a few a year and the rest do not
+    /// move, so re-reading it on every launch would be paying a download for
+    /// news that arrives about as often as a new bridge. Boiled down to what we
+    /// use and kept on disk beside the tide index, refreshed monthly, and used
+    /// stale rather than not at all when the network says no.
+    ///
+    /// Nothing here is a *reading*. Those are never cached: they come live from
+    /// NOAA every time, because the whole point of the row is that it is what
+    /// the sensor is saying now.
+    private static let maxAge: TimeInterval = 30 * 24 * 3600
+
+    private static var cacheURL: URL {
+        URL.cachesDirectory.appending(path: "ndbc-stations.json")
+    }
+
+    private struct Distilled: Codable {
+        let id: String
+        let name: String
+        let latitude: Double
+        let longitude: Double
+    }
+
+    private static func loadIndex() async -> [Station] {
+        if !cached.isEmpty { return cached }
+
+        // Both lists ask for this at the same moment on every search, and on a
+        // cold cache that used to be two downloads of the same file. Whoever
+        // asks first starts the work; everyone else waits on it.
+        if let loading { return await loading.value }
+
+        let task = Task { () -> [Station] in
+            let onDisk = fromDisk()
+            if let onDisk, onDisk.age < maxAge { return onDisk.stations }
+            if let fetched = await download(), !fetched.isEmpty { return fetched }
+            // A month-old copy of where the piers are is a fine answer, and a
+            // far better one than a sheet claiming there is nothing out here.
+            return onDisk?.stations ?? []
+        }
+        loading = task
+        cached = await task.value
+        loading = nil
+        return cached
+    }
+
+    private static func fromDisk() -> (stations: [Station], age: TimeInterval)? {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let rows = try? JSONDecoder().decode([Distilled].self, from: data),
+              !rows.isEmpty
+        else { return nil }
+        let written = (try? cacheURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate ?? .distantPast
+        return (rows.map { ($0.id, $0.name, Geo.Coordinate(latitude: $0.latitude,
+                                                           longitude: $0.longitude)) },
+                Date().timeIntervalSince(written))
+    }
+
     /// The index is XML with everything on the attributes of one tag, so each
     /// `<station …/>` is matched whole and its attributes read by name —
     /// robust to the order they come in, which does vary.
@@ -1713,19 +1849,18 @@ enum DataBuoyCenter {
     /// and a good share are water-quality or current platforms with no
     /// meteorological feed at all; taking the nearest three regardless meant
     /// three 404s and an empty list that then claimed there were no buoys.
-    private static func loadIndex() async -> [(id: String, name: String, coordinate: Geo.Coordinate)] {
-        if !cached.isEmpty { return cached }
+    private static func download() async -> [Station]? {
         guard let url = URL(string: "https://www.ndbc.noaa.gov/activestations.xml"),
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let xml = String(data: data, encoding: .utf8),
               let regex = try? NSRegularExpression(pattern: #"<station\b[^>]*>"#)
-        else { return [] }
+        else { return nil }
 
         let text = xml as NSString
-        cached = regex
+        let rows = regex
             .matches(in: xml, range: NSRange(location: 0, length: text.length))
-            .compactMap { match -> (String, String, Geo.Coordinate)? in
+            .compactMap { match -> Distilled? in
                 let tag = text.substring(with: match.range)
                 guard attribute("met", in: tag) == "y",
                       let id = attribute("id", in: tag),
@@ -1733,9 +1868,13 @@ enum DataBuoyCenter {
                       let lat = attribute("lat", in: tag).flatMap(Double.init),
                       let lon = attribute("lon", in: tag).flatMap(Double.init)
                 else { return nil }
-                return (id, name, Geo.Coordinate(latitude: lat, longitude: lon))
+                return Distilled(id: id, name: name, latitude: lat, longitude: lon)
             }
-        return cached
+        if let encoded = try? JSONEncoder().encode(rows) {
+            try? encoded.write(to: cacheURL, options: .atomic)
+        }
+        return rows.map { ($0.id, $0.name, Geo.Coordinate(latitude: $0.latitude,
+                                                          longitude: $0.longitude)) }
     }
 
     private static func attribute(_ name: String, in tag: String) -> String? {
@@ -1749,7 +1888,35 @@ enum DataBuoyCenter {
     ///
     /// Fixed-width columns after two `#` header lines, with `MM` for a sensor
     /// that is not reporting — which is common, so every field is optional.
-    static func latest(for stationId: String) async -> BuoyReading? {
+    private struct RealtimeRow {
+        // YY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES ATMP WTMP
+        //  0  1  2  3  4    5    6   7    8   9  10  11   12   13   14
+        let columns: [String]
+
+        func value(_ index: Int) -> Double? {
+            guard let raw = columns[safe: index], raw != "MM" else { return nil }
+            return Double(raw)
+        }
+
+        /// Knots from the metres per second the file publishes.
+        func knots(_ index: Int) -> Double? {
+            value(index).map { $0 * 3600 / 1852 }
+        }
+
+        var at: Date? {
+            var stamp = DateComponents()
+            stamp.year = value(0).map(Int.init)
+            stamp.month = value(1).map(Int.init)
+            stamp.day = value(2).map(Int.init)
+            stamp.hour = value(3).map(Int.init)
+            stamp.minute = value(4).map(Int.init)
+            var utc = Calendar(identifier: .gregorian)
+            utc.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+            return utc.date(from: stamp)
+        }
+    }
+
+    private static func latestRow(for stationId: String) async -> RealtimeRow? {
         // Uppercase, always. The index lists shore stations in lower case
         // ("pxoc1") and the data files are upper ("PXOC1.txt"); numeric buoy
         // ids are unaffected, which is why this only showed up once the
@@ -1764,29 +1931,19 @@ enum DataBuoyCenter {
         guard let first = rows.first else { return nil }
         let columns = first.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard columns.count >= 15 else { return nil }
+        return RealtimeRow(columns: columns)
+    }
 
-        func value(_ index: Int) -> Double? {
-            guard let raw = columns[safe: index], raw != "MM" else { return nil }
-            return Double(raw)
-        }
-        // YY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES ATMP WTMP
-        //  0  1  2  3  4    5    6   7    8   9  10  11   12   13   14
-        var stamp = DateComponents()
-        stamp.year = value(0).map(Int.init)
-        stamp.month = value(1).map(Int.init)
-        stamp.day = value(2).map(Int.init)
-        stamp.hour = value(3).map(Int.init)
-        stamp.minute = value(4).map(Int.init)
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+    static func latest(for stationId: String) async -> BuoyReading? {
+        guard let row = await latestRow(for: stationId) else { return nil }
 
         let reading = BuoyReading(
-            waveHeightM: value(8),
-            dominantPeriodS: value(9),
-            meanDirectionDeg: value(11),
-            waterTempC: value(14),
-            windKn: value(6).map { $0 * 3600 / 1852 },
-            at: utc.date(from: stamp)
+            waveHeightM: row.value(8),
+            dominantPeriodS: row.value(9),
+            meanDirectionDeg: row.value(11),
+            waterTempC: row.value(14),
+            windKn: row.knots(6),
+            at: row.at
         )
         // Sea state or nothing. Plenty of these stations are piers reporting
         // only wind and air temperature — real data, but the wind tab already
@@ -1794,6 +1951,35 @@ enum DataBuoyCenter {
         // water temperature is just a second copy of it.
         guard reading.waveHeightM != nil || reading.waterTempC != nil else { return nil }
         return reading
+    }
+
+    /// The wind half of the same row, for the stations that rule turns away.
+    ///
+    /// Those two guards are one decision written from both sides: a station
+    /// reporting wave height or water temperature is a buoy row, one reporting
+    /// only wind is a station row, and nothing is ever both. It comes from what
+    /// the sensor actually sent this hour rather than from a list of ids
+    /// somebody has to keep up to date — which is what makes it work on every
+    /// coast instead of the one that got complained about.
+    ///
+    /// A buoy whose water-temperature sensor drops out for an hour will cross
+    /// over and appear as a station. That is the honest description of what it
+    /// is reporting at the time, so it is left alone rather than pinned with a
+    /// second source of truth about which kind of thing each station is.
+    static func windReading(for stationId: String) async -> StationObservation? {
+        guard let row = await latestRow(for: stationId),
+              row.value(8) == nil, row.value(14) == nil,
+              let wind = row.knots(6)
+        else { return nil }
+
+        return StationObservation(
+            windKn: wind,
+            gustKn: row.knots(7),
+            directionDeg: row.value(5),
+            temperatureC: row.value(13),
+            summary: nil,
+            at: row.at
+        )
     }
 
     /// The newest row of a station's spectral summary — the *measured*

@@ -1282,13 +1282,20 @@ enum NationalWeatherService {
     /// but are not consistently returned by the forecast-office `/points/.../stations`
     /// lookup. Keep the active New York Harbor network in discovery so those real
     /// anemometers are not hidden behind nearby airport stations.
+    ///
+    /// Only the three that report wind and nothing else are listed. The Battery,
+    /// Sandy Hook and the harbour entrance buoy sit on the same water and are just
+    /// as missing from this lookup, but they carry water temperature too, so
+    /// `DataBuoyCenter` already surfaces them in the buoy list — naming them here
+    /// as well would show one anemometer twice under two different names.
+    ///
+    /// Which is the shape of the real bug: every PORTS coast has this hole, and
+    /// what decides whether a sensor reaches the screen today is `latest(for:)`
+    /// wanting sea state rather than anything about the harbour.
     private static let supplementalStations: [(id: String, name: String, coordinate: Geo.Coordinate)] = [
         ("ROBN4", "Robbins Reef", .init(latitude: 40.657, longitude: -74.065)),
-        ("BATN6", "The Battery", .init(latitude: 40.701, longitude: -74.014)),
-        ("MHRN6", "Mariners Harbor", .init(latitude: 40.641, longitude: -74.162)),
-        ("SDHN4", "Sandy Hook", .init(latitude: 40.467, longitude: -74.009)),
+        ("MHRN6", "Mariner Harbor", .init(latitude: 40.641, longitude: -74.162)),
         ("KPTN6", "Kings Point", .init(latitude: 40.811, longitude: -73.765)),
-        ("44065", "New York Harbor Entrance Buoy", .init(latitude: 40.368, longitude: -73.701)),
     ]
 
     private static func get(_ url: URL) async -> Data? {

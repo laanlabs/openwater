@@ -40,9 +40,14 @@ struct AppleWeatherAttribution: View {
             // bare "Weather".
             Link("\u{F8FF} Weather", destination: legal)
             if showsLegalLabel {
-                Link("Legal", destination: legal)
+                // The underline rides on the label's own Text rather than on
+                // the Link, because a button style restyles the label it is
+                // handed and an underline applied to the Link is lost with it.
+                // Callers that share a row have to set a style — see
+                // WeatherStatusView — and the underline is the whole signal
+                // that this grey word is a link.
+                Link(destination: legal) { Text("Legal").underline() }
                     .foregroundStyle(.secondary)
-                    .underline()
                     .padding(.leading, 4)
             }
         }

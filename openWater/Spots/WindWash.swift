@@ -23,11 +23,15 @@ enum WashLayer: String, CaseIterable {
     case off, wind, currents
 
     /// The caption's front half; the view appends the clock — "now", or
-    /// the scrubbed hour while a route's slider owns the map.
+    /// the scrubbed hour while a slider owns the map. The wind half names
+    /// whichever model the rider picked, because a caption that says
+    /// "Open-Meteo model" over GFS's numbers is a label on the wrong tin;
+    /// the current wash keeps the ocean model, which the picker does not
+    /// govern — the marine API runs its own.
     var caption: String? {
         switch self {
         case .off: nil
-        case .wind: "Wind wash · Open-Meteo model"
+        case .wind: "Wind wash · \(ForecastModel.selected.captionName)"
         case .currents: "Current wash · Open-Meteo ocean model"
         }
     }

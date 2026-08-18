@@ -851,6 +851,8 @@ enum OpenMeteo {
         if pastHours > 0 {
             components.queryItems?.append(.init(name: "past_hours", value: String(pastHours)))
         }
+        // Whichever model the rider picked; nothing at all for automatic.
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
               let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data)

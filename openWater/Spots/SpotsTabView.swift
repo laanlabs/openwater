@@ -143,6 +143,12 @@ struct SpotsTabView: View {
     @State private var mapScrub: Date?
     @State private var isShowingTimeControl = false
 
+    /// Which model answers for wind, app-wide. Stored rather than passed
+    /// because every wind URL in the app reads it at build time; this copy
+    /// exists so the views redraw and the fetches re-key when it changes.
+    @AppStorage("spots.forecastModel") private var forecastModelRaw = ForecastModel.automatic.rawValue
+    @State private var isPickingModel = false
+
     /// A request to add a spot: either at a place picked on the map, or `nil`
     /// for "here", which lets the form use the live fix as it always has.
     struct NewSpotRequest: Identifiable {
@@ -309,6 +315,10 @@ struct SpotsTabView: View {
         .sheet(isPresented: $isEditingFavorites) {
             FavoritesEditor()
         }
+        .sheet(isPresented: $isPickingModel) {
+            ForecastModelSheet(selection: $forecastModelRaw)
+                .presentationDetents([.medium, .large])
+        }
         .sheet(isPresented: $sharingLocation) {
             ShareLocationSheet()
         }
@@ -348,6 +358,16 @@ struct SpotsTabView: View {
             (localWeather, localWind) = await (air, blowing)
         }
         .task { await guide.load() }
+        .onChange(of: forecastModelRaw) { _, _ in
+            // Every cached number came from the old model; the wash refetches
+            // on the map's own settle rule, and the pins' live readings are
+            // re-asked by the key below carrying the model with it.
+            guide.forgetWind()
+            if washLayer != .off, let region = visibleRegion {
+                windWash.clear()
+                windWash.viewSettled(on: region, layer: washLayer)
+            }
+        }
         .task(id: windRefreshKey) {
             await guide.refreshWind(for: pins + nearby.prefix(20) + guide.favorites)
         }
@@ -411,7 +431,7 @@ struct SpotsTabView: View {
     /// `refreshWind` drops every spot still inside its TTL.
     private var windRefreshKey: String {
         (pins.prefix(8).map(\.spotId) + nearby.prefix(8).map(\.spotId))
-            .joined(separator: ",")
+            .joined(separator: ",") + "|" + forecastModelRaw
     }
 
     // MARK: - Map
@@ -940,15 +960,27 @@ struct SpotsTabView: View {
                 }
                 if let caption = washLayer.caption {
                     // The doctrine's line, map-sized: colours are a model,
-                    // and they are about now — or about a slider's hour,
-                    // and then the clock says which.
-                    Text("\(caption) · \(windWash.scrubLabel ?? "now")")
+                    // they are about now — or about a slider's hour, and
+                    // then the clock says which — and the model has a name
+                    // the rider can change by tapping it.
+                    Button { isPickingModel = true } label: {
+                        HStack(spacing: 4) {
+                            Text("\(caption) · \(windWash.scrubLabel ?? "now")")
+                            if washLayer == .wind {
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 8, weight: .bold))
+                            }
+                        }
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
                         .background(.regularMaterial, in: Capsule())
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(washLayer != .wind)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
         }
@@ -1065,7 +1097,7 @@ struct SpotsTabView: View {
     }
 
     private var scrubbedSpotsKey: String {
-        "\(mapScrub != nil)|\(pins.map(\.spotId).joined(separator: ","))"
+        "\(mapScrub != nil)|\(forecastModelRaw)|\(pins.map(\.spotId).joined(separator: ","))"
     }
 
     /// Whole hours off now — the slider's own units, rounded so the thumb

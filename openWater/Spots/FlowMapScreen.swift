@@ -33,6 +33,9 @@ struct FlowMapScreen: View {
     /// The colour wash, on by default and remembered — some riders read
     /// fields, some read arrows, and neither should have to re-choose.
     @AppStorage("flowMap.colourWash") private var showWash = true
+    /// The app-wide wind model, editable from this screen's own caption.
+    @AppStorage("spots.forecastModel") private var forecastModelRaw = ForecastModel.automatic.rawValue
+    @State private var isPickingModel = false
 
     struct GridPoint: Identifiable {
         /// Row-major position in the grid — the raster builder needs to
@@ -70,6 +73,17 @@ struct FlowMapScreen: View {
         }
         .task { await load() }
         .onChange(of: hour) { _, _ in rebuildRaster() }
+        .sheet(isPresented: $isPickingModel) {
+            ForecastModelSheet(selection: $forecastModelRaw)
+                .presentationDetents([.medium, .large])
+        }
+        .onChange(of: forecastModelRaw) { _, _ in
+            // A different model is a different field; the one on screen was
+            // answered by the old one.
+            guard let region = fieldRegion else { return }
+            fieldRegion = nil
+            reload(for: region)
+        }
     }
 
     private var arrowStates: [WindFieldMapView.Arrow] {
@@ -117,7 +131,26 @@ struct FlowMapScreen: View {
 
             if showWash { washLegend } else { legend }
 
-            Text("Open-Meteo's blend. The arrows are the model's own values; the "
+            // Whose model this is, and the door to changing it — the
+            // reference apps put the picker exactly here, on the name.
+            Button { isPickingModel = true } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "cpu")
+                        .font(.caption2.weight(.semibold))
+                    Text(ForecastModel.selected.name)
+                        .font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Text("The arrows are the model's own values; the "
                  + "colour between them is a smooth blend of those values for the "
                  + "eye, not extra detail. Pan or zoom and the field refetches to "
                  + "match — far out, the wash's edge marks the area it covers. "

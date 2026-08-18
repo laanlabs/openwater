@@ -369,6 +369,7 @@ final class SpotGuideStore {
             .init(name: "current", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
             .init(name: "wind_speed_unit", value: "kn"),
         ]
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200
@@ -423,6 +424,16 @@ final class SpotGuideStore {
         }
     }
 
+    /// Drop every wind number the app is holding. Called when the rider
+    /// picks a different model: the readings and the hourly series were all
+    /// answered by the old one, and both caches are keyed by spot rather
+    /// than by model, so keeping them would mean showing ICON's wind under
+    /// ECMWF's name until each TTL happened to expire.
+    func forgetWind() {
+        wind.removeAll()
+        windHours.removeAll()
+    }
+
     /// The key both wind stores use for a bare coordinate — the centre
     /// pin's "here", which is a place rather than a spot.
     static func windKey(for coordinate: Geo.Coordinate) -> String {
@@ -464,6 +475,7 @@ final class SpotGuideStore {
             .init(name: "current", value: "wind_speed_10m,wind_gusts_10m,wind_direction_10m"),
             .init(name: "wind_speed_unit", value: "kn"),
         ]
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         struct Payload: Codable {
             struct Current: Codable {
                 let wind_speed_10m: Double?
@@ -499,6 +511,7 @@ final class SpotGuideStore {
             .init(name: "wind_speed_unit", value: "kn"),
             .init(name: "timeformat", value: "unixtime"),
         ]
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200

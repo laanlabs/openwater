@@ -45,6 +45,14 @@ struct WeatherStatusView: View {
                 // hit region downwards — the wrong direction entirely.
                 .padding(.top, check.isFailed ? 10 : 0)
         }
+        // Every control in this row answers for its own rectangle. A Form row
+        // hands its whole width to a single control, and with a Link in the
+        // row the Link is the one that takes it — so every tap here, the error
+        // text included, opened Apple's legal page, and "Try again" could not
+        // be pressed at all. This has to sit on the whole row rather than on
+        // the button: styling the button alone leaves the Link holding the
+        // row, which was measured, not assumed.
+        .buttonStyle(.borderless)
         // Runs itself rather than waiting to be asked. Somebody opening
         // Settings after finding no wind reading has already asked the
         // question; making them find a button to ask it again is one step too
@@ -86,16 +94,7 @@ struct WeatherStatusView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    // Borderless because this row is shared. A Form row hands
-                    // its whole width to a single control, and with the legal
-                    // Link sitting below the button the Link was the one that
-                    // won it — every tap in this row, the error text included,
-                    // opened Apple's legal page and "Try again" could not be
-                    // pressed at all. Borderless is what tells SwiftUI these
-                    // are separate controls that share a row, the same reason
-                    // RecordedWindRow's buttons wear it.
                     Button("Try again") { Task { await runCheck() } }
-                        .buttonStyle(.borderless)
                         .font(.caption)
                 }
             }

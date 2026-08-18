@@ -12,11 +12,13 @@ import SwiftUI
 enum SpotSelection: Equatable {
     case spot(GuideSpot)
     case place(PlaceResult)
+    case privateSpot(PrivateSpot)
 
     var title: String {
         switch self {
         case .spot(let spot): spot.name
         case .place(let place): place.name
+        case .privateSpot(let spot): spot.name
         }
     }
 
@@ -24,6 +26,7 @@ enum SpotSelection: Equatable {
         switch self {
         case .spot(let spot): Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
         case .place(let place): place.coordinate
+        case .privateSpot(let spot): spot.coordinate
         }
     }
 
@@ -32,12 +35,21 @@ enum SpotSelection: Equatable {
         return nil
     }
 
+    /// A private spot may know which way its beach faces; the full
+    /// conditions sheet uses that for shore-aware surf.
+    var shoreFacingDeg: Double? {
+        if case .privateSpot(let spot) = self { return spot.shoreFacingDeg }
+        return nil
+    }
+
     /// The fetch key: a spot keeps its id so the caches it already warmed
-    /// stay warm; a place is its rounded coordinate, the `taskKey` rule.
+    /// stay warm; anything else is its rounded coordinate, the `taskKey`
+    /// rule.
     var key: String {
         switch self {
         case .spot(let spot): spot.spotId
         case .place(let place): String(format: "@%.3f,%.3f", place.latitude, place.longitude)
+        case .privateSpot(let spot): "private:\(spot.id)"
         }
     }
 }
@@ -156,7 +168,9 @@ struct SpotConditionsPanel: View {
             if let spot = selection.guideSpot {
                 NearbyConditionsSheet(spot: spot)
             } else {
-                NearbyConditionsSheet(title: selection.title, coordinate: selection.coordinate)
+                NearbyConditionsSheet(title: selection.title,
+                                      coordinate: selection.coordinate,
+                                      shoreFacingDeg: selection.shoreFacingDeg)
             }
         }
     }

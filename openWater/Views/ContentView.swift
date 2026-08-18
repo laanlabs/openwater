@@ -80,6 +80,14 @@ struct ContentView: View {
             recordTabReset += 1
             withAnimation(.snappy(duration: 0.18)) { selection = .record }
         }
+        // A tool asked the Spots map to open a route. The payload rides
+        // `RouteHandoff`, not the notification — this page's only job is
+        // getting the tab on screen; a freshly built Spots page consumes
+        // the seam from its own `onAppear`.
+        .onReceive(NotificationCenter.default.publisher(for: .openWaterOpenRoute)) { _ in
+            visited.insert(.spots)
+            withAnimation(.snappy(duration: 0.18)) { selection = .spots }
+        }
         // Published for the screens that cannot use the safe-area inset.
         //
         // A scrolling page just draws through the bar and stops its content

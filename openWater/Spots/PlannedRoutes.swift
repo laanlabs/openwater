@@ -77,6 +77,31 @@ struct PlannedRoute: Codable, Identifiable, Hashable {
     }
 }
 
+/// The Tools→Spots handoff: another tab asks the Spots map to open a
+/// route, or to start drawing one.
+///
+/// The same two-part shape as the record switch: a static seam holding what
+/// to do (the `ScreenshotRoute.requested` pattern — the Spots page may not
+/// even be built yet when the ask happens, so a notification alone would
+/// fall on deaf ears) and a notification to wake the page when it is
+/// already alive. The consumer clears the seam, so a stale ask cannot
+/// replay on a later visit.
+@MainActor
+enum RouteHandoff {
+    /// A route the Spots tab should open on arrival.
+    static var pending: PlannedRoute?
+    /// Nothing to open — start the editor instead.
+    static var startPlanning = false
+
+    static func post() {
+        NotificationCenter.default.post(name: .openWaterOpenRoute, object: nil)
+    }
+}
+
+extension Notification.Name {
+    static let openWaterOpenRoute = Notification.Name("openWaterOpenRoute")
+}
+
 /// The saved routes, owned by the phone.
 @MainActor
 @Observable

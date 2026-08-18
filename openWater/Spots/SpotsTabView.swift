@@ -29,7 +29,6 @@ struct SpotsTabView: View {
     @State private var pickingNewSpot = false
     @State private var addingSpot: NewSpotRequest?
     @State private var addingPrivateSpot: NewPrivateSpotRequest?
-    @State private var selectedPrivateSpot: PrivateSpot?
     @State private var renamingSpot: PrivateSpot?
     @State private var editingFacingSpot: PrivateSpot?
     @State private var renameText = ""
@@ -217,10 +216,6 @@ struct SpotsTabView: View {
         .sheet(item: $addingPrivateSpot) { request in
             AddPrivateSpotSheet(coordinate: request.coordinate)
         }
-        .fullScreenSheet(item: $selectedPrivateSpot) { spot in
-            NearbyConditionsSheet(title: spot.name, coordinate: spot.coordinate,
-                                  shoreFacingDeg: spot.shoreFacingDeg)
-        }
         .sheet(item: $editingFacingSpot) { spot in
             ShoreFacingSheet(spot: spot)
         }
@@ -267,6 +262,12 @@ struct SpotsTabView: View {
             // with no matching disappear would run the GPS forever; the
             // map's own UserAnnotation takes it from here.
             recorder.location.requestAuthorization()
+            // A handoff may predate this page existing at all — the seam,
+            // not the notification, is what survives that.
+            consumeRouteHandoff()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openWaterOpenRoute)) { _ in
+            consumeRouteHandoff()
         }
         .onChange(of: spotsKey, initial: true) { _, _ in refreshSpotLists() }
         .onChange(of: routeDisplayKey, initial: true) { _, _ in refreshRouteDisplay() }
@@ -397,7 +398,7 @@ struct SpotsTabView: View {
 
                 ForEach(guide.privateSpots) { spot in
                     Annotation("", coordinate: spot.clCoordinate, anchor: .bottom) {
-                        Button { selectedPrivateSpot = spot } label: {
+                        Button { select(.privateSpot(spot)) } label: {
                             PrivateSpotPin()
                                 .contentShape(Rectangle())
                         }
@@ -628,6 +629,34 @@ struct SpotsTabView: View {
         inspectRoute(route)
     }
 
+    /// What another tab asked this map to do, done exactly once.
+    ///
+    /// The doing waits a breath, whichever way it arrived: from `onAppear`
+    /// the page is mid-first-layout and the map does not exist yet, and
+    /// from the notification the tab switch lands in the same runloop turn
+    /// — either way a camera position set that early is quietly dropped,
+    /// which left the panel showing Oregon over a map still parked on
+    /// Montauk. The seam is claimed *before* the wait, so a second ask
+    /// cannot double-run.
+    private func consumeRouteHandoff() {
+        guard RouteHandoff.pending != nil || RouteHandoff.startPlanning else { return }
+        let route = RouteHandoff.pending
+        RouteHandoff.pending = nil
+        RouteHandoff.startPlanning = false
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            if let route {
+                inspectRoute(route)
+            } else {
+                withAnimation(.snappy) {
+                    selection = nil
+                    routeMode = .editing(draft: [], routeId: nil)
+                    panelDetent = .minimized
+                }
+            }
+        }
+    }
+
     private func inspectRoute(_ route: PlannedRoute) {
         withAnimation(.snappy) {
             selection = nil
@@ -635,10 +664,19 @@ struct SpotsTabView: View {
             panelDetent = .half
             // The panel takes the lower half, so the camera sits south of
             // the route's centre — the line rides the visible upper part.
+            // The shift is sized against what the screen will actually
+            // show, not the route's own latitude span: a portrait screen
+            // fitting an east–west run is zoomed out by the *longitude*
+            // span, and a shift keyed to the (tiny) latitude delta left
+            // the whole line parked under the panel.
             var region = boundingRegion(of: route.waypoints)
             region.span.latitudeDelta *= 1.6
             region.span.longitudeDelta *= 1.6
-            region.center.latitude -= region.span.latitudeDelta * 0.22
+            let effectiveLatSpan = max(
+                region.span.latitudeDelta,
+                region.span.longitudeDelta * cos(region.center.latitude * .pi / 180) * 2.0
+            )
+            region.center.latitude -= effectiveLatSpan * 0.28
             camera = .region(region)
         }
     }
@@ -1194,7 +1232,9 @@ struct SpotsTabView: View {
                     .padding(.top, favorites.isEmpty ? 0 : 8)
                     .padding(.bottom, 8)
                 ForEach(guide.privateSpots) { spot in
-                    Button { selectedPrivateSpot = spot } label: {
+                    // Private spots joined the panel flow: same map, same
+                    // five tabs, the beach facing riding along for surf.
+                    Button { select(.privateSpot(spot)) } label: {
                         PrivateSpotCard(spot: spot, reading: privateWind[spot.id],
                                         distanceMetres: distanceFrom(spot.coordinate),
                                         units: settings.units)

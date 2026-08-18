@@ -479,8 +479,19 @@ grammar. What shipped, in dependency order:
    green/orange/red by degrees off dead-downwind, and the readout carries
    the current's with-you/against-you verdict.
 
-Still open from that effort: absorbing the shuttle planner into saved
-routes (needs a Tools→Spots deep link; its share-shuttle-link must
-survive the move), place search inside `LocationPickerSheet`, private-spot
-pins joining the panel selection flow, and the FlowMapScreen wind wash
-migrating onto the main map as an optional layer.
+The shuttle planner was absorbed the same day: `RouteHandoff` (the
+`ScreenshotRoute.requested` pattern — a static seam plus a notification,
+because the Spots page may not exist yet when Tools asks) carries the
+Tools→Spots deep link, the row's first tap walks the old
+`shuttle.launch`/`shuttle.takeout` endpoints into a saved route exactly
+once (a route with the same ends is reused, never duplicated), the
+driver's share message lives on as the share button in the route panel,
+and `ShuttlePlannerView` is gone. Private-spot pins joined the panel
+selection flow at the same time, their `shoreFacingDeg` riding along to
+the full sheet. One earned lesson is written at the consume site: a map
+camera set while the page is hidden or mid-first-layout is quietly
+dropped, so the handoff claims its seam immediately and acts a breath
+later.
+
+Still open from that effort: the FlowMapScreen wind wash migrating onto
+the main map as an optional layer.

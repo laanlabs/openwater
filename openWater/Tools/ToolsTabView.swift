@@ -1,3 +1,4 @@
+import OpenWaterCore
 import SwiftUI
 
 /// The Tools tab: single-purpose utilities for the logistics around a
@@ -12,6 +13,12 @@ struct ToolsTabView: View {
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
     @Environment(\.openURL) private var openURL
+    @Environment(RouteStore.self) private var routeStore
+
+    /// The retired shuttle planner's two endpoints, kept only to walk them
+    /// over into a saved route the first time the row is tapped.
+    @AppStorage("shuttle.launch") private var storedLaunch = ""
+    @AppStorage("shuttle.takeout") private var storedTakeout = ""
 
     /// Bumped every time the Tools tab is tapped, including when it is
     /// already showing.
@@ -23,7 +30,7 @@ struct ToolsTabView: View {
     @State private var path: [Tool] = []
 
     enum Tool: Hashable {
-        case shareLocation, callOut, floatPlan, shuttle
+        case shareLocation, callOut, floatPlan
         case windHere, daylight, speedo, improveSpot, units
     }
 
@@ -46,13 +53,39 @@ struct ToolsTabView: View {
         }
     }
 
+    /// The shuttle planner's successor: the stored launch/takeout become a
+    /// saved route once — reusing a route that already has those ends, so
+    /// tapping the row twice never breeds duplicates — and the Spots map
+    /// opens on it. With nothing stored, the map opens ready to draw.
+    private func openShuttleAsRoute() {
+        if let launch = PickedPlace.restore(storedLaunch),
+           let takeout = PickedPlace.restore(storedTakeout) {
+            if let existing = routeStore.routes.first(where: { route in
+                guard let a = route.waypoints.first, let b = route.waypoints.last else { return false }
+                return Geo.distance(a, launch.coordinate) < 50 && Geo.distance(b, takeout.coordinate) < 50
+            }) {
+                RouteHandoff.pending = existing
+            } else {
+                let name = [launch.name, takeout.name]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " → ")
+                let route = PlannedRoute(name: name.isEmpty ? "Shuttle run" : name,
+                                         waypoints: [launch.coordinate, takeout.coordinate])
+                routeStore.add(route)
+                RouteHandoff.pending = route
+            }
+        } else {
+            RouteHandoff.startPlanning = true
+        }
+        RouteHandoff.post()
+    }
+
     @ViewBuilder
     private func destination(for tool: Tool) -> some View {
         switch tool {
         case .shareLocation: ShareLocationView()
         case .callOut: CallOutView()
         case .floatPlan: FloatPlanView()
-        case .shuttle: ShuttlePlannerView()
         case .windHere: WindHereView()
         case .daylight: DaylightView()
         case .speedo: BigSpeedoView()
@@ -110,10 +143,18 @@ struct ToolsTabView: View {
                         toolRow("Float Plan", symbol: "checkmark.shield",
                                 blurb: "Where you're going and when to worry, sent before you're out of range.")
                     }
-                    NavigationLink(value: Tool.shuttle) {
+                    // Not a pushed screen any more: shuttle planning became
+                    // saved routes on the Spots map, which answer the same
+                    // question with the whole line instead of three points.
+                    // This row walks the old two stored endpoints over once
+                    // and then simply opens the route.
+                    Button {
+                        openShuttleAsRoute()
+                    } label: {
                         toolRow("Shuttle Planner", symbol: "car.2",
-                                blurb: "Run distance, and whether today's wind actually points down it.")
+                                blurb: "Plan the run as a route on the map — wind and current along it, shareable with your driver.")
                     }
+                    .buttonStyle(.plain)
                 }
 
                 Section("Conditions") {

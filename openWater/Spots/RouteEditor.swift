@@ -258,6 +258,9 @@ struct RoutePanel: View {
     @Environment(AppSettings.self) private var settings
     @Environment(RouteStore.self) private var routeStore
 
+    /// The same preference the float plan and Share My Location honor.
+    @AppStorage("tools.mapProvider") private var providerID = ToolKit.MapProvider.google.rawValue
+
     private var path: RoutePath { route.path }
     private var progress: RouteProgress { weather.progress(for: route) }
 
@@ -302,6 +305,20 @@ struct RoutePanel: View {
                     updated.expectedSpeedKn = knots
                     routeStore.update(updated)
                 }
+
+                Spacer(minLength: 0)
+
+                // The retired shuttle planner's one irreplaceable feature:
+                // the driver's message, both ends as maps links in whichever
+                // app the household actually uses.
+                ShareLink(item: shuttleMessage) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                        .background(Color(.secondarySystemGroupedBackground), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Share the shuttle plan")
             }
 
             if weather.isLoading, weather.grid == nil {
@@ -524,6 +541,20 @@ struct RoutePanel: View {
     private var departureChoices: [Date] {
         let base = RouteWeatherModel.nextWholeHour()
         return (0..<12).map { base.addingTimeInterval(Double($0) * 3600) }
+    }
+
+    /// The shuttle message, word for word what the old planner sent: the
+    /// run, then each end as a link the driver's phone opens in a maps app.
+    private var shuttleMessage: String {
+        let provider = ToolKit.MapProvider(rawValue: providerID) ?? .google
+        guard let from = path.waypoints.first, let to = path.waypoints.last else {
+            return route.name
+        }
+        return """
+        Downwind run: \(route.name), \(Format.distance(path.totalDistance, unit: settings.units.distance)).
+        Launch: \(provider.url(for: from, label: "Launch").absoluteString)
+        Takeout: \(provider.url(for: to, label: "Takeout").absoluteString)
+        """
     }
 
     private func shortTime(_ date: Date) -> String {

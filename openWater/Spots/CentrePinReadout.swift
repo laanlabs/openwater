@@ -14,7 +14,12 @@ import SwiftUI
 struct CentrePinReadout: View {
 
     let reading: WindReading?
+    /// The fetch finished and this hour has no wind for this point. A dash
+    /// is the honest answer; a shimmer would keep promising one.
+    var isUnavailable = false
     let onTap: () -> Void
+
+    @State private var isPulsing = false
 
     /// The pill-and-stem stack is drawn hanging *upward* from the map
     /// centre: the dot's middle must sit on the camera's centre coordinate,
@@ -63,12 +68,31 @@ struct CentrePinReadout: View {
                     + Text(" kn")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.75))
+                } else if isUnavailable {
+                    Image(systemName: "wind")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(width: 22, height: 22)
+                    Text("—")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.55))
                 } else {
+                    // Waiting. `LoadingPlaceholder` is built for light cards
+                    // — its grey fill inside this dark capsule reads as a
+                    // solid blank bar, which is precisely how a rider
+                    // reported it — so the pill pulses in its own white
+                    // instead, unmistakably alive while the hour is fetched.
                     Image(systemName: "wind")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.8))
                         .frame(width: 22, height: 22)
-                    LoadingPlaceholder(height: 14, width: 38, corner: 5)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(.white.opacity(isPulsing ? 0.55 : 0.2))
+                        .frame(width: 38, height: 14)
+                        .animation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true),
+                                   value: isPulsing)
+                        .onAppear { isPulsing = true }
+                        .accessibilityLabel("Loading the wind")
                 }
             }
             .padding(.vertical, 5)

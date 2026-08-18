@@ -142,6 +142,9 @@ struct SpotsTabView: View {
     /// this control hides rather than argue with it.
     @State private var mapScrub: Date?
     @State private var isShowingTimeControl = false
+    /// The scrubbed hour came back empty for the centre point — shown as a
+    /// dash rather than an endless shimmer.
+    @State private var centreHourMissing = false
 
     /// Which model answers for wind, app-wide. Stored rather than passed
     /// because every wind URL in the app reads it at build time; this copy
@@ -378,8 +381,15 @@ struct SpotsTabView: View {
             await guide.refreshWindHours(for: pins + nearby.prefix(20) + guide.favorites)
         }
         .task(id: scrubbedCentreKey) {
+            centreHourMissing = false
             guard mapScrub != nil, let here = localCoordinate else { return }
             await guide.refreshWindHours(at: here)
+            // The request is done. If there is still nothing for this hour,
+            // the pill must stop implying that something is on its way —
+            // some models are thin at some points, and a shimmer that never
+            // ends is indistinguishable from a broken app.
+            centreHourMissing = guide.reading(
+                for: SpotGuideStore.windKey(for: here), at: mapScrub) == nil
         }
         .task(id: hardwareLayersKey) {
             guard showWindStations || showCameras || showBuoys,
@@ -710,7 +720,10 @@ struct SpotsTabView: View {
             // Hidden while a route is up — two readouts about two different
             // points is how a map lies.
             if !isSearching, routeMode == nil {
-                CentrePinReadout(reading: scrubbedLocalWind) { isShowingConditions = true }
+                CentrePinReadout(reading: scrubbedLocalWind,
+                                 isUnavailable: mapScrub != nil && centreHourMissing) {
+                    isShowingConditions = true
+                }
             }
             // Route drawing aims with the glass, not the finger: the
             // crosshairs sit at the camera's centre, the map is dragged
@@ -1092,8 +1105,12 @@ struct SpotsTabView: View {
 
     /// Refetch the hourly series when the pinned set changes — never when
     /// the thumb moves, since one fetch already covers the whole window.
+    /// The model belongs in here beside the coordinate: picking a new one
+    /// forgets every cached wind, and a key that did not mention the model
+    /// never changed — so the centre pill sat shimmering at a series that
+    /// had been thrown away and would never be asked for again.
     private var scrubbedCentreKey: String {
-        "\(mapScrub != nil)|\(localWeatherKey)"
+        "\(mapScrub != nil)|\(forecastModelRaw)|\(localWeatherKey)"
     }
 
     private var scrubbedSpotsKey: String {

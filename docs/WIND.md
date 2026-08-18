@@ -153,6 +153,12 @@ rider sign-off — see `docs/RUNS.md`. That lands as its own change.
 - [ ] **Modeled is not observed.** Open-Meteo "current" values are model
   output. Anywhere a current number is shown, say which it is, and how old.
   Stations and buoys are observations; the forecast endpoints never are.
+  *Progress 2026-08-18: the ocean-currents layer shipped with this rule
+  built in — every currents surface (conditions panel tab, route readout)
+  carries its source line: "NOAA CO-OPS predictions · predicted from
+  harmonics, not measured" or "Open-Meteo ocean model · modeled, not
+  observed · CC-BY 4.0", and the ForecastCache fallback age when serving
+  stale. The older wind screens still owe the same honesty.*
 - [x] **Cache the forecasts.** `ForecastCache`: every Open-Meteo request
   (and the astronomical tide table) now reads from a short-TTL disk cache
   keyed by the request URL, and a failed fetch serves an answer up to

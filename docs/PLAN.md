@@ -443,3 +443,44 @@ a complete, private, offline tool.
 
 Phases 1–4 are pure Swift and land first because they are the whole value of the
 app and they are testable without ever launching a simulator.
+
+---
+
+## 11. The weather-first Spots page (2026-08-18)
+
+The Spots tab inverted from "directory with weather attached" to
+"weather with a directory attached", modeled on Orca's interaction
+grammar. What shipped, in dependency order:
+
+1. **Currents data layer** — `CurrentsOutlook.swift`: Open-Meteo hourly
+   ocean currents everywhere, swapped wholesale for NOAA CO-OPS
+   current-prediction stations within 15 km (the tide screens' two-source
+   doctrine, applied to its sibling). Direction convention documented at
+   the type: currents point *toward*; wind points *from*. Unit-tested
+   against captured wire formats, including the subordinate-station trap
+   (`interval=60` answering MAX_SLACK rows).
+2. **Centre pin** — `CentrePinReadout.swift`, an overlay (never a map
+   annotation) with the wind pill at headline size; the map centre is now
+   what "here" means, and dragging the map is the sampling gesture.
+3. **Place search** — `PlaceSearch.swift`, `MKLocalSearchCompleter`
+   biased to the visible region; a place is a camera move plus a panel
+   selection, never a navigation push.
+4. **The conditions panel** — `SpotConditionsPanel.swift` +
+   `HourScrubber.swift`: Weather / Currents / Tides / Waves / Cams as
+   compact tabs in the map-attached sheet, one shared hour cursor, value
+   rows at the cursor, provenance footers everywhere.
+   `NearbyConditionsSheet` survives whole as "More detail".
+5. **Routes** — `RoutePath` (Core, tested), `PlannedRoutes.swift`
+   (UserDefaults, the `PrivateSpot` pattern), tap-to-draw editor with
+   spot snapping, save sheet with `RouteNamer` prefill.
+6. **Route weather** — `RouteWeather.swift`: one wind + one marine
+   request per activation (≤12 samples, every ~2 km), scrubbing reads
+   memory, an estimated-position marker walks the line, chords recolor
+   green/orange/red by degrees off dead-downwind, and the readout carries
+   the current's with-you/against-you verdict.
+
+Still open from that effort: absorbing the shuttle planner into saved
+routes (needs a Tools→Spots deep link; its share-shuttle-link must
+survive the move), place search inside `LocationPickerSheet`, private-spot
+pins joining the panel selection flow, and the FlowMapScreen wind wash
+migrating onto the main map as an optional layer.

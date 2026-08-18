@@ -516,6 +516,9 @@ struct WeatherDetail {
         let gustKn: Double?
         let directionDeg: Double?
         let precipitationChance: Double?
+        /// Millimetres this hour — the amount, where `precipitationChance`
+        /// is only the odds. The rain row draws both.
+        var precipitationMm: Double? = nil
         let visibilityM: Double?
         let uvIndex: Double?
         let code: Int
@@ -563,7 +566,7 @@ extension OpenMeteo {
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
             .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
             .init(name: "current", value: "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m"),
-            .init(name: "hourly", value: "temperature_2m,dew_point_2m,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,visibility,uv_index"),
+            .init(name: "hourly", value: "temperature_2m,dew_point_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,visibility,uv_index"),
             .init(name: "daily", value: "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"),
             .init(name: "wind_speed_unit", value: "kn"),
             .init(name: "forecast_days", value: "5"),
@@ -620,6 +623,7 @@ extension OpenMeteo {
             let gust = series("wind_gusts_10m")
             let direction = series("wind_direction_10m")
             let chance = series("precipitation_probability")
+            let amount = series("precipitation")
             let visibility = series("visibility")
             let uv = series("uv_index")
             let codes = series("weather_code")
@@ -633,6 +637,7 @@ extension OpenMeteo {
                     gustKn: gust[safe: index] ?? nil,
                     directionDeg: direction[safe: index] ?? nil,
                     precipitationChance: chance[safe: index] ?? nil,
+                    precipitationMm: amount[safe: index] ?? nil,
                     visibilityM: visibility[safe: index] ?? nil,
                     uvIndex: uv[safe: index] ?? nil,
                     code: Int((codes[safe: index] ?? nil) ?? 0)
@@ -697,6 +702,10 @@ struct WaveHour: Identifiable, Hashable {
     let heightM: Double?
     let periodS: Double?
     let swellM: Double?
+    /// Mean wave direction, degrees the waves are coming *from* — the wind
+    /// convention, not the currents one.
+    var directionDeg: Double? = nil
+    var swellPeriodS: Double? = nil
     var id: Date { at }
 }
 
@@ -1015,7 +1024,7 @@ enum OpenMeteo {
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
             .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
-            .init(name: "hourly", value: "wave_height,wave_period,swell_wave_height"),
+            .init(name: "hourly", value: "wave_height,wave_period,swell_wave_height,wave_direction,swell_wave_period"),
             .init(name: "forecast_hours", value: String(hours)),
             .init(name: "timeformat", value: "unixtime"),
         ]
@@ -1029,6 +1038,8 @@ enum OpenMeteo {
                 let wave_height: [Double?]?
                 let wave_period: [Double?]?
                 let swell_wave_height: [Double?]?
+                let wave_direction: [Double?]?
+                let swell_wave_period: [Double?]?
             }
             let hourly: Hourly?
         }
@@ -1040,7 +1051,9 @@ enum OpenMeteo {
                 at: Date(timeIntervalSince1970: hourly.time[index]),
                 heightM: hourly.wave_height?[safe: index] ?? nil,
                 periodS: hourly.wave_period?[safe: index] ?? nil,
-                swellM: hourly.swell_wave_height?[safe: index] ?? nil
+                swellM: hourly.swell_wave_height?[safe: index] ?? nil,
+                directionDeg: hourly.wave_direction?[safe: index] ?? nil,
+                swellPeriodS: hourly.swell_wave_period?[safe: index] ?? nil
             )
         }
         // Inland points come back as a full grid of nulls rather than an

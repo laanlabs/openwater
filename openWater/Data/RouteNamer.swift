@@ -81,8 +81,10 @@ final class RouteNamer {
         return "\(from) → \(to)"
     }
 
-    /// A name a rider would recognise for one coordinate.
-    private func name(for coordinate: Geo.Coordinate) async -> String? {
+    /// A name a rider would recognise for one coordinate. Internal since
+    /// the route editor arrived: it prefills save sheets with the same
+    /// spot-first-then-geocoder naming the session namer uses.
+    func name(for coordinate: Geo.Coordinate) async -> String? {
         await guide.load()
         if let spot = guide.nearestSpot(to: coordinate),
            Geo.distance(coordinate, .init(latitude: spot.latitude, longitude: spot.longitude)) < Self.spotRadius {

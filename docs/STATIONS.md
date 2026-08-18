@@ -191,6 +191,7 @@ What stands between a rider and a network request, today:
 | NDBC station index | disk, `ndbc-stations.json` | 30 days, stale beats empty |
 | Registry cross-links | disk, `wind-station-registry.json` | 7 days, stale beats empty |
 | CO-OPS tide index | disk, `noaa-tide-stations.json` | until iOS purges caches |
+| CO-OPS currents index | disk, `noaa-current-stations.json` | until iOS purges caches |
 | Forecast responses | disk, `forecasts/` | per-answer TTL, 3 h stale limit |
 | **Any observation** | **never cached** | — |
 

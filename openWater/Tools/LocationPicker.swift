@@ -65,6 +65,7 @@ struct LocationPickerSheet: View {
     @State private var name = ""
     @State private var isNaming = false
     @State private var query = ""
+    @State private var placeSearch = PlaceSearchModel()
 
     var body: some View {
         NavigationStack {
@@ -161,7 +162,7 @@ struct LocationPickerSheet: View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search the spot guide", text: $query)
+            TextField("Search spots, places", text: $query)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
             if !query.isEmpty {
@@ -180,6 +181,14 @@ struct LocationPickerSheet: View {
         .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
         .padding(.horizontal, 16)
         .padding(.top, 8)
+        .onChange(of: query) { _, text in
+            if let centre {
+                placeSearch.bias(to: MKCoordinateRegion(
+                    center: centre,
+                    span: MKCoordinateSpan(latitudeDelta: 1, longitudeDelta: 1)))
+            }
+            placeSearch.query = text
+        }
     }
 
     /// Names that *start* with what was typed come first — "Vi" should offer
@@ -199,15 +208,43 @@ struct LocationPickerSheet: View {
     }
 
     private var searchResults: some View {
-        List(matches) { spot in
-            Button {
-                select(spot)
-            } label: {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(spot.name).foregroundStyle(.primary)
-                    Text(spot.where_)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        List {
+            ForEach(matches) { spot in
+                Button {
+                    select(spot)
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(spot.name).foregroundStyle(.primary)
+                        Text(spot.where_)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            // The overlay search's places, in the picker too — a shuttle
+            // takeout is as often a boat ramp Apple knows as a spot the
+            // guide does.
+            ForEach(placeSearch.completions.prefix(5)) { completion in
+                Button {
+                    Task {
+                        if let place = await placeSearch.resolve(completion) {
+                            select(place)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "globe.americas.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(completion.title).foregroundStyle(.primary)
+                            if !completion.subtitle.isEmpty {
+                                Text(completion.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -226,6 +263,20 @@ struct LocationPickerSheet: View {
             camera = .region(MKCoordinateRegion(
                 center: spot.coordinate,
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+            ))
+        }
+        query = ""
+    }
+
+    private func select(_ place: PlaceResult) {
+        name = place.name
+        let coordinate = CLLocationCoordinate2D(latitude: place.latitude,
+                                                longitude: place.longitude)
+        centre = coordinate
+        withAnimation(.snappy) {
+            camera = .region(MKCoordinateRegion(
+                center: coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
             ))
         }
         query = ""

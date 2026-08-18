@@ -21,9 +21,31 @@ import SwiftUI
 ///   are cached.
 /// - Phase 3: drags on the content, and pull-past-the-top to collapse.
 /// - Phase 4: Favorites and Destinations return.
+/// The sheet's four heights — at file scope rather than nested, so callers
+/// can hold one without spelling out the sheet's generic parameters.
+enum SheetDetent: CaseIterable {
+    case minimized, peek, half, full
+
+    /// Screen fraction — except `minimized`, which is "the grab bar and
+    /// nothing else" and is resolved in points, because the bar does not
+    /// scale with the screen.
+    var fraction: CGFloat {
+        switch self {
+        case .minimized: 0
+        case .peek: 0.32
+        case .half: 0.58
+        case .full: 0.92
+        }
+    }
+}
+
 struct SpotsSheet<Header: View, Content: View>: View {
 
     let size: CGSize
+    /// Owned by the caller since the detail panel arrived: selecting a spot
+    /// raises the sheet to half, closing drops it back — a decision the tab
+    /// makes, not the sheet.
+    @Binding var detent: SheetDetent
     /// Pinned between the grab bar and the list — the mode switch lives
     /// here, because a control that scrolls away with the thing it switches
     /// is not a control.
@@ -31,24 +53,6 @@ struct SpotsSheet<Header: View, Content: View>: View {
     @ViewBuilder var content: Content
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
-
-    enum Detent: CaseIterable {
-        case minimized, peek, half, full
-
-        /// Screen fraction — except `minimized`, which is "the grab bar and
-        /// nothing else" and is resolved in points, because the bar does not
-        /// scale with the screen.
-        var fraction: CGFloat {
-            switch self {
-            case .minimized: 0
-            case .peek: 0.32
-            case .half: 0.58
-            case .full: 0.92
-            }
-        }
-    }
-
-    @State private var detent: Detent = .peek
 
     /// The live drag, in a `@GestureState` so it resets however the gesture
     /// dies. A cancelled drag — a call, a system gesture, anything stealing
@@ -58,7 +62,7 @@ struct SpotsSheet<Header: View, Content: View>: View {
     @GestureState(resetTransaction: Transaction(animation: .snappy))
     private var drag: CGFloat = 0
 
-    private func height(for detent: Detent) -> CGFloat {
+    private func height(for detent: SheetDetent) -> CGFloat {
         // Minimized is the grab bar and the header clear of the floating tab
         // bar — the mode switch stays reachable, the map gets everything
         // else. Everything else scales with the screen, never below that.
@@ -137,7 +141,7 @@ struct SpotsSheet<Header: View, Content: View>: View {
                 // The projected end of the flick decides, so a fast flick
                 // crosses detents without stopping at each one.
                 let projected = height(for: detent) - value.predictedEndTranslation.height
-                let nearest = Detent.allCases.min {
+                let nearest = SheetDetent.allCases.min {
                     abs(height(for: $0) - projected) < abs(height(for: $1) - projected)
                 } ?? .peek
                 withAnimation(.snappy) { detent = nearest }

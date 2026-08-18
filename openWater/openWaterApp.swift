@@ -13,6 +13,7 @@ struct openWaterApp: App {
     @State private var countdown = RaceCountdown()
     @State private var spotGuide = SpotGuideStore()
     @State private var routeNamer: RouteNamer
+    @State private var plannedRoutes: RouteStore
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -40,6 +41,7 @@ struct openWaterApp: App {
         let guide = SpotGuideStore()
         _spotGuide = State(initialValue: guide)
         _routeNamer = State(initialValue: RouteNamer(guide: guide))
+        _plannedRoutes = State(initialValue: RouteStore())
     }
 
     var body: some Scene {
@@ -52,6 +54,7 @@ struct openWaterApp: App {
                 .environment(countdown)
                 .environment(spotGuide)
                 .environment(routeNamer)
+                .environment(plannedRoutes)
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
                     library.purgeExpiredTrash()

@@ -175,6 +175,17 @@ And the structural gaps, in the order they hurt:
   within ~15 km, draw the harmonic prediction instead of the model sea
   level — wholesale, never mixed: the datums differ (MLLW against MSL) and
   the guide's datum-mixing warning is written in exactly this blood.
+- [x] **Ocean currents, same doctrine.** (2026-08-18) `Currents.outlook`
+  in `CurrentsOutlook.swift`: a CO-OPS current-prediction station within
+  the same 15 km replaces Open-Meteo's `ocean_current_velocity` wholesale
+  — harmonic stations give an hourly series plus max/slack events,
+  subordinate stations give events only and the outlook stays honestly
+  events-only rather than faking hours from four turns. Weak-and-variable
+  ("W") stations are dropped at the index; duplicate ids keep their
+  shallowest bin. The index lives on disk (`noaa-current-stations.json`),
+  never in Firestore. Route sampling stays on the model on purpose: a
+  line crossing between station domains would stitch two authorities
+  mid-route.
 
 ## What we are deliberately not doing
 

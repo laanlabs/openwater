@@ -273,7 +273,7 @@ struct NearbyConditionsSheet: View {
             }
         }
 
-        let meters = within(resources.filter { $0.kind == .wind })
+        let meters = withoutAbsorbedMeters(within(resources.filter { $0.kind == .wind }))
         section("WIND METERS IN THE GUIDE", trailing: {
             mapLink("Wind stations", places: stationPlaces, search: searchStations)
         }) {
@@ -299,7 +299,20 @@ struct NearbyConditionsSheet: View {
     /// list the station happened to be filed under.
     private var stationPlaces: [PlacesMapScreen.Place] {
         stationPlaces(free: stations.filter { $0.metres <= radius },
-                      meters: within(resources.filter { $0.kind == .wind }))
+                      meters: withoutAbsorbedMeters(within(resources.filter { $0.kind == .wind })))
+    }
+
+    /// The registry's whole point, applied: when a free station's row already
+    /// carries a provider link, the guide meter with that same URL is the
+    /// same anemometer wearing its other name — one pin, not two.
+    private func withoutAbsorbedMeters(
+        _ meters: [SpotGuideStore.GuideResource]
+    ) -> [SpotGuideStore.GuideResource] {
+        let absorbed = Set(stations.flatMap { station in
+            station.links.map { $0.url.absoluteString.lowercased() }
+        })
+        guard !absorbed.isEmpty else { return meters }
+        return meters.filter { !absorbed.contains($0.url.absoluteString.lowercased()) }
     }
 
     private func stationPlaces(free: [FreeStation],
@@ -912,6 +925,18 @@ struct NearbyConditionsSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The registry's second door: the tap stays on the free NOAA page,
+        // and a rider who pays for the network this sensor is also on gets
+        // their app one press deeper.
+        .contextMenu {
+            ForEach(station.links, id: \.self) { link in
+                Button {
+                    openURL(link.url)
+                } label: {
+                    Label("Open in \(link.label)", systemImage: "arrow.up.forward.app")
+                }
+            }
+        }
     }
 
     /// Distance first, then whatever the station is actually saying — and
@@ -947,6 +972,9 @@ struct NearbyConditionsSheet: View {
         } else {
             parts.append("no recent reading")
         }
+        // So the second door is discoverable without knowing about the
+        // long-press: the context menu is where it opens from.
+        for link in station.links { parts.append("also on \(link.label)") }
         return parts.joined(separator: " · ")
     }
 

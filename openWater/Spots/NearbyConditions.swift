@@ -1256,13 +1256,18 @@ struct FreeStation: Identifiable, Hashable {
     }
 
     let id: String
-    let name: String
+    /// Mutable because the registry's curated name wins over the feed's.
+    var name: String
     let coordinate: Geo.Coordinate
     let metres: Double
     var source: Source = .weatherService
 
     /// Filled in lazily — the list arrives first, readings trickle in after.
     var observation: StationObservation?
+
+    /// The registry's cross-links, when this sensor is also on a commercial
+    /// network — one pin, and the second door for riders who pay for it.
+    var links: [RegistryLink] = []
 
     var url: URL {
         switch source {
@@ -1318,6 +1323,7 @@ enum FreeStations {
                      radius: Double = 250_000) async -> [FreeStation] {
         async let office = NationalWeatherService.stations(near: coordinate, limit: limit)
         async let marine = DataBuoyCenter.metStations(near: coordinate, limit: limit, radius: radius)
+        async let curated = WindStationRegistry.crossLinks()
 
         let stations = await office
         // A handful of buoy-centre stations do reach the forecast office's
@@ -1326,10 +1332,20 @@ enum FreeStations {
         let known = Set(stations.map { $0.id.uppercased() })
         let supplements = await marine.filter { !known.contains($0.id.uppercased()) }
 
+        // The registry absorb, last: a curated row with this station's
+        // government id lends its name and its provider doors to the one pin.
+        // Purely an overlay — with an empty registry this is the identity map.
+        let registry = await curated
         return (stations + supplements)
             .sorted { $0.metres < $1.metres }
             .prefix(limit)
-            .map { $0 }
+            .map { station in
+                guard let row = registry[station.id.uppercased()] else { return station }
+                var absorbed = station
+                absorbed.name = row.name
+                absorbed.links = row.links
+                return absorbed
+            }
     }
 
     /// The station's own network answers for it.

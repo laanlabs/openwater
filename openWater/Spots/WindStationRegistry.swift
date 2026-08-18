@@ -3,7 +3,7 @@ import OpenWaterCore
 
 // MARK: - Wind station registry
 
-/// One station's commercial face, from the registry.
+/// One provider's view of a station, from the registry.
 struct RegistryLink: Hashable, Codable {
     let providerId: String
     let url: URL
@@ -15,6 +15,12 @@ struct RegistryLink: Hashable, Codable {
         case "ikitesurf": "iKitesurf"
         default: providerId.capitalized
         }
+    }
+
+    /// A government view is identity, not a door: it dedupes rows but is
+    /// never offered as a second place to open the station.
+    var isGovernment: Bool {
+        ["nws", "noaa", "ndbc", "coops"].contains(providerId)
     }
 }
 
@@ -135,9 +141,11 @@ enum WindStationRegistry {
             else { return nil }
             let govIds = map(fields["gov"]).compactMap { string($0.value)?.uppercased() }
             guard !govIds.isEmpty else { return nil }
+            // Government entries ride along too: they carry no door worth
+            // showing, but their URLs are how three names for one sensor
+            // are recognised as one.
             let links = array(fields["providers"]).compactMap { provider -> RegistryLink? in
                 guard let providerId = string(provider["providerId"]),
-                      providerId != "nws", providerId != "noaa",
                       let raw = string(provider["url"]), let url = URL(string: raw)
                 else { return nil }
                 return RegistryLink(providerId: providerId, url: url,

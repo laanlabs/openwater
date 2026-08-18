@@ -1343,7 +1343,7 @@ enum FreeStations {
                 guard let row = registry[station.id.uppercased()] else { return station }
                 var absorbed = station
                 absorbed.name = row.name
-                absorbed.links = row.links
+                absorbed.links = row.links.filter { !$0.isGovernment }
                 return absorbed
             }
     }

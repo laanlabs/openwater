@@ -47,6 +47,9 @@ struct NearbyConditionsSheet: View {
 
     @State private var tab: Tab = .conditions
     @State private var stations: [FreeStation] = []
+    /// Every name the registry knows for an instrument — url and gov-id
+    /// keys, each mapping to the one registry row they all are.
+    @State private var registryAliases: [String: String] = [:]
     @State private var resources: [SpotGuideStore.GuideResource] = []
     @State private var reading: WindReading?
     @State private var weather: SpotWeather?
@@ -273,7 +276,7 @@ struct NearbyConditionsSheet: View {
             }
         }
 
-        let meters = withoutAbsorbedMeters(within(resources.filter { $0.kind == .wind }))
+        let meters = dedupedMeters(within(resources.filter { $0.kind == .wind }))
         section("WIND METERS IN THE GUIDE", trailing: {
             mapLink("Wind stations", places: stationPlaces, search: searchStations)
         }) {
@@ -299,20 +302,101 @@ struct NearbyConditionsSheet: View {
     /// list the station happened to be filed under.
     private var stationPlaces: [PlacesMapScreen.Place] {
         stationPlaces(free: stations.filter { $0.metres <= radius },
-                      meters: withoutAbsorbedMeters(within(resources.filter { $0.kind == .wind })))
+                      meters: dedupedMeters(within(resources.filter { $0.kind == .wind })))
     }
 
-    /// The registry's whole point, applied: when a free station's row already
-    /// carries a provider link, the guide meter with that same URL is the
-    /// same anemometer wearing its other name — one pin, not two.
-    private func withoutAbsorbedMeters(
+    /// One instrument, one row — however many names the guide holds for it.
+    ///
+    /// The same sensor arrives twice three ways. A free station's row already
+    /// carries the meter's URL as a provider link (the registry absorb). The
+    /// meter's NOAA URL names a station or buoy this sheet is already
+    /// rendering live. Or the guide itself holds per-provider rows — Montauk
+    /// sits in `windStations` as a CO-OPS row, an NWS row and an NDBC row,
+    /// three documents metres apart for one anemometer, and the registry's
+    /// one-document rule cannot stop a writer from regressing. Presentation
+    /// can: rows arrive nearest-first, and the first of each instrument wins.
+    ///
+    /// Deduped against what is *shown*, deliberately: when a sensor is down
+    /// and its live row dropped, the guide's link is the only door left to
+    /// it, and one copy stays.
+    private func dedupedMeters(
         _ meters: [SpotGuideStore.GuideResource]
     ) -> [SpotGuideStore.GuideResource] {
-        let absorbed = Set(stations.flatMap { station in
-            station.links.map { $0.url.absoluteString.lowercased() }
-        })
-        guard !absorbed.isEmpty else { return meters }
-        return meters.filter { !absorbed.contains($0.url.absoluteString.lowercased()) }
+        var seen = Set<String>()
+        for station in stations {
+            seen.insert("gov:\(station.id.lowercased())")
+            seen.insert("url:\(station.url.absoluteString.lowercased())")
+            for link in station.links {
+                seen.insert("url:\(link.url.absoluteString.lowercased())")
+            }
+            if let row = registryAliases["gov:\(station.id.lowercased())"] {
+                seen.insert("reg:\(row)")
+            }
+        }
+        for buoy in buoys {
+            seen.insert("gov:\(buoy.id.lowercased())")
+            seen.insert("url:\(buoy.url.absoluteString.lowercased())")
+        }
+
+        var kept: [SpotGuideStore.GuideResource] = []
+        for meter in meters {
+            var keys = ["url:\(meter.url.absoluteString.lowercased())"]
+            if let id = Self.govStationId(in: meter.url) { keys.append("gov:\(id)") }
+            // The registry is the alias table nothing else can be: only it
+            // knows that CO-OPS 8510560 and NDBC mtkn6 are one anemometer.
+            for key in keys {
+                if let row = registryAliases[key] { keys.append("reg:\(row)") }
+            }
+            // Two rows with one name a stone's throw apart are one sensor
+            // whatever their URLs say — compared directly rather than by
+            // grid cell, so nothing depends on where a boundary falls.
+            let isDuplicate = keys.contains(where: seen.contains) || kept.contains {
+                $0.name.caseInsensitiveCompare(meter.name) == .orderedSame &&
+                Geo.distance($0.coordinate, meter.coordinate) < 250
+            }
+            // A duplicate's keys still count: they are aliases of the row
+            // that won, and the next alias should match through them —
+            // Montauk's NWS row falls to its CO-OPS twin by name, and its
+            // gov id is what then catches the NDBC row's third name.
+            seen.formUnion(keys)
+            guard !isDuplicate else { continue }
+            kept.append(meter)
+        }
+        return kept
+    }
+
+    /// The registry, flattened into a lookup: every gov id and provider URL
+    /// a row carries maps to that row's document id, so any two of a
+    /// sensor's names resolve to the same key.
+    private static func registryAliasMap() async -> [String: String] {
+        var aliases: [String: String] = [:]
+        for row in await WindStationRegistry.crossLinks().values {
+            for id in row.govIds { aliases["gov:\(id.lowercased())"] = row.id }
+            for link in row.links {
+                aliases["url:\(link.url.absoluteString.lowercased())"] = row.id
+            }
+        }
+        return aliases
+    }
+
+    /// The government station id a NOAA URL names, when it names one — the
+    /// key that recognises an NDBC station page and an api.weather.gov row
+    /// as the same piece of hardware.
+    private static func govStationId(in url: URL) -> String? {
+        let host = url.host?.lowercased() ?? ""
+        if host.hasSuffix("ndbc.noaa.gov"),
+           let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+               .queryItems?.first(where: { $0.name == "station" })?.value,
+           !id.isEmpty {
+            return id.lowercased()
+        }
+        if host == "api.weather.gov" {
+            let parts = url.pathComponents
+            if let at = parts.firstIndex(of: "stations"), parts.count > at + 1 {
+                return parts[at + 1].lowercased()
+            }
+        }
+        return nil
     }
 
     private func stationPlaces(free: [FreeStation],
@@ -439,7 +523,7 @@ struct NearbyConditionsSheet: View {
             }
         }
         free.removeAll { $0.observation == nil }
-        return await stationPlaces(free: free, meters: guided.filter { $0.kind == .wind })
+        return await stationPlaces(free: free, meters: dedupedMeters(guided.filter { $0.kind == .wind }))
     }
 
     private func searchTides(near centre: Geo.Coordinate) async -> [PlacesMapScreen.Place] {
@@ -1541,6 +1625,7 @@ struct NearbyConditionsSheet: View {
         let here = coordinate
 
         async let nearby = findResources(here)
+        async let aliases = Self.registryAliasMap()
         async let found = FreeStations.near(here, limit: 15, radius: Self.maxRadius)
         async let air = findWeather(here)
         async let blowing = findWind(here)
@@ -1553,6 +1638,7 @@ struct NearbyConditionsSheet: View {
         async let sea2 = OpenMeteo.surf(at: here)
         async let water = OpenMeteo.tide(at: here)
         (resources, stations, weather, reading) = await (nearby, found, air, blowing)
+        registryAliases = await aliases
         (alerts, tides, buoys) = await (warnings, tideList, buoyList)
         (outlook, waves, full) = await (ahead, sea, everything)
         (surf, tide) = await (sea2, water)

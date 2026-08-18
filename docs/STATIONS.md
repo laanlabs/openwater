@@ -18,6 +18,23 @@ generates every line of it:
 > cached beyond the session, and **never touch Firestore**. This is already
 > doctrine in `ForecastCache.swift` and it does not bend here.
 
+Applied to sources, the rule collapses to one sentence: **free APIs for
+everything a government publishes; Firestore only for what has no API;
+readings never stored anywhere.** NOAA's feeds are keyless, static, and
+self-healing — when they commission a sensor it appears, when they retire
+one it vanishes, and nobody here maintains anything. Firestore earns its
+place only where no such feed exists: the iKitesurf registry, the guide,
+spot-linked tide curation. Identity that a free API already serves is a
+bill plus a staleness bug, redeemable for nothing.
+
+This is not a theory; it has been tested. On the night of 2026-08-17 an
+automated writer copied 689 NDBC platforms, 220 NWS stations, and a
+provider's residential inventory into `windStations` — every shape this
+document forbids. The app never read the mirrors for discovery, riders
+paid to download them, and all 1,487 were deleted the next day. The rules
+for automated writers now live in
+[REGISTRY_WRITERS.md](REGISTRY_WRITERS.md).
+
 Everything below is about identity. The reading paths are untouched.
 
 ## The decision, per kind
@@ -90,24 +107,39 @@ Readings for any row with a `gov` id come through `FreeStations.latest` —
 which network answers is decided by the id, and Firestore is never in that
 path.
 
+All of this is shipped, not planned. `WindStationRegistry` fetches only
+the rows carrying a `gov` block (an `IS_NOT_NULL` query — a handful of
+documents, cached on disk for a week), `FreeStations.near` does the
+absorb, and `NearbyConditionsSheet.dedupedMeters` collapses any duplicate
+rows a writer manages to create — by NOAA URL station id, by the
+registry's alias table, and by same-name-within-250-m — so the screens
+stay right even when the database briefly does not.
+
 The registry's document schema, classification fields, and the audit
 procedure for growing it region by region are specified in
 [WIND_STATIONS.md](WIND_STATIONS.md), which is subordinate to this
 document where they disagree.
 
-Today's wind meters in the guide are link rows attached to spots. The
-registry promotes them to first-class station documents; the old rows keep
-serving until they are migrated, the same way every guide migration here
-has gone.
+### What the registry holds after curation (2026-08-18)
+
+~990 documents, every one of which qualifies under a rule somebody can
+name: the gov cross-links, six independent stations, ~827 spot-linked
+iKitesurf rows (the "nearest live station to this launch" mapping riders
+tap through), and ~153 guest-readable iKitesurf stations whose wind shows
+without an account. What was deleted — government mirrors and the
+unlinked subscription sweep — is preserved verbatim in dated backups with
+the database tooling, and any specific station can be re-added
+deliberately, which is what curation means.
 
 ### Read cost
 
-Same shape as the rest of the guide: country-scoped queries (the whole US
-guide is ~434 documents across three collections today, fetched once and
-cached on disk with a TTL — `SpotGuideStore`), and the registry adds tens
-of documents per country, not thousands, precisely because it does not
-mirror NOAA rows. A rider's normal day costs zero registry reads after the
-first.
+Two Firestore reads exist, with different bills. The registry read
+(`FreeStations`) is a handful of gov-linked documents per week — free in
+practice. The guide's meters read fetches `windStations` country-wide per
+session (~475 US documents after curation, memory-cached only) — this is
+the number curation protects, the reason the scale rule exists, and the
+place a disk cache would help next. A mirror would have pushed it back
+into the thousands.
 
 ## Tide stations: already right, already shipped
 
@@ -157,18 +189,27 @@ What stands between a rider and a network request, today:
 |---|---|---|
 | Guide dataset + resources | disk, `spot-guide.json` + per-region memory | TTL'd, stale-served with background refresh |
 | NDBC station index | disk, `ndbc-stations.json` | 30 days, stale beats empty |
+| Registry cross-links | disk, `wind-station-registry.json` | 7 days, stale beats empty |
 | CO-OPS tide index | disk, `noaa-tide-stations.json` | until iOS purges caches |
 | Forecast responses | disk, `forecasts/` | per-answer TTL, 3 h stale limit |
 | **Any observation** | **never cached** | — |
 
 ## Open items
 
+- **The writer.** The rules in
+  [REGISTRY_WRITERS.md](REGISTRY_WRITERS.md) only bind a bot that reads
+  them. Until the database tooling's own configuration points at these
+  documents, curation is a snapshot, not a state — verify the collection
+  is still near ~990 before trusting anything else on this page.
+- **Disk cache for the meters read.** The country-scoped `windStations`
+  fetch re-downloads ~475 US documents each session; the tide and NDBC
+  indexes already show the pattern to copy.
+- **Names for the spot-linked rows.** ~827 registry rows still carry
+  id-shaped names ("102428 — WX") from the original import. The app
+  rescues them at render time; the registry should not need rescuing.
 - **Bundled snapshot.** A distilled copy of the NDBC and CO-OPS indexes in
   the app bundle (~100 KB) would give a first-ever launch with no signal a
   working sheet. Cheap; needs an occasional refresh committed to the repo.
-- **Registry migration.** Promote the guide's existing wind-meter link rows
-  to `windStations` documents, starting with the ones that are rebadged
-  government sensors — they are the rows the dedup needs first.
 - **Universal links.** Store the provider's web URL; iOS hands it to the
   installed app when the provider supports universal links. Verify
   iKitesurf's do before relying on it, and add an app-scheme field only if

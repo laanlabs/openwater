@@ -493,5 +493,17 @@ camera set while the page is hidden or mid-first-layout is quietly
 dropped, so the handoff claims its seam immediately and acts a breath
 later.
 
-Still open from that effort: the FlowMapScreen wind wash migrating onto
-the main map as an optional layer.
+The wind wash followed (2026-08-18, `WindWash.swift`): the flow map's
+field on the main Spots map as a remembered toggle. SwiftUI's `Map`
+still cannot draw the flow map's geo-registered raster, so the honest
+translation is *map content*: the same 7×9 model grid, bilinearly
+upsampled by the raster's own walk, stepped through the same
+`WindPalette` bands, emitted as a few hundred `MapPolygon` cells with a
+feathered alpha edge. Being content is the point — MapKit keeps the
+field under every pin and marker, carries it through pan, zoom and
+rotation for free, and nothing recomputes per frame; the cells change
+only when the field refetches, on the flow map's own drift thresholds,
+one hour deep because the main map's wash means *now*. A provenance
+chip under the toggle says so. The flow map keeps the scrubber, the
+arrows and the smooth raster — the wash here is the glance, that screen
+is the study.

@@ -1230,6 +1230,19 @@ struct SpotsTabView: View {
                                    value: isBreathing)
                     LoadingPlaceholder(height: 13, width: 26, corner: 4)
                 }
+                // While the map is holding another hour, this corner is the
+                // one thing still speaking for now — the sky and the
+                // temperature are observed-ish current conditions, not a
+                // scrubbed forecast — so it says so. The flow map's own
+                // marker, borrowed: orange, small, unmissable.
+                if mapScrub != nil {
+                    Text("now")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange, in: Capsule())
+                }
                 // The expand glyph instead of a word: the sky and the
                 // number are the invitation, this says *more lives here*
                 // without spelling it.
@@ -1244,7 +1257,9 @@ struct SpotsTabView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Weather at the pin, and nearby stations")
+        .accessibilityLabel(mapScrub == nil
+                            ? "Weather at the pin, and nearby stations"
+                            : "Weather at the pin right now, and nearby stations")
     }
 
     /// The thumb corners over the map: on the right, the conditions door;

@@ -148,6 +148,12 @@ final class SpotGuideStore {
     /// Wind readings by spotId. Filled in batches as spots become visible.
     private(set) var wind: [String: WindReading] = [:]
 
+    /// Hourly series by spotId, fetched only once the map's time slider
+    /// asks for an hour that is not now. `wind` stays the authority for
+    /// now — `current=` is the freshest thing the model will say — and
+    /// these are the forecast a scrubbed hour is entitled to.
+    private(set) var windHours: [String: [WindForecastHour]] = [:]
+
     /// Ordered — the rider arranges these by hand in the favorites editor,
     /// so the array is the truth and membership checks ride on it. (It was
     /// a Set once; the persisted shape is the same string array, so old
@@ -390,6 +396,64 @@ final class SpotGuideStore {
                 directionDeg: direction, at: now
             )
         }
+    }
+
+    // MARK: The map's clock
+
+    /// How far the time slider reaches either side of now, and the depth
+    /// the hourly fetches buy to cover it.
+    static let scrubPastHours = 6
+    static let scrubForecastHours = 72
+
+    /// Hourly series for the spots the map is showing, one batched request
+    /// — the route grid's own fetcher, pointed at pins. Only called once
+    /// the slider leaves now, so a rider who never scrubs never pays.
+    func refreshWindHours(for targets: [GuideSpot]) async {
+        let due = targets.filter { windHours[$0.spotId] == nil }
+        guard !due.isEmpty else { return }
+        // The same cap `refreshWind` uses; the nearest have priority
+        // upstream, and 50 points of 78 hours is one honest request.
+        let batch = Array(due.prefix(50))
+        let series = await OpenMeteo.windAlong(
+            batch.map { Geo.Coordinate(latitude: $0.latitude, longitude: $0.longitude) },
+            hours: Self.scrubForecastHours, pastHours: Self.scrubPastHours)
+        for (index, spot) in batch.enumerated() {
+            guard let rows = series[safe: index], !rows.isEmpty else { continue }
+            windHours[spot.spotId] = rows
+        }
+    }
+
+    /// The key both wind stores use for a bare coordinate — the centre
+    /// pin's "here", which is a place rather than a spot.
+    static func windKey(for coordinate: Geo.Coordinate) -> String {
+        String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)
+    }
+
+    /// The centre pin's own hourly series, so the map's headline pill can
+    /// answer for the scrubbed hour instead of contradicting every other
+    /// number on screen.
+    func refreshWindHours(at coordinate: Geo.Coordinate) async {
+        let key = Self.windKey(for: coordinate)
+        guard windHours[key] == nil else { return }
+        let series = await OpenMeteo.windAlong(
+            [coordinate], hours: Self.scrubForecastHours, pastHours: Self.scrubPastHours)
+        guard let rows = series.first, !rows.isEmpty else { return }
+        windHours[key] = rows
+    }
+
+    /// What a pin should read at an instant. Now is `wind`'s live reading;
+    /// any other hour is the nearest row of that spot's series, and nil
+    /// until the series lands — a pin that shows this hour's number under
+    /// tomorrow's label would be a lie the map cannot afford.
+    func reading(for spotId: String, at instant: Date?) -> WindReading? {
+        guard let instant else { return wind[spotId] }
+        guard let rows = windHours[spotId], !rows.isEmpty else { return nil }
+        let nearest = rows.min {
+            abs($0.date.timeIntervalSince(instant)) < abs($1.date.timeIntervalSince(instant))
+        }
+        guard let nearest else { return nil }
+        return WindReading(speedKn: nearest.speedKn, gustKn: nearest.gustKn,
+                           directionDeg: nearest.directionDeg, at: nearest.date)
     }
 
     private static func fetchCurrentWind(latitude: Double, longitude: Double) async -> WindReading? {

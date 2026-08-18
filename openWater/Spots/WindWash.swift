@@ -278,11 +278,11 @@ final class WindWashModel {
             isLoading = true
             let coords = gridCoordinates(for: target)
             let count = FlowMapScreen.columns * FlowMapScreen.rows
-            // Three days deep rather than one hour: the route panel's
-            // slider scrubs the wash through the run's hours, departures
-            // reach 72 hours out, and the depth costs the same one
-            // request either way. Off a route, the shown hour is simply
-            // the one nearest now.
+            // Three days deep and six hours behind, rather than one
+            // hour: the map's time slider and the route panel's both
+            // scrub the wash through these rows, and the depth costs the
+            // same one request either way. Unscrubbed, the shown hour is
+            // simply the one nearest now.
             var axis: [Date] = []
             var day: [(speeds: [Double?], directions: [Double?])] = []
             func blank() -> (speeds: [Double?], directions: [Double?]) {
@@ -291,7 +291,9 @@ final class WindWashModel {
             }
             switch layer {
             case .wind:
-                let field = await OpenMeteo.windAlong(coords, hours: 72)
+                let field = await OpenMeteo.windAlong(
+                    coords, hours: SpotGuideStore.scrubForecastHours,
+                    pastHours: SpotGuideStore.scrubPastHours)
                 guard !Task.isCancelled else { return }
                 axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
                 day = axis.map { _ in blank() }
@@ -312,7 +314,9 @@ final class WindWashModel {
                 // The ocean model answers nil over land, so the current
                 // wash paints only the water — the field's own honesty,
                 // no land mask needed.
-                let field = await OpenMeteo.marineAlong(coords, hours: 72)
+                let field = await OpenMeteo.marineAlong(
+                    coords, hours: SpotGuideStore.scrubForecastHours,
+                    pastHours: SpotGuideStore.scrubPastHours)
                 guard !Task.isCancelled else { return }
                 axis = field.map(\.currents).max { $0.count < $1.count }?.map(\.at) ?? []
                 day = axis.map { _ in blank() }

@@ -829,8 +829,13 @@ enum OpenMeteo {
     /// fair while the takeout sits in a headland's shadow — the whole point
     /// of asking three times is catching the route's disagreements with
     /// itself.
+    ///
+    /// `pastHours` reaches behind now, for the Spots map's time slider: a
+    /// rider sliding back to "what did it do this morning" needs rows the
+    /// forecast window alone does not carry.
     static func windAlong(_ coordinates: [Geo.Coordinate],
-                          hours: Int = 4) async -> [[WindForecastHour]] {
+                          hours: Int = 4,
+                          pastHours: Int = 0) async -> [[WindForecastHour]] {
         guard !coordinates.isEmpty else { return [] }
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
@@ -843,6 +848,9 @@ enum OpenMeteo {
             .init(name: "forecast_hours", value: String(hours)),
             .init(name: "timeformat", value: "unixtime"),
         ]
+        if pastHours > 0 {
+            components.queryItems?.append(.init(name: "past_hours", value: String(pastHours)))
+        }
         guard let url = components.url,
               let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data)

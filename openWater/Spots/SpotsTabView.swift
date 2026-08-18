@@ -135,6 +135,14 @@ struct SpotsTabView: View {
     /// not where they are.
     @State private var editingCentre: CLLocationCoordinate2D?
 
+    /// The map's own clock: nil is now, anything else is the hour every pin
+    /// and both washes are answering for. Deliberately not persisted — a
+    /// map that reopened on yesterday's scrub would be lying about the
+    /// wind. A route's slider takes the clock over while it is open, so
+    /// this control hides rather than argue with it.
+    @State private var mapScrub: Date?
+    @State private var isShowingTimeControl = false
+
     /// A request to add a spot: either at a place picked on the map, or `nil`
     /// for "here", which lets the form use the live fix as it always has.
     struct NewSpotRequest: Identifiable {
@@ -343,6 +351,16 @@ struct SpotsTabView: View {
         .task(id: windRefreshKey) {
             await guide.refreshWind(for: pins + nearby.prefix(20) + guide.favorites)
         }
+        // Hourly series, fetched only once the clock leaves now — a rider
+        // who never scrubs never pays for this.
+        .task(id: scrubbedSpotsKey) {
+            guard mapScrub != nil else { return }
+            await guide.refreshWindHours(for: pins + nearby.prefix(20) + guide.favorites)
+        }
+        .task(id: scrubbedCentreKey) {
+            guard mapScrub != nil, let here = localCoordinate else { return }
+            await guide.refreshWindHours(at: here)
+        }
         .task(id: hardwareLayersKey) {
             guard showWindStations || showCameras || showBuoys,
                   let here = localCoordinate else {
@@ -386,8 +404,14 @@ struct SpotsTabView: View {
     }
 
     /// Wind is refetched when the viewport moves to new spots, not per frame.
+    /// The list's head rides in the key beside the pins'. Zoomed into a
+    /// street there are no pins at all, and a key made only of pins never
+    /// changes there — so the rows below sat blank, waiting for a pin to
+    /// appear before the live fetch would fire. Refires are cheap:
+    /// `refreshWind` drops every spot still inside its TTL.
     private var windRefreshKey: String {
-        pins.prefix(8).map(\.spotId).joined(separator: ",")
+        (pins.prefix(8).map(\.spotId) + nearby.prefix(8).map(\.spotId))
+            .joined(separator: ",")
     }
 
     // MARK: - Map
@@ -440,7 +464,8 @@ struct SpotsTabView: View {
         spots.filter { spot in
             if let discipline = disciplineFilter, spot.preferredActivity != discipline { return false }
             if firingOnly {
-                guard let reading = guide.wind[spot.spotId], reading.isFiring else { return false }
+                guard let reading = guide.reading(for: spot.spotId, at: mapScrub),
+                      reading.isFiring else { return false }
             }
             return true
         }
@@ -458,7 +483,9 @@ struct SpotsTabView: View {
         // stuck as dots while the list rows two inches below showed the
         // readings. Capturing the dictionary up front both registers the
         // dependency and hands the closures a stable copy.
-        let readings = guide.wind
+        // Resolved through the map's clock: `guide.wind` at now, the
+        // spot's own hourly row at any other hour.
+        let readings = scrubbedReadings
         // Hoisted for the same reason as the wind dictionary: reads inside
         // the map content builder register no observation dependency.
         let washCells = washLayer == .off ? [] : windWash.cells
@@ -663,7 +690,7 @@ struct SpotsTabView: View {
             // Hidden while a route is up — two readouts about two different
             // points is how a map lies.
             if !isSearching, routeMode == nil {
-                CentrePinReadout(reading: localWind) { isShowingConditions = true }
+                CentrePinReadout(reading: scrubbedLocalWind) { isShowingConditions = true }
             }
             // Route drawing aims with the glass, not the finger: the
             // crosshairs sit at the camera's centre, the map is dragged
@@ -894,9 +921,10 @@ struct SpotsTabView: View {
                 }
             } else {
                 HStack(spacing: 10) {
-                    // The weather chip lived here for a year; it moved to
-                    // the bottom-right corner to become the conditions
-                    // door, where a thumb actually is.
+                    // The weather chip lived in this corner for a year; it
+                    // moved to the bottom right to become the conditions
+                    // door, and the clock took the empty seat.
+                    timeButton
                     Spacer()
                     washToggle
                     squareButton("magnifyingglass", showsBadge: hasActiveFilter) {
@@ -907,10 +935,13 @@ struct SpotsTabView: View {
                         withAnimation(.snappy) { camera = .userLocation(fallback: .automatic) }
                     }
                 }
+                if isShowingTimeControl, routeMode == nil {
+                    timeSlider
+                }
                 if let caption = washLayer.caption {
                     // The doctrine's line, map-sized: colours are a model,
-                    // and they are about now — or about the route slider's
-                    // hour, and then the clock says which.
+                    // and they are about now — or about a slider's hour,
+                    // and then the clock says which.
                     Text("\(caption) · \(windWash.scrubLabel ?? "now")")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -923,6 +954,159 @@ struct SpotsTabView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+
+    // MARK: The map's clock
+
+    /// The clock in the corner. Lit while the map is answering for another
+    /// hour, and wearing that hour, so a scrubbed map can never be mistaken
+    /// for a live one at a glance.
+    private var timeButton: some View {
+        Button {
+            withAnimation(.snappy) { isShowingTimeControl.toggle() }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "clock")
+                    .font(.body.weight(.semibold))
+                if let label = scrubButtonLabel {
+                    Text(label)
+                        .font(.subheadline.weight(.bold))
+                        .monospacedDigit()
+                }
+            }
+            .foregroundStyle(mapScrub == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
+            .padding(.horizontal, mapScrub == nil ? 0 : 12)
+            .frame(minWidth: 44, minHeight: 44)
+            .background(mapScrub == nil ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.tint),
+                        in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(mapScrub == nil
+                            ? "Show the time slider"
+                            : "Showing \(scrubButtonLabel ?? ""). Show the time slider")
+    }
+
+    /// The slider itself: whole hours from six behind now to three days
+    /// ahead — the window the hourly fetches actually buy. Every pin and
+    /// both washes answer for the hour under the thumb.
+    private var timeSlider: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
+                Text(scrubHeadline)
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                if mapScrub != nil {
+                    Button("Now") { setScrub(hoursFromNow: 0) }
+                        .font(.subheadline.weight(.semibold))
+                }
+                Button {
+                    withAnimation(.snappy) { isShowingTimeControl = false }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide the time slider")
+            }
+            Slider(value: scrubHoursBinding,
+                   in: Double(-SpotGuideStore.scrubPastHours)...Double(SpotGuideStore.scrubForecastHours),
+                   step: 1)
+            HStack {
+                Text("−\(SpotGuideStore.scrubPastHours)h")
+                Spacer()
+                Text("now")
+                    // Now sits where it falls on the track, not at the
+                    // middle: six hours behind against seventy-two ahead.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer()
+                Text("+3d")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .monospacedDigit()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+    }
+
+    /// Every pin's reading for the hour the map is holding. Built once per
+    /// body pass for the map-content builder's sake — a lookup inside that
+    /// builder registers no observation dependency — and it reads
+    /// `windHours`, so a landing fetch redraws the pins.
+    private var scrubbedReadings: [String: WindReading] {
+        guard mapScrub != nil else { return guide.wind }
+        var out: [String: WindReading] = [:]
+        for spot in pins {
+            if let reading = guide.reading(for: spot.spotId, at: mapScrub) {
+                out[spot.spotId] = reading
+            }
+        }
+        return out
+    }
+
+    /// The centre pill's reading for the hour the map holds. Nil while the
+    /// series is still coming, which the pill already draws as "on its
+    /// way" — better than a number belonging to a different hour.
+    private var scrubbedLocalWind: WindReading? {
+        guard let mapScrub, let here = localCoordinate else { return localWind }
+        return guide.reading(for: SpotGuideStore.windKey(for: here), at: mapScrub)
+    }
+
+    /// Refetch the hourly series when the pinned set changes — never when
+    /// the thumb moves, since one fetch already covers the whole window.
+    private var scrubbedCentreKey: String {
+        "\(mapScrub != nil)|\(localWeatherKey)"
+    }
+
+    private var scrubbedSpotsKey: String {
+        "\(mapScrub != nil)|\(pins.map(\.spotId).joined(separator: ","))"
+    }
+
+    /// Whole hours off now — the slider's own units, rounded so the thumb
+    /// lands on hours the model actually published.
+    private var scrubHoursBinding: Binding<Double> {
+        Binding(
+            get: {
+                guard let mapScrub else { return 0 }
+                return (mapScrub.timeIntervalSinceNow / 3600).rounded()
+            },
+            set: { setScrub(hoursFromNow: Int($0.rounded())) }
+        )
+    }
+
+    private func setScrub(hoursFromNow hours: Int) {
+        // Zero means now, and now means nil: the live `current=` reading is
+        // a better answer for this hour than the hourly forecast of it.
+        let instant: Date? = hours == 0
+            ? nil
+            : Calendar.current.date(bySetting: .minute, value: 0,
+                                    of: Date().addingTimeInterval(Double(hours) * 3600))
+                ?? Date().addingTimeInterval(Double(hours) * 3600)
+        mapScrub = instant
+        windWash.scrub(to: instant)
+    }
+
+    /// The button's own label: nothing at now, else the hour it is holding.
+    private var scrubButtonLabel: String? {
+        guard let mapScrub else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = Calendar.current.isDateInToday(mapScrub) ? "HH:mm" : "EEE HH:mm"
+        return formatter.string(from: mapScrub)
+    }
+
+    /// The slider's headline: the full day and hour, or "Now".
+    private var scrubHeadline: String {
+        guard let mapScrub else { return "Now" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = Calendar.current.isDateInToday(mapScrub)
+            ? "'Today' HH:mm" : "EEE d MMM · HH:mm"
+        return formatter.string(from: mapScrub)
     }
 
     /// The layers menu: the colour wash (one at a time) and the hardware
@@ -1384,7 +1568,7 @@ struct SpotsTabView: View {
             // still push directly — tapping the map means "open that";
             // tapping a row means "show me where".
             Button { focus(on: spot.coordinate) } label: {
-                SpotRow(spot: spot, reading: guide.wind[spot.spotId],
+                SpotRow(spot: spot, reading: guide.reading(for: spot.spotId, at: mapScrub),
                         distanceMetres: distanceFromHere(spot), units: settings.units)
             }
             .buttonStyle(.plain)
@@ -1453,7 +1637,7 @@ struct SpotsTabView: View {
                     // from there.
                     Button { focus(on: spot.coordinate) } label: {
                         SavedLineRow(icon: "star.fill", name: spot.name,
-                                     reading: guide.wind[spot.spotId])
+                                     reading: guide.reading(for: spot.spotId, at: mapScrub))
                     }
                     .buttonStyle(.plain)
                 case .route(let route):

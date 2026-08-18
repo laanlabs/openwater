@@ -220,7 +220,8 @@ extension OpenMeteo {
     /// Route sampling stays on the model on purpose: a route crossing
     /// between CO-OPS station domains would stitch two authorities
     /// mid-line, and the point tabs already carry the stations.
-    static func marineAlong(_ coordinates: [Geo.Coordinate], hours: Int = 24)
+    static func marineAlong(_ coordinates: [Geo.Coordinate], hours: Int = 24,
+                            pastHours: Int = 0)
         async -> [(currents: [CurrentsOutlook.Hour], waves: [WaveHour])] {
         guard !coordinates.isEmpty else { return [] }
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
@@ -233,6 +234,11 @@ extension OpenMeteo {
             .init(name: "forecast_hours", value: String(hours)),
             .init(name: "timeformat", value: "unixtime"),
         ]
+        // The Spots map's time slider reaches behind now; the wind
+        // fetcher's own `pastHours`, for the water.
+        if pastHours > 0 {
+            components.queryItems?.append(.init(name: "past_hours", value: String(pastHours)))
+        }
         guard let url = components.url,
               let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data)

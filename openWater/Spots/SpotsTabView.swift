@@ -72,10 +72,15 @@ struct SpotsTabView: View {
     /// Route drawing and inspection; nil is the map as it always was.
     @State private var routeMode: RouteMode?
 
-    /// The colour wash, off by default and remembered — the flow map's
-    /// field, drawn under this map's own pins.
-    @AppStorage("spots.windWash") private var windWashOn = false
+    /// The colour wash, off by default and remembered — a field drawn
+    /// under this map's own pins: the flow map's wind, or the ocean
+    /// model's current.
+    @AppStorage("spots.washLayer") private var washLayerRaw = WashLayer.off.rawValue
     @State private var windWash = WindWashModel()
+
+    private var washLayer: WashLayer {
+        WashLayer(rawValue: washLayerRaw) ?? .off
+    }
 
     /// The inspected route's forecast — shared by panel and map so both
     /// speak about the same estimate.
@@ -386,7 +391,7 @@ struct SpotsTabView: View {
         let readings = guide.wind
         // Hoisted for the same reason as the wind dictionary: reads inside
         // the map content builder register no observation dependency.
-        let washCells = windWashOn ? windWash.cells : []
+        let washCells = washLayer == .off ? [] : windWash.cells
         return MapReader { proxy in
             Map(position: $camera) {
             // The wash goes first: map content draws in order, and the
@@ -515,7 +520,7 @@ struct SpotsTabView: View {
         .mapControlVisibility(.hidden)
         .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
-            if windWashOn { windWash.viewSettled(on: context.region) }
+            windWash.viewSettled(on: context.region, layer: washLayer)
         }
         // Route drawing borrows the plain tap — everywhere else a tap on
         // the map means nothing, so there is nothing to steal.
@@ -769,10 +774,10 @@ struct SpotsTabView: View {
                         withAnimation(.snappy) { camera = .userLocation(fallback: .automatic) }
                     }
                 }
-                if windWashOn {
+                if let caption = washLayer.caption {
                     // The doctrine's line, map-sized: colours are a model,
                     // and they are about now.
-                    Text("Wind wash · Open-Meteo model · now")
+                    Text(caption)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
@@ -786,27 +791,39 @@ struct SpotsTabView: View {
         .padding(.top, 8)
     }
 
-    /// The flow map's colour wash, toggled onto this map. Lit when on, so
-    /// a tinted sea never has to be explained by memory.
+    /// The wash layer picker. Lit when a field is on, so a tinted sea
+    /// never has to be explained by memory; a menu rather than a cycle
+    /// button, because "which one is this" should never take three taps
+    /// to answer.
     private var washToggle: some View {
-        Button {
-            windWashOn.toggle()
-            if windWashOn {
-                if let region = visibleRegion { windWash.viewSettled(on: region) }
-            } else {
-                windWash.clear()
+        Menu {
+            Picker("Map wash", selection: Binding(
+                get: { washLayerRaw },
+                set: { raw in
+                    washLayerRaw = raw
+                    let layer = WashLayer(rawValue: raw) ?? .off
+                    if layer == .off {
+                        windWash.clear()
+                    } else if let region = visibleRegion {
+                        windWash.viewSettled(on: region, layer: layer)
+                    }
+                }
+            )) {
+                Label("No wash", systemImage: "square.slash").tag(WashLayer.off.rawValue)
+                Label("Wind", systemImage: "wind").tag(WashLayer.wind.rawValue)
+                Label("Current", systemImage: "water.waves").tag(WashLayer.currents.rawValue)
             }
         } label: {
             Image(systemName: "square.3.layers.3d")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(windWashOn ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                .foregroundStyle(washLayer == .off ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
                 .frame(width: 44, height: 44)
-                .background(windWashOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.regularMaterial),
+                .background(washLayer == .off ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.tint),
                             in: RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(windWashOn ? "Hide the wind wash" : "Show the wind wash")
+        .accessibilityLabel("Map wash layer")
     }
 
     /// The sky at the pin.

@@ -1,5 +1,6 @@
 import Foundation
 import OpenWaterCore
+import SwiftUI
 
 // MARK: - Currents
 
@@ -105,6 +106,25 @@ struct CurrentStation: Identifiable, Hashable {
 
     var url: URL {
         URL(string: "https://tidesandcurrents.noaa.gov/noaacurrents/predictions?id=\(id)_\(bin)")!
+    }
+}
+
+/// The currents chart's colours — the reference apps' shared grammar,
+/// which riders already read: the water's pauses in cool pales and blues,
+/// its runs warming through yellow and amber to orange as it picks up.
+/// Half a knot matters here the way three knots matter for wind, so the
+/// bands sit close together at the bottom of the scale.
+enum CurrentPalette {
+    static func color(for kn: Double) -> Color {
+        switch kn {
+        case ..<0.2: Color(red: 0.80, green: 0.86, blue: 0.92)
+        case ..<0.5: Color(red: 0.55, green: 0.73, blue: 0.88)
+        case ..<0.8: Color(red: 0.49, green: 0.78, blue: 0.76)
+        case ..<1.2: Color(red: 0.95, green: 0.83, blue: 0.40)
+        case ..<1.6: Color(red: 0.96, green: 0.68, blue: 0.28)
+        case ..<2.2: Color(red: 0.95, green: 0.52, blue: 0.20)
+        default: Color(red: 0.90, green: 0.33, blue: 0.16)
+        }
     }
 }
 
@@ -370,9 +390,16 @@ extension TidesAndCurrents {
                                source: .station(station), timeZone: .current)
     }
 
-    /// `interval=60` rows: `{"Speed": "0.949", "Time": "...", "Direction": 50}`.
-    /// Speed is a string, unsigned; Direction is the set and already rotates
-    /// flood-to-ebb, so it is stored as-is.
+    /// `interval=60` rows, in the two dialects the stations actually speak.
+    /// Some answer `{"Speed": "0.949", "Direction": 50}` — a string
+    /// magnitude and the set, stored as-is. Others answer a signed
+    /// `Velocity_Major` with `meanFloodDir`/`meanEbbDir`, the MAX_SLACK
+    /// vocabulary at hourly cadence: positive floods, negative ebbs, and
+    /// the sign picks which mean direction the water is running. A row
+    /// carrying `Type` is an *event* that answered where hours were asked
+    /// — the subordinate-station trap — and is dropped, so a station that
+    /// cannot do hours yields honestly empty hours instead of a blank
+    /// chart with a working scrubber.
     static func parseHourlyPredictions(_ data: Data) -> [CurrentsOutlook.Hour] {
         struct Payload: Decodable {
             struct Root: Decodable { let cp: [Row]? }
@@ -380,16 +407,32 @@ extension TidesAndCurrents {
                 let Time: String
                 let Speed: String?
                 let Direction: Double?
+                let Velocity_Major: Double?
+                let meanFloodDir: Double?
+                let meanEbbDir: Double?
+                let kind: String?
+                enum CodingKeys: String, CodingKey {
+                    case Time, Speed, Direction, Velocity_Major, meanFloodDir, meanEbbDir
+                    case kind = "Type"
+                }
             }
             let current_predictions: Root?
         }
         let parser = stationTimeParser
         return ((try? JSONDecoder().decode(Payload.self, from: data))?.current_predictions?.cp ?? [])
             .compactMap { row in
-                guard let at = parser.date(from: row.Time) else { return nil }
-                return CurrentsOutlook.Hour(at: at,
-                                            speedKn: row.Speed.flatMap(Double.init),
-                                            directionDeg: row.Direction)
+                guard row.kind == nil, let at = parser.date(from: row.Time) else { return nil }
+                if let speed = row.Speed.flatMap(Double.init) {
+                    return CurrentsOutlook.Hour(at: at, speedKn: speed,
+                                                directionDeg: row.Direction)
+                }
+                if let major = row.Velocity_Major {
+                    return CurrentsOutlook.Hour(
+                        at: at,
+                        speedKn: abs(major),
+                        directionDeg: major >= 0 ? row.meanFloodDir : row.meanEbbDir)
+                }
+                return nil
             }
     }
 

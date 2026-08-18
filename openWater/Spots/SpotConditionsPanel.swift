@@ -239,11 +239,19 @@ struct SpotConditionsPanel: View {
             } else {
                 if !currents.hours.isEmpty {
                     let speeds = currents.hours.map(\.speedKn)
-                    // Arrows drawn as-is: currents point TOWARD. The one
-                    // row where the wind habit of +180 would flip a river.
+                    // The reference grammar, top to bottom: the set's
+                    // arrows first — the flip across slack is the story —
+                    // then the bars wearing the strength ramp, then the
+                    // numbers under their own columns. Arrows drawn as-is:
+                    // currents point TOWARD, the one row where the wind
+                    // habit of +180 would flip a river.
+                    DirectionTicksRow(directions: currents.hours.map(\.directionDeg),
+                                      pointsToward: true, size: 13)
                     let peak = max(1.5, (speeds.compactMap { $0 }.max() ?? 0) * 1.2)
-                    chartBars(values: speeds, caps: [], peak: peak) { _ in Color.chartBar }
-                    DirectionTicksRow(directions: currents.hours.map(\.directionDeg), pointsToward: true)
+                    chartBars(values: speeds, caps: [], peak: peak) {
+                        CurrentPalette.color(for: $0)
+                    }
+                    ValueTicksRow(values: speeds)
                     HourScrubber(hours: currents.hours.map(\.at), timeZone: currents.timeZone, selection: $scrub)
 
                     let index = scrubIndex(in: currents.hours.map(\.at))

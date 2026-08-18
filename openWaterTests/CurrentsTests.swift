@@ -94,17 +94,32 @@ final class CurrentsTests: XCTestCase {
 
     /// A subordinate station answers MAX_SLACK-shaped rows even when asked
     /// for `interval=60`. Feeding those rows to the hourly parser must
-    /// produce nothing — not garbage hours — which is what keeps a
-    /// subordinate station's outlook events-only.
+    /// produce nothing at all — a `Type` marks an event, and events posing
+    /// as hours once drew a blank chart under a working scrubber.
     func testHourlyParserRejectsEventShapedRows() {
         let fixture = """
         {"current_predictions":{"units":"feet, knots","cp":[
             {"Type":"flood","meanFloodDir":210,"Bin":"1","meanEbbDir":40,"Time":"2026-08-18 01:33","Velocity_Major":2.54}]}}
         """
+        XCTAssertTrue(TidesAndCurrents.parseHourlyPredictions(Data(fixture.utf8)).isEmpty)
+    }
+
+    /// The second hourly dialect, captured from SFB1203 (Golden Gate,
+    /// 0.46 nm E): no Speed/Direction keys — a signed `Velocity_Major`
+    /// whose sign picks the mean flood or ebb direction. Positive floods
+    /// toward 69°, negative ebbs toward 257°.
+    func testHourlyParserSpeaksVelocityMajorDialect() {
+        let fixture = """
+        {"current_predictions":{"units":"feet, knots","cp":[
+            {"meanFloodDir":69,"Bin":"18","meanEbbDir":257,"Time":"2026-08-17 01:00","Depth":"30","Velocity_Major":1.77},
+            {"meanFloodDir":69,"Bin":"18","meanEbbDir":257,"Time":"2026-08-17 07:00","Depth":"30","Velocity_Major":-2.31}]}}
+        """
         let hours = TidesAndCurrents.parseHourlyPredictions(Data(fixture.utf8))
-        // The row parses (it has a Time) but carries no Speed/Direction,
-        // so the outlook it feeds still reads as having no hourly answer.
-        XCTAssertTrue(hours.allSatisfy { $0.speedKn == nil && $0.directionDeg == nil })
+        XCTAssertEqual(hours.count, 2)
+        XCTAssertEqual(hours[0].speedKn ?? 0, 1.77, accuracy: 0.0001)
+        XCTAssertEqual(hours[0].directionDeg, 69, "positive runs the flood way")
+        XCTAssertEqual(hours[1].speedKn ?? 0, 2.31, accuracy: 0.0001, "magnitude, sign shed")
+        XCTAssertEqual(hours[1].directionDeg, 257, "negative runs the ebb way")
     }
 
     // MARK: Station index distillation

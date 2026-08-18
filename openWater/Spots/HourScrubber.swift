@@ -131,10 +131,17 @@ struct DirectionTicksRow: View {
 
     let directions: [Double?]
     var pointsToward = false
+    /// Point size of each arrow. The default suits a supporting row under
+    /// a wind chart; the currents tab draws them larger because the flip
+    /// across slack *is* the chart's story.
+    var size: Double = 8
 
-    /// Every nth arrow, chosen so the row never crowds — the columns stay
-    /// aligned with the chart because the spacer count never changes.
-    private var stride: Int { max(1, directions.count / 24) }
+    /// Every nth arrow, scaled to the arrow size so bigger arrows never
+    /// crowd — the columns stay aligned with the chart because the spacer
+    /// count never changes.
+    private var stride: Int {
+        max(1, directions.count / max(8, Int(200 / size)))
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -142,7 +149,7 @@ struct DirectionTicksRow: View {
                 Group {
                     if index.isMultiple(of: stride), let degrees = directions[index] {
                         Image(systemName: "location.north.fill")
-                            .font(.system(size: 8, weight: .heavy))
+                            .font(.system(size: size, weight: .heavy))
                             .rotationEffect(.degrees(pointsToward ? degrees : degrees + 180))
                             .foregroundStyle(.secondary)
                     } else {
@@ -150,7 +157,38 @@ struct DirectionTicksRow: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 12)
+                .frame(height: size * 1.5)
+            }
+        }
+    }
+}
+
+/// The chart's own numbers, every few columns, on the same equal-column
+/// axis as the bars — the way the reference maps write "S, kt" under a
+/// currents chart so the bar heights never need guessing at.
+struct ValueTicksRow: View {
+
+    let values: [Double?]
+    var decimals = 1
+
+    private var stride: Int { max(1, values.count / 8) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(values.indices, id: \.self) { index in
+                Group {
+                    if index.isMultiple(of: stride), let value = values[index] {
+                        Text(String(format: "%.\(decimals)f", value))
+                            .font(.caption2.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 14)
             }
         }
     }

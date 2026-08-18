@@ -16,11 +16,25 @@ import SwiftUI
 /// The hard cell edges are the model's own coarseness with the smoothing
 /// half-done — banding was already the raster's philosophy; these bands
 /// just have corners.
+/// What the map's wash is showing, if anything. A picker, not a stack —
+/// two translucent fields over one another would say nothing about either.
+enum WashLayer: String, CaseIterable {
+    case off, wind, currents
+
+    var caption: String? {
+        switch self {
+        case .off: nil
+        case .wind: "Wind wash · Open-Meteo model · now"
+        case .currents: "Current wash · Open-Meteo ocean model · now"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class WindWashModel {
 
-    /// One cell of the field: a quad and the band its wind falls in.
+    /// One cell of the field: a quad and the band its value falls in.
     struct Cell: Identifiable {
         let id: Int
         let coordinates: [CLLocationCoordinate2D]
@@ -31,6 +45,7 @@ final class WindWashModel {
     private(set) var fieldRegion: MKCoordinateRegion?
     private(set) var isLoading = false
     private var loadTask: Task<Void, Never>?
+    private var loadedLayer: WashLayer = .off
 
     /// How much finer the cells are than the model grid. Three keeps a
     /// 60 km field's cells around 2.5 km — contour-ish without asking
@@ -42,10 +57,12 @@ final class WindWashModel {
     private static let washAlpha = 0.42
 
     /// The map settled somewhere — refetch if it wandered far enough from
-    /// the loaded field. Thresholds are the flow map's own.
-    func viewSettled(on visible: MKCoordinateRegion) {
-        guard needsReload(for: visible) else { return }
-        reload(for: visible)
+    /// the loaded field, or if the rider switched what the field shows.
+    /// Thresholds are the flow map's own.
+    func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer) {
+        guard layer != .off else { return clear() }
+        guard layer != loadedLayer || needsReload(for: visible) else { return }
+        reload(for: visible, layer: layer)
     }
 
     func clear() {
@@ -53,6 +70,7 @@ final class WindWashModel {
         loadTask = nil
         cells = []
         fieldRegion = nil
+        loadedLayer = .off
         isLoading = false
     }
 
@@ -79,7 +97,7 @@ final class WindWashModel {
         return region
     }
 
-    private func reload(for visible: MKCoordinateRegion) {
+    private func reload(for visible: MKCoordinateRegion, layer: WashLayer) {
         let target = clampedField(for: visible)
         loadTask?.cancel()
         loadTask = Task {
@@ -87,14 +105,29 @@ final class WindWashModel {
             let coords = gridCoordinates(for: target)
             // One hour deep, not the flow map's twenty-four: this wash
             // means *now*; the scrubbing lives on the flow map.
-            let field = await OpenMeteo.windAlong(coords, hours: 1)
-            guard !Task.isCancelled else { return }
             var speeds = [Double?](repeating: nil, count: FlowMapScreen.columns * FlowMapScreen.rows)
-            for index in coords.indices where index < speeds.count {
-                speeds[index] = field[safe: index]?.first?.speedKn
+            switch layer {
+            case .wind:
+                let field = await OpenMeteo.windAlong(coords, hours: 1)
+                guard !Task.isCancelled else { return }
+                for index in coords.indices where index < speeds.count {
+                    speeds[index] = field[safe: index]?.first?.speedKn
+                }
+            case .currents:
+                // The ocean model answers nil over land, so the current
+                // wash paints only the water — the field's own honesty,
+                // no land mask needed.
+                let field = await OpenMeteo.marineAlong(coords, hours: 1)
+                guard !Task.isCancelled else { return }
+                for index in coords.indices where index < speeds.count {
+                    speeds[index] = field[safe: index]?.currents.first?.speedKn
+                }
+            case .off:
+                return
             }
-            cells = Self.buildCells(speeds: speeds, region: target)
+            cells = Self.buildCells(speeds: speeds, region: target, layer: layer)
             fieldRegion = target
+            loadedLayer = layer
             isLoading = false
         }
     }
@@ -116,7 +149,8 @@ final class WindWashModel {
     }
 
     /// The raster builder's bilinear walk, stopped at cell resolution.
-    private static func buildCells(speeds: [Double?], region: MKCoordinateRegion) -> [Cell] {
+    private static func buildCells(speeds: [Double?], region: MKCoordinateRegion,
+                                   layer: WashLayer) -> [Cell] {
         let columns = FlowMapScreen.columns
         let rows = FlowMapScreen.rows
         let cellColumns = (columns - 1) * upsample
@@ -161,6 +195,10 @@ final class WindWashModel {
 
                 let latitude = south + Double(cellRow) * latStep
                 let longitude = west + Double(cellColumn) * lonStep
+                let band: Color = switch layer {
+                case .currents: CurrentPalette.color(for: knots)
+                default: Color(uiColor: WindPalette.washColour(for: knots))
+                }
                 out.append(Cell(
                     id: cellRow * cellColumns + cellColumn,
                     coordinates: [
@@ -169,7 +207,7 @@ final class WindWashModel {
                         CLLocationCoordinate2D(latitude: latitude + latStep, longitude: longitude + lonStep),
                         CLLocationCoordinate2D(latitude: latitude + latStep, longitude: longitude),
                     ],
-                    color: Color(uiColor: WindPalette.washColour(for: knots)).opacity(alpha)
+                    color: band.opacity(alpha)
                 ))
             }
         }

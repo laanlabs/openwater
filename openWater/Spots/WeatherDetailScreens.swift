@@ -2231,14 +2231,21 @@ struct TideChart: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             chart
-            // The datum matters: heights here are against mean sea level and
-            // NOAA's are against mean lower low water, so the two sets of
-            // numbers will not match and a rider comparing them deserves to
-            // know why before they conclude one of us is broken.
-            Text("Sea level against MSL, from Open-Meteo's marine model — worldwide, and a model rather than a harmonic prediction. NOAA's stations below are measured against MLLW, so their heights read differently and their times are the authority.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            // The datum matters: the two sources measure from different
+            // zeroes (MSL against MLLW), so the caption must say whose
+            // curve this is — a rider comparing mismatched numbers deserves
+            // the why before they conclude one of us is broken.
+            Group {
+                switch curve.source {
+                case .model:
+                    Text("Sea level against MSL, from Open-Meteo's marine model — worldwide, and a model rather than a harmonic prediction. NOAA's stations below are measured against MLLW, so their heights read differently and their times are the authority.")
+                case .station(let name, let metres):
+                    Text("Predicted water level against MLLW — NOAA CO-OPS harmonics for \(name), \(Format.distance(metres, unit: .metric)) from here. The authority on times and heights; still a prediction, not a gauge.")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
 
             if let age = curve.staleAge {
                 Label {

@@ -2234,6 +2234,18 @@ struct TideCurve {
     }
 
     let points: [Point]
+
+    /// Which authority drew this curve. Never mixed — the datums alone
+    /// (MSL against MLLW) make a blended curve a lie with an axis.
+    enum Source: Hashable {
+        /// Open-Meteo's marine model: worldwide, hourly, MSL.
+        case model
+        /// CO-OPS harmonic predictions at a named station: US, six-minute,
+        /// MLLW — the authority where it stands.
+        case station(name: String, metres: Double)
+    }
+    var source: Source = .model
+
     var timeZone: TimeZone?
     /// The offline-fallback age, seconds, when that is what this is.
     var staleAge: TimeInterval?
@@ -2323,6 +2335,86 @@ extension OpenMeteo {
             timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:)),
             staleAge: served.staleAge
         )
+    }
+}
+
+/// Who draws the tide curve at a point: the harmonic station when one is
+/// close enough to speak for the water, the model everywhere else. The
+/// currents doctrine, applied to the curve the currents doctrine was
+/// copied from — SURF.md's Tier 5, closed.
+enum Tides {
+
+    static func curve(at coordinate: Geo.Coordinate) async -> TideCurve {
+        if let station = await TidesAndCurrents.stations(near: coordinate, limit: 1).first,
+           station.metres <= Currents.stationRadius {
+            let harmonic = await TidesAndCurrents.harmonicCurve(for: station)
+            // A station that answered with nothing is a failed fetch, not
+            // an authority — the model curve beats a blank chart.
+            if !harmonic.isEmpty { return harmonic }
+        }
+        return await OpenMeteo.tide(at: coordinate)
+    }
+}
+
+extension TidesAndCurrents {
+
+    /// The station's own curve: six-minute predicted water levels from the
+    /// same datagetter the high/low events come from, yesterday through
+    /// two days out. Predictions, not readings — computed from harmonics,
+    /// and caching them wrongs nobody.
+    static func harmonicCurve(for station: TideStation) async -> TideCurve {
+        let stamp = DateFormatter()
+        stamp.dateFormat = "yyyyMMdd"
+        stamp.timeZone = .current
+        let begin = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+
+        var components = URLComponents(
+            string: "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter")!
+        components.queryItems = [
+            .init(name: "product", value: "predictions"),
+            .init(name: "station", value: station.id),
+            .init(name: "begin_date", value: stamp.string(from: begin)),
+            .init(name: "range", value: "72"),
+            .init(name: "datum", value: "MLLW"),
+            .init(name: "units", value: "metric"),
+            .init(name: "time_zone", value: "lst_ldt"),
+            .init(name: "format", value: "json"),
+        ]
+        guard let url = components.url,
+              let served = await ForecastCache.serve(from: url, ttl: 21_600)
+        else { return TideCurve(points: []) }
+
+        var curve = TideCurve(
+            points: parseWaterLevel(served.data),
+            source: .station(name: station.name, metres: station.metres),
+            timeZone: .current
+        )
+        curve.staleAge = served.staleAge
+        return curve
+    }
+
+    /// Six-minute rows thinned to every half hour. The thinning is not
+    /// thrift: at six minutes the harmonic tables hold the same value
+    /// across a flat tide top, and the turn detector reads a plateau's
+    /// two ends as two high waters. Half-hour samples keep every turn a
+    /// rider plans by and give the plateaus back their single peak.
+    static func parseWaterLevel(_ data: Data) -> [TideCurve.Point] {
+        struct Payload: Decodable {
+            struct Row: Decodable { let t: String; let v: String }
+            let predictions: [Row]?
+        }
+        let parser = DateFormatter()
+        parser.dateFormat = "yyyy-MM-dd HH:mm"
+        parser.timeZone = .current
+
+        let rows = (try? JSONDecoder().decode(Payload.self, from: data))?.predictions ?? []
+        return rows.enumerated().compactMap { index, row in
+            guard index.isMultiple(of: 5),
+                  let at = parser.date(from: row.t),
+                  let metres = Double(row.v)
+            else { return nil }
+            return TideCurve.Point(at: at, metres: metres)
+        }
     }
 }
 

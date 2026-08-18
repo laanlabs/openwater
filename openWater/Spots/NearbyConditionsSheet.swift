@@ -1636,7 +1636,7 @@ struct NearbyConditionsSheet: View {
         async let sea = OpenMeteo.waves(at: here)
         async let everything = OpenMeteo.detail(at: here)
         async let sea2 = OpenMeteo.surf(at: here)
-        async let water = OpenMeteo.tide(at: here)
+        async let water = Tides.curve(at: here)
         (resources, stations, weather, reading) = await (nearby, found, air, blowing)
         registryAliases = await aliases
         (alerts, tides, buoys) = await (warnings, tideList, buoyList)

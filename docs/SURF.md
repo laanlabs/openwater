@@ -170,11 +170,16 @@ And the structural gaps, in the order they hurt:
   Forecast — human surf heights and rip current risk — served free from
   the same API the stations and alerts already use. A quoted card, named
   and dated, US coastal offices only, silently absent elsewhere.
-- [ ] **The harmonic curve.** CO-OPS serves 6-minute predicted water levels
-  from the same datagetter the tide events come from. Where a station sits
-  within ~15 km, draw the harmonic prediction instead of the model sea
-  level — wholesale, never mixed: the datums differ (MLLW against MSL) and
-  the guide's datum-mixing warning is written in exactly this blood.
+- [x] **The harmonic curve.** (2026-08-18) CO-OPS serves 6-minute predicted
+  water levels from the same datagetter the tide events come from. Where a
+  station sits within ~15 km — the same radius the currents layer grants —
+  `Tides.curve(at:)` draws the harmonic prediction instead of the model
+  sea level, wholesale, never mixed: the datums differ (MLLW against MSL)
+  and the chart's caption now says whose curve it is, station and distance
+  named. The six-minute rows are thinned to half-hours on purpose: the
+  harmonic tables hold one value across a flat tide top, and the turn
+  detector reads a plateau's two ends as two high waters. An empty station
+  answer falls back to the model — a failed fetch is not an authority.
 - [x] **Ocean currents, same doctrine.** (2026-08-18) `Currents.outlook`
   in `CurrentsOutlook.swift`: a CO-OPS current-prediction station within
   the same 15 km replaces Open-Meteo's `ocean_current_velocity` wholesale

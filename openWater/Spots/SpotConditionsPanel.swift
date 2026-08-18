@@ -146,7 +146,7 @@ struct SpotConditionsPanel: View {
             async let wind = OpenMeteo.outlook(at: here, days: 2)
             async let sky = OpenMeteo.detail(at: here)
             async let water = Currents.outlook(at: here)
-            async let sea = OpenMeteo.tide(at: here)
+            async let sea = Tides.curve(at: here)
             async let swell = OpenMeteo.waves(at: here, hours: 48)
             async let resources = guide.nearbyResources(near: here, radius: 40_000)
             async let stations = TidesAndCurrents.stations(near: here, limit: 1)

@@ -22,6 +22,11 @@ struct WeatherStatusView: View {
         case checking
         case working(windSpeed: Double, place: String)
         case failed(String)
+
+        var isFailed: Bool {
+            if case .failed = self { return true }
+            return false
+        }
     }
 
     var body: some View {
@@ -33,6 +38,12 @@ struct WeatherStatusView: View {
             // invisible to exactly the reviewer who came looking for it.
             AppleWeatherAttribution(showsLegalLabel: true, prefix: "Weather data provided by")
                 .font(.caption)
+                // Room to miss. "Try again" and the legal link were six points
+                // apart at caption size, close enough that a thumb aimed at one
+                // landed on the other. The gap rides here rather than as bottom
+                // padding on the button, because padding a Button grows its own
+                // hit region downwards — the wrong direction entirely.
+                .padding(.top, check.isFailed ? 10 : 0)
         }
         // Runs itself rather than waiting to be asked. Somebody opening
         // Settings after finding no wind reading has already asked the
@@ -75,7 +86,16 @@ struct WeatherStatusView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                    // Borderless because this row is shared. A Form row hands
+                    // its whole width to a single control, and with the legal
+                    // Link sitting below the button the Link was the one that
+                    // won it — every tap in this row, the error text included,
+                    // opened Apple's legal page and "Try again" could not be
+                    // pressed at all. Borderless is what tells SwiftUI these
+                    // are separate controls that share a row, the same reason
+                    // RecordedWindRow's buttons wear it.
                     Button("Try again") { Task { await runCheck() } }
+                        .buttonStyle(.borderless)
                         .font(.caption)
                 }
             }

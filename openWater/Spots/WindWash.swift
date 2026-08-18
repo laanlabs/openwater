@@ -60,7 +60,6 @@ final class WindWashModel {
         /// Speed-weighted components per node — u east, v north, the way
         /// the fluid runs — nil where the model is silent.
         let vectors: [(u: Double, v: Double)?]
-        let maxSpeed: Double
 
         /// Bilinear sample at fractional grid coordinates; components are
         /// interpolated rather than angles, which would spin the long way
@@ -166,8 +165,7 @@ final class WindWashModel {
                 guard let speed, let direction else { return nil }
                 let runs = (loadedLayer == .wind ? direction + 180 : direction) * .pi / 180
                 return (u: speed * sin(runs), v: speed * cos(runs))
-            },
-            maxSpeed: max(6, hour.speeds.compactMap { $0 }.max() ?? 6))
+            })
     }
 
     /// How much finer the cells are than the model grid. Three keeps a
@@ -493,6 +491,23 @@ struct WashParticleLayer: View {
                     // a white comet legible over pale wash and white chart
                     // alike — drawn as geometry, not a blur filter, because
                     // two hundred blurred strokes a frame is a heater.
+                    // A comet slow enough that its tail is sub-pixel has
+                    // no tail: at that speed the honest picture is a dot
+                    // drifting, and a hairline shorter than its own width
+                    // only aliases.
+                    let reach = hypot(head.x - tail.x, head.y - tail.y)
+                    guard reach > 2 else {
+                        context.fill(
+                            Path(ellipseIn: CGRect(x: head.x - 2.9, y: head.y - 2.3,
+                                                   width: 5.8, height: 5.8)),
+                            with: .color(.black.opacity(0.22 * particle.fade)))
+                        context.fill(
+                            Path(ellipseIn: CGRect(x: head.x - 1.4, y: head.y - 1.4,
+                                                   width: 2.8, height: 2.8)),
+                            with: .color(.white.opacity(particle.fade)))
+                        continue
+                    }
+
                     var shadow = Path()
                     shadow.move(to: CGPoint(x: tail.x, y: tail.y + 0.6))
                     shadow.addLine(to: CGPoint(x: head.x, y: head.y + 0.6))
@@ -563,11 +578,22 @@ final class WashParticleSim {
     private var lastTick: TimeInterval?
     private var fieldID: UUID?
     private static let count = 220
-    /// The comet's tail reaches this many seconds behind the head.
-    private static let tailSeconds = 0.6
-    /// The strongest air crosses the *viewport* in about this long —
-    /// screen-space pacing, so the flow reads the same at every zoom.
-    private static let crossSeconds = 5.5
+    /// The wind that crosses the viewport in `crossSeconds`. Everything
+    /// else is paced against it by its own speed, so the animation carries
+    /// absolute meaning: a glance at the pace is a reading of the wind.
+    private static let referenceKn = 18.0
+    /// How long `referenceKn` takes to cross the visible span — screen-space
+    /// pacing, so the flow reads the same at every zoom.
+    private static let crossSeconds = 6.0
+
+    /// How many seconds of travel the tail spans, ramped with the wind:
+    /// a stub in light air, a long streak when it is honking. Combined
+    /// with a velocity already proportional to speed, drawn tail length
+    /// grows faster than the wind does — which is the whole read.
+    private static func tailReach(forKnots knots: Double) -> Double {
+        let t = min(1, max(0, (knots - 3) / 22))
+        return 0.35 + 0.65 * t
+    }
 
     func advance(to date: Date, in field: WindWashModel.Field, bounds: Bounds) {
         let now = date.timeIntervalSinceReferenceDate
@@ -594,9 +620,14 @@ final class WashParticleSim {
             guard particle.age <= particle.lifetime,
                   particle.gx >= bounds.minGX - marginX, particle.gx <= bounds.maxGX + marginX,
                   particle.gy >= bounds.minGY - marginY, particle.gy <= bounds.maxGY + marginY,
-                  let flow = field.vector(gx: particle.gx, gy: particle.gy),
-                  (flow.u * flow.u + flow.v * flow.v).squareRoot() > 0.05
+                  let flow = field.vector(gx: particle.gx, gy: particle.gy)
             else {
+                particles[index] = Self.spawn(in: field, bounds: bounds, staggered: false)
+                continue
+            }
+            let speed = (flow.u * flow.u + flow.v * flow.v).squareRoot()
+            // Slack water and dead calm carry no comet at all.
+            guard speed > 0.05 else {
                 particles[index] = Self.spawn(in: field, bounds: bounds, staggered: false)
                 continue
             }
@@ -604,21 +635,31 @@ final class WashParticleSim {
             let phase = particle.age / particle.lifetime
             particles[index].fade = max(0, min(1, min(phase / 0.15, (1 - phase) / 0.3)))
 
-            // Degrees per second from the *visible* span, so the strongest
-            // air crosses the screen in `crossSeconds` whether the camera
-            // holds a street or a sea; longitude stretched for latitude.
+            // Degrees per second, scaled from the *visible* span so the
+            // pace reads the same on a street as on a sea — but against
+            // an absolute reference wind, never the field's own maximum.
+            // Normalising by the maximum was the bug the flow could not
+            // shake: it made a six-knot afternoon and a thirty-knot gale
+            // stream at exactly the same rate, because each field's
+            // fastest node was always the one crossing in `crossSeconds`.
+            // Now `referenceKn` crosses in that time and everything else
+            // moves by its own true speed — half the wind, half the pace.
             let cellLat = field.region.span.latitudeDelta / Double(field.rows - 1)
             let cellLon = field.region.span.longitudeDelta / Double(field.columns - 1)
             let degreesPerKnot = max(bounds.visibleLatSpan, 0.0001)
-                / (Self.crossSeconds * field.maxSpeed)
+                / (Self.crossSeconds * Self.referenceKn)
             let stretch = 1 / max(0.2, cos(field.region.center.latitude * .pi / 180))
             let gridVX = flow.u * degreesPerKnot * stretch / cellLon
             let gridVY = flow.v * degreesPerKnot / cellLat
 
             particles[index].gx += gridVX * dt
             particles[index].gy += gridVY * dt
-            particles[index].tailGX = particles[index].gx - gridVX * Self.tailSeconds
-            particles[index].tailGY = particles[index].gy - gridVY * Self.tailSeconds
+            // The tail is velocity times reach, and the reach itself grows
+            // with the wind — so drawn length rises faster than speed
+            // alone: light air leaves a stub, a gale leaves a streak.
+            let reach = Self.tailReach(forKnots: speed)
+            particles[index].tailGX = particles[index].gx - gridVX * reach
+            particles[index].tailGY = particles[index].gy - gridVY * reach
         }
     }
 

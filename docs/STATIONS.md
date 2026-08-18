@@ -90,6 +90,11 @@ Readings for any row with a `gov` id come through `FreeStations.latest` —
 which network answers is decided by the id, and Firestore is never in that
 path.
 
+The registry's document schema, classification fields, and the audit
+procedure for growing it region by region are specified in
+[WIND_STATIONS.md](WIND_STATIONS.md), which is subordinate to this
+document where they disagree.
+
 Today's wind meters in the guide are link rows attached to spots. The
 registry promotes them to first-class station documents; the old rows keep
 serving until they are migrated, the same way every guide migration here

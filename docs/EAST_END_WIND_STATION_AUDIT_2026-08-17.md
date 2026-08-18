@@ -55,3 +55,22 @@ freshness, distance, instrument quality, and exposure—not proximity alone.
 Machine-readable evidence is maintained with the database tooling as
 `east_end_long_island_wind_station_audit_2026-08-17.json`.
 
+## Reconciliation note, added at merge
+
+This audit is a faithful record of what was published on 2026-08-17, and
+two of its choices predate the rules that now govern the registry
+([STATIONS.md](STATIONS.md), [WIND_STATIONS.md](WIND_STATIONS.md)):
+
+- It wrote one row per provider view, linked by `canonicalDuplicateOf`.
+  The registry's identity rule is now one document per physical
+  instrument with provider entries inside it; these rows are legacy, the
+  field is a migration marker, and collapsing them is open work.
+- It bulk-published a full provider inventory — 181 rows for one region,
+  146 of them subscription-only, many of them residential Tempest
+  hardware. The registry's scale rule is now curation over inventory;
+  these rows stand until curated, but set no precedent.
+
+The observations themselves — which stations exist, which report freely,
+which buoys carry no anemometer — remain the audit's value and are
+unaffected.
+

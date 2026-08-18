@@ -1378,10 +1378,14 @@ enum NationalWeatherService {
 
     private static let agent = "openWater/1.0 (openwaterapp.com; support@openwaterapp.com)"
 
-    private static func get(_ url: URL) async -> Data? {
+    /// Internal, not private: the surf zone card lives in its own file and
+    /// speaks the same API with the same manners. The `accept` override is
+    /// for the text-product endpoints, which serve ld+json rather than
+    /// geo+json.
+    static func get(_ url: URL, accept: String = "application/geo+json") async -> Data? {
         var request = URLRequest(url: url)
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
-        request.setValue("application/geo+json", forHTTPHeaderField: "Accept")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
         request.timeoutInterval = 12
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200

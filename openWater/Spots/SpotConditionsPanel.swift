@@ -91,6 +91,7 @@ struct SpotConditionsPanel: View {
     @State private var waves: [WaveHour] = []
     @State private var cams: [SpotGuideStore.GuideResource] = []
     @State private var tideStation: TideStation?
+    @State private var surfZone: SurfZoneForecast?
     @State private var isLoading = true
 
     /// The shared cursor: one instant, every tab. Nil is "now".
@@ -150,7 +151,9 @@ struct SpotConditionsPanel: View {
             async let swell = OpenMeteo.waves(at: here, hours: 48)
             async let resources = guide.nearbyResources(near: here, radius: 40_000)
             async let stations = TidesAndCurrents.stations(near: here, limit: 1)
+            async let zone = NationalWeatherService.surfZone(at: here)
             (outlook, detail, currents, tide, waves) = await (wind, sky, water, sea, swell)
+            surfZone = await zone
             cams = await resources.filter { $0.kind == .camera }
             if let nearest = await stations.first {
                 var station = nearest
@@ -362,6 +365,12 @@ struct SpotConditionsPanel: View {
                 valueRow("Swell", waves[safe: index]?.swellM.map { Format.height($0, unit: settings.units.distance) } ?? nil)
 
                 provenance("Open-Meteo marine model · modeled, not observed · CC-BY 4.0.")
+            }
+
+            // The forecaster's own words, when a US coastal office writes
+            // them for this beach — and silently absent everywhere else.
+            if let surfZone {
+                SurfZoneCard(forecast: surfZone)
             }
         }
     }

@@ -166,10 +166,18 @@ And the structural gaps, in the order they hurt:
 
 ### Tier 5 — US extras
 
-- [ ] **The forecaster's own words.** NWS coastal offices write a Surf Zone
-  Forecast — human surf heights and rip current risk — served free from
-  the same API the stations and alerts already use. A quoted card, named
-  and dated, US coastal offices only, silently absent elsewhere.
+- [x] **The forecaster's own words.** (2026-08-18) NWS coastal offices
+  write a Surf Zone Forecast — human surf heights and rip current risk —
+  served free from the same API the stations and alerts already use.
+  `SurfZoneCard.swift`: the point's own forecast zone picks its block out
+  of the office-wide product (first block as the fallback, and the card
+  names what it covers so a borrowed neighbour is visible, not hidden),
+  quoted verbatim in the product's own column alignment up to the
+  categories footer, bylined and dated, collapsed to a dozen lines with
+  the rest behind a tap. US coastal offices only, silently absent
+  elsewhere; nil answers are remembered for half an hour so inland points
+  stop asking. The parser is pinned by tests against a captured OKX
+  product.
 - [x] **The harmonic curve.** (2026-08-18) CO-OPS serves 6-minute predicted
   water levels from the same datagetter the tide events come from. Where a
   station sits within ~15 km — the same radius the currents layer grants —

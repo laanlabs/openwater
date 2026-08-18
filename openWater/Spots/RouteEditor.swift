@@ -41,9 +41,9 @@ struct RouteEditChrome: View {
 
     private var instruction: String {
         switch draftCount {
-        case 0: "Tap the map to set the start"
-        case 1: "Tap to set the finish"
-        default: "Tap to extend the route — drag a handle to adjust"
+        case 0: "Pan the crosshairs over the start, then Add start"
+        case 1: "Aim at the finish and Add point"
+        default: "Add point extends the route — drag a handle to adjust"
         }
     }
 
@@ -63,17 +63,20 @@ struct RouteEditChrome: View {
                     .frame(height: 40)
                     .background(.regularMaterial, in: Capsule())
 
-                if draftCount > 0 {
-                    Button {
-                        onUndo()
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 40, height: 40)
-                            .background(.regularMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Remove last point")
+                // Always on the strip, named, greyed rather than hidden —
+                // an undo the rider never has to hunt for.
+                Button {
+                    onUndo()
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .frame(height: 40)
+                        .background(.regularMaterial, in: Capsule())
                 }
+                .disabled(draftCount == 0)
+                .opacity(draftCount == 0 ? 0.45 : 1)
+                .accessibilityLabel("Remove last point")
 
                 Spacer()
 
@@ -92,6 +95,35 @@ struct RouteEditChrome: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+}
+
+/// The aiming reticle for route drawing: fixed to the glass at the
+/// camera's centre, the map dragged underneath — the centre pin's
+/// philosophy wearing a surveyor's face. Add point drops the waypoint
+/// exactly under the dot.
+struct RouteCrosshair: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.85), lineWidth: 2)
+                .frame(width: 30, height: 30)
+            ForEach(0..<4, id: \.self) { tick in
+                Rectangle()
+                    .fill(Color.primary.opacity(0.85))
+                    .frame(width: 2, height: 9)
+                    .offset(y: -19.5)
+                    .rotationEffect(.degrees(Double(tick) * 90))
+            }
+            Circle()
+                .fill(Color.primary.opacity(0.85))
+                .frame(width: 4, height: 4)
+        }
+        // A white breath around the dark lines, so the reticle survives
+        // dark water and busy chart alike.
+        .shadow(color: Color(.systemBackground).opacity(0.9), radius: 1.5)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -264,6 +296,36 @@ struct RoutePanel: View {
     private var path: RoutePath { route.path }
     private var progress: RouteProgress { weather.progress(for: route) }
 
+    /// Departure with the thumb riding along: a rider asking "what if I
+    /// go at five" wants five o'clock's water and wash, not a scrub left
+    /// where the last drag parked it.
+    private var departureBinding: Binding<Date> {
+        Binding(
+            get: { weather.departure },
+            set: { choice in
+                weather.departure = choice
+                weather.scrub = choice
+            }
+        )
+    }
+
+    /// The slider's fraction of the run, written back as the scrubbed
+    /// instant everything else already reads — the readout, the strip,
+    /// the chords, the map's dot. One thumb drives the whole preview.
+    private var runFraction: Binding<Double> {
+        Binding(
+            get: {
+                let duration = progress.eta.timeIntervalSince(weather.departure)
+                guard duration > 0 else { return 0 }
+                return min(1, max(0, weather.instant.timeIntervalSince(weather.departure) / duration))
+            },
+            set: { fraction in
+                let duration = max(0, progress.eta.timeIntervalSince(weather.departure))
+                weather.scrub = weather.departure.addingTimeInterval(duration * fraction)
+            }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 14) {
@@ -274,25 +336,22 @@ struct RoutePanel: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 12) {
-                Menu {
-                    ForEach(departureChoices, id: \.self) { choice in
-                        Button(shortTime(choice)) { weather.departure = choice }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "clock")
-                            .font(.caption.weight(.semibold))
-                        Text("Depart \(shortTime(weather.departure))")
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(Color(.secondarySystemGroupedBackground), in: Capsule())
-                }
-                .buttonStyle(.plain)
+            // Date and time, not just the next twelve hours — planning
+            // Saturday's run on Thursday is the whole point of a saved
+            // route. The range matches the 72-hour grid below; beyond it
+            // the forecast has nothing honest to say. Its own row: the
+            // two chips plus the stepper is wider than any phone.
+            HStack(spacing: 5) {
+                Image(systemName: "clock")
+                    .font(.caption.weight(.semibold))
+                DatePicker("Departure", selection: departureBinding,
+                           in: Date()...Date().addingTimeInterval(72 * 3600),
+                           displayedComponents: [.date, .hourAndMinute])
+                    .labelsHidden()
+                Spacer(minLength: 0)
+            }
 
+            HStack(spacing: 12) {
                 Stepper(value: $weather.speedKn, in: 4...30, step: 1) {
                     Text("\(Int(weather.speedKn)) kn")
                         .font(.subheadline.weight(.semibold))
@@ -324,7 +383,22 @@ struct RoutePanel: View {
             if weather.isLoading, weather.grid == nil {
                 LoadingPlaceholder(height: 120)
             } else if let grid = weather.grid, !grid.isEmpty {
-                HourScrubber(hours: grid.hours, timeZone: .current, selection: $weather.scrub)
+                // The run as one slider: launch at the left end, the beach
+                // at the right, the dot on the map riding wherever the
+                // thumb stands. The old hour scrubber spanned the whole
+                // forecast day, so the run itself lived in a sliver of it;
+                // this thumb *is* the run.
+                VStack(spacing: 2) {
+                    Slider(value: runFraction, in: 0...1)
+                    HStack {
+                        Text("Launch \(shortTime(weather.departure))")
+                        Spacer()
+                        Text("Arrive \(shortTime(progress.eta))")
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+                }
 
                 markerReadout(grid: grid)
                 sampleStrip(grid: grid)
@@ -538,11 +612,6 @@ struct RoutePanel: View {
         return .red
     }
 
-    private var departureChoices: [Date] {
-        let base = RouteWeatherModel.nextWholeHour()
-        return (0..<12).map { base.addingTimeInterval(Double($0) * 3600) }
-    }
-
     /// The shuttle message, word for word what the old planner sent: the
     /// run, then each end as a link the driver's phone opens in a maps app.
     private var shuttleMessage: String {
@@ -568,41 +637,5 @@ struct RoutePanel: View {
             Text(value).font(.subheadline.weight(.bold)).monospacedDigit()
             Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
-    }
-}
-
-// MARK: - Saved-route row
-
-/// One saved route in the Favorites panel: name, the line's facts, and a
-/// context menu matching the private-spot card's.
-struct RouteRow: View {
-
-    let route: PlannedRoute
-    let units: UnitPreferences
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.tint)
-                .frame(width: 34, height: 34)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(route.name)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text("\(Format.distance(route.path.totalDistance, unit: units.distance)) · ≈\(Format.duration(route.path.totalDistance / (route.speedKn * 0.5144))) at \(Int(route.speedKn)) kn")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(12)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-        .contentShape(Rectangle())
     }
 }

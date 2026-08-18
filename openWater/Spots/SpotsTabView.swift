@@ -18,6 +18,7 @@ struct SpotsTabView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(RouteStore.self) private var routeStore
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
+    @Environment(\.openURL) private var openURL
 
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var visibleRegion: MKCoordinateRegion?
@@ -29,6 +30,7 @@ struct SpotsTabView: View {
     @State private var pickingNewSpot = false
     @State private var addingSpot: NewSpotRequest?
     @State private var addingPrivateSpot: NewPrivateSpotRequest?
+    @State private var selectedPrivateSpot: PrivateSpot?
     @State private var renamingSpot: PrivateSpot?
     @State private var editingFacingSpot: PrivateSpot?
     @State private var renameText = ""
@@ -61,12 +63,8 @@ struct SpotsTabView: View {
 
     @State private var panelMode: PanelMode = .nearby
 
-    /// What the detail panel is about, when it is about anything. Set by a
-    /// pin, a list row or a search pick; nil is the browse panel.
-    @State private var selection: SpotSelection?
-    @State private var panelTab: ConditionsTab = .weather
-    /// The sheet's height is the tab's decision now: selecting raises it
-    /// to half, closing drops it back to peek.
+    /// The sheet's height is the tab's decision now: inspecting a route
+    /// raises it to half, closing drops it back to peek.
     @State private var panelDetent: SheetDetent = .peek
 
     /// Route drawing and inspection; nil is the map as it always was.
@@ -77,6 +75,18 @@ struct SpotsTabView: View {
     /// model's current.
     @AppStorage("spots.washLayer") private var washLayerRaw = WashLayer.off.rawValue
     @State private var windWash = WindWashModel()
+
+    /// The hardware layers: the guide's wind meters and cams, and NDBC's
+    /// buoys, as pins around the browsed water. Remembered like the wash.
+    /// On by default — the guide's pins are the page — but a rider reading
+    /// the wash wants the field, not a hundred capsules over it.
+    @AppStorage("spots.layer.spots") private var showSpots = true
+    @AppStorage("spots.layer.windStations") private var showWindStations = false
+    @AppStorage("spots.layer.cameras") private var showCameras = false
+    @AppStorage("spots.layer.buoys") private var showBuoys = false
+    @State private var resourcePins: [SpotGuideStore.GuideResource] = []
+    @State private var buoyPins: [Buoy] = []
+    @State private var watchingCam: SpotGuideStore.GuideResource?
 
     private var washLayer: WashLayer {
         WashLayer(rawValue: washLayerRaw) ?? .off
@@ -117,6 +127,13 @@ struct SpotsTabView: View {
     @State private var savingRoute: SaveRouteRequest?
     @State private var renamingRoute: PlannedRoute?
     @State private var renameRouteText = ""
+    @State private var isEditingFavorites = false
+    /// The camera's centre *right now*, tracked continuously — but only
+    /// while a route is being drawn. `visibleRegion` settles on `.onEnd`,
+    /// and a rider taps Add point faster than a glide decays; a point
+    /// dropped from the settled region lands where the crosshairs were,
+    /// not where they are.
+    @State private var editingCentre: CLLocationCoordinate2D?
 
     /// A request to add a spot: either at a place picked on the map, or `nil`
     /// for "here", which lets the form use the live fix as it always has.
@@ -135,6 +152,7 @@ struct SpotsTabView: View {
     enum SpotsRoute: Hashable {
         case spot(GuideSpot)
         case region(GuideRegion)
+        case buoy(Buoy)
     }
 
     var body: some View {
@@ -171,23 +189,40 @@ struct SpotsTabView: View {
                         floatingControls
                     }
                 }
+                .overlay(alignment: .bottom) {
+                    // The one way points are laid down: pan until the
+                    // crosshairs sit on the water, then this button. In
+                    // thumb range on purpose — it is the whole gesture.
+                    if case .editing(let draft, _) = routeMode {
+                        Button(action: addDraftPointAtCentre) {
+                            Label(draft.isEmpty ? "Add start" : "Add point",
+                                  systemImage: "plus")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 20)
+                                .frame(height: 46)
+                                .background(.tint, in: Capsule())
+                                .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        // Above the minimized panel's picker row, not on it.
+                        .padding(.bottom, 116)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if routeMode == nil, !isSearching,
+                       panelDetent == .peek || panelDetent == .minimized {
+                        bottomCorners
+                            .padding(.horizontal, 16)
+                            .padding(.bottom,
+                                     panelHeight(in: geometry.size, detent: panelDetent) + 12)
+                    }
+                }
                 .overlay {
                     if isSearching {
                         SpotSearchOverlay(isPresented: $isSearching, biasRegion: visibleRegion) { route in
                             isSearching = false
-                            // A found spot opens on the map with its panel,
-                            // not on a pushed page — regions still push.
-                            if case .spot(let spot) = route {
-                                withAnimation(.snappy) {
-                                    camera = .region(MKCoordinateRegion(
-                                        center: spot.coordinate,
-                                        span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
-                                    ))
-                                }
-                                select(.spot(spot))
-                            } else {
-                                path.append(route)
-                            }
+                            path.append(route)
                         } onPlace: { place in
                             isSearching = false
                             // A place is a camera move: the map goes there and
@@ -200,7 +235,6 @@ struct SpotsTabView: View {
                                     span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
                                 ))
                             }
-                            select(.place(place))
                         }
                     }
                 }
@@ -211,6 +245,8 @@ struct SpotsTabView: View {
                     SpotDetailScreen(spot: spot)
                 case .region(let region):
                     DestinationScreen(region: region) { path.append(.spot($0)) }
+                case .buoy(let buoy):
+                    BuoyPinScreen(buoy: buoy, from: localCoordinate ?? buoy.coordinate)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -225,6 +261,15 @@ struct SpotsTabView: View {
         }
         .sheet(item: $addingPrivateSpot) { request in
             AddPrivateSpotSheet(coordinate: request.coordinate)
+        }
+        .fullScreenSheet(item: $selectedPrivateSpot) { spot in
+            // A private spot has no guide page, so its tap opens the same
+            // full conditions sheet the centre pin uses, beach facing along.
+            NearbyConditionsSheet(title: spot.name, coordinate: spot.coordinate,
+                                  shoreFacingDeg: spot.shoreFacingDeg)
+        }
+        .fullScreenCover(item: $watchingCam) { cam in
+            CamViewerSheet(name: cam.displayName, url: cam.url)
         }
         .sheet(item: $editingFacingSpot) { spot in
             ShoreFacingSheet(spot: spot)
@@ -252,6 +297,9 @@ struct SpotsTabView: View {
                 if !trimmed.isEmpty { routeStore.rename(route.id, to: trimmed) }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $isEditingFavorites) {
+            FavoritesEditor()
         }
         .sheet(isPresented: $sharingLocation) {
             ShareLocationSheet()
@@ -294,6 +342,26 @@ struct SpotsTabView: View {
         .task { await guide.load() }
         .task(id: windRefreshKey) {
             await guide.refreshWind(for: pins + nearby.prefix(20) + guide.favorites)
+        }
+        .task(id: hardwareLayersKey) {
+            guard showWindStations || showCameras || showBuoys,
+                  let here = localCoordinate else {
+                resourcePins = []
+                buoyPins = []
+                return
+            }
+            if showWindStations || showCameras {
+                let resources = await guide.nearbyResources(near: here, radius: 60_000)
+                // Capped: a dense coast can carry hundreds of meters and
+                // cams, and a map of nothing but hardware stops being a map.
+                resourcePins = Array(resources.filter {
+                    ($0.kind == .wind && showWindStations) ||
+                    ($0.kind == .camera && showCameras)
+                }.prefix(80))
+            } else {
+                resourcePins = []
+            }
+            buoyPins = showBuoys ? await DataBuoyCenter.buoys(near: here, limit: 25) : []
         }
         .task(id: privateWindKey) {
             for spot in guide.privateSpots where privateWind[spot.id] == nil {
@@ -339,7 +407,7 @@ struct SpotsTabView: View {
             String(format: "%.3f,%.3f", $0.latitude, $0.longitude)
         } ?? "-"
         // The wind count moves as readings land, and `firingOnly` reads them.
-        return "\(region)|\(here)|\(disciplineFilter ?? "")|\(firingOnly)|\(guide.spots.count)|\(firingOnly ? guide.wind.count : 0)"
+        return "\(region)|\(here)|\(disciplineFilter ?? "")|\(firingOnly)|\(showSpots)|\(guide.spots.count)|\(firingOnly ? guide.wind.count : 0)"
     }
 
     private func refreshSpotLists() {
@@ -349,8 +417,10 @@ struct SpotsTabView: View {
 
     /// The spots worth pins right now: inside the viewport, nearest to its
     /// centre first, capped so MapKit is drawing dozens and not a thousand.
+    /// Empty when the layer is toggled off — which also spares the wind
+    /// refresh for pins nobody can see.
     private var pinSpots: [GuideSpot] {
-        guard let region = visibleRegion else { return [] }
+        guard showSpots, let region = visibleRegion else { return [] }
         let halfLat = region.span.latitudeDelta / 2 * 1.2
         let halfLon = region.span.longitudeDelta / 2 * 1.2
         let centre = region.center
@@ -392,13 +462,18 @@ struct SpotsTabView: View {
         // Hoisted for the same reason as the wind dictionary: reads inside
         // the map content builder register no observation dependency.
         let washCells = washLayer == .off ? [] : windWash.cells
+        let washField = washLayer == .off ? nil : windWash.field
         return MapReader { proxy in
             Map(position: $camera) {
             // The wash goes first: map content draws in order, and the
             // field belongs under every pin, handle and marker.
             ForEach(washCells) { cell in
+                // The stroke is the fill's own colour: it papers over the
+                // antialiased hairline between neighbouring quads, which
+                // the saturated wash would otherwise show as a faint grid.
                 MapPolygon(coordinates: cell.coordinates)
                     .foregroundStyle(cell.color)
+                    .stroke(cell.color, lineWidth: 1)
             }
             UserAnnotation()
             // Pins step aside while a route is drawn: the map is a canvas
@@ -406,7 +481,7 @@ struct SpotsTabView: View {
             if routeMode?.isEditing != true {
                 ForEach(pins) { spot in
                     Annotation("", coordinate: spot.coordinate, anchor: .bottom) {
-                        Button { select(.spot(spot)) } label: {
+                        Button { path.append(.spot(spot)) } label: {
                             WindPin(reading: readings[spot.spotId])
                                 .contentShape(Rectangle())
                         }
@@ -417,8 +492,35 @@ struct SpotsTabView: View {
 
                 ForEach(guide.privateSpots) { spot in
                     Annotation("", coordinate: spot.clCoordinate, anchor: .bottom) {
-                        Button { select(.privateSpot(spot)) } label: {
+                        Button { selectedPrivateSpot = spot } label: {
                             PrivateSpotPin()
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // The hardware layers. A camera plays in the app, a buoy
+                // opens its own page, a wind station is an outbound link —
+                // each pin does what its row in the conditions sheet does.
+                ForEach(resourcePins) { resource in
+                    Annotation("", coordinate: resource.coordinate.clCoordinate, anchor: .center) {
+                        Button {
+                            if resource.kind == .camera { watchingCam = resource }
+                            else { openURL(resource.url) }
+                        } label: {
+                            HardwarePin(kind: resource.kind)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .annotationTitles(.hidden)
+                }
+                ForEach(buoyPins) { buoy in
+                    Annotation("", coordinate: buoy.coordinate.clCoordinate, anchor: .center) {
+                        Button { path.append(.buoy(buoy)) } label: {
+                            HardwarePin(kind: nil)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -516,22 +618,41 @@ struct SpotsTabView: View {
                 }
             }
         }
-        .mapStyle(settings.mapStyle.mapStyle)
+        // While a wash is up, the standard map goes muted — Apple's grey
+        // mutedStandard voice — so its parkland greens stop arguing with
+        // the field's colours; the wash owns the palette, the chart keeps
+        // the shapes. The rider's own style returns the moment the wash
+        // is off, and hybrid/satellite are left as chosen — emphasis is
+        // a standard-style idea. (A saturation/contrast mute stack over
+        // the whole map was tried and backed out: it composites over the
+        // map's own content, so the pins drained grey with the basemap.)
+        .mapStyle(washLayer != .off && settings.mapStyle == .standard
+                  ? .standard(elevation: .flat, emphasis: .muted,
+                              pointsOfInterest: .excludingAll, showsTraffic: false)
+                  : settings.mapStyle.mapStyle)
         .mapControlVisibility(.hidden)
         .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
             windWash.viewSettled(on: context.region, layer: washLayer)
         }
-        // Route drawing borrows the plain tap — everywhere else a tap on
-        // the map means nothing, so there is nothing to steal.
-        .onTapGesture(coordinateSpace: .local) { location in
-            guard case .editing(var draft, let routeId) = routeMode,
-                  let tapped = proxy.convert(location, from: .local)
-            else { return }
-            draft.append(snapped(Geo.Coordinate(latitude: tapped.latitude,
-                                                longitude: tapped.longitude)))
-            withAnimation(.snappy) { routeMode = .editing(draft: draft, routeId: routeId) }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        .onMapCameraChange(frequency: .continuous) { context in
+            // Live centre for the crosshairs (see `editingCentre`). The
+            // guard keeps ordinary pans from churning state every frame;
+            // the single nil write on exit stops a stale centre from
+            // outliving the session it was tracked for.
+            if routeMode?.isEditing == true {
+                editingCentre = context.region.center
+            } else if editingCentre != nil {
+                editingCentre = nil
+            }
+        }
+        // The living streaks over the wash: the reference apps' particle
+        // animation, streaming with the field. See WashParticleLayer for
+        // why this is an overlay and not map content.
+        .overlay {
+            if let washField {
+                WashParticleLayer(field: washField, proxy: proxy)
+            }
         }
         // The centre pin: pinned to the glass, never a map annotation. As an
         // annotation it would join MapKit's diffing — the strobe class of bug
@@ -539,10 +660,17 @@ struct SpotsTabView: View {
         // coordinate would need chasing after every camera move. On the
         // glass, the map slides and the pin stays, which is the interaction.
         .overlay {
-            // Hidden while a detail is up — two readouts about two different
+            // Hidden while a route is up — two readouts about two different
             // points is how a map lies.
-            if !isSearching, selection == nil, routeMode == nil {
+            if !isSearching, routeMode == nil {
                 CentrePinReadout(reading: localWind) { isShowingConditions = true }
+            }
+            // Route drawing aims with the glass, not the finger: the
+            // crosshairs sit at the camera's centre, the map is dragged
+            // underneath, and Add point drops the waypoint exactly there —
+            // no stray touches on the canvas.
+            if routeMode?.isEditing == true {
+                RouteCrosshair()
             }
         }
         }
@@ -550,9 +678,21 @@ struct SpotsTabView: View {
 
     // MARK: - Route editing
 
-    /// A tapped point becomes the spot it nearly is: within 800 m the
-    /// waypoint lands exactly on the guide spot, so the route's ends carry
-    /// real names into the save sheet.
+    /// The Add point button's whole job: the waypoint lands where the
+    /// crosshairs are — the settled camera centre — snapped like a tap
+    /// used to be before the crosshairs replaced it.
+    private func addDraftPointAtCentre() {
+        guard case .editing(var draft, let routeId) = routeMode,
+              let centre = editingCentre ?? visibleRegion?.center else { return }
+        draft.append(snapped(Geo.Coordinate(latitude: centre.latitude,
+                                            longitude: centre.longitude)))
+        withAnimation(.snappy) { routeMode = .editing(draft: draft, routeId: routeId) }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// A point becomes the spot it nearly is: within 800 m the waypoint
+    /// lands exactly on the guide spot, so the route's ends carry real
+    /// names into the save sheet.
     private func snapped(_ point: Geo.Coordinate) -> Geo.Coordinate {
         guard let spot = guide.nearestSpot(to: point) else { return point }
         let there = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
@@ -595,11 +735,23 @@ struct SpotsTabView: View {
     private var routeDisplayKey: String {
         guard case .inspecting(let route) = routeMode else { return "off" }
         let stamp = routeWeather.grid?.stamp.uuidString ?? "loading"
-        let bucket = Int(routeWeather.instant.timeIntervalSince1970 / 300)
+        // Fifteen seconds of scrubbed time per step, so the run slider's
+        // dot glides rather than hopping five minutes at a time; a refresh
+        // is a dozen samples of arithmetic, cheap enough to spend freely.
+        let bucket = Int(routeWeather.instant.timeIntervalSince1970 / 15)
         return "\(route.id)|\(stamp)|\(bucket)|\(routeWeather.departure.timeIntervalSince1970)|\(routeWeather.speedKn)"
     }
 
     private func refreshRouteDisplay() {
+        // The wash rides the same scrubbed instant as the dot: while a
+        // route is open, the panel's slider is the whole map's clock.
+        // scrub(to:) is a no-op until the thumb crosses an hour, so the
+        // fifteen-second ticks this refresh runs on cost nothing.
+        if case .inspecting = routeMode {
+            windWash.scrub(to: routeWeather.instant)
+        } else {
+            windWash.scrub(to: nil)
+        }
         guard case .inspecting(let route) = routeMode,
               let grid = routeWeather.grid, !grid.isEmpty else {
             routeDisplay = RouteMapDisplay()
@@ -669,7 +821,6 @@ struct SpotsTabView: View {
                 inspectRoute(route)
             } else {
                 withAnimation(.snappy) {
-                    selection = nil
                     routeMode = .editing(draft: [], routeId: nil)
                     panelDetent = .minimized
                 }
@@ -679,7 +830,6 @@ struct SpotsTabView: View {
 
     private func inspectRoute(_ route: PlannedRoute) {
         withAnimation(.snappy) {
-            selection = nil
             routeMode = .inspecting(route)
             panelDetent = .half
             // The panel takes the lower half, so the camera sits south of
@@ -698,25 +848,6 @@ struct SpotsTabView: View {
             )
             region.center.latitude -= effectiveLatSpan * 0.28
             camera = .region(region)
-        }
-    }
-
-    /// The one door into the detail panel: remember what, raise the sheet.
-    /// A route being inspected steps aside — one panel about one thing.
-    private func select(_ what: SpotSelection) {
-        withAnimation(.snappy) {
-            routeMode = nil
-            selection = what
-            if panelDetent == .peek || panelDetent == .minimized {
-                panelDetent = .half
-            }
-        }
-    }
-
-    private func closeSelection() {
-        withAnimation(.snappy) {
-            selection = nil
-            panelDetent = .peek
         }
     }
 
@@ -763,7 +894,9 @@ struct SpotsTabView: View {
                 }
             } else {
                 HStack(spacing: 10) {
-                    weatherChip
+                    // The weather chip lived here for a year; it moved to
+                    // the bottom-right corner to become the conditions
+                    // door, where a thumb actually is.
                     Spacer()
                     washToggle
                     squareButton("magnifyingglass", showsBadge: hasActiveFilter) {
@@ -776,8 +909,9 @@ struct SpotsTabView: View {
                 }
                 if let caption = washLayer.caption {
                     // The doctrine's line, map-sized: colours are a model,
-                    // and they are about now.
-                    Text(caption)
+                    // and they are about now — or about the route slider's
+                    // hour, and then the clock says which.
+                    Text("\(caption) · \(windWash.scrubLabel ?? "now")")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
@@ -791,10 +925,10 @@ struct SpotsTabView: View {
         .padding(.top, 8)
     }
 
-    /// The wash layer picker. Lit when a field is on, so a tinted sea
-    /// never has to be explained by memory; a menu rather than a cycle
-    /// button, because "which one is this" should never take three taps
-    /// to answer.
+    /// The layers menu: the colour wash (one at a time) and the hardware
+    /// pins (any of them). Lit when anything is on, so a dressed map never
+    /// has to be explained by memory; a menu rather than a cycle button,
+    /// because "which one is this" should never take three taps to answer.
     private var washToggle: some View {
         Menu {
             Picker("Map wash", selection: Binding(
@@ -813,27 +947,46 @@ struct SpotsTabView: View {
                 Label("Wind", systemImage: "wind").tag(WashLayer.wind.rawValue)
                 Label("Current", systemImage: "water.waves").tag(WashLayer.currents.rawValue)
             }
+            Section("On the map") {
+                Toggle(isOn: $showSpots) {
+                    Label("Spots", systemImage: "mappin.and.ellipse")
+                }
+                Toggle(isOn: $showWindStations) {
+                    Label("Wind stations", systemImage: "gauge.with.needle")
+                }
+                Toggle(isOn: $showCameras) {
+                    Label("Cameras", systemImage: "video")
+                }
+                Toggle(isOn: $showBuoys) {
+                    Label("Buoys", systemImage: "dot.radiowaves.up.forward")
+                }
+            }
         } label: {
+            // Hidden spots are as much a dressed map as a wash — the lit
+            // button is the reminder that the map is not in its default suit.
+            let isDressed = washLayer != .off || showWindStations || showCameras || showBuoys
+                || !showSpots
             Image(systemName: "square.3.layers.3d")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(washLayer == .off ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
+                .foregroundStyle(isDressed ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                 .frame(width: 44, height: 44)
-                .background(washLayer == .off ? AnyShapeStyle(.regularMaterial) : AnyShapeStyle(.tint),
+                .background(isDressed ? AnyShapeStyle(.tint) : AnyShapeStyle(.regularMaterial),
                             in: RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Map wash layer")
+        .accessibilityLabel("Map layers")
     }
 
-    /// The sky at the pin.
+    /// The conditions door, wearing the weather.
     ///
-    /// The centre pin's pill owns the wind; this chip carries the other half
-    /// — sky and temperature — and is the way into every station, cam and
-    /// forecast around the pin. It reads wherever the pin points, so browsing
-    /// Maui from the sofa shows Maui's weather rather than the weather
-    /// outside.
-    private var weatherChip: some View {
+    /// The centre pin's pill owns the wind; this button carries the other
+    /// half — sky and temperature — and names the action: one tap into
+    /// every station, cam and forecast around the pin. It reads wherever
+    /// the pin points, so browsing Maui from the sofa shows Maui's
+    /// weather rather than the weather outside. Bottom-right on purpose —
+    /// the one door the thumb should never have to travel for.
+    private var conditionsCorner: some View {
         Button {
             isShowingConditions = true
         } label: {
@@ -861,6 +1014,12 @@ struct SpotsTabView: View {
                                    value: isBreathing)
                     LoadingPlaceholder(height: 13, width: 26, corner: 4)
                 }
+                // The expand glyph instead of a word: the sky and the
+                // number are the invitation, this says *more lives here*
+                // without spelling it.
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
             .frame(height: 44)
@@ -870,6 +1029,73 @@ struct SpotsTabView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Weather at the pin, and nearby stations")
+    }
+
+    /// The thumb corners over the map: on the right, the conditions door;
+    /// on the left, the guide page of whatever spot the map is parked on —
+    /// named, so "full detail" says full detail *of what* — and nothing at
+    /// all when it is parked on open water. Shown only while the panel
+    /// sits low; a raised panel owns the screen.
+    private var bottomCorners: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            if let spot = centredSpot {
+                Button { path.append(.spot(spot)) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "book.fill")
+                            .font(.caption)
+                            .foregroundStyle(.tint)
+                        Text(spot.name)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .frame(height: 44)
+                    .frame(maxWidth: 230)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open the full guide for \(spot.name)")
+            }
+            Spacer(minLength: 8)
+            conditionsCorner
+        }
+    }
+
+    /// The guide spot the map is parked on, if any — within the same 800 m
+    /// the route editor snaps by. Derived from the settled centre rather
+    /// than remembered from a tap, so it works however the rider got
+    /// there: a row, a search pick, or panning by hand.
+    private var centredSpot: GuideSpot? {
+        guard let centre = visibleRegion?.center else { return nil }
+        let here = Geo.Coordinate(latitude: centre.latitude, longitude: centre.longitude)
+        guard let spot = guide.nearestSpot(to: here),
+              Geo.distance(here, Geo.Coordinate(latitude: spot.latitude,
+                                                longitude: spot.longitude)) < 800
+        else { return nil }
+        return spot
+    }
+
+    /// A row is a camera move, never a push — the place-search grammar,
+    /// extended to the guide's own rows. The map parks on the spot, the
+    /// centre pin samples it, and the bottom corners offer the depth.
+    private func focus(on coordinate: CLLocationCoordinate2D) {
+        withAnimation(.snappy) {
+            panelDetent = .peek
+            camera = .region(MKCoordinateRegion(
+                center: coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)))
+        }
+    }
+
+    /// SpotsSheet's own height formula, mirrored so the corners sit just
+    /// above the panel at either low detent.
+    private func panelHeight(in size: CGSize, detent: SheetDetent) -> CGFloat {
+        max(tabBarHeight + 84, size.height * detent.fraction)
     }
 
     /// Where "here" is: the centre pin — whatever the map is looking at —
@@ -891,6 +1117,15 @@ struct SpotsTabView: View {
     private var localWeatherKey: String {
         guard let here = localCoordinate else { return "" }
         return String(format: "%.2f,%.2f", here.latitude, here.longitude)
+    }
+
+    /// Coarser than the weather key — the pins reach tens of kilometres
+    /// out, so a refetch every ~10 km of panning keeps up with the view.
+    private var hardwareLayersKey: String {
+        guard showWindStations || showCameras || showBuoys,
+              let here = localCoordinate else { return "" }
+        return "\(showWindStations)|\(showCameras)|\(showBuoys)|"
+            + String(format: "%.1f,%.1f", here.latitude, here.longitude)
     }
 
     /// What else a rider does while looking at this map.
@@ -930,7 +1165,6 @@ struct SpotsTabView: View {
             // with the same "here" everything else on this screen means.
             Button {
                 withAnimation(.snappy) {
-                    selection = nil
                     routeMode = .editing(draft: [], routeId: nil)
                     panelDetent = .minimized
                 }
@@ -940,7 +1174,6 @@ struct SpotsTabView: View {
             Button {
                 if let here = localCoordinate {
                     withAnimation(.snappy) {
-                        selection = nil
                         routeMode = .editing(draft: [snapped(here)], routeId: nil)
                         panelDetent = .minimized
                     }
@@ -1086,45 +1319,6 @@ struct SpotsTabView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
-            } else if let selection {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        Text(selection.title)
-                            .font(.headline)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        if case .spot(let spot) = selection {
-                            Button {
-                                path.append(.spot(spot))
-                            } label: {
-                                Image(systemName: "book")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(width: 30, height: 30)
-                                    .background(Color(.systemGray5), in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Full guide page")
-                        }
-                        Button {
-                            closeSelection()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(width: 30, height: 30)
-                                .background(Color(.systemGray5), in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Close conditions")
-                    }
-                    Picker("Conditions", selection: $panelTab) {
-                        ForEach(ConditionsTab.allCases, id: \.self) { tab in
-                            Text(tab.rawValue).tag(tab)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
             } else {
                 Picker("Mode", selection: $panelMode) {
                     ForEach(PanelMode.allCases, id: \.self) { mode in
@@ -1138,8 +1332,6 @@ struct SpotsTabView: View {
         } content: {
             if case .inspecting(let route) = routeMode {
                 RoutePanel(route: route, weather: routeWeather)
-            } else if let selection {
-                SpotConditionsPanel(selection: selection, tab: panelTab)
             } else if guide.spots.isEmpty {
                 VStack(spacing: 8) {
                     if guide.isLoading {
@@ -1187,9 +1379,11 @@ struct SpotsTabView: View {
 
     private var nearbyList: some View {
         ForEach(nearby) { spot in
-            // A row opens the conditions panel, like a pin — the full guide
-            // page stays one tap further, behind the book button.
-            Button { select(.spot(spot)) } label: {
+            // A row is a camera move: the map parks on the spot, and the
+            // bottom corners offer conditions and the guide page. Pins
+            // still push directly — tapping the map means "open that";
+            // tapping a row means "show me where".
+            Button { focus(on: spot.coordinate) } label: {
                 SpotRow(spot: spot, reading: guide.wind[spot.spotId],
                         distanceMetres: distanceFromHere(spot), units: settings.units)
             }
@@ -1223,6 +1417,14 @@ struct SpotsTabView: View {
             .padding(.horizontal, 40)
             .padding(.top, 24)
         } else {
+            // One door to arranging the whole tab: reorder, delete, all
+            // three sections in one editable list.
+            HStack {
+                Spacer()
+                Button("Edit") { isEditingFavorites = true }
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
             let firing = favorites.filter { guide.wind[$0.spotId]?.isFiring == true }
             if !firing.isEmpty {
                 HStack(spacing: 12) {
@@ -1241,26 +1443,25 @@ struct SpotsTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
             }
-            ForEach(favorites) { spot in
-                Button { path.append(.spot(spot)) } label: {
-                    FavoriteCard(spot: spot, reading: guide.wind[spot.spotId],
-                                 distanceMetres: distanceFromHere(spot), units: settings.units)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-            }
-            if !routeStore.routes.isEmpty {
-                Text("SAVED ROUTES")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, favorites.isEmpty ? 0 : 8)
-                    .padding(.bottom, 8)
-                ForEach(routeStore.routes) { route in
+            // One list, no type headers — a route sits wherever the rider
+            // dragged it between two spots. The kind shows in the glyph,
+            // and PRIVATE in the badge, not in a section.
+            ForEach(guide.favoriteItems(routes: routeStore.routes)) { item in
+                switch item {
+                case .spot(let spot):
+                    // A camera move, like every row — the corners take it
+                    // from there.
+                    Button { focus(on: spot.coordinate) } label: {
+                        SavedLineRow(icon: "star.fill", name: spot.name,
+                                     reading: guide.wind[spot.spotId])
+                    }
+                    .buttonStyle(.plain)
+                case .route(let route):
                     Button { inspectRoute(route) } label: {
-                        RouteRow(route: route, units: settings.units)
+                        SavedLineRow(icon: "point.topleft.down.to.point.bottomright.curvepath",
+                                     name: route.name,
+                                     detail: Format.distance(route.path.totalDistance,
+                                                             unit: settings.units.distance))
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -1272,7 +1473,6 @@ struct SpotsTabView: View {
                         }
                         Button {
                             withAnimation(.snappy) {
-                                selection = nil
                                 routeMode = .editing(draft: route.waypoints, routeId: route.id)
                                 panelDetent = .minimized
                                 camera = .region(boundingRegion(of: route.waypoints))
@@ -1286,25 +1486,14 @@ struct SpotsTabView: View {
                             Label("Remove", systemImage: "trash")
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-                }
-            }
-            if !guide.privateSpots.isEmpty {
-                Text("SAVED ON THIS PHONE")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, favorites.isEmpty ? 0 : 8)
-                    .padding(.bottom, 8)
-                ForEach(guide.privateSpots) { spot in
-                    // Private spots joined the panel flow: same map, same
-                    // five tabs, the beach facing riding along for surf.
-                    Button { select(.privateSpot(spot)) } label: {
-                        PrivateSpotCard(spot: spot, reading: privateWind[spot.id],
-                                        distanceMetres: distanceFrom(spot.coordinate),
-                                        units: settings.units)
+                case .privateSpot(let spot):
+                    // The same camera move; the spot's own star pin sits
+                    // under the centre pin then, and tapping it opens the
+                    // facing-aware conditions sheet. The corner label is
+                    // reserved for guide spots.
+                    Button { focus(on: spot.clCoordinate) } label: {
+                        SavedLineRow(icon: "star.fill", name: spot.name,
+                                     reading: privateWind[spot.id], isPrivate: true)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -1325,9 +1514,8 @@ struct SpotsTabView: View {
                             Label("Remove", systemImage: "trash")
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
                 }
+                Divider().padding(.leading, 54)
             }
         }
     }
@@ -1428,6 +1616,33 @@ struct WindPin: View {
     }
 }
 
+/// A hardware pin — a wind meter, a cam, a buoy. Smaller and rounder than
+/// the spot pins, because the stations dress the map; they never compete
+/// with the spots standing on it.
+struct HardwarePin: View {
+    /// The guide resource's kind, or nil for an NDBC buoy.
+    let kind: SpotGuideStore.SpotLink.Kind?
+
+    private var symbol: String { kind?.symbol ?? "dot.radiowaves.up.forward" }
+    private var tint: Color {
+        switch kind {
+        case .wind: .teal
+        case .camera: .indigo
+        default: .orange
+        }
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 24, height: 24)
+            .background(tint, in: Circle())
+            .overlay(Circle().stroke(.white, lineWidth: 2))
+            .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+    }
+}
+
 /// A row in the Nearby list: name, distance and discipline, wind on the right.
 struct SpotRow: View {
     let spot: GuideSpot
@@ -1479,71 +1694,134 @@ struct SpotRow: View {
     }
 }
 
-/// The favorites dashboard card: wind leads, everything else supports.
-struct FavoriteCard: View {
-    let spot: GuideSpot
-    let reading: WindReading?
-    let distanceMetres: Double?
-    let units: UnitPreferences
+/// One saved thing, one line: a glyph, the name, and — when it has wind —
+/// the arrow and the number. The tab's whole promise is that glance, so
+/// the row carries nothing else. The arrow points downwind, the same
+/// streamline convention as every arrow on the map.
+struct SavedLineRow: View {
+    let icon: String
+    let name: String
+    var reading: WindReading? = nil
+    /// Trailing text for rows with no wind of their own (a route's length).
+    var detail: String? = nil
+    var isPrivate: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(spot.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(locationLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            Text(name)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            if isPrivate {
+                // The BEST chips' navy-on-wash, and never the thing that
+                // truncates — the name gives way, the badge does not.
+                Text("PRIVATE")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(Color.harbourNavy)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 4))
+                    .fixedSize()
+            }
+            Spacer(minLength: 8)
+            if let reading {
+                HStack(spacing: 5) {
+                    Image(systemName: "location.north.fill")
+                        .font(.system(size: 11, weight: .heavy))
+                        .rotationEffect(.degrees(reading.directionDeg + 180))
+                    Text("\(Int(reading.speedKn.rounded()))")
+                        .font(.callout.weight(.bold))
+                        .monospacedDigit()
+                    + Text(" kn")
+                        .font(.caption2.weight(.semibold))
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "star.fill")
+                .foregroundStyle(reading.isFiring ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            } else if let detail {
+                Text(detail)
                     .font(.caption)
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(.tint, in: Circle())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+}
 
-            HStack(spacing: 8) {
-                statTile("Wind", reading.map { "\(Int($0.speedKn.rounded()))kn \($0.cardinal)" } ?? "—",
-                         highlighted: reading?.isFiring == true)
-                if let gust = reading?.gustKn {
-                    statTile("Gusts", "\(Int(gust.rounded()))kn", highlighted: false)
+/// The whole favorites tab as one editable list: drag to reorder — across
+/// kinds, a route lands happily between two spots — and swipe (or tap the
+/// minus) to delete. Edit mode is on from the first frame; the sheet *is*
+/// the edit button's promise.
+struct FavoritesEditor: View {
+    @Environment(SpotGuideStore.self) private var guide
+    @Environment(RouteStore.self) private var routeStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(guide.favoriteItems(routes: routeStore.routes)) { item in
+                    editorRow(for: item)
                 }
-                if spot.cameraCount > 0 {
-                    statTile("Cams", "\(spot.cameraCount)", highlighted: false)
-                } else if spot.windStationCount > 0 {
-                    statTile("Meters", "\(spot.windStationCount)", highlighted: false)
+                .onMove {
+                    guide.moveFavoriteItems(routes: routeStore.routes,
+                                            fromOffsets: $0, toOffset: $1)
+                }
+                .onDelete { offsets in
+                    // Deletion goes home to whichever store owns the row.
+                    let items = guide.favoriteItems(routes: routeStore.routes)
+                    for item in offsets.compactMap({ items[safe: $0] }) {
+                        switch item {
+                        case .spot(let spot): guide.removeFavorite(spot.spotId)
+                        case .route(let route): routeStore.remove(route.id)
+                        case .privateSpot(let spot): guide.removePrivateSpot(spot.id)
+                        }
+                    }
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Edit favorites")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
         }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private var locationLine: String {
-        var parts: [String] = []
-        if !spot.where_.isEmpty { parts.append(spot.where_) }
-        if let metres = distanceMetres {
-            parts.append(Format.distance(metres, unit: units.distance))
+    private func editorRow(for item: FavoriteItem) -> some View {
+        let (icon, name, isPrivate): (String, String, Bool) = switch item {
+        case .spot(let spot): ("star.fill", spot.name, false)
+        case .route(let route): ("point.topleft.down.to.point.bottomright.curvepath", route.name, false)
+        case .privateSpot(let spot): ("star.fill", spot.name, true)
         }
-        return parts.joined(separator: " · ")
-    }
-
-    private func statTile(_ label: String, _ value: String, highlighted: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.callout.weight(.bold))
-                .foregroundStyle(highlighted ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+        return HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            Text(name)
+                .font(.body.weight(.medium))
+                .lineLimit(1)
+            if isPrivate {
+                Text("PRIVATE")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(Color.harbourNavy)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 4))
+                    .fixedSize()
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

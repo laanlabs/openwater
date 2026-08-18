@@ -168,6 +168,29 @@ final class CurrentsTests: XCTestCase {
                       "direction snaps to a real set, never the average")
     }
 
+    /// The flow screen lays station rows onto the field's own axis so one
+    /// scrubber drives bars and raster together. Rows land by exact
+    /// timestamp; a slot the station does not speak for stays nil rather
+    /// than borrowing the model's — wholesale down to the single slot.
+    func testAlignedLandsRowsByTimestampAndLeavesGapsNil() {
+        let t0 = Date(timeIntervalSince1970: 1_755_400_000)
+        let hour: TimeInterval = 3600
+        let stationHours: [CurrentsOutlook.Hour] = [
+            .init(at: t0, speedKn: 1.2, directionDeg: 69),
+            .init(at: t0.addingTimeInterval(hour), speedKn: 0.4, directionDeg: 257),
+            // An hour before the axis begins — must not leak in.
+            .init(at: t0.addingTimeInterval(-hour), speedKn: 3.0, directionDeg: 90),
+        ]
+        let axis = [t0, t0.addingTimeInterval(hour), t0.addingTimeInterval(2 * hour)]
+
+        let aligned = CurrentsOutlook.aligned(stationHours, to: axis)
+        XCTAssertEqual(aligned.count, 3, "one row per axis slot, always")
+        XCTAssertEqual(aligned[0].speedKn ?? 0, 1.2, accuracy: 0.0001)
+        XCTAssertEqual(aligned[1].directionDeg, 257)
+        XCTAssertNil(aligned[2].speedKn, "the slot the station is silent on stays nil")
+        XCTAssertEqual(aligned[2].at, axis[2], "the axis keeps its own timestamps")
+    }
+
     /// A subordinate station's outlook — events, no hours — is not empty:
     /// four turns a day is a real answer.
     func testEventsOnlyOutlookIsNotEmpty() {

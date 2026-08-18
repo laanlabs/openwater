@@ -1652,7 +1652,20 @@ enum TidesAndCurrents {
         guard let url = URL(string: "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions"),
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200
-        else { return [] }
+        else {
+            // The bundle's snapshot: a first launch with no signal still
+            // knows where the stations stand. Refreshed by
+            // scripts/refresh-station-snapshots.sh, same distilled format.
+            if let bundled = Bundle.main.url(forResource: "noaa-tide-stations", withExtension: "json"),
+               let data = try? Data(contentsOf: bundled),
+               let rows = try? JSONDecoder().decode([Distilled].self, from: data) {
+                cached = rows.map {
+                    ($0.id, $0.name, Geo.Coordinate(latitude: $0.latitude, longitude: $0.longitude))
+                }
+                return cached
+            }
+            return []
+        }
 
         struct Payload: Decodable {
             struct Station: Decodable {
@@ -1852,6 +1865,15 @@ enum DataBuoyCenter {
             let onDisk = fromDisk()
             if let onDisk, onDisk.age < maxAge { return onDisk.stations }
             if let fetched = await download(), !fetched.isEmpty { return fetched }
+            // The bundle's snapshot beats an empty sheet on a signal-less
+            // first launch (scripts/refresh-station-snapshots.sh).
+            if onDisk == nil,
+               let bundled = Bundle.main.url(forResource: "ndbc-stations", withExtension: "json"),
+               let data = try? Data(contentsOf: bundled),
+               let rows = try? JSONDecoder().decode([Distilled].self, from: data) {
+                return rows.map { ($0.id, $0.name, Geo.Coordinate(latitude: $0.latitude,
+                                                                  longitude: $0.longitude)) }
+            }
             // A month-old copy of where the piers are is a fine answer, and a
             // far better one than a sheet claiming there is nothing out here.
             return onDisk?.stations ?? []

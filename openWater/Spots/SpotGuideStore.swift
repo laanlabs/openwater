@@ -110,6 +110,28 @@ struct WindForecastHour: Codable, Identifiable {
     var id: Date { date }
 }
 
+// MARK: - A favorites row
+
+/// One row of the favorites tab, whichever kind of saved thing it is —
+/// the tab shows them all in one list, so the order has to speak all three.
+enum FavoriteItem: Identifiable {
+    case spot(GuideSpot)
+    case route(PlannedRoute)
+    case privateSpot(PrivateSpot)
+
+    /// The persisted order's vocabulary: typed, so a route and a spot
+    /// sharing an id string could never collide.
+    var key: String {
+        switch self {
+        case .spot(let spot): "spot:\(spot.spotId)"
+        case .route(let route): "route:\(route.id.uuidString)"
+        case .privateSpot(let spot): "private:\(spot.id.uuidString)"
+        }
+    }
+
+    var id: String { key }
+}
+
 // MARK: - Store
 
 /// The spot guide: 1000+ launches, cached on disk, favorites, and live wind.
@@ -126,8 +148,12 @@ final class SpotGuideStore {
     /// Wind readings by spotId. Filled in batches as spots become visible.
     private(set) var wind: [String: WindReading] = [:]
 
-    var favoriteIds: Set<String> {
-        didSet { UserDefaults.standard.set(Array(favoriteIds), forKey: Self.favoritesKey) }
+    /// Ordered — the rider arranges these by hand in the favorites editor,
+    /// so the array is the truth and membership checks ride on it. (It was
+    /// a Set once; the persisted shape is the same string array, so old
+    /// installs just inherit whatever order the Set happened to save.)
+    private(set) var favoriteIds: [String] {
+        didSet { UserDefaults.standard.set(favoriteIds, forKey: Self.favoritesKey) }
     }
 
     /// Spots the rider saved for themselves — never sent anywhere, so they
@@ -136,6 +162,7 @@ final class SpotGuideStore {
     private(set) var privateSpots: [PrivateSpot] = []
 
     private static let favoritesKey = "spotGuide.favorites"
+    private static let favoritesOrderKey = "spotGuide.favoritesOrder"
     private static let privateSpotsKey = "spotGuide.privateSpots"
     private static let cacheTTL: TimeInterval = 24 * 3600
     private static let windTTL: TimeInterval = 10 * 60
@@ -157,7 +184,8 @@ final class SpotGuideStore {
     }
 
     init() {
-        favoriteIds = Set(UserDefaults.standard.stringArray(forKey: Self.favoritesKey) ?? [])
+        favoriteIds = UserDefaults.standard.stringArray(forKey: Self.favoritesKey) ?? []
+        favoritesOrder = UserDefaults.standard.stringArray(forKey: Self.favoritesOrderKey) ?? []
         if let data = UserDefaults.standard.data(forKey: Self.privateSpotsKey),
            let saved = try? JSONDecoder().decode([PrivateSpot].self, from: data) {
             privateSpots = saved
@@ -165,12 +193,50 @@ final class SpotGuideStore {
     }
 
     func toggleFavorite(_ spotId: String) {
-        if favoriteIds.contains(spotId) { favoriteIds.remove(spotId) }
-        else { favoriteIds.insert(spotId) }
+        if let index = favoriteIds.firstIndex(of: spotId) { favoriteIds.remove(at: index) }
+        else { favoriteIds.append(spotId) }
     }
 
+    /// In the rider's own order. An id the loaded guide can't resolve is
+    /// skipped here but kept in `favoriteIds` — the guide refreshes, the
+    /// favorite comes back where it was.
     var favorites: [GuideSpot] {
-        spots.filter { favoriteIds.contains($0.spotId) }
+        favoriteIds.compactMap { id in spots.first { $0.spotId == id } }
+    }
+
+    func removeFavorite(_ spotId: String) {
+        favoriteIds.removeAll { $0 == spotId }
+    }
+
+    // MARK: One list, one order
+
+    /// The favorites tab stopped grouping by type, so the hand-arranged
+    /// order has to speak spots, routes and private spots at once: typed
+    /// keys, persisted whole. Items the list has never been told about
+    /// keep their natural order at the end; keys whose item is gone just
+    /// never match, and the next reorder writes them out.
+    private(set) var favoritesOrder: [String] {
+        didSet { UserDefaults.standard.set(favoritesOrder, forKey: Self.favoritesOrderKey) }
+    }
+
+    /// Everything the favorites tab shows, in the rider's own order.
+    /// Routes are handed in because they live in their own store.
+    func favoriteItems(routes: [PlannedRoute]) -> [FavoriteItem] {
+        let items = favorites.map(FavoriteItem.spot)
+            + routes.map(FavoriteItem.route)
+            + privateSpots.map(FavoriteItem.privateSpot)
+        let position = Dictionary(favoritesOrder.enumerated().map { ($1, $0) }) { first, _ in first }
+        return items.enumerated().sorted { a, b in
+            let pa = position[a.element.key] ?? Int.max
+            let pb = position[b.element.key] ?? Int.max
+            return pa == pb ? a.offset < b.offset : pa < pb
+        }.map(\.element)
+    }
+
+    func moveFavoriteItems(routes: [PlannedRoute], fromOffsets: IndexSet, toOffset: Int) {
+        var keys = favoriteItems(routes: routes).map(\.key)
+        keys.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        favoritesOrder = keys
     }
 
     func addPrivateSpot(_ spot: PrivateSpot) {
@@ -713,11 +779,23 @@ final class SpotGuideStore {
         return nearest.sorted { $0.value < $1.value }.prefix(3).map(\.key)
     }
 
-    /// One scope's worth of the guide, fetched once and kept.
+    /// One scope's worth of the guide, fetched once and kept — and, since
+    /// the disk cache arrived, *kept between sessions*: the US scope is
+    /// ~475 documents, identity that changes a few times a year, and
+    /// re-downloading it every session was the biggest Firestore bill the
+    /// app paid. Seven days fresh, the registry cross-links' own TTL; a
+    /// stale copy still beats a network failure, because where the cameras
+    /// stand did not change while the signal was out.
     private func resources(where field: String, equals value: String) async -> [GuideResource] {
         guard !value.isEmpty else { return [] }
         let cacheKey = "\(field)=\(value)"
         if let cached = nearbyCache[cacheKey] { return cached }
+
+        if let held = Self.storedResources(for: cacheKey),
+           held.age < Self.resourceCacheTTL {
+            nearbyCache[cacheKey] = held.resources
+            return held.resources
+        }
 
         let collections: [(String, SpotLink.Kind)] = [
             ("windStations", .wind), ("cameras", .camera), ("surfSpots", .surf),
@@ -750,8 +828,69 @@ final class SpotGuideStore {
             for await batch in group { found += batch }
         }
 
+        // An empty answer is indistinguishable from a failed fetch here —
+        // `runQuery` collapses errors to nothing — so an old copy on disk
+        // outranks it, and only a real answer overwrites one.
+        if found.isEmpty, let held = Self.storedResources(for: cacheKey) {
+            nearbyCache[cacheKey] = held.resources
+            return held.resources
+        }
+        Self.storeResources(found, for: cacheKey)
         nearbyCache[cacheKey] = found
         return found
+    }
+
+    // MARK: The resource disk cache
+
+    private static let resourceCacheTTL: TimeInterval = 7 * 86_400
+
+    /// The distilled row, not the domain type — the tide index's pattern:
+    /// what the file holds is spelled here, so the domain type can grow
+    /// without silently breaking old caches.
+    private struct StoredResource: Codable {
+        let kind: String
+        let name: String
+        let url: String
+        let provider: String?
+        let detail: String?
+        let latitude: Double
+        let longitude: Double
+    }
+
+    private static func resourceCacheURL(for key: String) -> URL {
+        let safe = key.map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        return URL.cachesDirectory.appending(path: "guide-resources-\(String(safe)).json")
+    }
+
+    private static func storedResources(for key: String) -> (resources: [GuideResource], age: TimeInterval)? {
+        let path = resourceCacheURL(for: key)
+        guard let data = try? Data(contentsOf: path),
+              let rows = try? JSONDecoder().decode([StoredResource].self, from: data)
+        else { return nil }
+        let written = (try? path.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate ?? .distantPast
+        let resources = rows.compactMap { row -> GuideResource? in
+            guard let kind = SpotLink.Kind(rawValue: row.kind),
+                  let url = URL(string: row.url) else { return nil }
+            return GuideResource(kind: kind, name: row.name, url: url,
+                                 provider: row.provider, detail: row.detail,
+                                 coordinate: Geo.Coordinate(latitude: row.latitude,
+                                                            longitude: row.longitude))
+        }
+        return (resources, Date().timeIntervalSince(written))
+    }
+
+    private static func storeResources(_ resources: [GuideResource], for key: String) {
+        let rows = resources.map { resource in
+            StoredResource(kind: resource.kind.rawValue, name: resource.name,
+                           url: resource.url.absoluteString,
+                           provider: resource.provider, detail: resource.detail,
+                           latitude: resource.coordinate.latitude,
+                           longitude: resource.coordinate.longitude)
+        }
+        if let encoded = try? JSONEncoder().encode(rows) {
+            try? encoded.write(to: resourceCacheURL(for: key), options: .atomic)
+        }
     }
 
     /// Measure and order for one spot. Distance is never cached — the region's

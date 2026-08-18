@@ -463,13 +463,21 @@ grammar. What shipped, in dependency order:
    annotation) with the wind pill at headline size; the map centre is now
    what "here" means, and dragging the map is the sampling gesture.
 3. **Place search** — `PlaceSearch.swift`, `MKLocalSearchCompleter`
-   biased to the visible region; a place is a camera move plus a panel
-   selection, never a navigation push.
-4. **The conditions panel** — `SpotConditionsPanel.swift` +
-   `HourScrubber.swift`: Weather / Currents / Tides / Waves / Cams as
-   compact tabs in the map-attached sheet, one shared hour cursor, value
-   rows at the cursor, provenance footers everywhere.
-   `NearbyConditionsSheet` survives whole as "More detail".
+   biased to the visible region; a place is a camera move — the centre
+   pin samples it — never a navigation push.
+4. **The conditions panel** — shipped as `SpotConditionsPanel.swift`
+   (Weather / Currents / Tides / Waves / Cams as compact tabs in the
+   map-attached sheet) and **removed the same day**: it duplicated
+   `NearbyConditionsSheet` ("Conditions here"), which stays the one
+   conditions surface. Pins, rows and search picks push the guide page
+   again; `HourScrubber.swift` survives it (route editor, Current tab).
+   The station-currents layer (item 1) lost its screen for a day; the
+   Current tab consumes it now (decided 2026-08-18): a station within
+   15 km owns the timeline and a turns-chip row, its rows laid onto the
+   field's axis (`CurrentsOutlook.aligned`, tested) so the one scrubber
+   drives bars and raster together; the map keeps the model's wash, the
+   station stands on it as a named dot, and both captions say whose
+   numbers are whose.
 5. **Routes** — `RoutePath` (Core, tested), `PlannedRoutes.swift`
    (UserDefaults, the `PrivateSpot` pattern), tap-to-draw editor with
    spot snapping, save sheet with `RouteNamer` prefill.
@@ -486,9 +494,9 @@ Tools→Spots deep link, the row's first tap walks the old
 `shuttle.launch`/`shuttle.takeout` endpoints into a saved route exactly
 once (a route with the same ends is reused, never duplicated), the
 driver's share message lives on as the share button in the route panel,
-and `ShuttlePlannerView` is gone. Private-spot pins joined the panel
-selection flow at the same time, their `shoreFacingDeg` riding along to
-the full sheet. One earned lesson is written at the consume site: a map
+and `ShuttlePlannerView` is gone. Private-spot pins open the full
+conditions sheet directly (no guide page to push), their
+`shoreFacingDeg` riding along. One earned lesson is written at the consume site: a map
 camera set while the page is hidden or mid-first-layout is quietly
 dropped, so the handoff claims its seam immediately and acts a breath
 later.
@@ -507,3 +515,15 @@ one hour deep because the main map's wash means *now*. A provenance
 chip under the toggle says so. The flow map keeps the scrubber, the
 arrows and the smooth raster — the wash here is the glance, that screen
 is the study.
+
+The layers menu grew the hardware pins (2026-08-18): Wind stations,
+Cameras and Buoys as independent remembered toggles beside the wash,
+drawn as small `HardwarePin` circles that never compete with the spot
+pins. Stations and cams come from the guide's regional resource cache
+(60 km around the map centre, capped at 80); buoys from the NDBC index
+(25 nearest). Each pin does what its row in the conditions sheet does —
+a cam plays in `CamViewerSheet`, a buoy pushes `BuoyPinScreen` (the
+index carries no readings, so the pin fetches the latest on the way
+in), a wind station is an outbound link. The refetch key is coarser
+than the weather key — ~10 km of panning — because the pins reach tens
+of kilometres out.

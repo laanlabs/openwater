@@ -92,7 +92,7 @@ struct NearbyConditionsSheet: View {
     }
 
     enum Tab: String, CaseIterable {
-        case conditions = "Weather", water = "Tide", surf = "Surf", cams = "Cams"
+        case conditions = "Weather", water = "Tide", currents = "Current", surf = "Waves", cams = "Cams"
     }
 
     var body: some View {
@@ -105,6 +105,7 @@ struct NearbyConditionsSheet: View {
                     switch tab {
                     case .conditions: conditionsTab
                     case .water: tideTab
+                    case .currents: CurrentFlowView(coordinate: coordinate)
                     case .surf: surfTab
                     case .cams: camsTab
                     }

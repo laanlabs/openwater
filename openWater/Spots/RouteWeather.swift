@@ -152,7 +152,12 @@ final class RouteWeatherModel {
         if loadedKey != key {
             speedKn = route.speedKn
             departure = Self.nextWholeHour()
-            scrub = nil
+            // Parked at the launch, not at "now": the slider's thumb sits
+            // at its left end, and everything the panel and the map show —
+            // the dot, the chords, the wash — must speak the run's clock
+            // from the first frame. A nil scrub here showed the rider
+            // this hour's wash under a run that starts at the next.
+            scrub = departure
         }
         // Same line, same fetch — the grid survives panel round-trips and
         // ForecastCache already deduplicates identical URLs on disk.
@@ -162,8 +167,10 @@ final class RouteWeatherModel {
         let samples = route.path.sampled(every: Self.sampleSpacing, maxPoints: Self.maxSamples)
         // Exactly two requests per activation, whatever the route's length:
         // the forecast grid and the marine grid, fetched together.
-        async let windTask = OpenMeteo.windAlong(samples.map(\.coordinate), hours: 24)
-        async let marineTask = OpenMeteo.marineAlong(samples.map(\.coordinate), hours: 24)
+        // Three days deep, matching the departure picker's range —
+        // planning Saturday's run on Thursday needs Saturday's rows.
+        async let windTask = OpenMeteo.windAlong(samples.map(\.coordinate), hours: 72)
+        async let marineTask = OpenMeteo.marineAlong(samples.map(\.coordinate), hours: 72)
         let (winds, marine) = await (windTask, marineTask)
         var built = RouteForecastGrid(
             samples: samples,

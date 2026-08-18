@@ -543,10 +543,13 @@ final class WindRasterOverlay: NSObject, MKOverlay {
         self.boundingMapRect = rect
     }
 
-    /// Nil until there is a field worth painting.
+    /// Nil until there is a field worth painting. The palette is a
+    /// parameter since the currents flow map arrived: same raster walk,
+    /// different quantity, different colours.
     static func build(grid: [FlowMapScreen.GridPoint], hour: Int,
                       columns: Int, rows: Int,
-                      region: MKCoordinateRegion) -> WindRasterOverlay? {
+                      region: MKCoordinateRegion,
+                      palette: (Double) -> UIColor = { WindPalette.washColour(for: $0) }) -> WindRasterOverlay? {
         guard !grid.isEmpty else { return nil }
 
         // Speeds by grid cell, row-major as the fetch built them.
@@ -592,7 +595,7 @@ final class WindRasterOverlay: NSObject, MKOverlay {
                 let alpha = washAlpha * CGFloat(min(1, edge / featherPx))
 
                 var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, opacity: CGFloat = 0
-                WindPalette.washColour(for: blended).getRed(&red, green: &green, blue: &blue, alpha: &opacity)
+                palette(blended).getRed(&red, green: &green, blue: &blue, alpha: &opacity)
                 let offset = (py * width + px) * 4
                 // Premultiplied, so the renderer can draw it straight.
                 pixels[offset] = UInt8(red * alpha * 255)

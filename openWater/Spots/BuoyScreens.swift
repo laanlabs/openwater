@@ -126,6 +126,22 @@ struct BuoyDetailScreen: View {
     }
 }
 
+/// The map pin's door to the buoy page. The station index carries no
+/// readings — those are never cached — so this fetches the latest
+/// observation on the way in and the page fills as it arrives.
+struct BuoyPinScreen: View {
+    @State var buoy: Buoy
+    let from: Geo.Coordinate
+
+    var body: some View {
+        BuoyDetailScreen(buoy: buoy, from: from)
+            .task {
+                guard buoy.reading == nil else { return }
+                buoy.reading = await DataBuoyCenter.latest(for: buoy.id)
+            }
+    }
+}
+
 /// Every nearby buoy at once.
 ///
 /// Distances in a list are a poor way to choose between buoys, because the

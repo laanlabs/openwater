@@ -83,6 +83,16 @@ struct CurrentsOutlook {
     }
 
     var nextEvent: Event? { events.first { $0.at > Date() } }
+
+    /// The station's top-of-hour rows laid onto another axis — the flow
+    /// screen's scrubber walks the field's hour slots, and the station's
+    /// rows land in them by timestamp. A slot the station does not speak
+    /// for stays nil rather than borrowing the model's: wholesale, never
+    /// mixed, down to the single slot.
+    static func aligned(_ hours: [Hour], to axis: [Date]) -> [Hour] {
+        let byTime = Dictionary(hours.map { ($0.at, $0) }) { first, _ in first }
+        return axis.map { byTime[$0] ?? Hour(at: $0, speedKn: nil, directionDeg: nil) }
+    }
 }
 
 /// A NOAA current-prediction station, at its shallowest published bin.
@@ -124,6 +134,25 @@ enum CurrentPalette {
         case ..<1.6: Color(red: 0.96, green: 0.68, blue: 0.28)
         case ..<2.2: Color(red: 0.95, green: 0.52, blue: 0.20)
         default: Color(red: 0.90, green: 0.33, blue: 0.16)
+        }
+    }
+
+    /// The flow map's wash wears blue, the reference marine maps' own
+    /// habit — slack water near white so the chart shows through, the
+    /// stream deepening toward indigo — while the bars keep the warm ramp.
+    /// Two palettes for one quantity on one screen is deliberate: it is
+    /// exactly how the reference draws it, and the arrows carry the read
+    /// between them.
+    static func washColour(for kn: Double) -> UIColor {
+        switch kn {
+        case ..<0.1: UIColor(red: 0.97, green: 0.98, blue: 1.00, alpha: 1)
+        case ..<0.3: UIColor(red: 0.85, green: 0.91, blue: 0.97, alpha: 1)
+        case ..<0.6: UIColor(red: 0.69, green: 0.82, blue: 0.94, alpha: 1)
+        case ..<0.9: UIColor(red: 0.52, green: 0.72, blue: 0.91, alpha: 1)
+        case ..<1.3: UIColor(red: 0.36, green: 0.60, blue: 0.86, alpha: 1)
+        case ..<1.8: UIColor(red: 0.24, green: 0.47, blue: 0.79, alpha: 1)
+        case ..<2.4: UIColor(red: 0.17, green: 0.34, blue: 0.68, alpha: 1)
+        default: UIColor(red: 0.14, green: 0.22, blue: 0.55, alpha: 1)
         }
     }
 }
@@ -292,7 +321,18 @@ extension TidesAndCurrents {
         guard let url = URL(string: "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=currentpredictions"),
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200
-        else { return [] }
+        else {
+            // The bundle's snapshot: same distilled rows, refreshed by
+            // scripts/refresh-station-snapshots.sh, so a signal-less first
+            // launch still knows its current stations.
+            if let bundled = Bundle.main.url(forResource: "noaa-current-stations", withExtension: "json"),
+               let data = try? Data(contentsOf: bundled),
+               let rows = try? JSONDecoder().decode([DistilledCurrent].self, from: data) {
+                cachedCurrents = rows
+                return rows
+            }
+            return []
+        }
 
         let rows = distillCurrentsIndex(data)
         if let encoded = try? JSONEncoder().encode(rows) {
@@ -494,14 +534,20 @@ enum Currents {
     /// the number is a policy, not a tuning.
     static let stationRadius: Double = 15_000
 
+    /// The station half of the door alone: the nearest station's word when
+    /// one stands close enough to speak for this point, nil where none does
+    /// — or where the nearest answered with nothing, because a failed fetch
+    /// is not an authority. The flow screen calls this rather than
+    /// `outlook(at:)` since the model already sits under it as the field.
+    static func station(at coordinate: Geo.Coordinate) async -> CurrentsOutlook? {
+        guard let station = await TidesAndCurrents.currentStations(near: coordinate, limit: 1).first,
+              station.metres <= stationRadius else { return nil }
+        let predicted = await TidesAndCurrents.currentPredictions(for: station)
+        return predicted.isEmpty ? nil : predicted
+    }
+
     static func outlook(at coordinate: Geo.Coordinate) async -> CurrentsOutlook {
-        if let station = await TidesAndCurrents.currentStations(near: coordinate, limit: 1).first,
-           station.metres <= stationRadius {
-            let predicted = await TidesAndCurrents.currentPredictions(for: station)
-            // A station that answered with nothing is a failed fetch, not an
-            // authority — fall through to the model rather than a blank tab.
-            if !predicted.isEmpty { return predicted }
-        }
+        if let predicted = await station(at: coordinate) { return predicted }
         return await OpenMeteo.currents(at: coordinate)
     }
 }

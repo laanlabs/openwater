@@ -286,7 +286,10 @@ struct SpotsTabView: View {
                                                  longitude: picked.longitude),
                            anchor: .bottom) {
                     Button { isShowingConditions = true } label: {
-                        PickedPointPin()
+                        // `localWind` is this point's wind whenever a point is
+                        // picked — the chrome chip's fetch keys off the same
+                        // coordinate — so the pin wears the answer directly.
+                        PickedPointPin(reading: localWind)
                     }
                     .buttonStyle(.plain)
                 }
@@ -310,6 +313,10 @@ struct SpotsTabView: View {
                     withAnimation(.snappy) {
                         pickedPoint = Geo.Coordinate(latitude: coordinate.latitude,
                                                      longitude: coordinate.longitude)
+                        // The old point's answer must not flash on the new
+                        // point while the refetch is in flight.
+                        localWind = nil
+                        localWeather = nil
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
@@ -430,7 +437,11 @@ struct SpotsTabView: View {
                         .foregroundStyle(.secondary)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            withAnimation(.snappy) { pickedPoint = nil }
+                            withAnimation(.snappy) {
+                                pickedPoint = nil
+                                localWind = nil
+                                localWeather = nil
+                            }
                         }
                         .accessibilityLabel("Back to my location")
                 }
@@ -801,17 +812,52 @@ struct SpotsTabView: View {
 ///
 /// Deliberately unlike `WindPin`: those are places in the guide, this is a
 /// scratch mark that goes away when they are done with it.
+/// The dropped pin wears the model wind at its own coordinate, so a rider
+/// probing an empty stretch of water reads the answer off the map instead of
+/// opening the sheet to get it. Until the fetch lands it is the plain marker
+/// it always was.
 struct PickedPointPin: View {
+    var reading: WindReading? = nil
+
     var body: some View {
         VStack(spacing: 0) {
-            Image(systemName: "cloud.sun.fill")
-                .font(.caption)
-                .symbolRenderingMode(.hierarchical)
+            if let reading {
+                HStack(spacing: 5) {
+                    Image(systemName: "location.north.fill")
+                        .font(.system(size: 9, weight: .heavy))
+                        // Pointing downwind, the way a streamline map draws
+                        // it — the arrow shows where the wind is going, and
+                        // the cardinal in the chrome chip says where from.
+                        .rotationEffect(.degrees(reading.directionDeg + 180))
+                        .foregroundStyle(.white)
+                        .frame(width: 18, height: 18)
+                        .background(.white.opacity(0.28), in: Circle())
+                    Text("\(Int(reading.speedKn.rounded()))")
+                        .font(.system(size: 13, weight: .bold))
+                    + Text("kn")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .padding(.vertical, 4)
+                .padding(.leading, 5)
+                .padding(.trailing, 9)
                 .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Color.primary.opacity(0.85), in: Circle())
-                .overlay(Circle().stroke(.white, lineWidth: 2))
+                .background(
+                    reading.isFiring ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary.opacity(0.85)),
+                    in: RoundedRectangle(cornerRadius: 14)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white, lineWidth: 1.5))
                 .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+            } else {
+                Image(systemName: "cloud.sun.fill")
+                    .font(.caption)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Color.primary.opacity(0.85), in: Circle())
+                    .overlay(Circle().stroke(.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+            }
             Rectangle()
                 .fill(Color.primary.opacity(0.85))
                 .frame(width: 2, height: 8)

@@ -279,11 +279,18 @@ stations** — the dense, non-NOAA layer that is exactly what the app is
 missing abroad, and plausibly what iKitesurf's own inventory is built on
 at home. Update interval 1–60+ minutes by station. Checked 2026-08-19.
 
-The free key is real: 15,000 accesses a month, no card. That is a
-prototype allowance, not a shipping one — the map asks for up to thirty
-station readings per significant pan, so fifteen thousand is on the order
-of five hundred pans for the whole user base. Production pricing is
-"contact us".
+The free key is 15,000 accesses a month, no card — and one access buys a
+whole map. `observations/closest` with a radius returns every station in
+range *with its reading attached*: eighteen stations, 32 KB, 0.14 s for a
+forty-kilometre box over Sag Harbor, carrying speed, gust, direction,
+timestamp, name and coordinates. The same map costs the app a 540 KB index
+page plus up to thirty separate observation calls today.
+
+So fifteen thousand accesses is fifteen thousand map refreshes, not five
+hundred. With a ten-minute cache that is a real allowance for a small user
+base — and a hard ceiling beyond it, since production pricing is "contact
+us" and a key shipped inside the app is extractable by anyone who wants to
+spend the quota.
 
 **Measured 2026-08-19** on a free key, `observations/closest` with
 `filter=allstations`, forty-kilometre radius, counting only stations
@@ -305,21 +312,28 @@ actually reporting wind.
 | Aarhus | 1 | 0 | 0 |
 | Rügen, La Paz, Cape Town | 0 | 0 | 0 |
 
-**Not adopted.** In the United States it does not beat what NOAA gives
-away: on the water this app was built for it finds eighteen where the free
-networks hold twenty-four, and in the densest metro tested it finds 225
-against 282. Its personal-weather-station layer is real and is genuinely
-extra in some places — forty-six of eighty around Long Island Sound — but
-paying a vendor to be outnumbered by the free source is a hard case to
-make.
+**Not adopted in the United States, and worth adopting abroad.** The two
+halves of that are different arguments.
 
-Abroad it is the best of the options looked at and still thin: about four
-stations to a spot, nothing at all at a third of them. Better than the
-METAR feed's one, not enough to build a foreign map on.
+At home it does not beat what NOAA gives away. On the water this app was
+built for it finds eighteen where the free networks hold twenty-four, and
+in the densest metro tested 225 against 282. Its personal-weather-station
+layer is real and is genuinely extra in places — forty-six of eighty
+around Long Island Sound — but the free source already outnumbers it, and
+every United States call spent here is a call not available where the map
+is empty.
 
-The measurement did surface something worth more than the vendor. The
-"free stations available" column above is what the *networks* hold, not
-what the app currently finds — see the open item below.
+Abroad it is the only option with anything at all: four stations to a spot
+on average, nothing at Rügen, La Paz or Cape Town, against zero free
+everywhere. Thin, but the difference between a measured number and none.
+
+Which suggests the shape: **use it only where the free networks stop.** A
+rider in the United States never spends a call; a rider anywhere else gets
+real readings where the app currently offers model wash. Foreign map loads
+are a small fraction of the traffic, so fifteen thousand a month goes a
+long way, and the ceiling stops being a product risk. The single radius
+call also happens to be the spatial query the app has never had — see the
+open item below, which it would close outright for the places it covers.
 
 ### WeatherFlow Tempest
 

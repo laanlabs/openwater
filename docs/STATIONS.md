@@ -220,26 +220,52 @@ keyless, `Query` capability, two layers — `0 Stations`, `1 Buoys` — with
 `WIND_SPEED`, `WIND_GUST`, `WIND_DIRECT` and `OBS_DATETIME` on both, and
 `WAVE_HEIGHT` on the buoys. Verified 2026-08-19.
 
+Speeds are **km/h**, not knots — `WIND_SPEED` and `WIND_GUST` both, per
+the layer's own field aliases.
+
 Two things make it worth keeping in mind. It is **global**: a bounding box
-over Tarifa answers Gibraltar at 20 kt and Algeciras at 24, Maui answers
-Kahului, Sydney answers three. And it takes a **bounding box at all**,
-which is the thing the weather service's own API has never offered — the
-whole state-index apparatus in `NationalWeatherService.stateIndex` exists
-to work around its absence.
+over Tarifa answers Gibraltar and Algeciras, Maui answers Kahului, Sydney
+answers three. And it takes a **bounding box at all**, which is the thing
+the weather service's own API has never offered — the whole state-index
+apparatus in `NationalWeatherService.stateIndex` exists to work around its
+absence.
 
-What it is not is dense. METAR is aerodromes, so it is the airport layer
-the app already gets from NWS inside the United States, and nothing like
-the citizen-station coverage that makes the East End map worth looking at.
-The case for adopting it is coverage abroad, where the app currently has
-no free stations at all and the audit rules R1 and R3 cannot be answered —
-not better coverage at home.
+What it is not is dense, and the measurement matters more than the
+adjective. Across the ten busiest non-United-States clusters in the
+registry, METAR inside forty kilometres comes to:
 
-Not adopted yet. If it is, it belongs beside the other three in
-`FreeStations.near` as a fourth source, deduplicated by ICAO against the
-NWS list, and its licence terms want reading first: Esri's Living Atlas
-feeds are free to use but they are Esri's service, not NOAA's own
-endpoint, and the app would be depending on somebody else's hosting of
-public-domain data.
+| Cluster | Registry rows | METAR ≤ 40 km | Nearest |
+| --- | --- | --- | --- |
+| 53.5,7.0 (Frisian coast) | 5 | 1 | EDWE, 20 km |
+| 56.0,10.5 (Aarhus) | 5 | 1 | EKAH, 34 km |
+| 54.5,13.5 (Rügen) | 5 | 0 | — |
+| -41.5,175.0 (Wellington) | 5 | 1 | NZWN, 25 km |
+| 18.5,-66.0 (San Juan) | 5 | 2 | TJSJ, 8 km |
+| 24.0,-110.0 (La Paz) | 5 | 0 | — |
+| 53.0,5.5 (IJsselmeer) | 4 | 1 | EHLW, 30 km |
+| 47.0,7.0 (Swiss lakes) | 4 | 2 | LSGC, 18 km |
+| -34.0,18.5 (Cape Town) | 4 | 1 | FACT, 10 km |
+| -33.5,151.5 (Sydney) | 4 | 0 | — |
+
+One aerodrome, twenty-odd kilometres inland, for about two thirds of the
+spots and nothing at all for the rest. Inside the United States it adds
+nothing: METAR is the airport layer NWS already serves, and the same
+`KJPX`, `KHWV`, `KMTP` and `KFOK` come back from both.
+
+**Not adopted, and the reason is the table.** A single inland aerodrome
+half an hour from the water is the reading most likely to mislead somebody
+deciding whether to drive — gradient wind at an airport is not the sea
+breeze at the beach, and R1 exists because a number that looks measured
+gets believed. Where the app has nothing abroad it shows model wash and
+curated links, which is honest about being a model.
+
+Revisit it if destination browsing abroad becomes a feature — "what is
+Tarifa doing right now" is a question one distant airport answers better
+than nothing. The cheap shape for that is an on-demand lookup in the
+conditions sheet for a coordinate, not a fourth source in
+`FreeStations.near` with its own cache, dedup and audit surface. Its
+licence wants reading either way: Living Atlas feeds are free to use but
+they are Esri's hosting of public-domain data, not NOAA's own endpoint.
 
 ### WeatherFlow Tempest
 

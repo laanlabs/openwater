@@ -146,6 +146,10 @@ For a regional audit:
    evidence-backed records, in the one-document-per-instrument shape
    above.
 
+Networks considered and rejected, with the reasons and the dates they
+were checked, are in [STATIONS.md](STATIONS.md#sources-evaluated) — read
+that before adding a fourth source.
+
 Audit records live beside this file —
 [the East End audit](EAST_END_WIND_STATION_AUDIT_2026-08-17.md) is the
 first.

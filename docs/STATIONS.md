@@ -203,6 +203,75 @@ of the NDBC, CO-OPS tide and CO-OPS currents indexes
 format), so a first-ever launch with no signal still knows where every
 station stands. Snapshots are identity, and identity is storable.
 
+## Sources evaluated
+
+Networks looked at and what they turned out to be worth, so the next
+person asking "can we not just read X" gets an answer instead of a
+weekend. The three the app reads today — NWS, NDBC and CO-OPS — are
+covered above.
+
+### Esri Living Atlas: NOAA METAR and buoys
+
+`https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/NOAA_METAR_current_wind_speed_direction_v1/FeatureServer`
+([map viewer](https://www.arcgis.com/apps/mapviewer/index.html?layers=cb1886ff0a9d4156ba4d2fadd7e8a139))
+
+Esri's hosted live feed over NOAA's hourly METAR and buoy data. Public,
+keyless, `Query` capability, two layers — `0 Stations`, `1 Buoys` — with
+`WIND_SPEED`, `WIND_GUST`, `WIND_DIRECT` and `OBS_DATETIME` on both, and
+`WAVE_HEIGHT` on the buoys. Verified 2026-08-19.
+
+Two things make it worth keeping in mind. It is **global**: a bounding box
+over Tarifa answers Gibraltar at 20 kt and Algeciras at 24, Maui answers
+Kahului, Sydney answers three. And it takes a **bounding box at all**,
+which is the thing the weather service's own API has never offered — the
+whole state-index apparatus in `NationalWeatherService.stateIndex` exists
+to work around its absence.
+
+What it is not is dense. METAR is aerodromes, so it is the airport layer
+the app already gets from NWS inside the United States, and nothing like
+the citizen-station coverage that makes the East End map worth looking at.
+The case for adopting it is coverage abroad, where the app currently has
+no free stations at all and the audit rules R1 and R3 cannot be answered —
+not better coverage at home.
+
+Not adopted yet. If it is, it belongs beside the other three in
+`FreeStations.near` as a fourth source, deduplicated by ICAO against the
+NWS list, and its licence terms want reading first: Esri's Living Atlas
+feeds are free to use but they are Esri's service, not NOAA's own
+endpoint, and the app would be depending on somebody else's hosting of
+public-domain data.
+
+### WeatherFlow Tempest
+
+[Station map](https://tempestwx.com/map/139111/40.99/-72.3202/14) ·
+[developer docs](https://weatherflow.github.io/Tempest/api/)
+
+There is a free API and it will not answer for other people's hardware.
+Every documented endpoint refuses an anonymous caller — observations,
+station metadata and forecast all return `401 UNAUTHORIZED` (verified
+2026-08-19) — and the docs are explicit that integrations are meant for
+the personal use of a single Tempest owner, with anything reading many
+locations directed to contact WeatherFlow. That is a commercial
+conversation, not a key.
+
+The public station map is not a way round it. It is a Firebase-backed web
+client, and using its embedded key would be bypassing authentication to
+scrape restricted readings — the two things
+[WIND_STATIONS.md](WIND_STATIONS.md) forbids by name.
+
+What is free and clean is the owner path: a rider who owns a Tempest can
+mint a personal access token and the app could read *their* station as a
+measured pin like any other. Not built. It is the only Tempest route that
+does not require somebody's permission first.
+
+Worth remembering that the app already gets a slice of this network for
+nothing. Tempest owners who opted into CWOP appear in the NWS feed, which
+is why `FW2389`, `FW4448`, `FW5754` and `GW3708` resolved onto free
+stations at zero metres in the
+[2026-08-19 audit](WIND_STATION_AUDIT_2026-08-19.md). `EW9356 Hampton
+Bays` is the counter-example: a Tempest with no CWOP feed, and the reason
+it stays a commercial pin.
+
 ## Open items
 
 - **The writer.** The rules in
@@ -212,6 +281,11 @@ station stands. Snapshots are identity, and identity is storable.
   is still near ~990 before trusting anything else on this page.
   *Verified 2026-08-18 (aggregation count): exactly 990. The curation is
   holding; the bot has not regressed since the rulebook was pushed.*
+- **No free stations outside the United States.** All three networks the
+  app reads stop at the border, so R1 and R3 in
+  [WIND_MAP_RULES.md](WIND_MAP_RULES.md) are unanswerable for 515 of the
+  990 registry rows. The Esri METAR feed above is the cheapest way to
+  change that, and would bring airports only.
 - **Names for the spot-linked rows.** ~827 registry rows still carry
   id-shaped names ("102428 — WX") from the original import. The app
   rescues them at render time; the registry should not need rescuing.

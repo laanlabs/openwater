@@ -20,12 +20,11 @@ Exit status is the number of violations, so it can gate a release.
 import argparse, json, math, sys, urllib.parse, urllib.request
 
 AGENT = "openWater-audit/1.0 (openwaterapp.com; support@openwaterapp.com)"
-# Mirrors NationalWeatherService: the walk stops when there is enough
-# hardware near the rider, and never goes past the hard bound. R5's job for
-# the audit is to say where the bound bites rather than the sufficiency.
+# Mirrors NationalWeatherService. The app stops early only to get a first
+# map on screen and then finishes the state in the background, so its
+# steady state is the complete index — which is what this audits. R5's job
+# here is to say where the hard page bound bites.
 APP_PAGE_BOUND = 16
-APP_ENOUGH_NEARBY = 40
-APP_NEARBY_REACH = 50.0
 PROJECT = "openwaterapp-2e0f7"
 FIREBASE_KEY = "AIzaSyD_wieknJx9-v_nRuszJrzaNvohfl0gRq8"
 
@@ -70,11 +69,8 @@ def nws_stations(lat, lon):
         # have nothing to say. That is a finding, not a crash: R1 and R3 are
         # unanswerable there, and the classification rules still are not.
         return [], None, 0
-    url, rows, pages = f"https://api.weather.gov/stations?state={state}&limit=500", [], 0
+    url, rows, pages, ran_out = f"https://api.weather.gov/stations?state={state}&limit=500", [], 0, False
     while url and pages < APP_PAGE_BOUND:
-        if sum(1 for r in rows
-               if metres(lat, lon, r["lat"], r["lon"]) <= APP_NEARBY_REACH * 1000) >= APP_ENOUGH_NEARBY:
-            break
         payload = get(url)
         for feature in payload.get("features", []):
             coordinates = feature["geometry"]["coordinates"]
@@ -84,8 +80,11 @@ def nws_stations(lat, lon):
                 "lat": coordinates[1], "lon": coordinates[0], "source": "nws",
             })
         pages += 1
-        url = payload.get("pagination", {}).get("next") if len(payload.get("features", [])) == 500 else None
-    return rows, state, pages
+        if len(payload.get("features", [])) < 500:
+            ran_out = True
+            break
+        url = payload.get("pagination", {}).get("next")
+    return rows, state, (pages if ran_out else -pages)
 
 
 def coops_stations():
@@ -268,12 +267,13 @@ def audit(lat, lon, reach, skip_readings):
     free += coops_stations()
     near = sorted((s for s in free if metres(lat, lon, s["lat"], s["lon"]) <= reach),
                   key=lambda s: metres(lat, lon, s["lat"], s["lon"]))
+    complete = pages > 0
     print(f"R5  discovery      {len(near)} free stations in reach "
-          f"({state} index took {pages} page(s), CO-OPS national)")
-    if pages >= APP_PAGE_BOUND:
-        violations.append(f"R5 {state}: walked the full {APP_PAGE_BOUND}-page bound "
-                          f"without finding {APP_ENOUGH_NEARBY} stations within "
-                          f"{APP_NEARBY_REACH:.0f} km — the index may be truncated here")
+          f"({state} index {'complete in' if complete else 'TRUNCATED at'} "
+          f"{abs(pages)} page(s), CO-OPS national)")
+    if not complete:
+        violations.append(f"R5 {state}: index runs past the app's {APP_PAGE_BOUND}-page "
+                          f"bound — stations beyond it can never be found")
 
     curated = [r for r in registry_rows() if metres(lat, lon, r["lat"], r["lon"]) <= reach]
     print(f"    registry       {len(curated)} curated rows in reach")

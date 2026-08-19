@@ -73,13 +73,25 @@ A pin shows the mean alone, or `mean`G`gust` when the gust stands three
 knots or more above it — the difference between a steady five and a five
 gusting eleven is the difference between a session and a swim.
 
-**R5. Discovery is complete before it is capped.** Follow a paginated
-index to its end, or to a bound stated in the code, before filtering by
-distance: half of New York's stations are on page two, including the three
-nearest to Sag Harbor. Caps on how many readings are fetched are a
-separate decision from how many stations are found, and neither may
-silently truncate the other. Any cache whose completeness changes gets a
-new filename, or the fix ships to nobody who already has the old one.
+**R5. Discovery is complete before it is capped, and "enough" is not
+"nearest".** Follow a paginated index to its end, or to a bound stated in
+the code, before filtering by distance: half of New York's stations are on
+page two, including the three nearest to Sag Harbor.
+
+Stopping early once enough stations have been found is a legitimate way to
+get a map on screen and an illegitimate way to finish. The pages are
+ordered by nothing useful, so an early stop keeps an arbitrary subset: of
+the forty stations genuinely nearest downtown San Francisco the app once
+held four, missing the closest at six hundred metres and Fort Point at
+five kilometres, while reporting forty-one stations found and looking
+perfectly healthy. An index that stopped early is therefore finished in
+the background and written back, and it records whether it is complete so
+nothing downstream has to guess.
+
+Caps on how many readings are fetched are a separate decision from how
+many stations are found, and neither may silently truncate the other. Any
+cache whose completeness changes gets a new filename, or the fix ships to
+nobody who already has the old one.
 
 ## The audit
 
@@ -123,6 +135,7 @@ than a rule without one.
 | R3 | One anemometer stood on the map twice at two prices | `FW2389 Orient` and NWS `F2389`, 0 m apart |
 | R4 | A mast was called silent while another feed reported it | Montauk: NWS `MTKN6` 5.2 kn, NDBC `MM`, CO-OPS 1.9 kn |
 | R5 | A paginated index stopped after one page and a week-long cache kept serving it | 13 of 24 stations near Sag Harbor; East Hampton, Southold and Orient all on page two |
+| R5 | Stopping on "enough stations" kept an arbitrary subset, not the nearest | 4 of the 40 nearest to downtown San Francisco; closest missed at 0.6 km |
 
 ### Regional inventory audits
 

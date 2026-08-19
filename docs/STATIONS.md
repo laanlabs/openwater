@@ -375,16 +375,6 @@ it stays a commercial pin.
   is still near ~990 before trusting anything else on this page.
   *Verified 2026-08-18 (aggregation count): exactly 990. The curation is
   holding; the bot has not regressed since the rulebook was pushed.*
-- **The app finds a sufficient subset, not the nearest stations.**
-  `stateIndex` stops walking once forty stations are within fifty
-  kilometres, which is enough to fill any map — but the pages are ordered
-  by nothing useful, so those forty are an arbitrary forty of however many
-  exist. California holds 282 stations inside forty kilometres of San
-  Francisco and the app finds about 41 of them; San Diego holds 108. The
-  map draws sixty pins and reads thirty, so the rider rarely sees the
-  difference — except in the one place it matters, which is the sheet
-  quoting the *nearest* station's distance. Fixing it properly means
-  either a source with a real spatial query or accepting the download.
 - **No free stations outside the United States.** All three networks the
   app reads stop at the border, so R1 and R3 in
   [WIND_MAP_RULES.md](WIND_MAP_RULES.md) are unanswerable for 515 of the
@@ -395,6 +385,20 @@ it stays a commercial pin.
   rescues them at render time; the registry should not need rescuing.
   A bulk rename is a database-tooling job under REGISTRY_WRITERS.md's
   caps — not something the app-side ever runs.
+
+## Closed items (2026-08-19)
+
+- **The app found a sufficient subset, not the nearest stations.** The
+  state walk stopped once forty stations were within fifty kilometres,
+  which fills a map and is not the same claim as finding the right
+  stations: the pages are ordered by nothing useful, so of the forty
+  nearest downtown San Francisco the app held four, missing the closest at
+  six hundred metres and Fort Point at five. Done — the early stop now
+  only gets the first map on screen, and the rest of the state is walked in
+  the background and written back with a `complete` flag, so the second
+  look is the right one. Measured on device: California went from ~41
+  stations within forty kilometres of San Francisco to 282, the full 7,829
+  landing about twelve seconds after the map drew.
 
 ## Closed items (2026-08-18)
 

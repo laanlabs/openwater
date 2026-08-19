@@ -1553,20 +1553,34 @@ enum NationalWeatherService {
     /// The hard stop on walking a state index, and the local coverage that
     /// lets the walk stop sooner.
     ///
-    /// California publishes 7,829 stations across sixteen pages, and a
-    /// phone should not spend eight megabytes to find the sensors on its
-    /// own bay. A fixed page bound was the wrong shape for that: it spends
-    /// the same effort on a dense coast as a thin one, and gets the dense
-    /// coast wrong anyway, because the pages are ordered by nothing useful
-    /// and the station a rider is standing beside can be on page twelve.
-    /// So the walk stops on sufficiency instead — enough hardware found
-    /// near this rider to fill any map they can see — and only the states
-    /// that need the depth pay for it.
+    /// California publishes 7,829 stations across sixteen pages and there
+    /// is no radius parameter to ask with, so a partial walk is a partial
+    /// map. Stopping early on sufficiency — enough stations found near this
+    /// rider — sounded reasonable and was measurably wrong: the pages are
+    /// ordered by nothing useful, so of the forty stations genuinely
+    /// nearest downtown San Francisco the app held **four**, missing the
+    /// closest at six hundred metres and Fort Point at five kilometres.
+    /// Enough stations is not the same claim as the right stations.
+    ///
+    /// So the walk still stops early, but only to get a map on screen: the
+    /// rest of the state is finished in the background and written back, so
+    /// the first look is fast and every look after it is complete. One
+    /// state, once a week, and only the states somebody actually visits.
     static let statePageBound = 16
     static let stateEnoughNearby = 40
     static let stateNearbyReach: Double = 50_000
 
-    private static var stateCache: [String: [DistilledStation]] = [:]
+    /// A state's stations, and whether the walk that produced them reached
+    /// the end. An incomplete index is usable and known to be partial.
+    private struct StateIndex: Codable {
+        var complete: Bool
+        var stations: [DistilledStation]
+    }
+
+    private static var stateCache: [String: StateIndex] = [:]
+    /// States whose completion is already running, so a second pan does not
+    /// start a second walk.
+    private static var completing: Set<String> = []
 
     private static func stateCacheURL(_ state: String) -> URL {
         // Versioned. The first cut of this stopped after one page of five
@@ -1574,32 +1588,56 @@ enum NationalWeatherService {
         // truncated list to every phone that already had one — including
         // the East Hampton, Southold and Orient stations sitting on page
         // two, which are the nearest ones to half the riders using it.
-        URL.cachesDirectory.appending(path: "nws-stations-v4-\(state).json")
+        URL.cachesDirectory.appending(path: "nws-stations-v5-\(state).json")
     }
 
     private static func stateIndex(_ state: String,
                                    near coordinate: Geo.Coordinate) async -> [DistilledStation] {
-        // An index that stopped early over San Francisco knows nothing
-        // about San Diego, and reusing it there is the truncation bug in a
-        // different hat. A held copy serves a new point only while it still
-        // holds hardware near it; otherwise the state is walked again from
-        // the top, with this rider deciding when it has gone far enough.
-        func sufficient(_ rows: [DistilledStation]) -> Bool {
-            rows.count { Geo.distance(coordinate, $0.coordinate) <= stateNearbyReach }
-                >= stateEnoughNearby / 4
+        // A complete index answers for anywhere in its state. An incomplete
+        // one answers only while it still holds hardware near this point —
+        // an index that stopped early over San Francisco knows nothing
+        // about San Diego — and either way the background finish is what
+        // turns the second answer into the right one.
+        func usable(_ index: StateIndex) -> Bool {
+            index.complete
+                || index.stations.count { Geo.distance(coordinate, $0.coordinate) <= stateNearbyReach }
+                    >= stateEnoughNearby / 4
         }
 
-        if let held = stateCache[state], sufficient(held) { return held }
+        if let held = stateCache[state], usable(held) {
+            if !held.complete { finish(state) }
+            return held.stations
+        }
         if let data = try? Data(contentsOf: stateCacheURL(state)),
-           let rows = try? JSONDecoder().decode([DistilledStation].self, from: data),
-           !rows.isEmpty, sufficient(rows),
+           let index = try? JSONDecoder().decode(StateIndex.self, from: data),
+           !index.stations.isEmpty, usable(index),
            let age = (try? stateCacheURL(state).resourceValues(forKeys: [.contentModificationDateKey]))?
                .contentModificationDate,
            Date().timeIntervalSince(age) < 7 * 86_400 {
-            stateCache[state] = rows
-            return rows
+            stateCache[state] = index
+            if !index.complete { finish(state) }
+            return index.stations
         }
 
+        // The cursor is followed rather than guessed at: the first page is
+        // alphabetical by nothing in particular, so New York's citizen
+        // stations at East Hampton, Southold and Orient are all on page two
+        // and stopping at one page is the coverage bug this index exists to
+        // fix, one level down.
+        let index = await walk(state, stopping: coordinate)
+        guard !index.stations.isEmpty else { return [] }
+        store(index, for: state)
+        if !index.complete { finish(state) }
+        return index.stations
+    }
+
+    /// Walks a state's pages, optionally stopping as soon as there is
+    /// enough hardware near a point to draw with.
+    ///
+    /// `complete` is the honest part: it says whether the cursor ran out or
+    /// the walk gave up, and nothing downstream has to guess.
+    private static func walk(_ state: String,
+                             stopping coordinate: Geo.Coordinate?) async -> StateIndex {
         struct Payload: Decodable {
             struct Feature: Decodable {
                 struct Geometry: Decodable { let coordinates: [Double] }
@@ -1615,21 +1653,18 @@ enum NationalWeatherService {
             let pagination: Pagination?
         }
 
-        // The cursor is followed rather than guessed at: the first page is
-        // alphabetical by nothing in particular, so New York's citizen
-        // stations at East Hampton, Southold and Orient are all on page two
-        // and stopping at one page is the coverage bug this index exists to
-        // fix, one level down.
         var rows: [DistilledStation] = []
         var next: URL? = URL(string: "https://api.weather.gov/stations?state=\(state)&limit=500")
-        for _ in 0..<Self.statePageBound {
-            if rows.count(where: {
-                Geo.distance(coordinate, $0.coordinate) <= Self.stateNearbyReach
-            }) >= Self.stateEnoughNearby { break }
+        for _ in 0..<statePageBound {
+            if let coordinate,
+               rows.count(where: { Geo.distance(coordinate, $0.coordinate) <= stateNearbyReach })
+                   >= stateEnoughNearby {
+                return StateIndex(complete: false, stations: rows)
+            }
             guard let url = next, let data = await get(url),
                   let payload = try? JSONDecoder().decode(Payload.self, from: data),
                   let features = payload.features
-            else { break }
+            else { return StateIndex(complete: false, stations: rows) }
             rows += features.compactMap { feature in
                 guard let id = feature.properties?.stationIdentifier,
                       let pair = feature.geometry?.coordinates, pair.count >= 2
@@ -1641,16 +1676,35 @@ enum NationalWeatherService {
             }
             guard features.count == 500,
                   let cursor = payload.pagination?.next.flatMap(URL.init(string:))
-            else { break }
+            else { return StateIndex(complete: true, stations: rows) }
             next = cursor
         }
-        guard !rows.isEmpty else { return [] }
+        // Ran out of pages allowed rather than pages available.
+        return StateIndex(complete: false, stations: rows)
+    }
 
-        if let encoded = try? JSONEncoder().encode(rows) {
+    /// Finish a state in the background and write it back.
+    ///
+    /// The first map is drawn from whatever the early stop found; this is
+    /// what makes the second one right. Deferred off constrained networks —
+    /// California is eight megabytes, and a rider in Low Data Mode did not
+    /// ask for it.
+    private static func finish(_ state: String) {
+        guard !completing.contains(state) else { return }
+        completing.insert(state)
+        Task {
+            defer { completing.remove(state) }
+            let index = await walk(state, stopping: nil)
+            guard index.complete, !index.stations.isEmpty else { return }
+            store(index, for: state)
+        }
+    }
+
+    private static func store(_ index: StateIndex, for state: String) {
+        stateCache[state] = index
+        if let encoded = try? JSONEncoder().encode(index) {
             try? encoded.write(to: stateCacheURL(state), options: .atomic)
         }
-        stateCache[state] = rows
-        return rows
     }
 
     private static var stateAt: [String: String] = [:]

@@ -86,7 +86,11 @@ held four, missing the closest at six hundred metres and Fort Point at
 five kilometres, while reporting forty-one stations found and looking
 perfectly healthy. An index that stopped early is therefore finished in
 the background and written back, and it records whether it is complete so
-nothing downstream has to guess.
+nothing downstream has to guess. The background finish refuses cellular,
+personal hotspots and Low Data Mode: California is eight megabytes, and a
+rider checking the wind from a car park did not ask to spend that. It
+comes back incomplete, waits ten minutes, and tries again wherever they
+land — completeness is worth having, not worth taking.
 
 Caps on how many readings are fetched are a separate decision from how
 many stations are found, and neither may silently truncate the other. Any

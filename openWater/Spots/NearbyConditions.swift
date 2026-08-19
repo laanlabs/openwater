@@ -1484,11 +1484,22 @@ enum NationalWeatherService {
     /// speaks the same API with the same manners. The `accept` override is
     /// for the text-product endpoints, which serve ld+json rather than
     /// geo+json.
-    static func get(_ url: URL, accept: String = "application/geo+json") async -> Data? {
+    /// - Parameter onlyWhenCheap: refuse cellular, personal hotspots and
+    ///   Low Data Mode. For the background state walk, which is eight
+    ///   megabytes in California and is nobody's idea of a good use of a
+    ///   data allowance — the request fails immediately rather than
+    ///   downloading, and the walk simply stays incomplete until the rider
+    ///   is somewhere it can finish.
+    static func get(_ url: URL, accept: String = "application/geo+json",
+                    onlyWhenCheap: Bool = false) async -> Data? {
         var request = URLRequest(url: url)
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.timeoutInterval = 12
+        if onlyWhenCheap {
+            request.allowsExpensiveNetworkAccess = false
+            request.allowsConstrainedNetworkAccess = false
+        }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200
         else { return nil }
@@ -1637,7 +1648,8 @@ enum NationalWeatherService {
     /// `complete` is the honest part: it says whether the cursor ran out or
     /// the walk gave up, and nothing downstream has to guess.
     private static func walk(_ state: String,
-                             stopping coordinate: Geo.Coordinate?) async -> StateIndex {
+                             stopping coordinate: Geo.Coordinate?,
+                             onlyWhenCheap: Bool = false) async -> StateIndex {
         struct Payload: Decodable {
             struct Feature: Decodable {
                 struct Geometry: Decodable { let coordinates: [Double] }
@@ -1661,7 +1673,7 @@ enum NationalWeatherService {
                    >= stateEnoughNearby {
                 return StateIndex(complete: false, stations: rows)
             }
-            guard let url = next, let data = await get(url),
+            guard let url = next, let data = await get(url, onlyWhenCheap: onlyWhenCheap),
                   let payload = try? JSONDecoder().decode(Payload.self, from: data),
                   let features = payload.features
             else { return StateIndex(complete: false, stations: rows) }
@@ -1683,19 +1695,31 @@ enum NationalWeatherService {
         return StateIndex(complete: false, stations: rows)
     }
 
+    /// When a deferred completion may be attempted again, per state.
+    private static var retryAfter: [String: Date] = [:]
+
     /// Finish a state in the background and write it back.
     ///
     /// The first map is drawn from whatever the early stop found; this is
-    /// what makes the second one right. Deferred off constrained networks —
-    /// California is eight megabytes, and a rider in Low Data Mode did not
-    /// ask for it.
+    /// what makes the second one right — but only over a network that can
+    /// afford it. California is eight megabytes, and a rider checking the
+    /// wind from a car park did not ask to spend that; the walk refuses
+    /// cellular, hotspots and Low Data Mode outright, comes back
+    /// incomplete, and tries again later. The map is never waiting on it.
     private static func finish(_ state: String) {
         guard !completing.contains(state) else { return }
+        if let after = retryAfter[state], after > Date() { return }
         completing.insert(state)
         Task {
             defer { completing.remove(state) }
-            let index = await walk(state, stopping: nil)
-            guard index.complete, !index.stations.isEmpty else { return }
+            let index = await walk(state, stopping: nil, onlyWhenCheap: true)
+            guard index.complete, !index.stations.isEmpty else {
+                // Refused, or the network gave out part way. Either way it
+                // is not worth asking again on the next pan.
+                retryAfter[state] = Date().addingTimeInterval(600)
+                return
+            }
+            retryAfter[state] = nil
             store(index, for: state)
         }
     }

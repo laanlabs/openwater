@@ -657,6 +657,18 @@ final class SpotGuideStore {
         let provider: String?
         let detail: String?
         let coordinate: Geo.Coordinate
+        /// What the registry says about getting a reading out of this one.
+        ///
+        /// `windStations` has carried these since the classification rules
+        /// landed — `accessTier`, `requiresSubscription`, `guestWindVisible`
+        /// — and the app read none of them, so a station whose wind any
+        /// visitor can see was drawn exactly like one behind a paywall. On
+        /// the East End, where a provider inventory of 181 rows was
+        /// published in one go, that is most of the map.
+        var accessTier: String?
+        var requiresSubscription: Bool?
+        var guestWindVisible: Bool?
+        var providerType: String?
         /// From the spot it was asked about — filled in per query, not stored,
         /// because the same regional cache serves every spot in the region.
         var metres: Double = 0
@@ -672,6 +684,25 @@ final class SpotGuideStore {
 
         var providerLabel: String {
             provider ?? url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
+        }
+
+        /// Whether reading this station's wind needs somebody's money.
+        ///
+        /// Stated from the registry rather than guessed from the provider:
+        /// iKitesurf is commercial and most of its rows are still readable
+        /// without an account, which is the whole distinction a rider
+        /// looking at a map of pins is trying to make.
+        var isLocked: Bool {
+            if guestWindVisible == true { return false }
+            if let requiresSubscription { return requiresSubscription }
+            return accessTier == "subscription" || accessTier == "authenticated"
+        }
+
+        /// A government sensor the app can read for itself, wearing whatever
+        /// name the registry gave it.
+        var isGovernment: Bool {
+            providerType == "government"
+                || ["noaa", "nws", "ndbc", "coops"].contains(provider?.lowercased() ?? "")
         }
 
         /// A name a rider can read.
@@ -895,9 +926,14 @@ final class SpotGuideStore {
                             kind: kind,
                             name: doc.fields["name"]?.stringValue ?? kind.label,
                             url: url,
-                            provider: doc.fields["provider"]?.stringValue,
+                            provider: doc.fields["provider"]?.stringValue
+                                ?? doc.fields["providerId"]?.stringValue,
                             detail: doc.fields["description"]?.stringValue,
-                            coordinate: at
+                            coordinate: at,
+                            accessTier: doc.fields["accessTier"]?.stringValue,
+                            requiresSubscription: doc.fields["requiresSubscription"]?.booleanValue,
+                            guestWindVisible: doc.fields["guestWindVisible"]?.booleanValue,
+                            providerType: doc.fields["providerType"]?.stringValue
                         )
                     }
                 }
@@ -932,11 +968,21 @@ final class SpotGuideStore {
         let detail: String?
         let latitude: Double
         let longitude: Double
+        // Optional so a cache written before the app read these still
+        // decodes — it comes back unclassified until the week expires it.
+        var accessTier: String?
+        var requiresSubscription: Bool?
+        var guestWindVisible: Bool?
+        var providerType: String?
     }
 
     private static func resourceCacheURL(for key: String) -> URL {
         let safe = key.map { $0.isLetter || $0.isNumber ? $0 : "-" }
-        return URL.cachesDirectory.appending(path: "guide-resources-\(String(safe)).json")
+        // Versioned: a cache written before the app read the access
+        // classification decodes fine and answers "unclassified" for a
+        // week, which would hold the free-versus-paid fix off every phone
+        // that already has one. Bumping the name retires them today.
+        return URL.cachesDirectory.appending(path: "guide-resources-v2-\(String(safe)).json")
     }
 
     private static func storedResources(for key: String) -> (resources: [GuideResource], age: TimeInterval)? {
@@ -952,7 +998,11 @@ final class SpotGuideStore {
             return GuideResource(kind: kind, name: row.name, url: url,
                                  provider: row.provider, detail: row.detail,
                                  coordinate: Geo.Coordinate(latitude: row.latitude,
-                                                            longitude: row.longitude))
+                                                            longitude: row.longitude),
+                                 accessTier: row.accessTier,
+                                 requiresSubscription: row.requiresSubscription,
+                                 guestWindVisible: row.guestWindVisible,
+                                 providerType: row.providerType)
         }
         return (resources, Date().timeIntervalSince(written))
     }
@@ -963,7 +1013,11 @@ final class SpotGuideStore {
                            url: resource.url.absoluteString,
                            provider: resource.provider, detail: resource.detail,
                            latitude: resource.coordinate.latitude,
-                           longitude: resource.coordinate.longitude)
+                           longitude: resource.coordinate.longitude,
+                           accessTier: resource.accessTier,
+                           requiresSubscription: resource.requiresSubscription,
+                           guestWindVisible: resource.guestWindVisible,
+                           providerType: resource.providerType)
         }
         if let encoded = try? JSONEncoder().encode(rows) {
             try? encoded.write(to: resourceCacheURL(for: key), options: .atomic)

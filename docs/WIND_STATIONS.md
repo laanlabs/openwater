@@ -122,6 +122,12 @@ published in bulk stand until curated, but they set no precedent.
   source and access clearly, and choose observations by entitlement,
   freshness, distance, and quality.
 
+## What the map draws
+
+The presentation rules — what a pin may say, when it wears a lock, and the
+audit that checks both — live in
+[WIND_MAP_RULES.md](WIND_MAP_RULES.md).
+
 ## Discovery and coverage audits
 
 For a regional audit:

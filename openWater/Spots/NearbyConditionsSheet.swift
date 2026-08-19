@@ -252,9 +252,7 @@ struct NearbyConditionsSheet: View {
         }
         .buttonStyle(.plain)
 
-        nearTermCard
-
-        outlookCard
+        windAheadCard
 
         section("REAL STATIONS NEARBY, FREE", trailing: {
             mapLink("Wind stations", places: stationPlaces, search: searchStations)
@@ -653,125 +651,124 @@ struct NearbyConditionsSheet: View {
         .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
     }
 
-    /// The next 24 hours, and how much the models argue about them.
+    /// The wind ahead: one strip, quarter-hour while a rapid-update model
+    /// still has it and hourly after, with the models' own argument about
+    /// it underneath.
     ///
-    /// Drawn as one bar per hour at the consensus, with a whisker showing the
-    /// range across models — so the eye reads the shape of the day first and
-    /// the confidence second, which is the order a rider thinks in.
+    /// This was two cards — six hours at fifteen-minute grain, then a day
+    /// at hourly — which drew the same wind twice at two scales and asked
+    /// the rider to join them up in their head. One scrolling strip says it
+    /// once, in the map's own colours, with the numbers written on it.
     @ViewBuilder
-    private var outlookCard: some View {
-        if !outlook.isEmpty {
+    private var windAheadCard: some View {
+        let track = WindTrack.make(nearTerm: nearTerm, outlook: ahead)
+        if !track.isEmpty {
             NavigationLink {
-                ForecastScreen(title: title, coordinate: coordinate, detail: full, outlook: outlook, waves: waves)
+                ForecastScreen(title: title, coordinate: coordinate, detail: full,
+                               outlook: ahead, waves: waves)
             } label: {
-                outlookCardBody
+                windAheadBody(track)
             }
             .buttonStyle(.plain)
         }
     }
 
-    /// The next six hours at quarter-hour grain — only where HRRR, ICON-D2
-    /// or AROME natively resolve it, which is the whole point of showing it:
-    /// this is the card that can see a sea breeze switch on inside an hour,
-    /// and pretending to that grain from interpolated hourly data would be
-    /// the false precision the rest of the sheet is against.
-    @ViewBuilder
-    private var nearTermCard: some View {
-        if !nearTerm.isEmpty {
-            // Gusts set the scale, not the means — the caps have to fit
-            // under the same grid the bars use.
-            let peak = max((nearTerm.speedsKn + nearTerm.gustsKn).compactMap { $0 }.max() ?? 1, 1)
-            NavigationLink {
-                ForecastScreen(title: title, coordinate: coordinate, detail: full,
-                               outlook: outlook, waves: waves)
-            } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("NEXT SIX HOURS · EVERY 15 MIN")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if let gust = nearTerm.peakGustKn {
-                        Text("gusts to \(Int(gust.rounded())) kn")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "chevron.right")
+    /// The window the cards speak for. The raw `outlook` keeps its head
+    /// start — the nowcast needs the hour a station's reading was taken in.
+    private var ahead: WindOutlook { outlook.nextHours(24) }
+
+    private func windAheadBody(_ track: WindTrack) -> some View {
+        let agreement = ahead.agreement
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("WIND, NEXT 24 HOURS")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // Disagreement warns from the icon; the words stay in a
+                // colour that can be read.
+                if ahead.spreadKn >= 8 {
+                    Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.orange)
                 }
+                Text(agreement.label)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(ahead.spreadKn < 8 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
 
-                // Grid above the bars, the way the comps draw it — the caps
-                // reach high enough that labels behind them would vanish.
-                ZStack(alignment: .bottom) {
-                    HStack(alignment: .bottom, spacing: 2) {
-                        ForEach(nearTerm.times.indices, id: \.self) { step in
-                            GustBar(meanKn: (nearTerm.speedsKn[safe: step] ?? nil) ?? 0,
-                                    gustKn: nearTerm.gustsKn[safe: step] ?? nil,
-                                    peak: peak, height: 54, cornerRadius: 1.5)
-                        }
-                    }
-                    ChartGrid(peak: peak)
-                }
-                .frame(height: 54, alignment: .bottom)
+            WindTrackChart(track: track, skySymbol: skySymbol(at:))
 
-                // On the hour, under the four bars it speaks for: the wind's
-                // arrow, and the sky it blows under.
-                HStack(spacing: 2) {
-                    ForEach(nearTerm.times.indices, id: \.self) { step in
-                        Group {
-                            if step % 4 == 0,
-                               let direction = nearTerm.directions[safe: step] ?? nil {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "arrow.down")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .rotationEffect(.degrees(direction))
-                                        .foregroundStyle(.secondary)
-                                    skyIcon(at: nearTerm.times[step])
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
+            if let age = ahead.staleAge {
+                Label {
+                    Text("No network right now — this is the model from \(Format.duration(age)) ago, not a fresh run.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "wifi.slash")
                 }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Color.harbourNavy)
+            }
 
-                HStack {
-                    Text("now")
-                    Spacer()
-                    if let middle = nearTerm.times[safe: nearTerm.times.count / 2] {
-                        Text(middle.formatted(.dateTime.hour().minute()))
-                    }
-                    Spacer()
-                    if let last = nearTerm.times.last {
-                        Text(last.formatted(.dateTime.hour().minute()))
-                    }
-                }
+            Text(agreement.detail)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Text("Quarter-hour steps straight from a rapid-update model — HRRR over North America, ICON-D2 and AROME over Europe. This card only exists where one of them actually resolves this water.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // A real anemometer against the models — the one line on this
+            // card that is measured rather than modelled, which is exactly
+            // why it gets to talk back to the chart above it. The alert
+            // lives in the icon, never the type: orange words on the blue
+            // wash were unreadable, and a sentence a rider must actually
+            // read should not wear the warning colour.
+            if let nowcast {
+                Label {
+                    Text(nowcast.line)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: abs(nowcast.deltaKn) < 1.5
+                          ? "gauge.with.needle" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(abs(nowcast.deltaKn) < 1.5
+                                         ? AnyShapeStyle(Color.harbourNavy)
+                                         : AnyShapeStyle(Color.orange))
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Color.harbourNavy)
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
-            }
-            .buttonStyle(.plain)
+
+            Text(trackSource(track))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// Where the strip's two halves come from, said once. The fine half
+    /// only exists where a rapid-update model natively resolves this water,
+    /// so the sentence has to change rather than promise it everywhere.
+    private func trackSource(_ track: WindTrack) -> String {
+        let models = "the hourly average of \(ahead.models.count) global models"
+        guard track.handover != nil else {
+            return "Scroll for the day ahead — \(models). Tap for each of them, the hour by hour, and the week."
+        }
+        return "Scroll for the day ahead. The narrow bars are quarter-hour steps from a rapid-update model — HRRR, ICON-D2 or AROME, wherever one of them resolves this water — then \(models). Tap for each model, the hour by hour, and the week."
     }
 
     /// The sky over one moment of the forecast, from the full detail the
     /// sheet already fetched — sun, cloud, rain, each in its own colours so
     /// the row reads at a glance.
-    @ViewBuilder
-    private func skyIcon(at date: Date) -> some View {
-        if let code = skyCode(at: date) {
-            Image(systemName: SpotWeather.symbol(for: code, isDay: isDaylight(date)))
-                .font(.system(size: 11))
-                .symbolRenderingMode(.multicolor)
-        }
+    private func skySymbol(at date: Date) -> String? {
+        skyCode(at: date).map { SpotWeather.symbol(for: $0, isDay: isDaylight(date)) }
     }
 
     /// The WMO code for the hour nearest a moment, when the detail knows it.
@@ -790,141 +787,6 @@ struct NearbyConditionsSheet: View {
         }
         let hour = Calendar.current.component(.hour, from: date)
         return hour >= 7 && hour < 19
-    }
-
-    @ViewBuilder
-    private var outlookCardBody: some View {
-        if !outlook.isEmpty {
-            let consensus = outlook.consensus
-            let gusts = outlook.consensusGusts
-            let peak = max((consensus + gusts).compactMap { $0 }.max() ?? 1, 1)
-            let agreement = outlook.agreement
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("NEXT 24 HOURS")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    // Disagreement warns from the icon; the words stay in a
-                    // colour that can be read.
-                    if outlook.spreadKn >= 8 {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Color.orange)
-                    }
-                    Text(agreement.label)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(outlook.spreadKn < 8 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                // Consensus only. The first version drew a whisker above every
-                // bar for the spread between models, which was accurate and
-                // unreadable — twenty-four thin spikes over twenty-four bars.
-                // The disagreement is now one sentence below, and the per-model
-                // lines live on the detail screen where there is room for them.
-                ZStack(alignment: .bottom) {
-                    HStack(alignment: .bottom, spacing: 3) {
-                        ForEach(outlook.hours.indices, id: \.self) { hour in
-                            GustBar(meanKn: (consensus[safe: hour] ?? nil) ?? 0,
-                                    gustKn: gusts[safe: hour] ?? nil,
-                                    peak: peak, height: 62, cornerRadius: 2)
-                        }
-                    }
-                    ChartGrid(peak: peak)
-                }
-                .frame(height: 62, alignment: .bottom)
-
-                // Under the bars, every third hour: the wind's arrow and the
-                // sky's icon. Speed decides whether you go, direction decides
-                // whether the spot works at all, and the sky is the context
-                // both sit in — sea breezes live and die by the sun.
-                // Independent models only, matching the consensus above.
-                let directions = outlook.blendDirections(
-                    of: Set(outlook.models.filter { !$0.isComposite }.map(\.id)))
-                HStack(spacing: 3) {
-                    ForEach(outlook.hours.indices, id: \.self) { hour in
-                        Group {
-                            if hour % 3 == 0, let direction = directions[safe: hour] ?? nil {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "arrow.down")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .rotationEffect(.degrees(direction))
-                                        .foregroundStyle(.secondary)
-                                    skyIcon(at: outlook.hours[hour])
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-
-                HStack {
-                    Text("now")
-                    Spacer()
-                    if let middle = outlook.hours[safe: outlook.hours.count / 2] {
-                        Text(middle.formatted(.dateTime.hour()))
-                    }
-                    Spacer()
-                    if let last = outlook.hours.last {
-                        Text(last.formatted(.dateTime.hour()))
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-                if let age = outlook.staleAge {
-                    Label {
-                        Text("No network right now — this is the model from \(Format.duration(age)) ago, not a fresh run.")
-                            .fixedSize(horizontal: false, vertical: true)
-                    } icon: {
-                        Image(systemName: "wifi.slash")
-                    }
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(Color.harbourNavy)
-                }
-
-                Text(agreement.detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                // A real anemometer against the models — the one line on
-                // this card that is measured rather than modelled, which is
-                // exactly why it gets to talk back to the chart above it.
-                // The alert lives in the icon, never the type: orange words
-                // on the blue wash were unreadable, and a sentence a rider
-                // must actually read should not wear the warning colour.
-                if let nowcast {
-                    Label {
-                        Text(nowcast.line)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } icon: {
-                        Image(systemName: abs(nowcast.deltaKn) < 1.5
-                              ? "gauge.with.needle" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(abs(nowcast.deltaKn) < 1.5
-                                             ? AnyShapeStyle(Color.harbourNavy)
-                                             : AnyShapeStyle(Color.orange))
-                    }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(Color.harbourNavy)
-                    .padding(11)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
-                }
-
-                Text("Average of \(outlook.models.count) global models — tap for each of them, the hour by hour, and the week.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
-        }
     }
 
     /// Sea state ahead, where there is any sea.
@@ -1633,7 +1495,9 @@ struct NearbyConditionsSheet: View {
         async let warnings = NationalWeatherService.alerts(at: here)
         async let tideList = TidesAndCurrents.stations(near: here)
         async let buoyList = DataBuoyCenter.buoys(near: here, limit: 14, radius: Self.maxRadius)
-        async let ahead = OpenMeteo.outlook(at: here)
+        // Two calendar days: the window the card draws runs 24 hours from
+        // this hour, and one day's worth of it is already behind by tea time.
+        async let ahead = OpenMeteo.outlook(at: here, days: 2)
         async let sea = OpenMeteo.waves(at: here)
         async let everything = OpenMeteo.detail(at: here)
         async let sea2 = OpenMeteo.surf(at: here)
@@ -1716,36 +1580,5 @@ struct NearbyConditionsSheet: View {
         nowcast = NowcastAdjustment.make(outlook: outlook, stations: stations, buoys: buoys)
         // And the wave buoy gets the same say over the wave model.
         swellNowcast = SwellNowcastAdjustment.make(outlook: surfOutlook, buoys: buoys)
-    }
-}
-
-/// One forecast bar: solid to the mean, with a Foam cap up to the gust.
-///
-/// The cap is the headroom that knocks you over, so it gets its own colour
-/// on top of the bar rather than the old scheme of paling the whole bar —
-/// which flattened a gusty 8 kn and a steady 8 kn into the same picture.
-struct GustBar: View {
-
-    let meanKn: Double
-    let gustKn: Double?
-    /// The chart's full-scale value — the caller must fold gusts into it,
-    /// or the caps overflow the frame.
-    let peak: Double
-    let height: Double
-    let cornerRadius: Double
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if let gustKn, gustKn > meanKn {
-                UnevenRoundedRectangle(topLeadingRadius: cornerRadius,
-                                       topTrailingRadius: cornerRadius)
-                    .fill(Color.foam)
-                    .frame(height: height * (gustKn - meanKn) / peak)
-            }
-            Rectangle()
-                .fill(Color.chartBar)
-                .frame(height: max(2, height * meanKn / peak))
-        }
-        .frame(maxWidth: .infinity, alignment: .bottom)
     }
 }

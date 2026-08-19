@@ -191,26 +191,21 @@ final class WindWashModel {
     /// the field reads as one continuous surface. The palettes remain the
     /// single source of the colours — this only smooths between them.
     private static func smoothColour(for knots: Double, layer: WashLayer) -> Color {
-        let stops = layer == .currents ? currentStops : windStops
+        // Wind reads its own palette's continuous form — the conditions
+        // strip reads the same one, which is why it lives on the palette
+        // rather than here.
+        guard layer == .currents else { return Color(uiColor: WindPalette.smooth(for: knots)) }
+        let stops = currentStops
         guard let first = stops.first, let last = stops.last else { return .clear }
         if knots <= first.at { return Color(uiColor: first.colour) }
         if knots >= last.at { return Color(uiColor: last.colour) }
         for index in 1..<stops.count where knots < stops[index].at {
             let a = stops[index - 1], b = stops[index]
-            return Color(uiColor: lerp(a.colour, b.colour,
-                                       (knots - a.at) / (b.at - a.at)))
+            return Color(uiColor: WindPalette.lerp(a.colour, b.colour,
+                                                   (knots - a.at) / (b.at - a.at)))
         }
         return Color(uiColor: last.colour)
     }
-
-    /// Each band's colour, anchored at its band's midpoint.
-    private static let windStops: [(at: Double, colour: UIColor)] = {
-        var previous = 0.0
-        return WindPalette.washBands.map { band in
-            defer { previous = band.upTo }
-            return ((previous + band.upTo) / 2, band.colour)
-        }
-    }()
 
     /// The current palette's band midpoints, sampled through the palette
     /// itself so the two can never drift apart.
@@ -218,15 +213,6 @@ final class WindWashModel {
         [0.1, 0.35, 0.65, 1.0, 1.4, 1.9, 2.6].map {
             ($0, UIColor(CurrentPalette.color(for: $0)))
         }
-
-    private static func lerp(_ a: UIColor, _ b: UIColor, _ t: Double) -> UIColor {
-        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
-        var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
-        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
-        b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
-        return UIColor(red: ar + (br - ar) * t, green: ag + (bg - ag) * t,
-                       blue: ab + (bb - ab) * t, alpha: 1)
-    }
 
     /// The map settled somewhere — refetch if it wandered far enough from
     /// the loaded field, or if the rider switched what the field shows.

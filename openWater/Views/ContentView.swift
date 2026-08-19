@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var recordTabReset = 0
     @State private var sessionsTabReset = 0
     @State private var toolsTabReset = 0
+    @State private var spotsTabReset = 0
 
     /// Room kept clear for the bar. The capsule is 62 points tall including its
     /// rise, and it sits 6 above the home indicator.
@@ -43,7 +44,7 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             ZStack {
                 page(.sessions) { SessionListView(reset: sessionsTabReset) }
-                page(.spots) { SpotsTabView() }
+                page(.spots) { SpotsTabView(reset: spotsTabReset) }
                 page(.record) {
                     RecordTabView(isActive: selection == .record, reset: recordTabReset)
                 }
@@ -72,6 +73,10 @@ struct ContentView: View {
                     if tab == .record { recordTabReset += 1 }
                     if tab == .sessions { sessionsTabReset += 1 }
                     if tab == .tools { toolsTabReset += 1 }
+                    // Deliberately not bumped by the route handoff below:
+                    // that arrives with something for the map to open, and
+                    // this is the tap that closes things.
+                    if tab == .spots { spotsTabReset += 1 }
                 }
             )
         }

@@ -280,22 +280,46 @@ missing abroad, and plausibly what iKitesurf's own inventory is built on
 at home. Update interval 1–60+ minutes by station. Checked 2026-08-19.
 
 The free key is real: 15,000 accesses a month, no card. That is a
-prototype allowance, not a shipping one. The map asks for up to thirty
-station readings per significant pan, held ten minutes, so fifteen
-thousand is on the order of five hundred pans — for the whole user base,
-if the key ships inside the app, which also makes it extractable.
-Production pricing is "contact us", so adopting this is a purchase and a
-conversation, not a key.
+prototype allowance, not a shipping one — the map asks for up to thirty
+station readings per significant pan, so fifteen thousand is on the order
+of five hundred pans for the whole user base. Production pricing is
+"contact us".
 
-What the free tier is good for is settling the question. Thirty requests
-would produce the same table as the METAR entry above: how many Xweather
-stations report wind within forty kilometres of the busiest clusters,
-against the free networks the app already reads. Until somebody runs it,
-"they have more stations" is marketing rather than a number, and the
-answer decides whether there is anything to buy.
+**Measured 2026-08-19** on a free key, `observations/closest` with
+`filter=allstations`, forty-kilometre radius, counting only stations
+actually reporting wind.
 
-**Pending measurement.** Needs an account, which the app's authors have to
-create; nothing else about it can be settled from the outside.
+| Cluster | Xweather | Of which PWS | Free stations available |
+| --- | --- | --- | --- |
+| Sag Harbor | 18 | 11 | **24** |
+| Long Island Sound | 80 | 46 | 32 |
+| Hood River | 102 | 13 | 97 |
+| San Francisco | 225 | 95 | **282** |
+| Maui | 71 | 5 | **99** |
+| Frisian coast | 7 | 3 | 0 |
+| IJsselmeer | 10 | 7 | 0 |
+| Wellington | 9 | 6 | 0 |
+| Swiss lakes | 6 | 2 | 0 |
+| Sydney | 4 | 3 | 0 |
+| Tarifa | 2 | 0 | 0 |
+| Aarhus | 1 | 0 | 0 |
+| Rügen, La Paz, Cape Town | 0 | 0 | 0 |
+
+**Not adopted.** In the United States it does not beat what NOAA gives
+away: on the water this app was built for it finds eighteen where the free
+networks hold twenty-four, and in the densest metro tested it finds 225
+against 282. Its personal-weather-station layer is real and is genuinely
+extra in some places — forty-six of eighty around Long Island Sound — but
+paying a vendor to be outnumbered by the free source is a hard case to
+make.
+
+Abroad it is the best of the options looked at and still thin: about four
+stations to a spot, nothing at all at a third of them. Better than the
+METAR feed's one, not enough to build a foreign map on.
+
+The measurement did surface something worth more than the vendor. The
+"free stations available" column above is what the *networks* hold, not
+what the app currently finds — see the open item below.
 
 ### WeatherFlow Tempest
 
@@ -337,6 +361,16 @@ it stays a commercial pin.
   is still near ~990 before trusting anything else on this page.
   *Verified 2026-08-18 (aggregation count): exactly 990. The curation is
   holding; the bot has not regressed since the rulebook was pushed.*
+- **The app finds a sufficient subset, not the nearest stations.**
+  `stateIndex` stops walking once forty stations are within fifty
+  kilometres, which is enough to fill any map — but the pages are ordered
+  by nothing useful, so those forty are an arbitrary forty of however many
+  exist. California holds 282 stations inside forty kilometres of San
+  Francisco and the app finds about 41 of them; San Diego holds 108. The
+  map draws sixty pins and reads thirty, so the rider rarely sees the
+  difference — except in the one place it matters, which is the sheet
+  quoting the *nearest* station's distance. Fixing it properly means
+  either a source with a real spatial query or accepting the download.
 - **No free stations outside the United States.** All three networks the
   app reads stop at the border, so R1 and R3 in
   [WIND_MAP_RULES.md](WIND_MAP_RULES.md) are unanswerable for 515 of the

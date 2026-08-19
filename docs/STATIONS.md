@@ -267,6 +267,36 @@ conditions sheet for a coordinate, not a fourth source in
 licence wants reading either way: Living Atlas feeds are free to use but
 they are Esri's hosting of public-domain data, not NOAA's own endpoint.
 
+### Xweather (Vaisala, formerly AerisWeather)
+
+[Product](https://www.xweather.com/products/weather-api) ·
+[observations endpoint](https://www.xweather.com/docs/weather-api/endpoints/observations)
+
+The first candidate that addresses both gaps at once, and the first one
+worth spending a measurement on. Its observations data set is documented
+as global, sourced primarily from METAR but also from **personal weather
+stations** — the dense, non-NOAA layer that is exactly what the app is
+missing abroad, and plausibly what iKitesurf's own inventory is built on
+at home. Update interval 1–60+ minutes by station. Checked 2026-08-19.
+
+The free key is real: 15,000 accesses a month, no card. That is a
+prototype allowance, not a shipping one. The map asks for up to thirty
+station readings per significant pan, held ten minutes, so fifteen
+thousand is on the order of five hundred pans — for the whole user base,
+if the key ships inside the app, which also makes it extractable.
+Production pricing is "contact us", so adopting this is a purchase and a
+conversation, not a key.
+
+What the free tier is good for is settling the question. Thirty requests
+would produce the same table as the METAR entry above: how many Xweather
+stations report wind within forty kilometres of the busiest clusters,
+against the free networks the app already reads. Until somebody runs it,
+"they have more stations" is marketing rather than a number, and the
+answer decides whether there is anything to buy.
+
+**Pending measurement.** Needs an account, which the app's authors have to
+create; nothing else about it can be settled from the outside.
+
 ### WeatherFlow Tempest
 
 [Station map](https://tempestwx.com/map/139111/40.99/-72.3202/14) ·

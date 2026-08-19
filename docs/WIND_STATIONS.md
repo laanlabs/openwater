@@ -146,9 +146,37 @@ For a regional audit:
    evidence-backed records, in the one-document-per-instrument shape
    above.
 
-Networks considered and rejected, with the reasons and the dates they
-were checked, are in [STATIONS.md](STATIONS.md#sources-evaluated) — read
-that before adding a fourth source.
+Networks considered, with the reasons and the dates they were checked, are
+in [STATIONS.md](STATIONS.md#sources-evaluated) — read that before adding
+a fourth source.
+
+### Option on the table: Xweather, outside the United States
+
+The three networks above are American. Everywhere else the app has no free
+stations at all, which leaves 515 of the registry's 990 rows on a map that
+can only offer model wash — and leaves R1 and R3 of
+[WIND_MAP_RULES.md](WIND_MAP_RULES.md) unanswerable there.
+
+[Xweather](https://www.xweather.com/products/weather-api) is the option,
+not a decision. Measured 2026-08-19: one `observations/closest` call
+returns every station in a radius with its reading attached — eighteen
+stations, 32 KB, 0.14 s over Sag Harbor — so the free tier's 15,000
+accesses a month are 15,000 map refreshes rather than 15,000 readings.
+Abroad it holds about four stations to a spot and none at all at some
+(Rügen, La Paz, Cape Town). At home it is beaten by NOAA outright and
+should never be called.
+
+Which is the shape if it is ever taken: **only where `state(at:)` comes
+back nil** — the app already computes that, and already means "outside the
+United States" by it. A domestic rider never spends a call; the ceiling
+stops being a product risk; and the single radius call is the spatial
+query this API family has never offered.
+
+Two things to settle first, neither of them code. The key cannot ship
+inside the app — it is extractable, and somebody else spending the
+allowance is the whole risk — so it wants a proxy, which is a server this
+app has so far done without. And the free tier's attribution and display
+terms want reading before anything it returns is in front of a rider.
 
 Audit records live beside this file —
 [the East End audit](EAST_END_WIND_STATION_AUDIT_2026-08-17.md) is the

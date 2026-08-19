@@ -203,6 +203,169 @@ of the NDBC, CO-OPS tide and CO-OPS currents indexes
 format), so a first-ever launch with no signal still knows where every
 station stands. Snapshots are identity, and identity is storable.
 
+## Sources evaluated
+
+Networks looked at and what they turned out to be worth, so the next
+person asking "can we not just read X" gets an answer instead of a
+weekend. The three the app reads today — NWS, NDBC and CO-OPS — are
+covered above.
+
+### Esri Living Atlas: NOAA METAR and buoys
+
+`https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/NOAA_METAR_current_wind_speed_direction_v1/FeatureServer`
+([map viewer](https://www.arcgis.com/apps/mapviewer/index.html?layers=cb1886ff0a9d4156ba4d2fadd7e8a139))
+
+Esri's hosted live feed over NOAA's hourly METAR and buoy data. Public,
+keyless, `Query` capability, two layers — `0 Stations`, `1 Buoys` — with
+`WIND_SPEED`, `WIND_GUST`, `WIND_DIRECT` and `OBS_DATETIME` on both, and
+`WAVE_HEIGHT` on the buoys. Verified 2026-08-19.
+
+Speeds are **km/h**, not knots — `WIND_SPEED` and `WIND_GUST` both, per
+the layer's own field aliases.
+
+Two things make it worth keeping in mind. It is **global**: a bounding box
+over Tarifa answers Gibraltar and Algeciras, Maui answers Kahului, Sydney
+answers three. And it takes a **bounding box at all**, which is the thing
+the weather service's own API has never offered — the whole state-index
+apparatus in `NationalWeatherService.stateIndex` exists to work around its
+absence.
+
+What it is not is dense, and the measurement matters more than the
+adjective. Across the ten busiest non-United-States clusters in the
+registry, METAR inside forty kilometres comes to:
+
+| Cluster | Registry rows | METAR ≤ 40 km | Nearest |
+| --- | --- | --- | --- |
+| 53.5,7.0 (Frisian coast) | 5 | 1 | EDWE, 20 km |
+| 56.0,10.5 (Aarhus) | 5 | 1 | EKAH, 34 km |
+| 54.5,13.5 (Rügen) | 5 | 0 | — |
+| -41.5,175.0 (Wellington) | 5 | 1 | NZWN, 25 km |
+| 18.5,-66.0 (San Juan) | 5 | 2 | TJSJ, 8 km |
+| 24.0,-110.0 (La Paz) | 5 | 0 | — |
+| 53.0,5.5 (IJsselmeer) | 4 | 1 | EHLW, 30 km |
+| 47.0,7.0 (Swiss lakes) | 4 | 2 | LSGC, 18 km |
+| -34.0,18.5 (Cape Town) | 4 | 1 | FACT, 10 km |
+| -33.5,151.5 (Sydney) | 4 | 0 | — |
+
+One aerodrome, twenty-odd kilometres inland, for about two thirds of the
+spots and nothing at all for the rest. Inside the United States it adds
+nothing: METAR is the airport layer NWS already serves, and the same
+`KJPX`, `KHWV`, `KMTP` and `KFOK` come back from both.
+
+**Not adopted, and the reason is the table.** A single inland aerodrome
+half an hour from the water is the reading most likely to mislead somebody
+deciding whether to drive — gradient wind at an airport is not the sea
+breeze at the beach, and R1 exists because a number that looks measured
+gets believed. Where the app has nothing abroad it shows model wash and
+curated links, which is honest about being a model.
+
+Revisit it if destination browsing abroad becomes a feature — "what is
+Tarifa doing right now" is a question one distant airport answers better
+than nothing. The cheap shape for that is an on-demand lookup in the
+conditions sheet for a coordinate, not a fourth source in
+`FreeStations.near` with its own cache, dedup and audit surface. Its
+licence wants reading either way: Living Atlas feeds are free to use but
+they are Esri's hosting of public-domain data, not NOAA's own endpoint.
+
+### Xweather (Vaisala, formerly AerisWeather)
+
+[Product](https://www.xweather.com/products/weather-api) ·
+[observations endpoint](https://www.xweather.com/docs/weather-api/endpoints/observations)
+
+The first candidate that addresses both gaps at once, and the first one
+worth spending a measurement on. Its observations data set is documented
+as global, sourced primarily from METAR but also from **personal weather
+stations** — the dense, non-NOAA layer that is exactly what the app is
+missing abroad, and plausibly what iKitesurf's own inventory is built on
+at home. Update interval 1–60+ minutes by station. Checked 2026-08-19.
+
+The free key is 15,000 accesses a month, no card — and one access buys a
+whole map. `observations/closest` with a radius returns every station in
+range *with its reading attached*: eighteen stations, 32 KB, 0.14 s for a
+forty-kilometre box over Sag Harbor, carrying speed, gust, direction,
+timestamp, name and coordinates. The same map costs the app a 540 KB index
+page plus up to thirty separate observation calls today.
+
+So fifteen thousand accesses is fifteen thousand map refreshes, not five
+hundred. With a ten-minute cache that is a real allowance for a small user
+base — and a hard ceiling beyond it, since production pricing is "contact
+us" and a key shipped inside the app is extractable by anyone who wants to
+spend the quota.
+
+**Measured 2026-08-19** on a free key, `observations/closest` with
+`filter=allstations`, forty-kilometre radius, counting only stations
+actually reporting wind.
+
+| Cluster | Xweather | Of which PWS | Free stations available |
+| --- | --- | --- | --- |
+| Sag Harbor | 18 | 11 | **24** |
+| Long Island Sound | 80 | 46 | 32 |
+| Hood River | 102 | 13 | 97 |
+| San Francisco | 225 | 95 | **282** |
+| Maui | 71 | 5 | **99** |
+| Frisian coast | 7 | 3 | 0 |
+| IJsselmeer | 10 | 7 | 0 |
+| Wellington | 9 | 6 | 0 |
+| Swiss lakes | 6 | 2 | 0 |
+| Sydney | 4 | 3 | 0 |
+| Tarifa | 2 | 0 | 0 |
+| Aarhus | 1 | 0 | 0 |
+| Rügen, La Paz, Cape Town | 0 | 0 | 0 |
+
+**Not adopted in the United States, and worth adopting abroad.** The two
+halves of that are different arguments.
+
+At home it does not beat what NOAA gives away. On the water this app was
+built for it finds eighteen where the free networks hold twenty-four, and
+in the densest metro tested 225 against 282. Its personal-weather-station
+layer is real and is genuinely extra in places — forty-six of eighty
+around Long Island Sound — but the free source already outnumbers it, and
+every United States call spent here is a call not available where the map
+is empty.
+
+Abroad it is the only option with anything at all: four stations to a spot
+on average, nothing at Rügen, La Paz or Cape Town, against zero free
+everywhere. Thin, but the difference between a measured number and none.
+
+Which suggests the shape: **use it only where the free networks stop.** A
+rider in the United States never spends a call; a rider anywhere else gets
+real readings where the app currently offers model wash. Foreign map loads
+are a small fraction of the traffic, so fifteen thousand a month goes a
+long way, and the ceiling stops being a product risk. The single radius
+call also happens to be the spatial query the app has never had — see the
+open item below, which it would close outright for the places it covers.
+
+### WeatherFlow Tempest
+
+[Station map](https://tempestwx.com/map/139111/40.99/-72.3202/14) ·
+[developer docs](https://weatherflow.github.io/Tempest/api/)
+
+There is a free API and it will not answer for other people's hardware.
+Every documented endpoint refuses an anonymous caller — observations,
+station metadata and forecast all return `401 UNAUTHORIZED` (verified
+2026-08-19) — and the docs are explicit that integrations are meant for
+the personal use of a single Tempest owner, with anything reading many
+locations directed to contact WeatherFlow. That is a commercial
+conversation, not a key.
+
+The public station map is not a way round it. It is a Firebase-backed web
+client, and using its embedded key would be bypassing authentication to
+scrape restricted readings — the two things
+[WIND_STATIONS.md](WIND_STATIONS.md) forbids by name.
+
+What is free and clean is the owner path: a rider who owns a Tempest can
+mint a personal access token and the app could read *their* station as a
+measured pin like any other. Not built. It is the only Tempest route that
+does not require somebody's permission first.
+
+Worth remembering that the app already gets a slice of this network for
+nothing. Tempest owners who opted into CWOP appear in the NWS feed, which
+is why `FW2389`, `FW4448`, `FW5754` and `GW3708` resolved onto free
+stations at zero metres in the
+[2026-08-19 audit](WIND_STATION_AUDIT_2026-08-19.md). `EW9356 Hampton
+Bays` is the counter-example: a Tempest with no CWOP feed, and the reason
+it stays a commercial pin.
+
 ## Open items
 
 - **The writer.** The rules in
@@ -212,11 +375,30 @@ station stands. Snapshots are identity, and identity is storable.
   is still near ~990 before trusting anything else on this page.
   *Verified 2026-08-18 (aggregation count): exactly 990. The curation is
   holding; the bot has not regressed since the rulebook was pushed.*
+- **No free stations outside the United States.** All three networks the
+  app reads stop at the border, so R1 and R3 in
+  [WIND_MAP_RULES.md](WIND_MAP_RULES.md) are unanswerable for 515 of the
+  990 registry rows. The Esri METAR feed above is the cheapest way to
+  change that, and would bring airports only.
 - **Names for the spot-linked rows.** ~827 registry rows still carry
   id-shaped names ("102428 — WX") from the original import. The app
   rescues them at render time; the registry should not need rescuing.
   A bulk rename is a database-tooling job under REGISTRY_WRITERS.md's
   caps — not something the app-side ever runs.
+
+## Closed items (2026-08-19)
+
+- **The app found a sufficient subset, not the nearest stations.** The
+  state walk stopped once forty stations were within fifty kilometres,
+  which fills a map and is not the same claim as finding the right
+  stations: the pages are ordered by nothing useful, so of the forty
+  nearest downtown San Francisco the app held four, missing the closest at
+  six hundred metres and Fort Point at five. Done — the early stop now
+  only gets the first map on screen, and the rest of the state is walked in
+  the background and written back with a `complete` flag, so the second
+  look is the right one. Measured on device: California went from ~41
+  stations within forty kilometres of San Francisco to 282, the full 7,829
+  landing about twelve seconds after the map drew.
 
 ## Closed items (2026-08-18)
 

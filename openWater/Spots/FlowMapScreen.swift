@@ -367,6 +367,43 @@ enum WindPalette {
         return UIColor(red: 0.76, green: 0.09, blue: 0.55, alpha: 1)
     }
 
+    /// Each band's colour anchored at the band's own midpoint — the stops a
+    /// continuous read of this palette interpolates between.
+    static let smoothStops: [(at: Double, colour: UIColor)] = {
+        var previous = 0.0
+        return washBands.map { band in
+            defer { previous = band.upTo }
+            return ((previous + band.upTo) / 2, band.colour)
+        }
+    }()
+
+    /// The palette read as a gradient rather than as bands.
+    ///
+    /// The map's wash wants this so the field reads as one surface, and the
+    /// conditions strip wants it so two neighbouring hours a knot apart do
+    /// not jump a whole colour at each other. One implementation, because
+    /// two would drift and the whole point of the ramp is that green means
+    /// the same thing everywhere in the app.
+    static func smooth(for kn: Double) -> UIColor {
+        guard let first = smoothStops.first, let last = smoothStops.last else { return .clear }
+        if kn <= first.at { return first.colour }
+        if kn >= last.at { return last.colour }
+        for index in 1..<smoothStops.count where kn < smoothStops[index].at {
+            let a = smoothStops[index - 1], b = smoothStops[index]
+            return lerp(a.colour, b.colour, (kn - a.at) / (b.at - a.at))
+        }
+        return last.colour
+    }
+
+    static func lerp(_ a: UIColor, _ b: UIColor, _ t: Double) -> UIColor {
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+        var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+        b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        return UIColor(red: ar + (br - ar) * t, green: ag + (bg - ag) * t,
+                       blue: ab + (bb - ab) * t, alpha: 1)
+    }
+
     /// The arrows when the wash is carrying the colour: dark slate streaks
     /// over the field, the way the reference maps draw them.
     static let arrowNeutral = UIColor(white: 0.24, alpha: 1)

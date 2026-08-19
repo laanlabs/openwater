@@ -23,6 +23,12 @@ struct SpotsTabView: View {
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var path: [SpotsRoute] = []
+
+    /// Bumped every time the Spots tab is tapped, including when it is
+    /// already showing. The bar is the way back when the way back is not
+    /// obvious — see `returnToTop`.
+    var reset: Int = 0
+
     @State private var isSearching = false
     @State private var controlsExpanded = false
     @State private var disciplineFilter: String?
@@ -85,7 +91,44 @@ struct SpotsTabView: View {
     @AppStorage("spots.layer.cameras") private var showCameras = false
     @AppStorage("spots.layer.buoys") private var showBuoys = false
     @State private var resourcePins: [SpotGuideStore.GuideResource] = []
+    /// NOAA's own anemometers around the browsed water.
+    ///
+    /// Held apart from `resourcePins` because they are a different kind of
+    /// thing: the guide's meters are curated links, mostly to networks that
+    /// want an account, while these are the free public sensors the
+    /// conditions sheet leads with. The layer was drawing only the first
+    /// set, so switching on "wind stations" over a coast thick with NOAA
+    /// stations showed the paid ones and nothing else.
+    @State private var freeStationPins: [FreeStation] = []
+    /// What those stations last measured, keyed by station id.
+    ///
+    /// Held here rather than on the pins so it survives a pan: the layer
+    /// refetches its pin list every ten kilometres, and water already looked
+    /// at should redraw from memory instead of asking NOAA the same question
+    /// again. Every reading is its own HTTP request — neither network
+    /// publishes a bulk endpoint the app can use — which is why only the
+    /// stations nearest the middle are asked.
+    @State private var stationWind: [String: StationReading] = [:]
     @State private var buoyPins: [Buoy] = []
+
+    struct StationReading {
+        let observation: StationObservation?
+        let at: Date
+        /// Ten minutes, the same window the spot pins' wind is cached for.
+        var isFresh: Bool { Date().timeIntervalSince(at) < 600 }
+    }
+
+    /// How many stations get a number.
+    ///
+    /// Raised from fourteen once the coverage was there to spend it on:
+    /// twenty-four free stations stand within sixty kilometres of Sag
+    /// Harbour and eighteen of them are reporting on a given evening, so a
+    /// cap of fourteen was leaving a third of the answer as anonymous dots
+    /// next to a competitor's map that draws every one. Each reading is a
+    /// small JSON body held for ten minutes, and only the stations missing
+    /// a fresh one are ever asked.
+    private static let measuredPins = 30
+
     @State private var watchingCam: SpotGuideStore.GuideResource?
 
     private var washLayer: WashLayer {
@@ -159,6 +202,47 @@ struct SpotsTabView: View {
         let id = UUID()
     }
 
+    /// A wind pin, opened.
+    ///
+    /// One type for both halves of the layer, because a rider tapping a pin
+    /// is asking the same question of either: what is this, what is it
+    /// reading, and where do I go to see more. Sending them straight out to
+    /// Safari answered only the last of those, and answered it before they
+    /// knew whether the station was worth the trip.
+    struct StationDetail: Identifiable {
+        enum Access {
+            /// A public sensor the app reads for itself.
+            case government
+            /// A commercial network that shows its wind to anyone.
+            case guestVisible
+            /// A commercial network that wants an account first.
+            case subscription
+        }
+
+        let id: String
+        let name: String
+        let source: String
+        let access: Access
+        let metres: Double
+        /// Where the instrument stands — what the model is asked about when
+        /// the instrument itself will not say.
+        let coordinate: Geo.Coordinate
+        let url: URL
+        /// The station behind a free pin, so the sheet can ask it directly.
+        ///
+        /// The map fetches readings for the nearest thirty, which is a
+        /// snapshot taken before anybody tapped anything: a pin opened
+        /// before its turn came round had no reading in hand and said the
+        /// instrument was silent, which was a claim about our timing rather
+        /// than about the anemometer. Montauk was reading five knots while
+        /// the sheet said it was not reporting.
+        var free: FreeStation?
+        var observation: StationObservation?
+        var links: [RegistryLink] = []
+    }
+
+    @State private var openStation: StationDetail?
+
     /// A request to save a private spot, pinned to a coordinate at the
     /// moment the menu was tapped so a wandering fix cannot move it.
     struct NewPrivateSpotRequest: Identifiable {
@@ -173,6 +257,15 @@ struct SpotsTabView: View {
     }
 
     var body: some View {
+        // Split from the chain below only to keep the type-checker inside
+        // its time limit: the map, its panel and a dozen sheets are one
+        // expression already, and one more modifier on the end tipped it
+        // over the edge.
+        screen
+            .onChange(of: reset) { _, _ in returnToTop() }
+    }
+
+    private var screen: some View {
         NavigationStack(path: $path) {
             GeometryReader { geometry in
                 ZStack(alignment: .bottom) {
@@ -328,6 +421,16 @@ struct SpotsTabView: View {
         .sheet(isPresented: $isGivingFeedback) {
             AppFeedbackSheet(screen: "Spots")
         }
+        .sheet(item: $openStation) { station in
+            StationDetailSheet(station: station, units: settings.units) { id, observation in
+                stationWind[id] = StationReading(observation: observation, at: .now)
+            }
+                // Two heights, and the content scrolls inside either: a
+                // station with three provider doors and a rider using large
+                // type do not fit the same card as a bare NOAA mast.
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .fullScreenSheet(isPresented: $isShowingConditions) {
             if let here = localCoordinate {
                 NearbyConditionsSheet(title: conditionsTitle, coordinate: here)
@@ -395,21 +498,77 @@ struct SpotsTabView: View {
             guard showWindStations || showCameras || showBuoys,
                   let here = localCoordinate else {
                 resourcePins = []
+                freeStationPins = []
                 buoyPins = []
                 return
             }
             if showWindStations || showCameras {
-                let resources = await guide.nearbyResources(near: here, radius: 60_000)
+                // Both networks at once: the free public sensors and the
+                // guide's curated meters are the same layer as far as a
+                // rider is concerned — "where can I read the actual wind" —
+                // and the conditions sheet has always listed them together.
+                let reach: Double = 60_000
+                async let curated = guide.nearbyResources(near: here, radius: reach)
+                async let free = showWindStations
+                    ? FreeStations.near(here, limit: 40, radius: reach) : []
+                let resources = await curated
+                // Cut to the same reach the meters use. The forecast
+                // office's endpoint answers with its whole zone sorted by
+                // distance and no radius at all, so asking it for forty
+                // stations over a thin stretch of coast lands pins a
+                // hundred kilometres outside the layer's own promise.
+                let stations = await free.filter { $0.metres <= reach }
+
+                // One anemometer, one pin — and where a commercial row is a
+                // view of a free sensor, the free reading wins and the
+                // commercial page becomes a second door on the same pin.
+                //
+                // This is most of the East End. iKitesurf's inventory there
+                // is largely CWOP citizen stations and airport ASOS that
+                // NOAA already publishes for nothing, so the map was showing
+                // a paid-looking pin over an instrument the app can read —
+                // and riders who do subscribe still want their own network's
+                // page, which is why the link stays rather than the pin
+                // being dropped.
+                var seen = Set<String>()
+                for station in stations {
+                    seen.insert(station.url.absoluteString.lowercased())
+                    for link in station.links { seen.insert(link.url.absoluteString.lowercased()) }
+                }
+
+                var merged = stations
+                for index in merged.indices {
+                    for resource in resources
+                    where resource.kind == .wind
+                        && !seen.contains(resource.url.absoluteString.lowercased())
+                        && Self.isSameInstrument(resource, merged[index]) {
+                        merged[index].links.append(RegistryLink(
+                            providerId: resource.provider?.lowercased() ?? "provider",
+                            url: resource.url,
+                            accessTier: resource.accessTier))
+                        seen.insert(resource.url.absoluteString.lowercased())
+                    }
+                }
+
                 // Capped: a dense coast can carry hundreds of meters and
                 // cams, and a map of nothing but hardware stops being a map.
+                freeStationPins = Array(merged.prefix(60))
                 resourcePins = Array(resources.filter {
-                    ($0.kind == .wind && showWindStations) ||
-                    ($0.kind == .camera && showCameras)
+                    (($0.kind == .wind && showWindStations)
+                     || ($0.kind == .camera && showCameras))
+                    && !seen.contains($0.url.absoluteString.lowercased())
                 }.prefix(80))
             } else {
                 resourcePins = []
+                freeStationPins = []
             }
             buoyPins = showBuoys ? await DataBuoyCenter.buoys(near: here, limit: 25) : []
+        }
+        .task(id: stationWindKey) {
+            // Last, and on its own: every reading is a request, and the pins
+            // are more useful standing there unlabelled than not standing
+            // there at all while a dozen of them are in flight.
+            await refreshStationWind()
         }
         .task(id: privateWindKey) {
             for spot in guide.privateSpots where privateWind[spot.id] == nil {
@@ -565,9 +724,10 @@ struct SpotsTabView: View {
                     Annotation("", coordinate: resource.coordinate.clCoordinate, anchor: .center) {
                         Button {
                             if resource.kind == .camera { watchingCam = resource }
-                            else { openURL(resource.url) }
+                            else { openStation = detail(for: resource) }
                         } label: {
-                            HardwarePin(kind: resource.kind)
+                            HardwarePin(kind: resource.kind,
+                                        isLocked: resource.kind == .wind && resource.isLocked)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -578,6 +738,19 @@ struct SpotsTabView: View {
                     Annotation("", coordinate: buoy.coordinate.clCoordinate, anchor: .center) {
                         Button { path.append(.buoy(buoy)) } label: {
                             HardwarePin(kind: nil)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .annotationTitles(.hidden)
+                }
+                // Last of the hardware, so that where pins collide the one
+                // still standing is the one carrying a measured number. The
+                // rest of this map is a model's opinion; these are not.
+                ForEach(freeStationPins) { station in
+                    Annotation("", coordinate: station.coordinate.clCoordinate, anchor: .center) {
+                        Button { openStation = detail(for: station) } label: {
+                            StationPin(observation: stationWind[station.id]?.observation)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -736,6 +909,52 @@ struct SpotsTabView: View {
         }
     }
 
+    /// Spots tapped while Spots is already showing: everything opened on
+    /// top of the map closes, and the map is the map again.
+    ///
+    /// The tab bar is the way back when the way back is not obvious — a
+    /// rider two guides deep, or reading a route's panel at full height,
+    /// should not have to find the right corner. Deliberately thorough:
+    /// the pushed stack, every sheet and alert, the search overlay, both
+    /// route modes, the panel's height and picker, and the map's clock,
+    /// because "back to Spots" means the screen a cold launch opens on.
+    ///
+    /// Pointedly not touched: the camera, the wash and the layer toggles.
+    /// Where the rider is looking and what they asked the map to draw are
+    /// the map's settings, not something they are lost inside — a tap that
+    /// threw away a pan across an ocean would be its own bug report.
+    private func returnToTop() {
+        path = []
+        isSearching = false
+        controlsExpanded = false
+        pickingNewSpot = false
+        addingSpot = nil
+        addingPrivateSpot = nil
+        selectedPrivateSpot = nil
+        renamingSpot = nil
+        editingFacingSpot = nil
+        watchingCam = nil
+        savingRoute = nil
+        renamingRoute = nil
+        isEditingFavorites = false
+        isPickingModel = false
+        sharingLocation = false
+        isGivingFeedback = false
+        isShowingConditions = false
+        isShowingTimeControl = false
+        // The clock is transient by design — a map still answering for
+        // tomorrow afternoon is not the normal view. Through `setScrub`
+        // rather than the state directly, because the wash keeps its own
+        // copy of the hour and would otherwise go on drawing tomorrow's
+        // field under a caption that had stopped saying so.
+        setScrub(hoursFromNow: 0)
+        withAnimation(.snappy) {
+            routeMode = nil
+            panelDetent = .peek
+            panelMode = .nearby
+        }
+    }
+
     // MARK: - Route editing
 
     /// The Add point button's whole job: the waypoint lands where the
@@ -750,13 +969,128 @@ struct SpotsTabView: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
-    /// A point becomes the spot it nearly is: within 800 m the waypoint
-    /// lands exactly on the guide spot, so the route's ends carry real
-    /// names into the save sheet.
+    private func detail(for station: FreeStation) -> StationDetail {
+        let network = switch station.source {
+        case .weatherService: "National Weather Service · \(station.id)"
+        case .dataBuoyCenter: "NOAA Data Buoy Center · \(station.id.uppercased())"
+        case .tidesAndCurrents: "NOAA Tides and Currents · \(station.id)"
+        }
+        return StationDetail(
+            id: station.id,
+            name: station.name,
+            source: network,
+            access: .government,
+            metres: station.metres,
+            coordinate: station.coordinate,
+            url: station.url,
+            free: station,
+            observation: stationWind[station.id]?.observation,
+            links: station.links)
+    }
+
+    private func detail(for resource: SpotGuideStore.GuideResource) -> StationDetail {
+        StationDetail(
+            id: resource.id,
+            name: resource.displayName,
+            source: Self.sourceLabel(for: resource),
+            access: resource.isGovernment ? .government
+                : resource.isLocked ? .subscription : .guestVisible,
+            metres: resource.metres,
+            coordinate: resource.coordinate,
+            url: resource.url)
+    }
+
+    /// The provider, spelled the way its own riders spell it.
+    ///
+    /// The registry stores normalised keys and some rows carry no provider
+    /// at all, which left the sheet offering to open "wx.ikitesurf.com" —
+    /// a hostname is not a brand, and a rider deciding whether to follow a
+    /// link should recognise where it goes.
+    private static func sourceLabel(for resource: SpotGuideStore.GuideResource) -> String {
+        let raw = resource.provider?.lowercased()
+            ?? resource.url.host?.replacingOccurrences(of: "www.", with: "").lowercased()
+            ?? ""
+        if raw.contains("ikitesurf") { return "iKitesurf" }
+        if raw.contains("weatherflow") { return "WeatherFlow" }
+        if raw.contains("windalert") { return "WindAlert" }
+        if raw.contains("windy") { return "Windy" }
+        if raw.contains("noaa") || raw.contains("weather.gov") { return "NOAA" }
+        return resource.providerLabel.isEmpty ? "the guide" : resource.providerLabel
+    }
+
+    /// Whether a curated row and a free station are the same hardware.
+    ///
+    /// Two keys, because the registry names these rows two different ways.
+    /// Position settles most of it: a provider's coordinates for a station
+    /// come from the station, so two rows within a couple of hundred metres
+    /// on a coast are one mast, not two. The call sign settles the rest —
+    /// the guide names its citizen-station rows "FW2389 Orient NY US" while
+    /// the weather service files the same sensor as `F2389`, dropping the
+    /// second letter, which is exactly the kind of difference that let one
+    /// anemometer stand on this map twice under two prices.
+    private static func isSameInstrument(_ resource: SpotGuideStore.GuideResource,
+                                         _ station: FreeStation) -> Bool {
+        if Geo.distance(resource.coordinate, station.coordinate) < 250 { return true }
+        guard let callSign = cwopCallSign(in: resource.name) else { return false }
+        return callSign.caseInsensitiveCompare(station.id) == .orderedSame
+    }
+
+    /// The weather service's id for a CWOP station named in the guide's
+    /// text, when there is one: two letters and four digits, second letter
+    /// dropped.
+    private static func cwopCallSign(in name: String) -> String? {
+        for word in name.split(separator: " ") {
+            let token = String(word)
+            guard token.count == 6 else { continue }
+            let letters = token.prefix(2), digits = token.suffix(4)
+            guard letters.allSatisfy(\.isLetter), digits.allSatisfy(\.isNumber) else { continue }
+            return String(letters.prefix(1)) + digits
+        }
+        return nil
+    }
+
+    /// Measured wind for the stations nearest the middle of the map.
+    ///
+    /// Only the ones missing a fresh reading are asked, so panning across
+    /// water already visited costs nothing and the numbers fill in as a
+    /// rider explores rather than all at once on every move.
+    private func refreshStationWind() async {
+        let wanted = freeStationPins.prefix(Self.measuredPins)
+            .filter { stationWind[$0.id]?.isFresh != true }
+        guard !wanted.isEmpty else { return }
+        await withTaskGroup(of: (String, StationObservation?).self) { group in
+            for station in wanted {
+                group.addTask { (station.id, await FreeStations.latest(for: station)) }
+            }
+            for await (id, observation) in group {
+                stationWind[id] = StationReading(observation: observation, at: .now)
+            }
+        }
+    }
+
+    /// A point becomes the spot it nearly is: a waypoint that lands within
+    /// reach of a guide spot takes the spot's own coordinate, so the
+    /// route's ends carry real names into the save sheet.
     private func snapped(_ point: Geo.Coordinate) -> Geo.Coordinate {
         guard let spot = guide.nearestSpot(to: point) else { return point }
         let there = Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude)
-        return Geo.distance(point, there) < 800 ? there : point
+        return Geo.distance(point, there) < snapRadius ? there : point
+    }
+
+    /// How far a point may travel to reach a spot: 800 m out at a planning
+    /// zoom, and never further than the reticle is wide.
+    ///
+    /// A flat 800 m read as a broken map close in. The pins step aside
+    /// while a route is drawn, so the dot hopped a finger's width away from
+    /// the crosshairs towards a spot the rider could not see and had not
+    /// aimed at. The visible latitude span is the map's height, so a
+    /// fraction of it is a fraction of the screen: two per cent is about
+    /// the reticle's own radius, which keeps every snap inside the ring
+    /// that was doing the aiming while leaving the wide-zoom snap — where
+    /// 800 m is a few points of glass — exactly as it was.
+    private var snapRadius: Double {
+        guard let span = visibleRegion?.span.latitudeDelta else { return 800 }
+        return min(800, span * 110_574 * 0.02)
     }
 
     private func moveDraftPoint(_ index: Int, to point: Geo.Coordinate) {
@@ -1367,6 +1701,14 @@ struct SpotsTabView: View {
         return String(format: "%.2f,%.2f", here.latitude, here.longitude)
     }
 
+    /// Which stations are asked what they are reading. Held as its own key,
+    /// and not inline: the map's body is one expression already, and a
+    /// `joined` inside it was enough to put the type-checker over its limit.
+    private var stationWindKey: String {
+        freeStationPins.prefix(Self.measuredPins).map(\.id).joined(separator: ",")
+    }
+
+
     /// Coarser than the weather key — the pins reach tens of kilometres
     /// out, so a refetch every ~10 km of panning keeps up with the view.
     private var hardwareLayersKey: String {
@@ -1864,19 +2206,117 @@ struct WindPin: View {
     }
 }
 
+/// A free station wearing what it just measured.
+///
+/// Only ever a measurement. A model number on a pin is indistinguishable
+/// from a reading at arm's length on a moving map, whatever colour it is
+/// drawn in — the estimate belongs in the sheet, under the sentence that
+/// says what it is.
+///
+/// The one pin on this map whose number is not a forecast. Everything else —
+/// every spot capsule, the centre pill, the wash — is a model's opinion
+/// about this hour; this is an anemometer's report of it, which is why it
+/// gets to say a number at all while the guide's meters stay dots. They are
+/// links to networks the app cannot read, and a pin that showed a number for
+/// one instrument and not its neighbour would be read as "no wind here".
+///
+/// The arrow points the way the wind is going, matching the compass and the
+/// forecast strip. Stale readings fall back to the dot: an hours-old number
+/// on a live map is worse than no number, because nothing about it says so.
+struct StationPin: View {
+
+    let observation: StationObservation?
+
+    /// What the instrument sent, if it sent anything about the wind.
+    ///
+    /// A gust counts. A station reading zero mean and gusting four is
+    /// reporting — the weather service's own page writes that "0G4" — and
+    /// treating it as silence threw away the only number on it that was
+    /// telling a rider anything. Zero counts too: nothing is a reading.
+    private var reading: (speed: Double, gust: Double?, direction: Double?)? {
+        guard let observation, !observation.isStale else { return nil }
+        guard observation.windKn != nil || observation.gustKn != nil else { return nil }
+        return (observation.windKn ?? 0, observation.gustKn, observation.directionDeg)
+    }
+
+    /// "5" on its own, "0G4" when the gust is the part worth knowing.
+    private var label: String {
+        guard let reading else { return "" }
+        let mean = Int(reading.speed.rounded())
+        guard let gust = reading.gust.map({ Int($0.rounded()) }), gust >= mean + 3 else {
+            return "\(mean)"
+        }
+        return "\(mean)G\(gust)"
+    }
+
+    var body: some View {
+        if let reading {
+            HStack(spacing: 3) {
+                if let direction = reading.direction {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 9, weight: .black))
+                        .rotationEffect(.degrees(direction + 180))
+                        .foregroundStyle(.tint)
+                } else {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tint)
+                }
+                Text(label)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(max(reading.speed, reading.gust ?? 0) >= 15
+                                     ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                + Text("kn")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .monospacedDigit()
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .background {
+                // Outlined rather than filled with the tint: the spot pins
+                // own the loud capsule on this map, and a station that
+                // shouted louder than the launch it stands next to would be
+                // the wrong way round.
+                Capsule()
+                    .fill(.background)
+                    .stroke(Color.accentColor.opacity(0.55), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.16), radius: 4, y: 1)
+        } else {
+            HardwarePin(kind: .wind, isFree: true)
+        }
+    }
+}
+
 /// A hardware pin — a wind meter, a cam, a buoy. Smaller and rounder than
 /// the spot pins, because the stations dress the map; they never compete
 /// with the spots standing on it.
 struct HardwarePin: View {
     /// The guide resource's kind, or nil for an NDBC buoy.
     let kind: SpotGuideStore.SpotLink.Kind?
+    /// Whether this one's wind is behind somebody's paywall. Only the locked
+    /// ones are marked: the registry says most commercial stations show
+    /// their reading to anyone, and a badge on every meter would say the
+    /// opposite of the truth as loudly as no badge at all did.
+    var isLocked = false
+    /// A public sensor rather than a curated link. It wears the conditions
+    /// sheet's own antenna in the accent colour, because the difference
+    /// matters before you tap: one of these opens a NOAA page that just
+    /// shows you the wind, the teal ones frequently open a login.
+    var isFree = false
 
-    private var symbol: String { kind?.symbol ?? "dot.radiowaves.up.forward" }
+    private var symbol: String {
+        if isFree { return "antenna.radiowaves.left.and.right" }
+        return kind?.symbol ?? "dot.radiowaves.up.forward"
+    }
+
     private var tint: Color {
+        if isFree { return .accentColor }
         switch kind {
-        case .wind: .teal
-        case .camera: .indigo
-        default: .orange
+        case .wind: return .teal
+        case .camera: return .indigo
+        default: return .orange
         }
     }
 
@@ -1887,7 +2327,318 @@ struct HardwarePin: View {
             .frame(width: 24, height: 24)
             .background(tint, in: Circle())
             .overlay(Circle().stroke(.white, lineWidth: 2))
+            .overlay(alignment: .bottomTrailing) {
+                if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 6, weight: .black))
+                        .foregroundStyle(.white)
+                        .frame(width: 11, height: 11)
+                        .background(Color(.systemGray), in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                        .offset(x: 3, y: 3)
+                }
+            }
             .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+    }
+}
+
+/// What a wind pin says when you tap it.
+///
+/// The pins used to open Safari on the spot, which threw a rider out of the
+/// app to answer "is this station worth anything" — a question the app
+/// already had the answer to. The reading is here where the app measured it,
+/// the access is stated plainly, and the source page is one deliberate tap
+/// further on.
+struct StationDetailSheet: View {
+
+    let station: SpotsTabView.StationDetail
+    let units: UnitPreferences
+    /// Handed back so the pin behind the sheet stops disagreeing with it:
+    /// a reading fetched here is the same reading the map wanted.
+    var onReading: (String, StationObservation) -> Void = { _, _ in }
+
+    @Environment(SpotGuideStore.self) private var guide
+    @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
+
+    /// The model at this point, for the stations the app cannot read.
+    ///
+    /// A commercial station keeps its measurements behind its own door, and
+    /// the app will not pretend otherwise — but "no number at all" is a poor
+    /// answer to "is it windy at that pin". So the sheet asks Open-Meteo
+    /// about the instrument's own coordinate and says exactly what that is:
+    /// a model estimate standing where the anemometer stands, and the
+    /// provider's link right under it for the reading itself.
+    @State private var model: WindReading?
+    /// What the station says when asked directly, here and now.
+    @State private var fetched: StationObservation?
+    @State private var isAsking = false
+
+    private var measured: StationObservation? {
+        guard let observation = fetched ?? station.observation, !observation.isStale,
+              observation.windKn != nil || observation.gustKn != nil else { return nil }
+        return observation
+    }
+
+    /// What the grey number is, and where the measured one is instead.
+    private var modelCaption: String {
+        let what = "This is a forecast for where the station stands, not what it measured."
+        switch station.access {
+        case .subscription:
+            return what + " \(source) has the instrument's own reading behind a paid account."
+        default:
+            return what + " Open \(source) below to read this station's own numbers — free, no account needed."
+        }
+    }
+
+    /// The provider's name on its own, for sentences that mention it.
+    private var source: String {
+        station.source.split(separator: " ·").first.map(String.init) ?? station.source
+    }
+
+    private var access: (label: String, detail: String, symbol: String) {
+        switch station.access {
+        // Asked of the reading actually in hand, not the one the map
+        // happened to hold when the pin was tapped — this said "not
+        // reporting" directly above a number it had just fetched.
+        case .government where measured == nil:
+            // Kept short: this one has no number above it to explain, and
+            // the sheet is a glance rather than a page.
+            // Half the network reports no wind in any given hour. Saying so
+            // beats promising a reading that is not underneath this.
+            // "Sensor", not "anemometer": the weather service's station
+             // list carries rain gauges and tide gauges alongside the wind
+             // masts, and Sag Harbor's nearest is a rain gauge. Whether it
+             // measures wind is exactly what the silence is telling you.
+            ("Free public sensor",
+             "A government sensor, free to read. It is not reporting wind right now.",
+             "antenna.radiowaves.left.and.right")
+        case .government where !station.links.isEmpty:
+            // The point of saying this out loud: a rider who pays for one of
+            // these networks should know the pin they are looking at is on
+            // it, and a rider who does not should know they are not missing
+            // anything — it is the same instrument either way.
+            ("Free public sensor",
+             "A government anemometer, read here for nothing. \(station.links.map(\.label).joined(separator: " and ")) carr\(station.links.count == 1 ? "ies" : "y") the same instrument if you subscribe.",
+             "antenna.radiowaves.left.and.right")
+        case .government:
+            ("Free public sensor",
+             "A government anemometer. The reading above comes straight from it — no account, no subscription.",
+             "antenna.radiowaves.left.and.right")
+        case .guestVisible:
+            ("Free to read on \(source)",
+             "No account needed. The app cannot read that network directly, so the figure above is a model.",
+             "gauge.with.needle")
+        case .subscription:
+            ("Subscription",
+             "\(source) wants a paid account before it shows this station's reading.",
+             "lock.fill")
+        }
+    }
+
+    var body: some View {
+        // The readable half scrolls, the doors stay put.
+        //
+        // It used to be one column pinned to a medium detent, which is a
+        // guess about how long the content is — and the content varies by
+        // station, by access tier, by how many provider doors the registry
+        // hung on it, and by the rider's type size. Whenever the guess was
+        // short the column overflowed and was clipped at both ends, which
+        // is how a station's own name came to be cut in half.
+        VStack(spacing: 0) {
+            ScrollView {
+                detail
+                    .padding(20)
+                    // Clear of the drag indicator, which sits inside the
+                    // sheet's own top inset and was landing on the name.
+                    .padding(.top, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+
+            doors
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 20)
+                .background(Color.deepSurface)
+        }
+        .background(Color.deepSurface)
+        .task {
+            guard measured == nil else { return }
+            isAsking = true
+            defer { isAsking = false }
+
+            // Ask the instrument itself first. The map's reading may simply
+            // not have come round to this one yet, and "no reading in our
+            // cache" is not the same claim as "not reporting".
+            if let free = station.free {
+                fetched = await FreeStations.latest(for: free)
+                if let fetched, fetched.windKn != nil || fetched.gustKn != nil {
+                    onReading(free.id, fetched)
+                }
+                if measured != nil { return }
+            }
+
+            // A government station that is genuinely silent stays silent.
+            // The app can read it, so a model standing in its place would
+            // be answering a question the rider did not ask — and it is
+            // exactly the substitution the registry rules forbid. The
+            // commercial meters the app can never read are the only ones
+            // the model speaks for.
+            guard station.access != .government, model == nil else { return }
+            model = await guide.currentWind(at: station.coordinate)
+        }
+    }
+
+    private var detail: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(station.name)
+                    .font(.title3.weight(.bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(station.source)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let observation = measured {
+                let wind = observation.windKn ?? 0
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if let direction = observation.directionDeg {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 20, weight: .bold))
+                            .rotationEffect(.degrees(direction + 180))
+                            .foregroundStyle(.tint)
+                    }
+                    (Text("\(Int(wind.rounded()))").font(.system(size: 40, weight: .bold))
+                     + Text(" kn").font(.headline))
+                        .foregroundStyle(wind >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                        .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let gust = observation.gustKn {
+                            Text("gusting \(Int(gust.rounded()))")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                        }
+                        if let direction = observation.directionDeg {
+                            Text("from \(Format.cardinal(direction)) · \(Int(direction.rounded()))°")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                if let at = observation.at {
+                    Text("Measured \(Format.duration(Date().timeIntervalSince(at))) ago")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            } else if let model {
+                // Labelled above the figure, not below it. A caption under a
+                // 40-point number is read second if it is read at all, and
+                // this number is the one on the screen most likely to be
+                // mistaken for an instrument's.
+                Text("MODEL ESTIMATE")
+                    .font(.system(size: 11, weight: .heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 20, weight: .bold))
+                        .rotationEffect(.degrees(model.directionDeg + 180))
+                        .foregroundStyle(.secondary)
+                    (Text("\(Int(model.speedKn.rounded()))").font(.system(size: 40, weight: .bold))
+                     + Text(" kn").font(.headline))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let gust = model.gustKn {
+                            Text("gusting \(Int(gust.rounded()))")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                        }
+                        Text("from \(model.cardinal) · \(Int(model.directionDeg.rounded()))°")
+                            .font(.subheadline)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                // Never dressed as the station's own reading, and never a
+                // dead end: the sentence that says what this is also says
+                // where the real number lives.
+                Text(modelCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if isAsking {
+                LoadingPlaceholder()
+                    .frame(height: 44)
+            }
+
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(access.label)
+                        .font(.subheadline.weight(.semibold))
+                    Text(access.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } icon: {
+                Image(systemName: access.symbol)
+                    .foregroundStyle(station.access == .subscription
+                                     ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.tintWash, in: RoundedRectangle(cornerRadius: 12))
+
+            if station.metres > 0 {
+                Text("\(Format.distance(station.metres, unit: units.distance)) from here")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        }
+    }
+
+    private var doors: some View {
+            VStack(spacing: 8) {
+                Button {
+                    openURL(station.url)
+                    dismiss()
+                } label: {
+                    Label("Open \(source)", systemImage: "arrow.up.forward.app")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(.tint, in: RoundedRectangle(cornerRadius: 14))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+
+                // The registry's second door: a sensor that is also on a
+                // network somebody pays for opens there too.
+                ForEach(station.links, id: \.self) { link in
+                    Button {
+                        openURL(link.url)
+                        dismiss()
+                    } label: {
+                        Label("Open \(link.label)", systemImage: "arrow.up.forward")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
     }
 }
 

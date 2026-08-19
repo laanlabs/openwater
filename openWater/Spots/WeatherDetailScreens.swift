@@ -1,5 +1,6 @@
 import OpenWaterCore
 import SwiftUI
+import UIKit
 
 // MARK: - Right now, in full
 
@@ -797,6 +798,45 @@ private struct ModelTrace: Shape {
     }
 }
 
+/// A hairline, as a shape — the only way to dash a rule in SwiftUI.
+private struct Line: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
+
+/// The blend, closed down to the floor.
+///
+/// The faint fill under the heavy line is what makes the blend read as one
+/// body rather than as the thickest of five lines — mass, at five per cent,
+/// which is enough to win a squint test and not enough to be mistaken for a
+/// reading of its own.
+private struct BlendArea: Shape {
+    let speeds: [Double?]
+    let peak: Double
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard speeds.count > 1, peak > 0 else { return path }
+        let step = rect.width / CGFloat(speeds.count - 1)
+        var points: [CGPoint] = []
+        for (index, speed) in speeds.enumerated() {
+            guard let speed else { continue }
+            points.append(CGPoint(x: rect.minX + CGFloat(index) * step,
+                                  y: rect.maxY - rect.height * CGFloat(speed / peak)))
+        }
+        guard points.count > 1 else { return path }
+        path.move(to: CGPoint(x: points[0].x, y: rect.maxY))
+        points.forEach { path.addLine(to: $0) }
+        path.addLine(to: CGPoint(x: points[points.count - 1].x, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Comparing the models properly
 
 /// The models, full screen, scrollable and switchable.
@@ -823,10 +863,43 @@ struct ModelCompareScreen: View {
     /// Everything derived from the forecast and the model switches.
     @State private var series = ModelSeries()
 
-    static let palette: [Color] = [.blue, .orange, .green, .purple, .pink]
+    /// The model hues, and the whole point of them: colour on this screen
+    /// means "this is a model", and nothing else.
+    ///
+    /// Fully saturated blue, orange, green and magenta competed with the
+    /// blend on equal terms, so five lines arrived at once and none of them
+    /// read first. These are the same hues at a shared, lower chroma —
+    /// traceable individually, never louder than the answer they support.
+    /// Lifted in the dark field, where a mid-tone on navy loses the contrast
+    /// it had on white.
+    ///
+    /// NBM is graphite on purpose: it is NOAA's own blend of the others
+    /// rather than a fifth opinion, so it wears no hue of its own.
+    static let palette: [Color] = [
+        hue(0x6E92C4, dark: 0x8CB0E0),
+        hue(0xC9924F, dark: 0xE0AC6B),
+        hue(0x5FA37A, dark: 0x7CC298),
+        hue(0xA277B4, dark: 0xBE96CE),
+        hue(0x7A8391, dark: 0x9AA4B3),
+    ]
+
+    static func hue(_ light: Int, dark: Int) -> Color {
+        func make(_ value: Int) -> UIColor {
+            UIColor(red: Double((value >> 16) & 0xFF) / 255,
+                    green: Double((value >> 8) & 0xFF) / 255,
+                    blue: Double(value & 0xFF) / 255, alpha: 1)
+        }
+        let day = make(light), night = make(dark)
+        return Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? night : day })
+    }
+
     /// Ten points an hour is roughly a day per screen — close enough to read
     /// a sea breeze, far enough that a week is a few flicks away.
     static let hourWidth: CGFloat = 10
+
+    /// The card's shadow: a cool ink rather than black, so the lift reads as
+    /// depth instead of as dirt on a white field.
+    static let shadowInk = Color(red: 20 / 255, green: 30 / 255, blue: 45 / 255)
 
     private var zone: TimeZone { outlook.timeZone ?? .current }
 
@@ -839,18 +912,31 @@ struct ModelCompareScreen: View {
                                        systemImage: "chart.xyaxis.line",
                                        description: Text("The global models returned nothing for this point."))
             } else {
-                readout
-                // Equatable, and deliberately: the reading line writes `probe`
-                // as the forecast slides under it, and without this the chart
-                // rebuilt — four full-width vector traces, a gust band and a
-                // hundred and thirty date labels — on every one of those
-                // writes. The chart depends on the forecast and the switches,
-                // neither of which a scroll touches.
-                ModelChart(outlook: outlook, series: series, enabled: enabled, zone: zone) { hour in
-                    probe = hour
+                // Readout, plot and direction row are one object on a white
+                // field. The plot used to be drawn straight onto the app's
+                // pale blue surface, which cost contrast on every line laid
+                // over it — five models, a blend and a gust band all paying
+                // for a background nobody was reading.
+                VStack(spacing: 0) {
+                    readout
+                    // Equatable, and deliberately: the reading line writes
+                    // `probe` as the forecast slides under it, and without
+                    // this the chart rebuilt — four full-width vector traces,
+                    // a gust band and a hundred and thirty date labels — on
+                    // every one of those writes. The chart depends on the
+                    // forecast and the switches, neither of which a scroll
+                    // touches.
+                    ModelChart(outlook: outlook, series: series, enabled: enabled, zone: zone) { hour in
+                        probe = hour
+                    }
+                    .equatable()
+                    .frame(maxHeight: .infinity)
                 }
-                .equatable()
-                .frame(maxHeight: .infinity)
+                .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 26))
+                .shadow(color: Self.shadowInk.opacity(0.06), radius: 1, y: 1)
+                .shadow(color: Self.shadowInk.opacity(0.16), radius: 14, y: 9)
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
                 toggles
             }
         }
@@ -885,83 +971,98 @@ struct ModelCompareScreen: View {
 
     /// What the models say at the hour being read, or at now when the rider
     /// has not moved the chart.
+    ///
+    /// One number, and what surrounds it. The row of coloured per-model
+    /// figures that used to sit here was five competing accents in the
+    /// header of a screen whose whole argument is that the blend is the
+    /// answer; the spread underneath the direction says the same thing in
+    /// one line — how far apart they are is what a rider needs, not which
+    /// of them is which.
     private var readout: some View {
         let hour = probe ?? series.nowIndex ?? 0
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(outlook.hours[safe: hour].map {
-                    $0.formatted(Date.FormatStyle(timeZone: zone)
-                        .weekday(.abbreviated).month(.abbreviated).day().hour())
-                } ?? "—")
-                    .font(.subheadline.weight(.bold))
+        return HStack(alignment: .bottom, spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(outlook.hours[safe: hour].map {
+                        $0.formatted(Date.FormatStyle(timeZone: zone)
+                            .weekday(.abbreviated).month(.abbreviated).day().hour())
+                    } ?? "—")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
 
-                if probe == nil, series.nowIndex != nil {
-                    Text("now")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.orange, in: Capsule())
+                    // Grey, not orange: nothing on this screen wears a
+                    // colour unless it is a model.
+                    if probe == nil, series.nowIndex != nil {
+                        Text("now")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
+                    }
                 }
 
-                Spacer(minLength: 0)
-
-                if let direction = series.directions[safe: hour] ?? nil {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 11, weight: .bold))
-                            .rotationEffect(.degrees(direction + 180))
-                        Text(Format.cardinal(direction))
-                            .font(.subheadline.weight(.semibold))
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let value = series.blend[safe: hour] ?? nil {
+                        // The one colour that is not a model, and it earns
+                        // it: fifteen knots is the app's firing line, the
+                        // same threshold the map pins and the dashed rule on
+                        // the plot are speaking about.
+                        (Text("\(Int(value.rounded()))").font(.system(size: 34, weight: .bold))
+                         + Text(" kn").font(.system(size: 15, weight: .semibold)))
+                            .foregroundStyle(value >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                            .monospacedDigit()
                     }
-                    .foregroundStyle(.secondary)
+                    if let gust = series.gusts[safe: hour] ?? nil {
+                        Text("gusting \(Int(gust.rounded()))")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
                 }
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if let value = series.blend[safe: hour] ?? nil {
-                    (Text("\(Int(value.rounded()))").font(.system(size: 28, weight: .heavy, design: .rounded))
-                     + Text(" kn").font(.subheadline.weight(.semibold)))
-                        .foregroundStyle(value >= 15 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                        .monospacedDigit()
+            Spacer(minLength: 0)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                if let direction = series.directions[safe: hour] ?? nil {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 13, weight: .semibold))
+                            .rotationEffect(.degrees(direction + 180))
+                        Text(Format.cardinal(direction))
+                            .font(.system(size: 15, weight: .semibold))
+                    }
                 }
-                if let gust = series.gusts[safe: hour] ?? nil {
-                    Text("gusting \(Int(gust.rounded()))")
-                        .font(.subheadline)
+                if let spread = spread(at: hour) {
+                    Text(spread)
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Spacer(minLength: 0)
-
-                // Per model, named — a bare row of coloured numbers made you
-                // match them back to the chips at the bottom of the screen.
-                HStack(spacing: 10) {
-                    ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
-                        if enabled.contains(model.id) {
-                            VStack(spacing: 0) {
-                                Text((model.speeds[safe: hour] ?? nil).map { "\(Int($0.rounded()))" } ?? "—")
-                                    .font(.caption.weight(.bold))
-                                    .monospacedDigit()
-                                    .foregroundStyle(Self.palette[index % Self.palette.count])
-                                Text(model.label)
-                                    .font(.system(size: 7, weight: .semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
+                if let chances = chances(at: hour) {
+                    Text(chances)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .multilineTextAlignment(.trailing)
                 }
             }
-
-            if let chances = chances(at: hour) {
-                Text(chances)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.deepCard)
+        .padding(.horizontal, 18)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+    }
+
+    /// How far apart the switched-on models are at this hour — the sentence
+    /// the per-model figures used to spell out in five colours.
+    private func spread(at hour: Int) -> String? {
+        let values = outlook.models
+            .filter { enabled.contains($0.id) && !$0.isComposite }
+            .compactMap { $0.speeds[safe: hour] ?? nil }
+        guard values.count > 1, let low = values.min(), let high = values.max() else { return nil }
+        guard high - low >= 1 else { return "models agree" }
+        return "spread \(Int(low.rounded()))–\(Int(high.rounded())) kn"
     }
 
     /// The hour as a distribution, when the ensemble covers it.
@@ -976,15 +1077,35 @@ struct ModelCompareScreen: View {
               let low = ensemble.percentile(10, at: index),
               let high = ensemble.percentile(90, at: index)
         else { return nil }
-        return "\(Int((chance * 100).rounded()))% chance of 15 kn or more · "
-            + "\(ensemble.memberCount) GEFS runs land \(Int(low.rounded()))–\(Int(high.rounded())) kn"
+        return "\(Int((chance * 100).rounded()))% over 15 kn · GEFS \(Int(low.rounded()))–\(Int(high.rounded()))"
     }
 
     // MARK: Switching models
 
     private var toggles: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+            // The blend, set apart from the models rather than listed
+            // beside them — it is the answer, and the models are what it is
+            // made of. A legend that ranked them equally was the same
+            // mistake the chart used to make.
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.primary)
+                    .frame(width: 22, height: 3.5)
+                Text("Blend")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("average of the \(enabled.count) model\(enabled.count == 1 ? "" : "s") switched on")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 14))
+
+            FlowLayout(spacing: 6) {
                 ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                     let on = enabled.contains(model.id)
                     Button {
@@ -993,31 +1114,34 @@ struct ModelCompareScreen: View {
                         if on, enabled.count > 1 { enabled.remove(model.id) }
                         else { enabled.insert(model.id) }
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Circle()
+                                // A neutral grey turns warm against this
+                                // app's navy — the off state borrows the
+                                // chart's own cool slate instead.
                                 .fill(on ? Self.palette[index % Self.palette.count]
-                                      : Color(.systemGray3))
-                                .frame(width: 8, height: 8)
+                                      : ModelChart.dayRule)
+                                .frame(width: 6, height: 6)
                             Text(model.label)
-                                .font(.caption.weight(.semibold))
+                                .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundStyle(on ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                                // A pill that wraps its own label is a
+                                // two-line pill; the row wraps instead.
+                                .lineLimit(1)
+                                .fixedSize()
                         }
                         .padding(.horizontal, 11)
-                        .frame(height: 32)
-                        .background(on ? AnyShapeStyle(Color.deepCard)
-                                    : AnyShapeStyle(Color(.systemGray6)),
-                                    in: Capsule())
+                        .frame(height: 30)
+                        .background {
+                            if on {
+                                Capsule().fill(Color.deepCard)
+                            } else {
+                                Capsule().strokeBorder(ModelChart.dayRule, lineWidth: 1)
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer(minLength: 0)
-            }
-
-            HStack(spacing: 14) {
-                key(Color.primary, "Blend", line: true)
-                key(Color.foam.opacity(0.45), "Gust range")
-                key(Color.orange, "Now", line: true)
-                Spacer(minLength: 0)
             }
 
             if !steadiness.isEmpty {
@@ -1031,7 +1155,6 @@ struct ModelCompareScreen: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.deepSurface)
     }
 
     /// Each model's recent record at this point — how far its two-day-ahead
@@ -1085,17 +1208,6 @@ struct ModelCompareScreen: View {
         return "How far each model's two-day-ahead call here has drifted from its own final hour. Steadiness, not verified truth — but the one that keeps changing its story has told you something."
     }
 
-    private func key(_ colour: Color, _ label: String, line: Bool = false) -> some View {
-        HStack(spacing: 4) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(colour)
-                .frame(width: line ? 14 : 12, height: line ? 2.5 : 9)
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var footnote: String {
         let horizons = outlook.models.compactMap { model -> String? in
             guard enabled.contains(model.id), let end = outlook.horizon(of: model) else { return nil }
@@ -1129,13 +1241,13 @@ struct ModelSeries {
     var directions: [Double?] = []
     var peak: Double = 1
     var levels: [Double] = []
-    /// Every third hour carries a label and a rule; every sixth an arrow.
-    /// Denser than that and they collide at ten points an hour.
+    /// Every sixth hour carries a label and an arrow. Denser than that and
+    /// they collide at ten points an hour.
     var ticks: [Int] = []
     var arrowTicks: [Int] = []
     var midnights: Set<Int> = []
-    /// The hour we are actually in — the orange rule that separates what has
-    /// happened from what is guessed.
+    /// The hour we are actually in — where the greyed hindcast stops and
+    /// the forecast starts.
     var nowIndex: Int?
     /// The header, already formatted.
     var headings: [Heading] = []
@@ -1153,11 +1265,23 @@ struct ModelSeries {
         gusts = outlook.blendGusts(of: enabled)
         directions = outlook.blendDirections(of: enabled)
 
+        // Gusts set the ceiling as well as the speeds, and the ceiling is
+        // then rounded up to a whole gridline: the band drawn from the blend
+        // up to the gust used to run off the top of the plot on any day
+        // gustier than it was windy, which is most of them. The floor of
+        // four steps keeps a calm day's axis at twenty knots rather than
+        // magnifying a two-knot afternoon into a mountain range.
         let shown = outlook.models.filter { enabled.contains($0.id) }
-        peak = max(shown.flatMap { $0.speeds.compactMap { $0 } }.max() ?? 1, 1)
-        levels = ChartGrid.levels(peak: peak, step: ChartGrid.interval(for: peak))
+        let highest = max(shown.flatMap { $0.speeds.compactMap { $0 } }.max() ?? 1,
+                          outlook.consensusGusts.compactMap { $0 }.max() ?? 1)
+        let step = ChartGrid.interval(for: highest)
+        peak = max((highest / step).rounded(.up) * step, step * 4)
+        levels = ChartGrid.levels(peak: peak, step: step)
 
-        ticks = outlook.hours.indices.filter { $0 % 3 == 0 }
+        // Six-hourly, not three: at ten points an hour a three-hourly label
+        // is thirty points from its neighbour, which is not enough for
+        // "12 PM" and was never enough for a weekday.
+        ticks = outlook.hours.indices.filter { $0 % 6 == 0 }
         arrowTicks = outlook.hours.indices.filter { $0 % 6 == 0 }
 
         var calendar = Calendar.current
@@ -1213,16 +1337,30 @@ private struct ModelChart: View, Equatable {
     /// only ever land on the first hour.
     @State private var scroll = ScrollPosition()
     @State private var hasLanded = false
+    /// The hour under the reading line, kept here as well as reported out —
+    /// the knob has to know where the blend is to sit on it.
+    @State private var probe: Int?
 
-    private static let headerHeight: CGFloat = 24
+    static let headerHeight: CGFloat = 24
     /// The arrow band, plus the gap that keeps it off the plot floor. They
     /// were sitting directly on the axis, which read as part of the chart
     /// rather than as its own row.
-    private static let arrowsHeight: CGFloat = 46
-    private static let arrowsGap: CGFloat = 10
+    static let arrowsHeight: CGFloat = 46
+    static let arrowsGap: CGFloat = 10
     private static let axisWidth: CGFloat = 32
 
-    private static var footerHeight: CGFloat { arrowsHeight + arrowsGap }
+    static var footerHeight: CGFloat { arrowsHeight + arrowsGap }
+
+    /// The chart's own greys. Named rather than sprinkled, because the whole
+    /// argument of this screen is that chrome is grey and data is coloured —
+    /// the moment a rule picks up a hue it starts competing for the eye.
+    static let rule = ModelCompareScreen.hue(0xE6EAEF, dark: 0x1E4462)
+    static let dayRule = ModelCompareScreen.hue(0xC8D0DA, dark: 0x2C5A7C)
+    static let reference = ModelCompareScreen.hue(0xC8D0DA, dark: 0x33627F)
+    /// The gust band's blue — the one non-model colour on the plot, and it
+    /// is a fill at fourteen per cent rather than a line, so it never reads
+    /// as a series.
+    static let gust = ModelCompareScreen.hue(0x5B8FD6, dark: 0x7FB0EE)
 
     private var hourWidth: CGFloat { ModelCompareScreen.hourWidth }
     private var palette: [Color] { ModelCompareScreen.palette }
@@ -1242,22 +1380,28 @@ private struct ModelChart: View, Equatable {
         let width = CGFloat(outlook.hours.count) * hourWidth
 
         return HStack(spacing: 0) {
-            axisGutter
+            axisGutter(plotHeight: plotHeight)
             ZStack(alignment: .topLeading) {
-                horizontalRules
+                horizontalRules(plotHeight: plotHeight)
                 GeometryReader { viewport in
                     let half = viewport.size.width / 2
                     ScrollView(.horizontal, showsIndicators: true) {
-                        VStack(spacing: 0) {
-                            hourHeader(width: width)
-                            plot(width: width, height: plotHeight)
-                            arrowRow(width: width)
-                        }
-                        // Half a viewport either side, so the first hour and
-                        // the last can both be brought to the middle. Without
-                        // it the ends of the forecast are unreadable — the
-                        // reading line can never reach them.
-                        .padding(.horizontal, half)
+                        // Held apart from this view and compared by value:
+                        // the knob below rides the blend as the chart
+                        // scrolls, which re-runs this body on every hour it
+                        // passes, and rebuilding four full-width traces and
+                        // a hundred and thirty labels at that rate is what
+                        // used to make the drag stutter. Nothing in here
+                        // depends on where the chart is scrolled to.
+                        ChartContent(outlook: outlook, series: series, enabled: enabled,
+                                     width: width, plotHeight: plotHeight)
+                            .equatable()
+                            // Half a viewport either side, so the first hour
+                            // and the last can both be brought to the middle.
+                            // Without it the ends of the forecast are
+                            // unreadable — the reading line can never reach
+                            // them.
+                            .padding(.horizontal, half)
                     }
                     .scrollPosition($scroll)
                     .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
@@ -1278,14 +1422,32 @@ private struct ModelChart: View, Equatable {
                         let hour = Int(geometry.contentOffset.x / hourWidth + 0.5)
                         return min(max(0, hour), max(0, outlook.hours.count - 1))
                     } action: { _, hour in
+                        probe = hour
                         onProbe(hour)
                     }
-                    .overlay {
-                        // Fixed to the screen, not to the data.
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.45))
-                            .frame(width: 1)
-                            .allowsHitTesting(false)
+                    .overlay(alignment: .top) {
+                        // Fixed to the screen, not to the data — and chrome,
+                        // not a series. A hairline through the plot *and*
+                        // the direction row underneath, so the two read as
+                        // one crosshair, with a knob where it crosses the
+                        // blend. The knob is what makes a line this faint
+                        // findable: it is the reading, sitting on the answer.
+                        ZStack(alignment: .top) {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.18))
+                                .frame(width: 1)
+
+                            if let hour = probe ?? series.nowIndex,
+                               let value = series.blend[safe: hour] ?? nil {
+                                Circle()
+                                    .fill(Color.deepCard)
+                                    .stroke(Color.primary, lineWidth: 2.5)
+                                    .frame(width: 10, height: 10)
+                                    .offset(y: Self.headerHeight
+                                            + plotHeight * (1 - value / series.peak) - 5)
+                            }
+                        }
+                        .allowsHitTesting(false)
                     }
                     .onChange(of: outlook.hours.count, initial: true) { _, _ in
                         // Open with now under the reading line. A day of
@@ -1306,44 +1468,96 @@ private struct ModelChart: View, Equatable {
         .padding(.vertical, 10)
     }
 
-    private var axisGutter: some View {
-        GeometryReader { geometry in
-            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
+    /// The scale, and only the scale. The "kn" caption that used to sit at
+    /// the top of it is gone: the unit is already stated beside the number
+    /// in the readout, and repeating it in the plot spent ink on something
+    /// nobody was going to misread.
+    private func axisGutter(plotHeight: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
             ForEach(series.levels, id: \.self) { level in
                 Text("\(Int(level))")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
                     .monospacedDigit()
-                    .frame(width: Self.axisWidth - 5, alignment: .trailing)
-                    .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak) - 6)
+                    .frame(width: Self.axisWidth - 6, alignment: .trailing)
+                    .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak) - 7)
             }
-            Text("kn")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.tertiary)
-                .frame(width: Self.axisWidth - 5, alignment: .trailing)
-                .offset(y: Self.headerHeight - 14)
         }
         .frame(width: Self.axisWidth)
     }
 
-    private var horizontalRules: some View {
-        GeometryReader { geometry in
-            let plotHeight = max(1, geometry.size.height - Self.headerHeight - Self.footerHeight - 20)
+    /// Horizontal rules only, one per five knots, quiet enough that four
+    /// lines drawn across them still win.
+    ///
+    /// Fifteen knots is dashed rather than tinted: it is a reference a rider
+    /// measures against, not a reading, and it was wearing the accent colour
+    /// on a screen where colour is supposed to mean "this is a model".
+    private func horizontalRules(plotHeight: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
             ForEach(series.levels, id: \.self) { level in
                 let isKey = abs(level - 15) < 0.01
-                Rectangle()
-                    .fill(isKey ? AnyShapeStyle(Color.accentColor.opacity(0.5))
-                          : AnyShapeStyle(Color(.systemGray3).opacity(0.7)))
-                    .frame(height: isKey ? 1.5 : 0.75)
-                    .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak))
+                Group {
+                    if isKey {
+                        Line()
+                            .stroke(Self.reference,
+                                    style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                            .frame(height: 1)
+                    } else {
+                        Rectangle()
+                            .fill(Self.rule)
+                            .frame(height: 1)
+                    }
+                }
+                .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak))
             }
             // The floor, so the traces have something to stand on.
             Rectangle()
-                .fill(Color(.systemGray2))
+                .fill(Self.rule)
                 .frame(height: 1)
-                .offset(y: geometry.size.height - Self.footerHeight - 20)
+                .offset(y: Self.headerHeight + plotHeight)
         }
         .allowsHitTesting(false)
+    }
+
+}
+
+/// Everything that scrolls: the hours, the plot, the arrows.
+///
+/// Split from `ModelChart` for one reason. The reading line's knob rides the
+/// blend as the chart moves, so the chart's body now runs on every hour that
+/// passes under it — and rebuilding four full-width vector traces, a gust
+/// band and a hundred and thirty date labels at that rate is exactly the
+/// stutter the old `Equatable` guard existed to prevent. Nothing in here
+/// depends on where the chart is scrolled to, so it is compared by value and
+/// skipped.
+private struct ChartContent: View, Equatable {
+
+    let outlook: WindOutlook
+    let series: ModelSeries
+    let enabled: Set<String>
+    let width: CGFloat
+    let plotHeight: CGFloat
+
+    static func == (lhs: ChartContent, rhs: ChartContent) -> Bool {
+        lhs.enabled == rhs.enabled
+            && lhs.width == rhs.width
+            && lhs.plotHeight == rhs.plotHeight
+            && lhs.series.peak == rhs.series.peak
+            && lhs.series.blend.count == rhs.series.blend.count
+            && lhs.series.nowIndex == rhs.series.nowIndex
+    }
+
+    private var hourWidth: CGFloat { ModelCompareScreen.hourWidth }
+    private var palette: [Color] { ModelCompareScreen.palette }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            hourHeader(width: width)
+            plot(width: width, height: plotHeight)
+            arrowRow(width: width)
+        }
     }
 
     /// Hours across the top, with the day named where it turns over.
@@ -1351,13 +1565,13 @@ private struct ModelChart: View, Equatable {
         ZStack(alignment: .topLeading) {
             ForEach(series.headings) { heading in
                 Text(heading.text)
-                    .font(.system(size: 9, weight: heading.isMidnight ? .bold : .regular))
-                    .foregroundStyle(heading.isMidnight ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .font(.system(size: 11, weight: heading.isMidnight ? .semibold : .regular))
+                    .foregroundStyle(heading.isMidnight ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                     .fixedSize()
-                    .offset(x: CGFloat(heading.id) * hourWidth + 3, y: 4)
+                    .offset(x: CGFloat(heading.id) * hourWidth + 3, y: 3)
             }
         }
-        .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
+        .frame(width: width, height: ModelChart.headerHeight, alignment: .topLeading)
     }
 
     private func plot(width: CGFloat, height: CGFloat) -> some View {
@@ -1367,35 +1581,47 @@ private struct ModelChart: View, Equatable {
             // of the decision.
             if let now = series.nowIndex, now > 0 {
                 Rectangle()
-                    .fill(Color(.systemGray5).opacity(0.55))
+                    .fill(Color(.systemGray5).opacity(0.35))
                     .frame(width: CGFloat(now) * hourWidth)
                     .frame(maxHeight: .infinity)
             }
 
-            ForEach(series.ticks, id: \.self) { hour in
+            // Only where the day turns over. A rule every three hours put
+            // more lines on the field than the forecast had, and the eye
+            // has to get past all of them to reach the data.
+            ForEach(series.ticks.filter { series.midnights.contains($0) }, id: \.self) { hour in
                 Rectangle()
-                    .fill(series.midnights.contains(hour)
-                          ? Color(.systemGray2) : Color(.systemGray4).opacity(0.5))
-                    .frame(width: series.midnights.contains(hour) ? 1 : 0.5)
+                    .fill(ModelChart.dayRule)
+                    .frame(width: 1)
                     .offset(x: CGFloat(hour) * hourWidth)
             }
 
             // Gusts behind everything, as a filled band up from the blend —
-            // the headroom above the average is the part that knocks you over.
+            // the headroom above the average is the part that knocks you
+            // over. Faint on purpose: it is a range, and a range drawn as a
+            // slab reads as a reading.
             GustBand(speeds: series.blend, gusts: series.gusts, peak: series.peak)
-                .fill(Color.foam.opacity(0.45))
+                .fill(ModelChart.gust.opacity(0.14))
 
             ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                 if enabled.contains(model.id) {
                     ModelTrace(speeds: model.speeds, peak: series.peak)
-                        .stroke(palette[index % palette.count].opacity(0.7),
-                                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        .stroke(palette[index % palette.count].opacity(0.5),
+                                style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
                 }
             }
 
+            // The blend, twice: a faint fill down to the floor that gives it
+            // mass, then the line itself at nearly four times a model's
+            // weight. Squint at the chart and this is the only thing you
+            // see — which is the point, because it is the only line that is
+            // an answer rather than an opinion.
+            BlendArea(speeds: series.blend, peak: series.peak)
+                .fill(Color.primary.opacity(0.05))
+
             ModelTrace(speeds: series.blend, peak: series.peak)
                 .stroke(Color.primary,
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                        style: StrokeStyle(lineWidth: 3.8, lineCap: .round, lineJoin: .round))
 
             // Where each run stops. A line that simply ends looks like a
             // bug or like calm; a labelled cap says the model ran out, which
@@ -1411,7 +1637,7 @@ private struct ModelChart: View, Equatable {
                                 .fill(palette[index % palette.count])
                                 .frame(width: 6, height: 6)
                             Text("\(model.label) ends")
-                                .font(.system(size: 8, weight: .bold))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(palette[index % palette.count])
                                 .fixedSize()
                         }
@@ -1421,10 +1647,14 @@ private struct ModelChart: View, Equatable {
                 }
             }
 
+            // Where the hindcast stops. It was a saturated orange rule,
+            // which read as a sixth model; the greyed field to its left
+            // already says which side of it you are on, so the edge only has
+            // to be visible, not loud.
             if let now = series.nowIndex {
                 Rectangle()
-                    .fill(Color.orange)
-                    .frame(width: 2)
+                    .fill(ModelChart.dayRule)
+                    .frame(width: 1)
                     .offset(x: CGFloat(now) * hourWidth)
             }
         }
@@ -1448,12 +1678,11 @@ private struct ModelChart: View, Equatable {
                 if let direction = series.directions[safe: hour] ?? nil {
                     VStack(spacing: 2) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
+                            .font(.system(size: 15, weight: .semibold))
                             .rotationEffect(.degrees(direction + 180))
-                            .foregroundStyle((series.blend[safe: hour] ?? nil).map { $0 >= 15 }
-                                             == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(.secondary)
                         Text(Format.cardinal(direction))
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.system(size: 11))
                             .foregroundStyle(.tertiary)
                     }
                     .frame(width: hourWidth * 3)
@@ -1464,8 +1693,8 @@ private struct ModelChart: View, Equatable {
         // Leading, not centre: the children are placed by `offset` from the
         // origin, so a centred frame shifts every arrow by half the chart's
         // width — which on a sixteen-day chart is a long way off screen.
-        .frame(width: width, height: Self.arrowsHeight, alignment: .topLeading)
-        .padding(.top, Self.arrowsGap)
+        .frame(width: width, height: ModelChart.arrowsHeight, alignment: .topLeading)
+        .padding(.top, ModelChart.arrowsGap)
     }
 }
 

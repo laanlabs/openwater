@@ -207,6 +207,33 @@ struct WindOutlook {
         }
     }
 
+    /// The same outlook, cut to the window the cards actually speak for.
+    ///
+    /// The API sells calendar days, so a run fetched with `timezone=auto`
+    /// opens at local midnight — which for an afternoon rider is fifteen
+    /// hours of history under a heading that says "next 24". Trimming here
+    /// rather than at the fetch keeps the untrimmed run for the nowcast,
+    /// which has to reach back to the hour a station's reading was actually
+    /// taken in to have anything to compare it against.
+    func nextHours(_ limit: Int, from now: Date = Date()) -> WindOutlook {
+        guard !hours.isEmpty else { return self }
+        let start = hours.lastIndex { $0 <= now } ?? 0
+        let end = min(start + limit, hours.count)
+        guard start < end else { return self }
+        func cut(_ series: [Double?]) -> [Double?] {
+            Array(series.dropFirst(start).prefix(end - start))
+        }
+        return WindOutlook(
+            hours: Array(hours[start..<end]),
+            models: models.map {
+                Model(id: $0.id, label: $0.label, speeds: cut($0.speeds),
+                      gusts: cut($0.gusts), directions: cut($0.directions),
+                      isComposite: $0.isComposite)
+            },
+            timeZone: timeZone,
+            staleAge: staleAge)
+    }
+
     /// The widest disagreement between models over the useful window, in knots.
     ///
     /// Measured over the next twelve hours rather than the whole run, because
@@ -476,8 +503,6 @@ struct NearTermWind {
     var timeZone: TimeZone?
 
     var isEmpty: Bool { times.isEmpty || !speedsKn.contains { $0 != nil } }
-
-    var peakGustKn: Double? { gustsKn.compactMap { $0 }.max() }
 }
 
 // MARK: - The full picture
@@ -1276,6 +1301,14 @@ struct FreeStation: Identifiable, Hashable {
     enum Source: Hashable {
         case weatherService
         case dataBuoyCenter
+        /// Tides and Currents — the harbour masts.
+        ///
+        /// The third of NOAA's three, and the one the app was missing. The
+        /// forecast office's list is airfields, the buoy centre's is
+        /// offshore; CO-OPS is bolted to the piers, bridges and jetties
+        /// riders actually launch from. Montauk stands in this one and in
+        /// neither of the others.
+        case tidesAndCurrents
     }
 
     let id: String
@@ -1284,6 +1317,21 @@ struct FreeStation: Identifiable, Hashable {
     let coordinate: Geo.Coordinate
     let metres: Double
     var source: Source = .weatherService
+
+    /// The same mast on another network, when it stands in two of them.
+    ///
+    /// Montauk is in all three: the forecast office, the buoy centre and
+    /// CO-OPS, within fifty metres of each other. Whichever record survives
+    /// deduplication is the one asked for a reading, and on any given hour
+    /// it may be the silent one — NDBC's columns were all `MM` while NWS
+    /// had five knots. Keeping the loser's address turns that from a dead
+    /// pin into a second phone call.
+    struct Alternate: Hashable {
+        let source: Source
+        let id: String
+    }
+
+    var alternate: Alternate?
 
     /// Filled in lazily — the list arrives first, readings trickle in after.
     var observation: StationObservation?
@@ -1301,6 +1349,8 @@ struct FreeStation: Identifiable, Hashable {
             // page is where a rider goes to see the last day of this sensor,
             // and the timeseries page has nothing for these.
             URL(string: "https://www.ndbc.noaa.gov/station_page.php?station=\(id.lowercased())")!
+        case .tidesAndCurrents:
+            URL(string: "https://tidesandcurrents.noaa.gov/stationhome.html?id=\(id)")!
         }
     }
 }
@@ -1346,20 +1396,47 @@ enum FreeStations {
                      radius: Double = 250_000) async -> [FreeStation] {
         async let office = NationalWeatherService.stations(near: coordinate, limit: limit)
         async let marine = DataBuoyCenter.metStations(near: coordinate, limit: limit, radius: radius)
+        async let harbour = TidesAndCurrents.metStations(near: coordinate, limit: limit, radius: radius)
         async let curated = WindStationRegistry.crossLinks()
 
         let stations = await office
         // A handful of buoy-centre stations do reach the forecast office's
         // list — SFOC1 at San Francisco is one — so the merge is by identifier
         // rather than by hope. Case-folded: the two agencies disagree about it.
-        let known = Set(stations.map { $0.id.uppercased() })
-        let supplements = await marine.filter { !known.contains($0.id.uppercased()) }
+        // Every other network's record of a mast this list already holds
+        // becomes an alternate on it rather than being dropped outright —
+        // see `FreeStation.Alternate`. CO-OPS numbers its stations while
+        // the other two use call signs, so an id can never collide across
+        // the networks, but a hundred and fifty metres apart is one
+        // instrument however it is named.
+        var merged: [FreeStation] = []
+
+        func absorb(_ candidate: FreeStation) {
+            if let twin = merged.firstIndex(where: {
+                $0.id.caseInsensitiveCompare(candidate.id) == .orderedSame
+                    || Geo.distance($0.coordinate, candidate.coordinate) < 150
+            }) {
+                if merged[twin].alternate == nil {
+                    merged[twin].alternate = .init(source: candidate.source, id: candidate.id)
+                }
+                return
+            }
+            merged.append(candidate)
+        }
+
+        // The office's own list included, because it holds duplicates of
+        // itself: the weather service carries Montauk twice, as `MTKN6` and
+        // as `NDBCMTKN6`, a hundred metres apart — and on a given hour one
+        // of the two is the silent one.
+        for candidate in stations { absorb(candidate) }
+        for candidate in await marine { absorb(candidate) }
+        for candidate in await harbour { absorb(candidate) }
 
         // The registry absorb, last: a curated row with this station's
         // government id lends its name and its provider doors to the one pin.
         // Purely an overlay — with an empty registry this is the identity map.
         let registry = await curated
-        return (stations + supplements)
+        return merged
             .sorted { $0.metres < $1.metres }
             .prefix(limit)
             .map { station in
@@ -1373,9 +1450,24 @@ enum FreeStations {
 
     /// The station's own network answers for it.
     static func latest(for station: FreeStation) async -> StationObservation? {
-        switch station.source {
-        case .weatherService: await NationalWeatherService.latest(for: station.id)
-        case .dataBuoyCenter: await DataBuoyCenter.windReading(for: station.id)
+        let primary = await read(station.source, station.id)
+        if primary?.windKn != nil { return primary }
+        // The mast is not silent until every network carrying it has been
+        // asked. A record that survived deduplication is not automatically
+        // the one reporting this hour.
+        guard let alternate = station.alternate,
+              let second = await read(alternate.source, alternate.id),
+              second.windKn != nil
+        else { return primary }
+        return second
+    }
+
+    private static func read(_ source: FreeStation.Source,
+                             _ id: String) async -> StationObservation? {
+        switch source {
+        case .weatherService: await NationalWeatherService.latest(for: id)
+        case .dataBuoyCenter: await DataBuoyCenter.windReading(for: id)
+        case .tidesAndCurrents: await TidesAndCurrents.windReading(for: id)
         }
     }
 }
@@ -1392,11 +1484,22 @@ enum NationalWeatherService {
     /// speaks the same API with the same manners. The `accept` override is
     /// for the text-product endpoints, which serve ld+json rather than
     /// geo+json.
-    static func get(_ url: URL, accept: String = "application/geo+json") async -> Data? {
+    /// - Parameter onlyWhenCheap: refuse cellular, personal hotspots and
+    ///   Low Data Mode. For the background state walk, which is eight
+    ///   megabytes in California and is nobody's idea of a good use of a
+    ///   data allowance — the request fails immediately rather than
+    ///   downloading, and the walk simply stays incomplete until the rider
+    ///   is somewhere it can finish.
+    static func get(_ url: URL, accept: String = "application/geo+json",
+                    onlyWhenCheap: Bool = false) async -> Data? {
         var request = URLRequest(url: url)
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.timeoutInterval = 12
+        if onlyWhenCheap {
+            request.allowsExpensiveNetworkAccess = false
+            request.allowsConstrainedNetworkAccess = false
+        }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200
         else { return nil }
@@ -1408,7 +1511,255 @@ enum NationalWeatherService {
     /// The endpoint answers a 301 to the gridpoint that actually owns the
     /// list; `URLSession` follows it, which is why this reads as one call and
     /// the equivalent `curl` needs `-L`.
+    /// Every station the forecast office lists for this point, plus every
+    /// station the state index knows about — merged, distance-sorted.
+    ///
+    /// The points endpoint alone was the whole coverage problem. It answers
+    /// with the office's own list, which on the East End is seven airfields
+    /// inside sixty kilometres and nothing else, while `?state=` returns
+    /// thirteen — including the citizen stations at Orient, Hampton Bays,
+    /// Baiting Hollow and Bridgehampton that the registry had been showing
+    /// as commercial pins because iKitesurf was the only door the app knew
+    /// about. Same network, same free API, a different question asked of it.
+    ///
+    /// There is no radius parameter anywhere in this API. The state index is
+    /// the closest thing to one: fetched once, kept, and cut to the rider's
+    /// radius here.
     static func stations(near coordinate: Geo.Coordinate, limit: Int = 8) async -> [FreeStation] {
+        async let office = officeStations(near: coordinate)
+        async let local = stateStations(near: coordinate)
+
+        var merged = await office
+        let known = Set(merged.map { $0.id.uppercased() })
+        merged += await local.filter { !known.contains($0.id.uppercased()) }
+        return merged
+            .sorted { $0.metres < $1.metres }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// The state's whole station list, distilled and kept for a week.
+    ///
+    /// Which state comes from the same points call the office list uses, so
+    /// this costs one extra request the first time a rider is in a state and
+    /// nothing after that.
+    private static func stateStations(near coordinate: Geo.Coordinate) async -> [FreeStation] {
+        guard let state = await state(at: coordinate) else { return [] }
+        return await stateIndex(state, near: coordinate).map {
+            FreeStation(id: $0.id, name: $0.name, coordinate: $0.coordinate,
+                        metres: Geo.distance(coordinate, $0.coordinate))
+        }
+    }
+
+    private struct DistilledStation: Codable {
+        let id: String
+        let name: String
+        let latitude: Double
+        let longitude: Double
+        var coordinate: Geo.Coordinate {
+            Geo.Coordinate(latitude: latitude, longitude: longitude)
+        }
+    }
+
+    /// The hard stop on walking a state index, and the local coverage that
+    /// lets the walk stop sooner.
+    ///
+    /// California publishes 7,829 stations across sixteen pages and there
+    /// is no radius parameter to ask with, so a partial walk is a partial
+    /// map. Stopping early on sufficiency — enough stations found near this
+    /// rider — sounded reasonable and was measurably wrong: the pages are
+    /// ordered by nothing useful, so of the forty stations genuinely
+    /// nearest downtown San Francisco the app held **four**, missing the
+    /// closest at six hundred metres and Fort Point at five kilometres.
+    /// Enough stations is not the same claim as the right stations.
+    ///
+    /// So the walk still stops early, but only to get a map on screen: the
+    /// rest of the state is finished in the background and written back, so
+    /// the first look is fast and every look after it is complete. One
+    /// state, once a week, and only the states somebody actually visits.
+    static let statePageBound = 16
+    static let stateEnoughNearby = 40
+    static let stateNearbyReach: Double = 50_000
+
+    /// A state's stations, and whether the walk that produced them reached
+    /// the end. An incomplete index is usable and known to be partial.
+    private struct StateIndex: Codable {
+        var complete: Bool
+        var stations: [DistilledStation]
+    }
+
+    private static var stateCache: [String: StateIndex] = [:]
+    /// States whose completion is already running, so a second pan does not
+    /// start a second walk.
+    private static var completing: Set<String> = []
+
+    private static func stateCacheURL(_ state: String) -> URL {
+        // Versioned. The first cut of this stopped after one page of five
+        // hundred, and a week-long cache would have kept serving that
+        // truncated list to every phone that already had one — including
+        // the East Hampton, Southold and Orient stations sitting on page
+        // two, which are the nearest ones to half the riders using it.
+        URL.cachesDirectory.appending(path: "nws-stations-v5-\(state).json")
+    }
+
+    private static func stateIndex(_ state: String,
+                                   near coordinate: Geo.Coordinate) async -> [DistilledStation] {
+        // A complete index answers for anywhere in its state. An incomplete
+        // one answers only while it still holds hardware near this point —
+        // an index that stopped early over San Francisco knows nothing
+        // about San Diego — and either way the background finish is what
+        // turns the second answer into the right one.
+        func usable(_ index: StateIndex) -> Bool {
+            index.complete
+                || index.stations.count { Geo.distance(coordinate, $0.coordinate) <= stateNearbyReach }
+                    >= stateEnoughNearby / 4
+        }
+
+        if let held = stateCache[state], usable(held) {
+            if !held.complete { finish(state) }
+            return held.stations
+        }
+        if let data = try? Data(contentsOf: stateCacheURL(state)),
+           let index = try? JSONDecoder().decode(StateIndex.self, from: data),
+           !index.stations.isEmpty, usable(index),
+           let age = (try? stateCacheURL(state).resourceValues(forKeys: [.contentModificationDateKey]))?
+               .contentModificationDate,
+           Date().timeIntervalSince(age) < 7 * 86_400 {
+            stateCache[state] = index
+            if !index.complete { finish(state) }
+            return index.stations
+        }
+
+        // The cursor is followed rather than guessed at: the first page is
+        // alphabetical by nothing in particular, so New York's citizen
+        // stations at East Hampton, Southold and Orient are all on page two
+        // and stopping at one page is the coverage bug this index exists to
+        // fix, one level down.
+        let index = await walk(state, stopping: coordinate)
+        guard !index.stations.isEmpty else { return [] }
+        store(index, for: state)
+        if !index.complete { finish(state) }
+        return index.stations
+    }
+
+    /// Walks a state's pages, optionally stopping as soon as there is
+    /// enough hardware near a point to draw with.
+    ///
+    /// `complete` is the honest part: it says whether the cursor ran out or
+    /// the walk gave up, and nothing downstream has to guess.
+    private static func walk(_ state: String,
+                             stopping coordinate: Geo.Coordinate?,
+                             onlyWhenCheap: Bool = false) async -> StateIndex {
+        struct Payload: Decodable {
+            struct Feature: Decodable {
+                struct Geometry: Decodable { let coordinates: [Double] }
+                struct Properties: Decodable {
+                    let stationIdentifier: String?
+                    let name: String?
+                }
+                let geometry: Geometry?
+                let properties: Properties?
+            }
+            struct Pagination: Decodable { let next: String? }
+            let features: [Feature]?
+            let pagination: Pagination?
+        }
+
+        var rows: [DistilledStation] = []
+        var next: URL? = URL(string: "https://api.weather.gov/stations?state=\(state)&limit=500")
+        for _ in 0..<statePageBound {
+            if let coordinate,
+               rows.count(where: { Geo.distance(coordinate, $0.coordinate) <= stateNearbyReach })
+                   >= stateEnoughNearby {
+                return StateIndex(complete: false, stations: rows)
+            }
+            guard let url = next, let data = await get(url, onlyWhenCheap: onlyWhenCheap),
+                  let payload = try? JSONDecoder().decode(Payload.self, from: data),
+                  let features = payload.features
+            else { return StateIndex(complete: false, stations: rows) }
+            rows += features.compactMap { feature in
+                guard let id = feature.properties?.stationIdentifier,
+                      let pair = feature.geometry?.coordinates, pair.count >= 2
+                else { return nil }
+                // GeoJSON is longitude first.
+                return DistilledStation(id: id,
+                                        name: feature.properties?.name ?? id,
+                                        latitude: pair[1], longitude: pair[0])
+            }
+            guard features.count == 500,
+                  let cursor = payload.pagination?.next.flatMap(URL.init(string:))
+            else { return StateIndex(complete: true, stations: rows) }
+            next = cursor
+        }
+        // Ran out of pages allowed rather than pages available.
+        return StateIndex(complete: false, stations: rows)
+    }
+
+    /// When a deferred completion may be attempted again, per state.
+    private static var retryAfter: [String: Date] = [:]
+
+    /// Finish a state in the background and write it back.
+    ///
+    /// The first map is drawn from whatever the early stop found; this is
+    /// what makes the second one right — but only over a network that can
+    /// afford it. California is eight megabytes, and a rider checking the
+    /// wind from a car park did not ask to spend that; the walk refuses
+    /// cellular, hotspots and Low Data Mode outright, comes back
+    /// incomplete, and tries again later. The map is never waiting on it.
+    private static func finish(_ state: String) {
+        guard !completing.contains(state) else { return }
+        if let after = retryAfter[state], after > Date() { return }
+        completing.insert(state)
+        Task {
+            defer { completing.remove(state) }
+            let index = await walk(state, stopping: nil, onlyWhenCheap: true)
+            guard index.complete, !index.stations.isEmpty else {
+                // Refused, or the network gave out part way. Either way it
+                // is not worth asking again on the next pan.
+                retryAfter[state] = Date().addingTimeInterval(600)
+                return
+            }
+            retryAfter[state] = nil
+            store(index, for: state)
+        }
+    }
+
+    private static func store(_ index: StateIndex, for state: String) {
+        stateCache[state] = index
+        if let encoded = try? JSONEncoder().encode(index) {
+            try? encoded.write(to: stateCacheURL(state), options: .atomic)
+        }
+    }
+
+    private static var stateAt: [String: String] = [:]
+
+    /// Which state a point is in, according to the same endpoint that
+    /// answers everything else about it.
+    private static func state(at coordinate: Geo.Coordinate) async -> String? {
+        let key = String(format: "%.1f,%.1f", coordinate.latitude, coordinate.longitude)
+        if let held = stateAt[key] { return held }
+        let path = String(format: "https://api.weather.gov/points/%.4f,%.4f",
+                          coordinate.latitude, coordinate.longitude)
+        guard let url = URL(string: path), let data = await get(url) else { return nil }
+
+        struct Payload: Decodable {
+            struct Properties: Decodable {
+                struct Relative: Decodable {
+                    struct Inner: Decodable { let state: String? }
+                    let properties: Inner?
+                }
+                let relativeLocation: Relative?
+            }
+            let properties: Properties?
+        }
+        guard let state = (try? JSONDecoder().decode(Payload.self, from: data))?
+            .properties?.relativeLocation?.properties?.state, state.count == 2
+        else { return nil }
+        stateAt[key] = state
+        return state
+    }
+
+    private static func officeStations(near coordinate: Geo.Coordinate) async -> [FreeStation] {
         let path = String(format: "https://api.weather.gov/points/%.4f,%.4f/stations",
                           coordinate.latitude, coordinate.longitude)
         guard let url = URL(string: path), let data = await get(url) else { return [] }
@@ -1444,42 +1795,78 @@ enum NationalWeatherService {
                     metres: Geo.distance(coordinate, here)
                 )
             }
-            .sorted { $0.metres < $1.metres }
-            .prefix(limit)
-            .map { $0 }
     }
 
     /// The latest observation from one station, or nil when it has not
     /// reported — plenty of these sensors are seasonal or simply broken, which
     /// is worth showing as "no reading" rather than hiding.
+    /// The newest observation from one station that actually carries wind.
+    ///
+    /// `observations/latest` is the newest *record*, which is not the same
+    /// thing: these sensors file partial reports, and a record holding only
+    /// pressure and temperature reads as a silent anemometer. So when the
+    /// newest record has neither a speed nor a gust, the recent history is
+    /// walked for one that does — the difference between "this station has
+    /// nothing to say" and "we asked at a bad moment".
     static func latest(for stationId: String) async -> StationObservation? {
+        if let newest = await observation(atLatestFor: stationId),
+           newest.windKn != nil || newest.gustKn != nil {
+            return newest
+        }
+        return await recentObservation(for: stationId)
+    }
+
+    /// The last few records, newest first, for the first one carrying wind.
+    private static func recentObservation(for stationId: String) async -> StationObservation? {
+        guard let url = URL(string: "https://api.weather.gov/stations/\(stationId)/observations?limit=8"),
+              let data = await get(url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let features = root["features"] as? [[String: Any]]
+        else { return nil }
+        for feature in features {
+            guard let properties = feature["properties"],
+                  let encoded = try? JSONSerialization.data(withJSONObject: properties),
+                  let reading = decodeObservation(encoded),
+                  reading.windKn != nil || reading.gustKn != nil
+            else { continue }
+            return reading
+        }
+        return nil
+    }
+
+    private static func observation(atLatestFor stationId: String) async -> StationObservation? {
         guard let url = URL(string: "https://api.weather.gov/stations/\(stationId)/observations/latest"),
               let data = await get(url)
         else { return nil }
+        return decodeObservation(data, wrapped: true)
+    }
 
-        struct Payload: Decodable {
-            struct Properties: Decodable {
-                struct Quantity: Decodable {
-                    let value: Double?
-                    let unitCode: String?
-                }
-                let timestamp: String?
-                let textDescription: String?
-                let temperature: Quantity?
-                let windSpeed: Quantity?
-                let windGust: Quantity?
-                let windDirection: Quantity?
+    private static func decodeObservation(_ data: Data,
+                                          wrapped: Bool = false) -> StationObservation? {
+
+        struct Properties: Decodable {
+            struct Quantity: Decodable {
+                let value: Double?
+                let unitCode: String?
             }
-            let properties: Properties?
+            let timestamp: String?
+            let textDescription: String?
+            let temperature: Quantity?
+            let windSpeed: Quantity?
+            let windGust: Quantity?
+            let windDirection: Quantity?
         }
-        guard let p = (try? JSONDecoder().decode(Payload.self, from: data))?.properties else {
-            return nil
-        }
+        struct Payload: Decodable { let properties: Properties? }
+
+        let decoded: Properties? = wrapped
+            ? (try? JSONDecoder().decode(Payload.self, from: data))?.properties
+            : try? JSONDecoder().decode(Properties.self, from: data)
+        guard let p = decoded else { return nil }
 
         // NWS reports wind in km/h and temperature in °C, but says so in every
         // payload rather than promising it — so convert from what it declares
         // rather than from what it usually sends.
-        func knots(_ q: Payload.Properties.Quantity?) -> Double? {
+        func knots(_ q: Properties.Quantity?) -> Double? {
             guard let value = q?.value else { return nil }
             return switch q?.unitCode {
             case "wmoUnit:km_h-1": value / 1.852
@@ -1487,7 +1874,7 @@ enum NationalWeatherService {
             default: value / 1.852
             }
         }
-        func celsius(_ q: Payload.Properties.Quantity?) -> Double? {
+        func celsius(_ q: Properties.Quantity?) -> Double? {
             guard let value = q?.value else { return nil }
             return q?.unitCode == "wmoUnit:degF" ? (value - 32) * 5 / 9 : value
         }
@@ -1699,6 +2086,118 @@ enum TidesAndCurrents {
             ($0.id, $0.name, Geo.Coordinate(latitude: $0.latitude, longitude: $0.longitude))
         }
         return cached
+    }
+
+    /// The met stations — the ones with an anemometer on the pier.
+    ///
+    /// A separate index from the tide predictions above: `type=met` is the
+    /// subset that actually reports weather, three hundred-odd of them, and
+    /// asking for the whole station list and filtering would download four
+    /// times the bytes to throw most of them away.
+    static func metStations(near coordinate: Geo.Coordinate, limit: Int = 8,
+                            radius: Double = 250_000) async -> [FreeStation] {
+        await loadMetIndex()
+            .map { (station: $0, metres: Geo.distance(coordinate, $0.coordinate)) }
+            .filter { $0.metres <= radius }
+            .sorted { $0.metres < $1.metres }
+            .prefix(limit)
+            .map { FreeStation(id: $0.station.id, name: $0.station.name,
+                               coordinate: $0.station.coordinate, metres: $0.metres,
+                               source: .tidesAndCurrents) }
+    }
+
+    private static var cachedMet: [(id: String, name: String, coordinate: Geo.Coordinate)] = []
+
+    private static var metCacheURL: URL {
+        URL.cachesDirectory.appending(path: "noaa-met-stations.json")
+    }
+
+    private static func loadMetIndex() async -> [(id: String, name: String, coordinate: Geo.Coordinate)] {
+        if !cachedMet.isEmpty { return cachedMet }
+
+        func adopt(_ rows: [Distilled]) -> [(id: String, name: String, coordinate: Geo.Coordinate)] {
+            rows.map { ($0.id, $0.name,
+                        Geo.Coordinate(latitude: $0.latitude, longitude: $0.longitude)) }
+        }
+
+        if let data = try? Data(contentsOf: metCacheURL),
+           let rows = try? JSONDecoder().decode([Distilled].self, from: data), !rows.isEmpty {
+            cachedMet = adopt(rows)
+            return cachedMet
+        }
+
+        guard let url = URL(string: "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=met"),
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200
+        else { return [] }
+
+        struct Payload: Decodable {
+            struct Station: Decodable {
+                let id: String?
+                let name: String?
+                let lat: Double?
+                let lng: Double?
+            }
+            let stations: [Station]?
+        }
+        let rows = ((try? JSONDecoder().decode(Payload.self, from: data))?.stations ?? [])
+            .compactMap { station -> Distilled? in
+                guard let id = station.id, let name = station.name,
+                      let lat = station.lat, let lng = station.lng else { return nil }
+                return Distilled(id: id, name: name, latitude: lat, longitude: lng)
+            }
+        if let encoded = try? JSONEncoder().encode(rows) {
+            try? encoded.write(to: metCacheURL, options: .atomic)
+        }
+        cachedMet = adopt(rows)
+        return cachedMet
+    }
+
+    /// What the mast is reading right now.
+    ///
+    /// `units=english` is knots for wind, which is the one place in this API
+    /// where the imperial switch gives the unit a sailor already thinks in.
+    static func windReading(for stationId: String) async -> StationObservation? {
+        var components = URLComponents(
+            string: "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter")!
+        components.queryItems = [
+            .init(name: "product", value: "wind"),
+            .init(name: "station", value: stationId),
+            .init(name: "date", value: "latest"),
+            .init(name: "units", value: "english"),
+            .init(name: "time_zone", value: "gmt"),
+            .init(name: "format", value: "json"),
+        ]
+        guard let url = components.url,
+              let data = await ForecastCache.data(from: url, ttl: 540)
+        else { return nil }
+
+        struct Payload: Decodable {
+            struct Row: Decodable {
+                let t: String?
+                /// Speed, direction in degrees, gust — all as strings.
+                let s: String?
+                let d: String?
+                let g: String?
+            }
+            let data: [Row]?
+        }
+        guard let row = (try? JSONDecoder().decode(Payload.self, from: data))?.data?.last,
+              let speed = row.s.flatMap(Double.init)
+        else { return nil }
+
+        let parser = DateFormatter()
+        parser.dateFormat = "yyyy-MM-dd HH:mm"
+        parser.timeZone = TimeZone(identifier: "GMT")
+
+        return StationObservation(
+            windKn: speed,
+            gustKn: row.g.flatMap(Double.init),
+            directionDeg: row.d.flatMap(Double.init),
+            temperatureC: nil,
+            summary: nil,
+            at: row.t.flatMap(parser.date(from:))
+        )
     }
 
     /// Today's high and low waters for one station, in metres above MLLW.

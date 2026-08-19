@@ -2377,6 +2377,17 @@ struct StationDetailSheet: View {
         return observation
     }
 
+    /// What the grey number is, and where the measured one is instead.
+    private var modelCaption: String {
+        let what = "This is a forecast for where the station stands, not what it measured."
+        switch station.access {
+        case .subscription:
+            return what + " \(source) has the instrument's own reading behind a paid account."
+        default:
+            return what + " Open \(source) below to read this station's own numbers — free, no account needed."
+        }
+    }
+
     /// The provider's name on its own, for sentences that mention it.
     private var source: String {
         station.source.split(separator: " ·").first.map(String.init) ?? station.source
@@ -2410,8 +2421,8 @@ struct StationDetailSheet: View {
              "A government anemometer. The reading above comes straight from it — no account, no subscription.",
              "antenna.radiowaves.left.and.right")
         case .guestVisible:
-            ("Free to read",
-             "\(source) shows this station's wind without an account — open it for what the instrument actually measured.",
+            ("Free to read on \(source)",
+             "This station's own wind is published without an account. The app cannot read that network directly, which is why the figure above is a model and this button is the way to the measurement.",
              "gauge.with.needle")
         case .subscription:
             ("Subscription",
@@ -2465,6 +2476,18 @@ struct StationDetailSheet: View {
                         .foregroundStyle(.tertiary)
                 }
             } else if let model {
+                // Labelled above the figure, not below it. A caption under a
+                // 40-point number is read second if it is read at all, and
+                // this number is the one on the screen most likely to be
+                // mistaken for an instrument's.
+                Text("MODEL ESTIMATE")
+                    .font(.system(size: 11, weight: .heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 20, weight: .bold))
@@ -2487,12 +2510,13 @@ struct StationDetailSheet: View {
                     .foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
                 }
-                // Never dressed as the station's own reading. Grey, and
-                // labelled — the whole registry rule is that a model must
-                // not stand in for an instrument without saying so.
-                Text("Model estimate where this station stands — not its reading.")
+                // Never dressed as the station's own reading, and never a
+                // dead end: the sentence that says what this is also says
+                // where the real number lives.
+                Text(modelCaption)
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if isAsking {
                 LoadingPlaceholder()
                     .frame(height: 44)
@@ -2556,6 +2580,9 @@ struct StationDetailSheet: View {
             }
         }
         .padding(20)
+        // Clear of the drag indicator, which sits inside the sheet's own
+        // top inset and was landing on the station's name.
+        .padding(.top, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.deepSurface)
         .task {

@@ -425,7 +425,10 @@ struct SpotsTabView: View {
             StationDetailSheet(station: station, units: settings.units) { id, observation in
                 stationWind[id] = StationReading(observation: observation, at: .now)
             }
-                .presentationDetents([.medium])
+                // Two heights, and the content scrolls inside either: a
+                // station with three provider doors and a rider using large
+                // type do not fit the same card as a bare NOAA mast.
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
         .fullScreenSheet(isPresented: $isShowingConditions) {
@@ -2399,6 +2402,8 @@ struct StationDetailSheet: View {
         // happened to hold when the pin was tapped — this said "not
         // reporting" directly above a number it had just fetched.
         case .government where measured == nil:
+            // Kept short: this one has no number above it to explain, and
+            // the sheet is a glance rather than a page.
             // Half the network reports no wind in any given hour. Saying so
             // beats promising a reading that is not underneath this.
             // "Sensor", not "anemometer": the weather service's station
@@ -2406,7 +2411,7 @@ struct StationDetailSheet: View {
              // masts, and Sag Harbor's nearest is a rain gauge. Whether it
              // measures wind is exactly what the silence is telling you.
             ("Free public sensor",
-             "A government sensor, free to read. It is not reporting wind right now — its own page has the rest of what it sent.",
+             "A government sensor, free to read. It is not reporting wind right now.",
              "antenna.radiowaves.left.and.right")
         case .government where !station.links.isEmpty:
             // The point of saying this out loud: a rider who pays for one of
@@ -2422,16 +2427,70 @@ struct StationDetailSheet: View {
              "antenna.radiowaves.left.and.right")
         case .guestVisible:
             ("Free to read on \(source)",
-             "This station's own wind is published without an account. The app cannot read that network directly, which is why the figure above is a model and this button is the way to the measurement.",
+             "No account needed. The app cannot read that network directly, so the figure above is a model.",
              "gauge.with.needle")
         case .subscription:
             ("Subscription",
-             "\(source) wants a paid account before it shows this station's reading. The estimate above is the model, not the instrument.",
+             "\(source) wants a paid account before it shows this station's reading.",
              "lock.fill")
         }
     }
 
     var body: some View {
+        // The readable half scrolls, the doors stay put.
+        //
+        // It used to be one column pinned to a medium detent, which is a
+        // guess about how long the content is — and the content varies by
+        // station, by access tier, by how many provider doors the registry
+        // hung on it, and by the rider's type size. Whenever the guess was
+        // short the column overflowed and was clipped at both ends, which
+        // is how a station's own name came to be cut in half.
+        VStack(spacing: 0) {
+            ScrollView {
+                detail
+                    .padding(20)
+                    // Clear of the drag indicator, which sits inside the
+                    // sheet's own top inset and was landing on the name.
+                    .padding(.top, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+
+            doors
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 20)
+                .background(Color.deepSurface)
+        }
+        .background(Color.deepSurface)
+        .task {
+            guard measured == nil else { return }
+            isAsking = true
+            defer { isAsking = false }
+
+            // Ask the instrument itself first. The map's reading may simply
+            // not have come round to this one yet, and "no reading in our
+            // cache" is not the same claim as "not reporting".
+            if let free = station.free {
+                fetched = await FreeStations.latest(for: free)
+                if let fetched, fetched.windKn != nil || fetched.gustKn != nil {
+                    onReading(free.id, fetched)
+                }
+                if measured != nil { return }
+            }
+
+            // A government station that is genuinely silent stays silent.
+            // The app can read it, so a model standing in its place would
+            // be answering a question the rider did not ask — and it is
+            // exactly the substitution the registry rules forbid. The
+            // commercial meters the app can never read are the only ones
+            // the model speaks for.
+            guard station.access != .government, model == nil else { return }
+            model = await guide.currentWind(at: station.coordinate)
+        }
+    }
+
+    private var detail: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(station.name)
@@ -2546,8 +2605,10 @@ struct StationDetailSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 0)
+        }
+    }
 
+    private var doors: some View {
             VStack(spacing: 8) {
                 Button {
                     openURL(station.url)
@@ -2578,38 +2639,6 @@ struct StationDetailSheet: View {
                     .buttonStyle(.plain)
                 }
             }
-        }
-        .padding(20)
-        // Clear of the drag indicator, which sits inside the sheet's own
-        // top inset and was landing on the station's name.
-        .padding(.top, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.deepSurface)
-        .task {
-            guard measured == nil else { return }
-            isAsking = true
-            defer { isAsking = false }
-
-            // Ask the instrument itself first. The map's reading may simply
-            // not have come round to this one yet, and "no reading in our
-            // cache" is not the same claim as "not reporting".
-            if let free = station.free {
-                fetched = await FreeStations.latest(for: free)
-                if let fetched, fetched.windKn != nil || fetched.gustKn != nil {
-                    onReading(free.id, fetched)
-                }
-                if measured != nil { return }
-            }
-
-            // A government station that is genuinely silent stays silent.
-            // The app can read it, so a model standing in its place would
-            // be answering a question the rider did not ask — and it is
-            // exactly the substitution the registry rules forbid. The
-            // commercial meters the app can never read are the only ones
-            // the model speaks for.
-            guard station.access != .government, model == nil else { return }
-            model = await guide.currentWind(at: station.coordinate)
-        }
     }
 }
 

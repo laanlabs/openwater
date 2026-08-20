@@ -80,10 +80,15 @@ struct SpotsTabView: View {
     /// under this map's own pins: the flow map's wind, or the ocean
     /// model's current.
     @AppStorage("spots.washLayer") private var washLayerRaw = WashLayer.off.rawValue
-    /// The current wash cut to the coastline — on by default, and a switch
-    /// because the coastline comes from a second free endpoint that can be
-    /// refused or absent, and a rider who wants the field back should not
-    /// have to wait for one.
+    /// The current wash cut to the coastline — on by default, now that the
+    /// coastline is one the app carries rather than one it has to buy a
+    /// sample at a time. See `Coastline` for the two versions this took.
+    ///
+    /// Still a switch: Natural Earth's 1:10m shoreline is a generalisation,
+    /// and a rider whose launch sits behind a breakwater it does not know
+    /// about should be able to get the field back. The default is duplicated
+    /// in `WindWashModel.masksLand`, which is read from a model with no view
+    /// around it; the two have to agree.
     @AppStorage("spots.maskLand") private var masksLand = true
     @State private var windWash = WindWashModel()
 

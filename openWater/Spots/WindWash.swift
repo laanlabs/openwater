@@ -186,15 +186,13 @@ final class WindWashModel {
     /// until the thumb actually crosses an hour.
     private var displayedIndex: Int?
     private var fieldStamp = UUID()
-    /// Where the land is, for the layer that must not paint over it. Filled
-    /// in tile by tile as a rider looks around, and kept between regions —
-    /// the coast does not move, so a tile fetched once serves every zoom and
-    /// every hour after it.
+    /// Where the land is, for the layer that must not paint over it.
+    ///
+    /// Rasterized from the bundled coastline for exactly the field's own
+    /// rectangle, so every cell the wash draws is inside it — there is no
+    /// half-loaded state to wait out and no coarser answer for a wider view.
     private var waterMask = WaterMask()
     private var maskTask: Task<Void, Never>?
-    /// What the rider is looking at, kept so the mask can be judged complete
-    /// for *this* view before any of it is trusted.
-    private var visibleRegion: MKCoordinateRegion?
 
     private static let hourLabel: DateFormatter = {
         let formatter = DateFormatter()
@@ -243,12 +241,8 @@ final class WindWashModel {
         let hour = hourly[index]
         // The mask is the current layer's business only — wind blows over
         // land, and a wind wash that stopped at the shoreline would hide the
-        // very thing a rider on a beach is asking about — and only once it
-        // covers the whole view, so the coastline arrives in one piece
-        // rather than as a chequerboard of loaded tiles.
-        let mask = loadedLayer == .currents && Self.masksLand
-            && visibleRegion.map { waterMask.covers($0) } == true
-            ? waterMask : WaterMask()
+        // very thing a rider on a beach is asking about.
+        let mask = loadedLayer == .currents && Self.masksLand ? waterMask : WaterMask()
         cells = Self.buildCells(speeds: hour.speeds, region: region,
                                 layer: loadedLayer, mask: mask)
         field = Field(
@@ -316,12 +310,10 @@ final class WindWashModel {
         }
 
     /// The land-mask switch moved: rebuild what is on screen with the new
-    /// answer, and start fetching tiles if it just came on.
+    /// answer, rasterizing the coastline if it just came on.
     func maskPreferenceChanged(for visible: MKCoordinateRegion, layer: WashLayer) {
         guard layer == .currents else { return }
-        visibleRegion = visible
-        if Self.masksLand { loadMask(for: visible) }
-        apply(force: true)
+        if Self.masksLand { loadMask() } else { apply(force: true) }
     }
 
     /// The map settled somewhere — refetch if it wandered far enough from
@@ -329,74 +321,43 @@ final class WindWashModel {
     /// Thresholds are the flow map's own.
     /// Whether the current wash is cut to the coastline.
     ///
-    /// A switch rather than a certainty, because the mask leans on a second
-    /// free endpoint: where it is rate-limited, offline or simply wrong about
-    /// a stretch of water, a rider should be able to turn it off and get the
-    /// field back rather than stare at a hole where their launch is.
+    /// Still a switch, though the coastline no longer depends on a network
+    /// that can refuse it. Natural Earth's 1:10m shoreline is a generalisation,
+    /// and where it is simply wrong about a stretch of water — a dredged
+    /// channel, a new breakwater, an island below its resolution — a rider
+    /// should be able to turn it off and get the field back rather than stare
+    /// at a hole where their launch is.
+    ///
+    /// The default lives here *and* in `SpotsTabView`, because this is read
+    /// from a model with no view around it. Both say on; they have to.
     static var masksLand: Bool {
         UserDefaults.standard.object(forKey: "spots.maskLand") as? Bool ?? true
     }
 
     func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer) {
         guard layer != .off else { return clear() }
-        visibleRegion = visible
-        if layer == .currents, Self.masksLand { loadMask(for: visible) }
         guard layer != loadedLayer || needsReload(for: visible) else { return }
         reload(for: visible, layer: layer)
     }
 
-    /// Fill in the water mask for what is on screen.
+    /// Draw the coastline for the field's own rectangle.
     ///
-    /// Twelve tiles a pass, nearest the middle first — that is a bay's worth
-    /// at the zoom a rider reads a launch at, and the rest arrives as they
-    /// pan. Every tile is a single hundred-point request cached for half a
-    /// year, so this is loud exactly once per stretch of coast and silent
-    /// for ever after.
-    private func loadMask(for visible: MKCoordinateRegion) {
-        let wanted = WaterMask.keys(covering: visible).filter { !waterMask.has($0) }
-        guard !wanted.isEmpty else { return }
+    /// Off the main actor because rasterizing a continent is tens of
+    /// milliseconds of path filling, and the map is being panned while it
+    /// happens. The wash paints unmasked until this lands and switches over in
+    /// one go — the same handover the tiled version needed, now measured in a
+    /// frame or two rather than a rider's patience.
+    private func loadMask() {
+        guard let region = fieldRegion else { return }
         maskTask?.cancel()
         maskTask = Task { [weak self] in
-            // Every tile this view needs, nearest the middle first — the
-            // mask is only used once it covers the view, so stopping half
-            // way would mean never using it at all. The grain is chosen so
-            // that is two dozen requests at most.
-            var missed = false
-            var gained: [(WaterMask.Key, [Bool])] = []
-            for key in wanted {
-                guard !Task.isCancelled else { return }
-                if let samples = await WaterMask.fetch(key) {
-                    gained.append((key, samples))
-                } else {
-                    missed = true
-                }
-                // A breath between requests. Open-Meteo counts by the
-                // minute, and a burst of two dozen alongside the wash's own
-                // fetches is exactly how the first version of this got
-                // itself refused and left the coastline unmasked.
-                try? await Task.sleep(for: .milliseconds(80))
-            }
+            let drawn = await Task.detached(priority: .userInitiated) {
+                Coastline.mask(for: region)
+            }.value
             guard let self, !Task.isCancelled else { return }
-            for (key, samples) in gained { self.waterMask.insert(samples, for: key) }
-            if !gained.isEmpty {
-                // The hour has not moved, only what counts as water — so
-                // this rebuild has to be forced past the no-op guard.
-                self.apply(force: true)
-            }
-            // Something was refused or offline. Nothing here is urgent —
-            // the wash paints unmasked meanwhile — so wait out the minute
-            // window and try the rest once.
-            guard missed, !Task.isCancelled else { return }
-            try? await Task.sleep(for: .seconds(65))
-            guard !Task.isCancelled else { return }
-            var second: [(WaterMask.Key, [Bool])] = []
-            for key in wanted where !self.waterMask.has(key) {
-                guard !Task.isCancelled else { return }
-                if let samples = await WaterMask.fetch(key) { second.append((key, samples)) }
-                try? await Task.sleep(for: .milliseconds(80))
-            }
-            guard !second.isEmpty, !Task.isCancelled else { return }
-            for (key, samples) in second { self.waterMask.insert(samples, for: key) }
+            self.waterMask = drawn
+            // The hour has not moved, only what counts as water — so this
+            // rebuild has to be forced past the no-op guard.
             self.apply(force: true)
         }
     }
@@ -505,6 +466,11 @@ final class WindWashModel {
             loadedLayer = layer
             fieldStamp = UUID()
             displayedIndex = nil
+            // The rectangle just changed, so the coastline drawn for the old
+            // one is the wrong shape. Redrawn against the new field before
+            // anything asks it a question.
+            waterMask = WaterMask()
+            if layer == .currents, Self.masksLand { loadMask() }
             if axis.isEmpty {
                 // An answer with no hours at all — an inland window under
                 // the ocean model. The old region's cells must go with it,

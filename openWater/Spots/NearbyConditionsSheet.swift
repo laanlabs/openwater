@@ -1629,7 +1629,8 @@ struct NearbyConditionsSheet: View {
         // may wait on that.
         async let quarterly = OpenMeteo.nearTerm(at: here)
         async let waveAgencies = OpenMeteo.swellOutlook(at: here)
-        async let radarMinutes = AppleWeather.minuteRain(at: here)
+        async let radarMinutes = AppleWeather.minuteRain(
+            at: here, hours: MinuteRainCard.windowHours)
         // Keyed to the spot's own midnight, which the detail run above has
         // already resolved — the normals only line up with the forecast they
         // are drawn against if both weeks start on the same day.

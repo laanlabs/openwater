@@ -277,6 +277,53 @@ final class AppleWeatherTests: XCTestCase {
         XCTAssertEqual(minutes[60].intensityMmH, 2)
     }
 
+    /// The window the card actually asks for. Twelve hours is one hour of
+    /// radar and eleven of hourly model, and the model half has to reach the
+    /// far end of it — a run of hourly entries that stops short leaves the
+    /// strip trailing off into nothing rather than saying so.
+    func testStitchCarriesTheModelToTheEndOfATwelveHourWindow() throws {
+        let radar = samples(60, everySeconds: 60, from: start, mmH: 4)
+        // Thirteen hourly entries: the hour already under way, plus twelve.
+        let hourly = samples(13, everySeconds: 3600, from: start.addingTimeInterval(-1800), mmH: 2)
+
+        let minutes = MinuteRain.stitch(radar: radar, hourly: hourly,
+                                        hours: MinuteRainCard.windowHours, from: start)
+
+        XCTAssertEqual(minutes.count, MinuteRainCard.windowHours * 60)
+        XCTAssertEqual(minutes.filter(\.isRadar).count, 60)
+        // The last minute is a minute short of the window's end, and still wet.
+        let last = try XCTUnwrap(minutes.last)
+        XCTAssertEqual(last.at.timeIntervalSince(start),
+                       Double(MinuteRainCard.windowHours) * 3600 - 60, accuracy: 0.001)
+        XCTAssertEqual(last.intensityMmH, 2)
+        // One a minute the whole way, with no gap at the seam or anywhere after.
+        for index in 1..<minutes.count {
+            XCTAssertEqual(minutes[index].at.timeIntervalSince(minutes[index - 1].at), 60,
+                           accuracy: 0.001, "gap at \(index)")
+        }
+    }
+
+    /// An hourly run that runs out mid-window stops the strip where the data
+    /// stops rather than inventing minutes to fill the rest.
+    func testStitchStopsWhereTheHourlyRunStops() throws {
+        let hourly = samples(4, everySeconds: 3600, from: start.addingTimeInterval(-1800), mmH: 2)
+        let minutes = MinuteRain.stitch(radar: [], hourly: hourly,
+                                        hours: MinuteRainCard.windowHours, from: start)
+
+        // Four hourly entries opening half an hour back cover three and a
+        // half hours of the twelve asked for. Counted by where the last
+        // minute lands rather than by a total, because the window opens on
+        // the minute boundary `now` falls inside — up to fifty-nine seconds
+        // before `now` — and that offset is worth a minute at the edge.
+        XCTAssertLessThan(minutes.count, MinuteRainCard.windowHours * 60)
+        XCTAssertTrue(minutes.allSatisfy { !$0.isRadar })
+
+        let lastHourOpens = start.addingTimeInterval(150 * 60)
+        let last = try XCTUnwrap(minutes.last)
+        XCTAssertGreaterThanOrEqual(last.at, lastHourOpens)
+        XCTAssertLessThan(last.at, lastHourOpens.addingTimeInterval(3600))
+    }
+
     /// No radar here — most of the world. The model carries the whole window
     /// rather than the card vanishing, which is the point of stitching at all.
     func testStitchWithoutRadarFallsBackToTheModelThroughout() {

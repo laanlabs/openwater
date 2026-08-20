@@ -223,9 +223,18 @@ struct SpeedPage: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Heart rate is off", systemImage: "heart.slash")
                         .font(.headline)
-                    Text("openWater was not given permission to read it, so this session will have none.")
+                    Text("This session will have none.")
+                        .font(.body)
+                    // On a screen this size the temptation is to shrink the
+                    // type until everything fits. The route is the whole
+                    // point of the sheet, so it keeps body size and the sheet
+                    // scrolls instead.
+                    Text("On your iPhone:")
                         .font(.footnote)
-                    Text("Turn it on from the Watch app on your iPhone: Privacy & Security ▸ Health ▸ openWater. It applies to the next session.")
+                        .foregroundStyle(.secondary)
+                    Text("Health app ▸ profile ▸ Privacy ▸ Apps ▸ openWater ▸ Heart Rate")
+                        .font(.body.weight(.medium))
+                    Text("Applies to your next session.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

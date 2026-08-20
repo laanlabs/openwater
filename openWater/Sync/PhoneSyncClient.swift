@@ -151,7 +151,7 @@ final class PhoneSyncClient: NSObject {
         if reply["canRead"] as? Bool == true {
             return "Heart rate is on — the watch can read it, and your sessions will carry it."
         }
-        return "Heart rate is off. On this iPhone: Watch app ▸ Privacy & Security ▸ Health ▸ openWater, and turn on Heart Rate. It applies to the next session."
+        return "Heart rate is off. On this iPhone: Health app ▸ your profile ▸ Privacy ▸ Apps ▸ openWater, and turn on Heart Rate. It applies to the next session."
     }
 
     func pushRecords() {

@@ -39,14 +39,19 @@ struct WatchHeartRateCheckTests {
 
     @Test("Asked, and no sample, names the exact switch to turn on")
     func denied() {
-        // The one case worth being pedantic about: a rider who has been told
+        // The one case worth being pedantic about, twice over. A rider told
         // "permission is off" and not told where the switch is will look in
-        // this app's settings, which is the one place it is not.
+        // this app's settings, which is the one place it is not — and the
+        // first version of this sent them to the Watch app's Privacy section,
+        // which is the wrong place too. HealthKit's read permissions live in
+        // the Health app, under the profile, and nowhere else.
         let verdict = PhoneSyncClient.heartRateVerdict(
             from: ["available": true, "asked": true, "canRead": false])
-        #expect(verdict.contains("Watch app"))
-        #expect(verdict.contains("Health"))
+        #expect(verdict.contains("Health app"))
+        #expect(verdict.contains("profile"))
+        #expect(verdict.contains("Privacy ▸ Apps"))
         #expect(verdict.contains("openWater"))
+        #expect(!verdict.contains("Watch app"))
     }
 
     @Test("A reply that says nothing is not read as good news")

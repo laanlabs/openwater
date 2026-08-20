@@ -601,11 +601,19 @@ struct HealthCard: View {
 
     var body: some View {
         if heartRateMissingFromWatch {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Label("No heart rate in this recording", systemImage: "heart.slash")
-                    .font(.subheadline.weight(.semibold))
-                Text("The watch reads it only with permission. Watch app on this iPhone ▸ Privacy & Security ▸ Health ▸ openWater — it applies to the next session.")
-                    .font(.caption)
+                    .font(.headline)
+                Text("The watch reads it only with permission.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                // Body size and full contrast: this is a route somebody is
+                // meant to follow, not a footnote to be skimmed past.
+                Text("Health app ▸ your profile picture ▸ Privacy ▸ Apps ▸ openWater ▸ Heart Rate")
+                    .font(.body.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("It applies to your next session — this one cannot be recovered.")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

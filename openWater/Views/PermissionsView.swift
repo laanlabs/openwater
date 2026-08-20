@@ -35,6 +35,7 @@ struct PermissionsView: View {
                 Text("Recording")
             } footer: {
                 Text("A session is a GPS track — without location there is nothing to record. openWater asks only for While Using, and keeps recording with the screen off because a session is an active workout, not a background app.")
+                    .font(.subheadline)
             }
 
             Section {
@@ -47,6 +48,7 @@ struct PermissionsView: View {
                 )
             } footer: {
                 Text("Approximate location is a few kilometres wide. It is fine for a weather forecast and useless for a speed — a track built from it would be a scribble with nonsense numbers on it.")
+                    .font(.subheadline)
             }
 
             Section {
@@ -57,9 +59,10 @@ struct PermissionsView: View {
                         icon("heart.fill", tone: heartTone)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Heart rate on the watch")
+                                .font(.body.weight(.medium))
                                 .foregroundStyle(.primary)
                             Text(sync.isCheckingHeartRate ? "Asking the watch…" : "Tap to check")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
@@ -70,17 +73,29 @@ struct PermissionsView: View {
 
                 if let message = sync.heartRateMessage {
                     Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.body)
+                        .foregroundStyle(heartTone == .good ? AnyShapeStyle(.primary)
+                                                            : AnyShapeStyle(Color.orange))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                // The steps, in the size a person reads instructions at.
+                //
+                // These lived in a Form footer — caption-sized grey text under
+                // a grey background — which is where an app puts something it
+                // does not really expect anybody to act on. Heart rate is the
+                // single most asked-for thing the watch does, and the path to
+                // it is four taps that nobody can guess: it is not in this
+                // app's settings, and it is not in the Watch app either.
+                howToEnableHeartRate
             } header: {
                 Text("Apple Watch")
             } footer: {
                 // The honest asymmetry: this phone has no HealthKit at all, so
                 // it cannot read the answer — only the watch can, and only by
                 // asking its own store for a sample.
-                Text("Heart rate is read on the watch, so only the watch can answer. The check asks it directly. If the answer is no, the switch is in the Watch app on this iPhone under Privacy & Security ▸ Health — watchOS asks once and never again, so that is the only way back.")
+                Text("Heart rate is read on the watch, so only the watch can answer — the check above asks it directly.")
+                    .font(.subheadline)
             }
 
             Section {
@@ -88,12 +103,50 @@ struct PermissionsView: View {
                     .foregroundStyle(.secondary)
             } footer: {
                 Text("Jumps, pumps and time on foil are read from the accelerometer on whichever device is recording. Neither iPhone nor Apple Watch asks for that, so there is nothing here to switch on — and nothing you can have turned off by accident.")
+                    .font(.subheadline)
             }
         }
         .navigationTitle("Permissions")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Permissions")
         .onAppear { permissions.refresh() }
+    }
+
+    /// Where the switch actually is, spelled out.
+    ///
+    /// Numbered because it is a route rather than a fact, and at body size
+    /// because a rider is going to read it while holding the phone in the
+    /// other hand and tapping along.
+    private var howToEnableHeartRate: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("How to turn it on", systemImage: "heart.text.square")
+                .font(.headline)
+
+            step(1, "Open the **Health** app on this iPhone")
+            step(2, "Tap your **profile picture**, top right")
+            step(3, "Under Privacy, tap **Apps**, then **openWater**")
+            step(4, "Turn on **Heart Rate** — or Turn On All")
+
+            Text("watchOS asks once and never again, so this is the only way back. It applies to your next session, not the ones already recorded.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func step(_ number: Int, _ text: LocalizedStringKey) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(number)")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Color.accentColor, in: Circle())
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var heartTone: Tone {
@@ -141,8 +194,9 @@ struct PermissionsView: View {
             icon(symbol, tone: tone)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
+                    .font(.body.weight(.medium))
                 Text(detail)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(tone == .good ? AnyShapeStyle(.secondary)
                                                    : AnyShapeStyle(tone.colour))
                     .fixedSize(horizontal: false, vertical: true)

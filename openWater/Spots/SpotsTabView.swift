@@ -91,6 +91,10 @@ struct SpotsTabView: View {
     /// around it; the two have to agree.
     @AppStorage("spots.maskLand") private var masksLand = true
     @State private var windWash = WindWashModel()
+    /// How wide the map is drawn. The wash needs it to turn "one device
+    /// pixel" into degrees — see `WindWashModel.buildLayout`.
+    @State private var mapWidth: CGFloat = 0
+    @Environment(\.displayScale) private var displayScale
 
     /// The hardware layers: the guide's wind meters and cams, and NDBC's
     /// buoys, as pins around the browsed water. Remembered like the wash.
@@ -481,7 +485,8 @@ struct SpotsTabView: View {
             guide.forgetWind()
             if washLayer != .off, let region = visibleRegion {
                 windWash.clear()
-                windWash.viewSettled(on: region, layer: washLayer)
+                windWash.viewSettled(on: region, layer: washLayer,
+                                     widthPoints: mapWidth, displayScale: displayScale)
             }
         }
         .task(id: windRefreshKey) {
@@ -693,13 +698,33 @@ struct SpotsTabView: View {
             Map(position: $camera) {
             // The wash goes first: map content draws in order, and the
             // field belongs under every pin, handle and marker.
+            // Seventeen hundred quads, and SwiftUI re-resolves every one
+            // of them into a polygon overlay on every pass of this body —
+            // about 130 ms of blocked main thread, measured, whether or
+            // not a single cell has changed. Lifting the ForEach into its
+            // own `MapContent` struct was tried and does not help: the
+            // subtree is rebuilt regardless. So the rule this map lives by
+            // is that its body must not run during a gesture — see
+            // `MapClock`, which keeps a drag's hours to itself.
             ForEach(washCells) { cell in
-                // The stroke is the fill's own colour: it papers over the
-                // antialiased hairline between neighbouring quads, which
-                // the saturated wash would otherwise show as a faint grid.
+                // Fill only. There used to be a stroke in the fill's own
+                // colour here, to paper over the hairline between
+                // neighbouring quads — and it made the hairline instead.
+                // Alpha does not add, it composites, so a translucent
+                // stroke laid over two translucent fills came out half
+                // again as strong as the field around it: measured +73
+                // against a field reading 138, which on the dark basemap is
+                // a lit grid over the water, and is what a rider
+                // photographed and sent us.
+                //
+                // Removing it only halved that, because the real cause is
+                // underneath: MapKit fills a polygon about a pixel past its
+                // own edge, so abutting quads paint the shared pixels
+                // twice whatever the stroke does. That is cancelled in
+                // `WindWashModel.buildLayout`, which pulls each quad in by
+                // that pixel.
                 MapPolygon(coordinates: cell.coordinates)
                     .foregroundStyle(cell.color)
-                    .stroke(cell.color, lineWidth: 1)
             }
             UserAnnotation()
             // Pins step aside while a route is drawn: the map is a canvas
@@ -805,7 +830,7 @@ struct SpotsTabView: View {
                                         .font(.system(size: 9, weight: .heavy))
                                         .foregroundStyle(.white)
                                         .frame(width: 18, height: 18)
-                                        .background(Color.primary.opacity(0.6), in: Circle())
+                                        .background(Color.mapInk.opacity(0.6), in: Circle())
                                         .overlay(Circle().stroke(.white, lineWidth: 1.5))
                                 }
                                 .buttonStyle(.plain)
@@ -836,7 +861,7 @@ struct SpotsTabView: View {
                                 .rotationEffect(.degrees(arrow.deg + 180))
                                 .foregroundStyle(.white)
                                 .frame(width: 20, height: 20)
-                                .background(Color.primary.opacity(0.7), in: Circle())
+                                .background(Color.mapInk.opacity(0.7), in: Circle())
                                 .overlay(Circle().stroke(.white, lineWidth: 1.5))
                                 .allowsHitTesting(false)
                         }
@@ -871,11 +896,24 @@ struct SpotsTabView: View {
                               pointsOfInterest: .excludingAll, showsTraffic: false)
                   : settings.mapStyle.mapStyle)
         .mapControlVisibility(.hidden)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            mapWidth = width
+            if let visibleRegion {
+                windWash.mapMeasured(widthPoints: width, displayScale: displayScale,
+                                     visible: visibleRegion)
+            }
+        }
         .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
-            windWash.viewSettled(on: context.region, layer: washLayer)
+            windWash.cameraSettled()
+            windWash.viewSettled(on: context.region, layer: washLayer,
+                                 widthPoints: mapWidth, displayScale: displayScale)
         }
         .onMapCameraChange(frequency: .continuous) { context in
+            // The wash holds its repaint while this is true — see
+            // `WindWashModel.cameraMoving`. Cheap and idempotent, so it is
+            // safe to call on every frame of a pan.
+            windWash.cameraMoving()
             // Live centre for the crosshairs (see `editingCentre`). The
             // guard keeps ordinary pans from churning state every frame;
             // the single nil write on exit stops a stale centre from
@@ -894,6 +932,32 @@ struct SpotsTabView: View {
                 WashParticleLayer(field: washField, proxy: proxy)
             }
         }
+        // The field is coming, and the water is bare until it does.
+        //
+        // Drawing the wash costs the main thread the better part of a second
+        // — seventeen hundred polygons handed to MapKit, which is work no
+        // thread but this one may do — so the field is kept off the map
+        // while it is being fetched or rebuilt, and painted once when the
+        // map is still. That is what leaves the map free to be panned while
+        // the rider waits, and this says what the waiting is for rather than
+        // letting the water simply go empty.
+        .overlay(alignment: .center) {
+            if washLayer != .off, windWash.isBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(windWash.isLoading ? "Getting the wind" : "Drawing the field")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
+        }
+        .animation(.snappy, value: windWash.isBusy)
         // The centre pin: pinned to the glass, never a map annotation. As an
         // annotation it would join MapKit's diffing — the strobe class of bug
         // the pins-as-state comment above exists to prevent — and its
@@ -1322,12 +1386,32 @@ struct SpotsTabView: View {
                     // the rider can change by tapping it.
                     Button { isPickingModel = true } label: {
                         HStack(spacing: 4) {
+                            // Two things the caption has to be honest
+                            // about: the field is refetched whenever the map
+                            // wanders far enough, and it is rebuilt a beat
+                            // behind the clock while a thumb is on the time
+                            // slider. In both the wash on screen is older
+                            // than the caption's own hour, and the spinner
+                            // is the smallest way to say "catching up"
+                            // rather than let the map quietly disagree with
+                            // itself.
+                            if windWash.isLoading || windWash.isRebuilding {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .transition(.opacity)
+                            }
                             Text("\(caption) · \(windWash.scrubLabel ?? "now")")
+                                // A model name, a clock and a chevron: at
+                                // large text sizes this wrapped to two lines
+                                // and sat across the map's own labels.
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                             if washLayer == .wind {
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.system(size: 8, weight: .bold))
                             }
                         }
+                        .animation(.snappy, value: windWash.isLoading || windWash.isRebuilding)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
@@ -1361,6 +1445,14 @@ struct SpotsTabView: View {
                     Text(label)
                         .font(.subheadline.weight(.bold))
                         .monospacedDigit()
+                        // The row is four fixed 44pt buttons and this, so
+                        // this is the only part of it that can be squeezed —
+                        // and under pressure SwiftUI squeezed it: a rider
+                        // sent us a photograph of "18:00" wrapped one
+                        // character per line inside the chip. One line, and
+                        // it shrinks a little before it ever truncates.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
             .foregroundStyle(mapScrub == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
@@ -1372,6 +1464,12 @@ struct SpotsTabView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Capped here and nowhere else on this map. The chip shares a fixed
+        // row with four 44pt buttons, so past a point it cannot grow without
+        // taking the row apart — and the hour it is showing is written again,
+        // uncapped, in the slider's own headline directly below, so nothing
+        // is only legible here.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .accessibilityLabel(mapScrub == nil
                             ? "Show the time slider"
                             : "Showing \(scrubButtonLabel ?? ""). Show the time slider")
@@ -1379,49 +1477,12 @@ struct SpotsTabView: View {
 
     /// The slider itself: whole hours from six behind now to three days
     /// ahead — the window the hourly fetches actually buy. Every pin and
-    /// both washes answer for the hour under the thumb.
+    /// both washes answer for the hour the thumb settles on; the drag
+    /// itself stays inside `MapClock`, for the reasons written there.
     private var timeSlider: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 10) {
-                Text(scrubHeadline)
-                    .font(.subheadline.weight(.bold))
-                    .monospacedDigit()
-                Spacer(minLength: 0)
-                if mapScrub != nil {
-                    Button("Now") { setScrub(hoursFromNow: 0) }
-                        .font(.subheadline.weight(.semibold))
-                }
-                Button {
-                    withAnimation(.snappy) { isShowingTimeControl = false }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hide the time slider")
-            }
-            Slider(value: scrubHoursBinding,
-                   in: Double(-SpotGuideStore.scrubPastHours)...Double(SpotGuideStore.scrubForecastHours),
-                   step: 1)
-            HStack {
-                Text("−\(SpotGuideStore.scrubPastHours)h")
-                Spacer()
-                Text("now")
-                    // Now sits where it falls on the track, not at the
-                    // middle: six hours behind against seventy-two ahead.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer()
-                Text("+3d")
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.tertiary)
-            .monospacedDigit()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+        MapClock(hoursFromNow: mapScrub.map { Int(($0.timeIntervalSinceNow / 3600).rounded()) },
+                 commit: { setScrub(hoursFromNow: $0) },
+                 close: { withAnimation(.snappy) { isShowingTimeControl = false } })
     }
 
     /// Every pin's reading for the hour the map is holding. Built once per
@@ -1461,26 +1522,8 @@ struct SpotsTabView: View {
         "\(mapScrub != nil)|\(forecastModelRaw)|\(pins.map(\.spotId).joined(separator: ","))"
     }
 
-    /// Whole hours off now — the slider's own units, rounded so the thumb
-    /// lands on hours the model actually published.
-    private var scrubHoursBinding: Binding<Double> {
-        Binding(
-            get: {
-                guard let mapScrub else { return 0 }
-                return (mapScrub.timeIntervalSinceNow / 3600).rounded()
-            },
-            set: { setScrub(hoursFromNow: Int($0.rounded())) }
-        )
-    }
-
     private func setScrub(hoursFromNow hours: Int) {
-        // Zero means now, and now means nil: the live `current=` reading is
-        // a better answer for this hour than the hourly forecast of it.
-        let instant: Date? = hours == 0
-            ? nil
-            : Calendar.current.date(bySetting: .minute, value: 0,
-                                    of: Date().addingTimeInterval(Double(hours) * 3600))
-                ?? Date().addingTimeInterval(Double(hours) * 3600)
+        let instant = MapClock.instant(hoursFromNow: hours)
         mapScrub = instant
         windWash.scrub(to: instant)
     }
@@ -1490,15 +1533,6 @@ struct SpotsTabView: View {
         guard let mapScrub else { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = Calendar.current.isDateInToday(mapScrub) ? "HH:mm" : "EEE HH:mm"
-        return formatter.string(from: mapScrub)
-    }
-
-    /// The slider's headline: the full day and hour, or "Now".
-    private var scrubHeadline: String {
-        guard let mapScrub else { return "Now" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = Calendar.current.isDateInToday(mapScrub)
-            ? "'Today' HH:mm" : "EEE d MMM · HH:mm"
         return formatter.string(from: mapScrub)
     }
 
@@ -1516,7 +1550,8 @@ struct SpotsTabView: View {
                     if layer == .off {
                         windWash.clear()
                     } else if let region = visibleRegion {
-                        windWash.viewSettled(on: region, layer: layer)
+                        windWash.viewSettled(on: region, layer: layer,
+                                             widthPoints: mapWidth, displayScale: displayScale)
                     }
                 }
             )) {
@@ -1556,6 +1591,9 @@ struct SpotsTabView: View {
                 || !showSpots
             Image(systemName: "square.3.layers.3d")
                 .font(.body.weight(.semibold))
+                // Capped for the reason in `squareLabel`: a fixed 44pt frame
+                // cannot hold a glyph that scales without one.
+                .dynamicTypeSize(...DynamicTypeSize.xLarge)
                 .foregroundStyle(isDressed ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                 .frame(width: 44, height: 44)
                 .background(isDressed ? AnyShapeStyle(.tint) : AnyShapeStyle(.regularMaterial),
@@ -1839,6 +1877,15 @@ struct SpotsTabView: View {
 
     private func squareLabel(_ symbol: String, showsBadge: Bool = false) -> some View {
         Image(systemName: symbol)
+            // The frame is a fixed 44, because the row is four of these and
+            // a clock and it has to fit a phone. The glyph inside it was not
+            // fixed, so at the accessibility sizes it grew straight out
+            // through the material and into its neighbours — four symbols
+            // overlapping each other across the top of the map. Capped to
+            // match the clock chip beside it; the labels these stand for are
+            // in their accessibility labels, and every screen they open
+            // scales without a ceiling.
+            .dynamicTypeSize(...DynamicTypeSize.xLarge)
             .frame(width: 44, height: 44)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
@@ -1942,7 +1989,7 @@ struct SpotsTabView: View {
             }
         } content: {
             if case .inspecting(let route) = routeMode {
-                RoutePanel(route: route, weather: routeWeather)
+                RoutePanel(route: route, weather: routeWeather, wash: windWash)
             } else if guide.spots.isEmpty {
                 VStack(spacing: 8) {
                     if guide.isLoading {
@@ -3290,5 +3337,132 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+// MARK: - The map's clock
+
+/// The time slider, with the drag kept to itself.
+///
+/// Its own state for the thumb is the whole point. Bound straight to the
+/// tab's `mapScrub`, every step of a drag re-runs the tab's body, and the
+/// tab's body builds the map — with a wash up, seventeen hundred polygons
+/// re-resolved into overlays per step, about 130 ms of blocked main thread
+/// apiece. That is the stall: not the arithmetic behind the field, which is
+/// off the main actor now, but the map being handed the same quads over and
+/// over by a body that had no reason to run.
+///
+/// Held here, a sweep across three days redraws a slider and nothing else.
+/// The hour is handed up when the thumb *pauses*, and again when it lifts —
+/// a rider who stops on Thursday afternoon is asking about Thursday
+/// afternoon; one who sweeps past it is not, and the sixty hours in between
+/// were never worth a redraw.
+private struct MapClock: View {
+
+    /// The committed hour, in whole hours off now; nil is "now".
+    let hoursFromNow: Int?
+    let commit: (Int) -> Void
+    let close: () -> Void
+
+    /// Where the thumb is while a finger owns it, nil the rest of the time.
+    @State private var dragged: Double?
+    @State private var settle: Task<Void, Never>?
+
+    /// How still the thumb has to be before the map is told. Long enough
+    /// that a sweep never triggers one, short enough that stopping
+    /// somewhere feels like it answered.
+    private static let pause = Duration.milliseconds(250)
+
+    private var hours: Int { Int(dragged ?? Double(hoursFromNow ?? 0)) }
+
+    /// The instant a whole-hour offset means: the top of that hour. Zero is
+    /// "now", and now is nil — the live reading is a better answer for this
+    /// hour than the hourly forecast of it.
+    static func instant(hoursFromNow hours: Int) -> Date? {
+        guard hours != 0 else { return nil }
+        let target = Date().addingTimeInterval(Double(hours) * 3600)
+        return Calendar.current.date(bySetting: .minute, value: 0, of: target) ?? target
+    }
+
+    /// The full day and hour, or "Now".
+    private var headline: String {
+        guard let instant = Self.instant(hoursFromNow: hours) else { return "Now" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = Calendar.current.isDateInToday(instant)
+            ? "'Today' HH:mm" : "EEE d MMM · HH:mm"
+        return formatter.string(from: instant)
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
+                Text(headline)
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                if hours != 0 {
+                    Button("Now") { pick(0) }
+                        .font(.subheadline.weight(.semibold))
+                }
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide the time slider")
+            }
+            Slider(value: Binding(get: { Double(hours) }, set: { moved(to: $0) }),
+                   in: Double(-SpotGuideStore.scrubPastHours)...Double(SpotGuideStore.scrubForecastHours),
+                   step: 1,
+                   onEditingChanged: { editing in if !editing { lift() } })
+            HStack {
+                Text("−\(SpotGuideStore.scrubPastHours)h")
+                Spacer()
+                Text("now")
+                    // Now sits where it falls on the track, not at the
+                    // middle: six hours behind against seventy-two ahead.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer()
+                Text("+3d")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .monospacedDigit()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.10), radius: 7, y: 2)
+        .onDisappear { settle?.cancel() }
+    }
+
+    private func moved(to value: Double) {
+        let hour = value.rounded()
+        guard hour != dragged else { return }
+        dragged = hour
+        settle?.cancel()
+        settle = Task {
+            try? await Task.sleep(for: Self.pause)
+            guard !Task.isCancelled else { return }
+            commit(Int(hour))
+        }
+    }
+
+    /// The thumb lifted: whatever it is on is the answer, at once. Also the
+    /// only place a fast flick ever reaches the map, since it never paused.
+    private func lift() {
+        settle?.cancel()
+        settle = nil
+        guard let dragged else { return }
+        self.dragged = nil
+        commit(Int(dragged))
+    }
+
+    private func pick(_ hour: Int) {
+        settle?.cancel()
+        settle = nil
+        dragged = nil
+        commit(hour)
     }
 }

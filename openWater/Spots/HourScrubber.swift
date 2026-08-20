@@ -68,7 +68,7 @@ struct HourScrubber: View {
 
                 // The cursor and its bubble.
                 Capsule()
-                    .fill(selection == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary.opacity(0.8)))
+                    .fill(selection == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.mapInk.opacity(0.8)))
                     .frame(width: 2, height: 18)
                     .offset(x: CGFloat(cursorIndex) * step - 1, y: 22)
                 Text(selection == nil ? "Now" : bubbleLabel(hours[cursorIndex]))
@@ -77,7 +77,7 @@ struct HourScrubber: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(selection == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary.opacity(0.85)),
+                    .background(selection == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.mapInk.opacity(0.85)),
                                 in: Capsule())
                     .fixedSize()
                     .offset(x: bubbleOffset(cursorIndex: cursorIndex, step: step, width: width), y: 0)

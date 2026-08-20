@@ -44,7 +44,7 @@ import MapKit
 /// Inland water is deliberately *not* cut out — Lake Tahoe and the Columbia
 /// River both count as land here. That costs nothing: the layer this masks is
 /// an ocean current model, which has nothing to say about either.
-enum Coastline {
+nonisolated enum Coastline {
 
     /// The packed file, mapped once and never copied.
     ///
@@ -211,7 +211,7 @@ enum Coastline {
 /// Deliberately a value: the wash hands it to the cell builder and to the
 /// field renderer, both of which run on their own schedule, and a shared
 /// mutable mask would be a coastline changing shape under a draw.
-struct WaterMask {
+nonisolated struct WaterMask {
 
     private var south = 0.0
     private var west = 0.0
@@ -258,7 +258,7 @@ struct WaterMask {
 
 // MARK: - Reading the packed file
 
-private extension Data {
+nonisolated private extension Data {
     /// A little-endian scalar at a byte offset from the start.
     ///
     /// Unaligned on purpose. Every field in this file is four-byte aligned by

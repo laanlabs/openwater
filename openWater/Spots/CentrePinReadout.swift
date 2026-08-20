@@ -34,11 +34,11 @@ struct CentrePinReadout: View {
         VStack(spacing: 0) {
             pill
             Rectangle()
-                .fill(Color.primary.opacity(0.85))
+                .fill(Color.mapInk.opacity(0.85))
                 .frame(width: 2, height: stemHeight)
                 .allowsHitTesting(false)
             Circle()
-                .fill(Color.primary.opacity(0.85))
+                .fill(Color.mapInk.opacity(0.85))
                 .strokeBorder(.white, lineWidth: 2.5)
                 .frame(width: dotSize, height: dotSize)
                 .allowsHitTesting(false)
@@ -100,8 +100,13 @@ struct CentrePinReadout: View {
             .padding(.trailing, 12)
             .frame(height: pillHeight)
             .foregroundStyle(.white)
+            // `mapInk`, not `.primary`: everything on this pill is white,
+            // and `.primary` inverts — in dark mode the pill came out white
+            // with white numbers on it, which is how a rider photographed
+            // it. Map chrome that carries white content has to stay dark in
+            // both appearances.
             .background(
-                (reading?.isFiring ?? false) ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary.opacity(0.85)),
+                (reading?.isFiring ?? false) ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.mapInk.opacity(0.85)),
                 in: Capsule()
             )
             .overlay(Capsule().stroke(.white, lineWidth: 1.5))

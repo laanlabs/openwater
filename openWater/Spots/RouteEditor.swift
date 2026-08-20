@@ -286,6 +286,10 @@ struct RoutePanel: View {
 
     let route: PlannedRoute
     @Bindable var weather: RouteWeatherModel
+    /// The map's wash, so the run slider can tell it when a finger is on
+    /// the thumb — this panel's slider is the whole map's clock while a
+    /// route is open, and the wash has to know to hold still.
+    let wash: WindWashModel
 
     @Environment(AppSettings.self) private var settings
     @Environment(RouteStore.self) private var routeStore
@@ -389,7 +393,12 @@ struct RoutePanel: View {
                 // forecast day, so the run itself lived in a sliver of it;
                 // this thumb *is* the run.
                 VStack(spacing: 2) {
-                    Slider(value: runFraction, in: 0...1)
+                    // Same rule as the map's own clock: the wash waits for
+                    // the thumb to stop, the dot and the numbers do not.
+                    Slider(value: runFraction, in: 0...1,
+                           onEditingChanged: { editing in
+                               if editing { wash.beginScrub() } else { wash.endScrub() }
+                           })
                     HStack {
                         Text("Launch \(shortTime(weather.departure))")
                         Spacer()

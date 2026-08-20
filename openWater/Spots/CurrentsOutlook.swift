@@ -124,7 +124,7 @@ struct CurrentStation: Identifiable, Hashable {
 /// its runs warming through yellow and amber to orange as it picks up.
 /// Half a knot matters here the way three knots matter for wind, so the
 /// bands sit close together at the bottom of the scale.
-enum CurrentPalette {
+nonisolated enum CurrentPalette {
     static func color(for kn: Double) -> Color {
         switch kn {
         case ..<0.2: Color(red: 0.80, green: 0.86, blue: 0.92)

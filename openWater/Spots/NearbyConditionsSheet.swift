@@ -134,9 +134,6 @@ struct NearbyConditionsSheet: View {
             }
         }
         .presentationDetents([.large])
-        .fullScreenCover(isPresented: $isShowingTideFullScreen) {
-            TideFullScreen(curve: tide, title: title)
-        }
         .fullScreenCover(item: $watchingCam) { cam in
             CamViewerSheet(name: cam.displayName, url: cam.url)
         }
@@ -612,6 +609,14 @@ struct NearbyConditionsSheet: View {
                             .monospacedDigit()
                     }
                     .frame(width: 58)
+                    .transition(.opacity)
+                } else {
+                    VStack(spacing: 4) {
+                        LoadingPlaceholder(height: 30, width: 30, corner: 8)
+                        LoadingPlaceholder(height: 18, width: 34, corner: 5)
+                    }
+                    .frame(width: 58)
+                    .transition(.opacity)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -625,17 +630,28 @@ struct NearbyConditionsSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        VStack(spacing: 12) {
-                            ForEach(0..<4, id: \.self) { _ in
-                                LoadingPlaceholder(height: 58, corner: 12)
-                            }
+                        // Shaped like the line that is coming — a big number
+                        // and its cardinal. What used to sit here was four
+                        // stacked 58-point bars, nearly three hundred points
+                        // of shimmer where forty were about to land, so the
+                        // card collapsed the moment the reading did and took
+                        // everything below it up the screen.
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            LoadingPlaceholder(height: 30, width: 52, corner: 8)
+                            LoadingPlaceholder(height: 17, width: 120, corner: 5)
                         }
-                        .padding(.horizontal)
+                        .padding(.vertical, 3)
+                        .transition(.opacity)
                     }
                     if let weather = weather {
                         Text(weather.label + (weather.apparentC.map { ", feels \(Int($0.rounded()))°" } ?? ""))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .transition(.opacity)
+                    } else {
+                        LoadingPlaceholder(height: 12, width: 150, corner: 4)
+                            .padding(.top, 2)
+                            .transition(.opacity)
                     }
                 }
                 Spacer(minLength: 0)
@@ -649,6 +665,8 @@ struct NearbyConditionsSheet: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+        .animation(.easeInOut(duration: 0.25), value: reading == nil)
+        .animation(.easeInOut(duration: 0.25), value: weather == nil)
     }
 
     /// The wind ahead: one strip, quarter-hour while a rapid-update model
@@ -662,27 +680,69 @@ struct NearbyConditionsSheet: View {
     @ViewBuilder
     private var windAheadCard: some View {
         let track = WindTrack.make(nearTerm: nearTerm, outlook: ahead)
-        if !track.isEmpty {
-            NavigationLink {
-                ForecastScreen(title: title, coordinate: coordinate, detail: full,
-                               outlook: ahead, waves: waves)
-            } label: {
-                windAheadBody(track)
+        Group {
+            if !track.isEmpty {
+                NavigationLink {
+                    ForecastScreen(title: title, coordinate: coordinate, detail: full,
+                                   outlook: ahead, waves: waves)
+                } label: {
+                    windAheadBody(track)
+                }
+                .buttonStyle(.plain)
+            } else if isSearching {
+                windAheadPlaceholder
             }
-            .buttonStyle(.plain)
         }
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.25), value: track.isEmpty)
+    }
+
+    /// The strip's own shape, held while the forecast is in flight.
+    ///
+    /// This card is a quarter of the tab's height and used to render as
+    /// nothing at all until the run landed, so the stations, the meters and
+    /// everything under them started high and were shoved down the screen
+    /// mid-read. Holding the space costs nothing and the wind fades into it.
+    ///
+    /// Only while the search is actually running: a point with no forecast
+    /// at all — the marine grid has holes — must end up with no card rather
+    /// than a shimmer that never resolves.
+    private var windAheadPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                LoadingPlaceholder(height: 11, width: 132, corner: 4)
+                Spacer(minLength: 0)
+                LoadingPlaceholder(height: 11, width: 70, corner: 4)
+            }
+            HStack(alignment: .top, spacing: 6) {
+                LoadingPlaceholder(height: 152, width: 34, corner: 8)
+                LoadingPlaceholder(height: 152, corner: 8)
+            }
+            LoadingPlaceholder(height: 11, corner: 4)
+            LoadingPlaceholder(height: 11, width: 210, corner: 4)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityLabel("Loading the wind forecast")
     }
 
     /// The window the cards speak for. The raw `outlook` keeps its head
     /// start — the nowcast needs the hour a station's reading was taken in.
-    private var ahead: WindOutlook { outlook.nextHours(24) }
+    ///
+    /// Two days rather than one: a strip that stops at this hour tomorrow
+    /// cannot answer "is it worth going out after work tomorrow", which is
+    /// the question a rider opens this card with the evening before. The
+    /// strip scrolls, so the extra day costs width rather than legibility,
+    /// and it is one more calendar day on a request already being made.
+    private var ahead: WindOutlook { outlook.nextHours(48) }
 
     private func windAheadBody(_ track: WindTrack) -> some View {
         let agreement = ahead.agreement
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("WIND, NEXT 24 HOURS")
+                Text("WIND, NEXT 48 HOURS")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -933,19 +993,30 @@ struct NearbyConditionsSheet: View {
     /// against an ebb is a different run from the same one on a flood, and
     /// water temperature decides what a rider puts on, which in a lot of the
     /// places this app is used is a safety question rather than a comfort one.
-    @State private var isShowingTideFullScreen = false
 
     @ViewBuilder
     private var tideTab: some View {
         if !tide.isEmpty {
-            Button {
-                isShowingTideFullScreen = true
+            // A push rather than a full-screen cover, and into a screen of
+            // cards rather than a bare chart — the same door the wind card
+            // opens, so "tap the chart for the detail" means one thing on
+            // this sheet.
+            NavigationLink {
+                TideScreen(curve: tide, title: title)
             } label: {
                 VStack(alignment: .trailing, spacing: 4) {
-                    TideChart(curve: tide)
-                    Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tint)
+                    // Two days on the card, ten behind the chevron. The card
+                    // is a glance — the shape of today and tomorrow, with
+                    // every turn labelled — and the whole run drawn into it
+                    // would be a scribble under a pile of overlapping times.
+                    TideChart(curve: tide.window(hours: 48))
+                    HStack(spacing: 3) {
+                        Text("Hour by hour")
+                            .font(.caption2.weight(.semibold))
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.tint)
                 }
             }
             .buttonStyle(.plain)
@@ -1495,9 +1566,10 @@ struct NearbyConditionsSheet: View {
         async let warnings = NationalWeatherService.alerts(at: here)
         async let tideList = TidesAndCurrents.stations(near: here)
         async let buoyList = DataBuoyCenter.buoys(near: here, limit: 14, radius: Self.maxRadius)
-        // Two calendar days: the window the card draws runs 24 hours from
-        // this hour, and one day's worth of it is already behind by tea time.
-        async let ahead = OpenMeteo.outlook(at: here, days: 2)
+        // Three calendar days: the card draws 48 hours from this hour, and
+        // the run opens at local midnight — so an evening rider has most of
+        // day one already behind them and needs the third to reach the end.
+        async let ahead = OpenMeteo.outlook(at: here, days: 3)
         async let sea = OpenMeteo.waves(at: here)
         async let everything = OpenMeteo.detail(at: here)
         async let sea2 = OpenMeteo.surf(at: here)

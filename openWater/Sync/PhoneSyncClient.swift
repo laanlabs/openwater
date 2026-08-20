@@ -64,6 +64,11 @@ final class PhoneSyncClient: NSObject {
     /// eventually is not a time. This is the "eventually is now" button — it
     /// only works while the watch is reachable, and says so plainly when it is
     /// not rather than appearing to do something.
+    /// The heart-rate check's own state, kept apart from the sync button's so
+    /// one spinner cannot speak for the other.
+    private(set) var isCheckingHeartRate = false
+    var heartRateMessage: String?
+
     func requestSync() {
         guard let session, session.activationState == .activated else {
             lastSyncMessage = "The watch is not connected."
@@ -91,6 +96,54 @@ final class PhoneSyncClient: NSObject {
                 self?.lastSyncMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Ask the watch whether it can actually read a heartbeat.
+    ///
+    /// The phone cannot answer this itself — it has no HealthKit, by design,
+    /// because the watch is the thing with the sensor — so the question goes
+    /// over the wire and the watch probes its own store. Worth a button
+    /// because the failure is invisible from here: a rider whose Health
+    /// prompt was declined at their first session sees sessions arrive with
+    /// no heart rate and nothing anywhere saying why.
+    func checkHeartRate() {
+        guard let session, session.activationState == .activated else {
+            heartRateMessage = "The watch is not connected."
+            return
+        }
+        guard session.isReachable else {
+            heartRateMessage = "Your watch is out of range. Open openWater on it while it is near your phone."
+            return
+        }
+
+        isCheckingHeartRate = true
+        heartRateMessage = nil
+        session.sendMessage(["request": "heartRate"]) { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isCheckingHeartRate = false
+                self.heartRateMessage = Self.heartRateVerdict(from: reply)
+            }
+        } errorHandler: { [weak self] error in
+            Task { @MainActor in
+                self?.isCheckingHeartRate = false
+                self?.heartRateMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// What the watch's answer means, in a sentence a rider can act on.
+    static func heartRateVerdict(from reply: [String: Any]) -> String {
+        guard reply["available"] as? Bool == true else {
+            return "This watch cannot record heart rate."
+        }
+        guard reply["asked"] as? Bool == true else {
+            return "openWater has not asked for heart rate yet. Start a session on the watch and tap Review when Health asks."
+        }
+        if reply["canRead"] as? Bool == true {
+            return "Heart rate is on — the watch can read it, and your sessions will carry it."
+        }
+        return "Heart rate is off. On this iPhone: Watch app ▸ Privacy & Security ▸ Health ▸ openWater, and turn on Heart Rate. It applies to the next session."
     }
 
     func pushRecords() {

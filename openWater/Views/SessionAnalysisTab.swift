@@ -395,10 +395,31 @@ struct SessionAnalysisTab: View {
         summary.averageHeartRate != nil || summary.activeEnergyKilojoules != nil
     }
 
+    /// A watch session with no beat anywhere in it.
+    ///
+    /// The row used to be absent, which is the wrong absence: a rider who
+    /// wore the watch for three hours reads "no heart rate row" as "this app
+    /// does not do heart rate", when what happened is that the Health prompt
+    /// at the first session was declined and HealthKit never says so. The row
+    /// stays, wearing the warning, and the screen behind it says where to
+    /// turn it back on.
+    private var heartRateMissing: Bool {
+        guard summary.averageHeartRate == nil,
+              let device = session.deviceModel?.lowercased(),
+              device.contains("watch")
+        else { return false }
+        return !session.track.points.contains { $0.heartRate != nil }
+    }
+
     private var sessionSection: some View {
         Section("Session") {
-            if hasHealthData {
-                AnalysisRow(symbol: "heart", title: "Heart rate", value: heartValue) {
+            if hasHealthData || heartRateMissing {
+                AnalysisRow(
+                    symbol: "heart",
+                    title: "Heart rate",
+                    value: heartRateMissing ? "none" : heartValue,
+                    warning: heartRateMissing ? "The watch was not given permission to read it" : nil
+                ) {
                     AnalysisDetail(title: "Health") {
                         HealthCard(session: session, summary: summary)
                     }

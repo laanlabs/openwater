@@ -58,6 +58,13 @@ final class WindWashModel {
         /// stamp, so the comet sim keeps its particles and only the wind
         /// under them changes.
         let id: UUID
+        /// Which fluid this is. Air and water differ by an order of
+        /// magnitude — eighteen knots is an ordinary afternoon, one and a
+        /// half is a strong tide — so they cannot share a pace.
+        let flow: Flow
+        /// Where the land is, so a comet cannot stream up a street. Empty
+        /// for wind, which has every right to blow over a hill.
+        let mask: WaterMask
         let region: MKCoordinateRegion
         let columns: Int
         let rows: Int
@@ -72,12 +79,31 @@ final class WindWashModel {
             let column0 = max(0, min(Int(gx), columns - 2))
             let row0 = max(0, min(Int(gy), rows - 2))
             let tx = gx - Double(column0), ty = gy - Double(row0)
-            guard let a = vectors[row0 * columns + column0],
-                  let b = vectors[row0 * columns + column0 + 1],
-                  let c = vectors[(row0 + 1) * columns + column0],
-                  let d = vectors[(row0 + 1) * columns + column0 + 1] else { return nil }
-            return (u: (a.u * (1 - tx) + b.u * tx) * (1 - ty) + (c.u * (1 - tx) + d.u * tx) * ty,
-                    v: (a.v * (1 - tx) + b.v * tx) * (1 - ty) + (c.v * (1 - tx) + d.v * tx) * ty)
+            let corners = [
+                (vectors[row0 * columns + column0], (1 - tx) * (1 - ty)),
+                (vectors[row0 * columns + column0 + 1], tx * (1 - ty)),
+                (vectors[(row0 + 1) * columns + column0], (1 - tx) * ty),
+                (vectors[(row0 + 1) * columns + column0 + 1], tx * ty),
+            ]
+            // The same rule the cells are built by — nearest node vetoes,
+            // live corners shade — so a comet never streams over water the
+            // wash has decided is land, or stops where it has not.
+            guard let nearest = corners.max(by: { $0.1 < $1.1 }), nearest.0 != nil
+            else { return nil }
+            // The DEM has the last word: the model will happily answer with
+            // the nearest sea cell's water for a point three kilometres
+            // inland, and a comet crossing the Financial District is the
+            // most visible way to say something is wrong.
+            if mask.isWater(coordinate(gx: gx, gy: gy)) == false { return nil }
+            var u = 0.0, v = 0.0, weight = 0.0
+            for (value, w) in corners {
+                guard let value else { continue }
+                u += value.u * w
+                v += value.v * w
+                weight += w
+            }
+            guard weight > 0.25 else { return nil }
+            return (u: u / weight, v: v / weight)
         }
 
         func coordinate(gx: Double, gy: Double) -> CLLocationCoordinate2D {
@@ -95,6 +121,50 @@ final class WindWashModel {
             let west = region.center.longitude - region.span.longitudeDelta / 2
             return ((coordinate.longitude - west) / region.span.longitudeDelta * Double(columns - 1),
                     (coordinate.latitude - south) / region.span.latitudeDelta * Double(rows - 1))
+        }
+    }
+
+    /// What the comets are streaming through, and how fast that reads.
+    ///
+    /// The pace is absolute *within* a fluid — half the speed is half the
+    /// pace, which is what makes a glance at the flow a reading of it — but
+    /// the reference differs between them, because the fluids do. Paced by
+    /// the wind's numbers, a one-knot ebb crossed the screen in about four
+    /// minutes: a field that reads as still, over water that is moving hard
+    /// enough to decide whether a rider gets home.
+    enum Flow {
+        case wind, current
+
+        /// The speed that crosses the visible span in `crossSeconds`.
+        var referenceKn: Double {
+            switch self {
+            case .wind: 18
+            case .current: 1.2
+            }
+        }
+
+        var crossSeconds: Double {
+            switch self {
+            case .wind: 6
+            case .current: 5
+            }
+        }
+
+        /// The speeds between which the tail grows from a stub to a streak.
+        var tailRamp: (from: Double, to: Double) {
+            switch self {
+            case .wind: (3, 25)
+            case .current: (0.1, 2.2)
+            }
+        }
+
+        /// Below this there is nothing honest to draw — dead calm, or slack
+        /// water.
+        var stillKn: Double {
+            switch self {
+            case .wind: 0.05
+            case .current: 0.015
+            }
         }
     }
 
@@ -116,6 +186,15 @@ final class WindWashModel {
     /// until the thumb actually crosses an hour.
     private var displayedIndex: Int?
     private var fieldStamp = UUID()
+    /// Where the land is, for the layer that must not paint over it. Filled
+    /// in tile by tile as a rider looks around, and kept between regions —
+    /// the coast does not move, so a tile fetched once serves every zoom and
+    /// every hour after it.
+    private var waterMask = WaterMask()
+    private var maskTask: Task<Void, Never>?
+    /// What the rider is looking at, kept so the mask can be judged complete
+    /// for *this* view before any of it is trusted.
+    private var visibleRegion: MKCoordinateRegion?
 
     private static let hourLabel: DateFormatter = {
         let formatter = DateFormatter()
@@ -151,18 +230,31 @@ final class WindWashModel {
     /// Cells and field for the hour nearest the scrubbed instant. The
     /// field keeps its stamp across hours so the comets ride the change
     /// instead of reseeding.
-    private func apply() {
+    /// `force` is for a mask tile landing: the hour has not changed, but what
+    /// counts as water has, so the no-op guard has to be stepped past.
+    private func apply(force: Bool = false) {
         guard let region = fieldRegion, !hourAxis.isEmpty else { return }
         let target = scrubbedTo ?? Date()
         let index = hourAxis.indices.min {
             abs(hourAxis[$0].timeIntervalSince(target)) < abs(hourAxis[$1].timeIntervalSince(target))
         } ?? 0
-        guard index != displayedIndex, hourly.indices.contains(index) else { return }
+        guard force || index != displayedIndex, hourly.indices.contains(index) else { return }
         displayedIndex = index
         let hour = hourly[index]
-        cells = Self.buildCells(speeds: hour.speeds, region: region, layer: loadedLayer)
+        // The mask is the current layer's business only — wind blows over
+        // land, and a wind wash that stopped at the shoreline would hide the
+        // very thing a rider on a beach is asking about — and only once it
+        // covers the whole view, so the coastline arrives in one piece
+        // rather than as a chequerboard of loaded tiles.
+        let mask = loadedLayer == .currents && Self.masksLand
+            && visibleRegion.map { waterMask.covers($0) } == true
+            ? waterMask : WaterMask()
+        cells = Self.buildCells(speeds: hour.speeds, region: region,
+                                layer: loadedLayer, mask: mask)
         field = Field(
             id: fieldStamp,
+            flow: loadedLayer == .currents ? .current : .wind,
+            mask: mask,
             region: region,
             columns: FlowMapScreen.columns, rows: FlowMapScreen.rows,
             vectors: zip(hour.speeds, hour.directions).map { speed, direction in
@@ -172,10 +264,19 @@ final class WindWashModel {
             })
     }
 
-    /// How much finer the cells are than the model grid. Three keeps a
-    /// 60 km field's cells around 2.5 km — contour-ish without asking
-    /// MapKit to composite thousands of overlays.
-    private static let upsample = 3
+    /// How much finer the cells are than the model grid.
+    ///
+    /// Three left a 45 km field in cells about two and a half kilometres
+    /// across, which at the zoom a rider actually reads a launch at is a
+    /// quad the size of a thumbnail — the field stopped looking like water
+    /// and started looking like a spreadsheet. Six halves that again in
+    /// both directions: 1,440 quads instead of 432, which MapKit composites
+    /// without complaint, and the gradient between the model's own nodes
+    /// finally reads as a gradient. It adds no information — the model has
+    /// what it has — but a smooth surface is the honest picture of a field
+    /// that genuinely is smooth, where hard squares imply edges the water
+    /// does not have.
+    private static let upsample = 6
     /// The wash's strength. The balance that took three tries: heavy
     /// enough that the field's colours read as a surface, light enough
     /// that the muted map's coastline still shows through — you can see
@@ -214,18 +315,97 @@ final class WindWashModel {
             ($0, UIColor(CurrentPalette.color(for: $0)))
         }
 
+    /// The land-mask switch moved: rebuild what is on screen with the new
+    /// answer, and start fetching tiles if it just came on.
+    func maskPreferenceChanged(for visible: MKCoordinateRegion, layer: WashLayer) {
+        guard layer == .currents else { return }
+        visibleRegion = visible
+        if Self.masksLand { loadMask(for: visible) }
+        apply(force: true)
+    }
+
     /// The map settled somewhere — refetch if it wandered far enough from
     /// the loaded field, or if the rider switched what the field shows.
     /// Thresholds are the flow map's own.
+    /// Whether the current wash is cut to the coastline.
+    ///
+    /// A switch rather than a certainty, because the mask leans on a second
+    /// free endpoint: where it is rate-limited, offline or simply wrong about
+    /// a stretch of water, a rider should be able to turn it off and get the
+    /// field back rather than stare at a hole where their launch is.
+    static var masksLand: Bool {
+        UserDefaults.standard.object(forKey: "spots.maskLand") as? Bool ?? true
+    }
+
     func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer) {
         guard layer != .off else { return clear() }
+        visibleRegion = visible
+        if layer == .currents, Self.masksLand { loadMask(for: visible) }
         guard layer != loadedLayer || needsReload(for: visible) else { return }
         reload(for: visible, layer: layer)
+    }
+
+    /// Fill in the water mask for what is on screen.
+    ///
+    /// Twelve tiles a pass, nearest the middle first — that is a bay's worth
+    /// at the zoom a rider reads a launch at, and the rest arrives as they
+    /// pan. Every tile is a single hundred-point request cached for half a
+    /// year, so this is loud exactly once per stretch of coast and silent
+    /// for ever after.
+    private func loadMask(for visible: MKCoordinateRegion) {
+        let wanted = WaterMask.keys(covering: visible).filter { !waterMask.has($0) }
+        guard !wanted.isEmpty else { return }
+        maskTask?.cancel()
+        maskTask = Task { [weak self] in
+            // Every tile this view needs, nearest the middle first — the
+            // mask is only used once it covers the view, so stopping half
+            // way would mean never using it at all. The grain is chosen so
+            // that is two dozen requests at most.
+            var missed = false
+            var gained: [(WaterMask.Key, [Bool])] = []
+            for key in wanted {
+                guard !Task.isCancelled else { return }
+                if let samples = await WaterMask.fetch(key) {
+                    gained.append((key, samples))
+                } else {
+                    missed = true
+                }
+                // A breath between requests. Open-Meteo counts by the
+                // minute, and a burst of two dozen alongside the wash's own
+                // fetches is exactly how the first version of this got
+                // itself refused and left the coastline unmasked.
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            guard let self, !Task.isCancelled else { return }
+            for (key, samples) in gained { self.waterMask.insert(samples, for: key) }
+            if !gained.isEmpty {
+                // The hour has not moved, only what counts as water — so
+                // this rebuild has to be forced past the no-op guard.
+                self.apply(force: true)
+            }
+            // Something was refused or offline. Nothing here is urgent —
+            // the wash paints unmasked meanwhile — so wait out the minute
+            // window and try the rest once.
+            guard missed, !Task.isCancelled else { return }
+            try? await Task.sleep(for: .seconds(65))
+            guard !Task.isCancelled else { return }
+            var second: [(WaterMask.Key, [Bool])] = []
+            for key in wanted where !self.waterMask.has(key) {
+                guard !Task.isCancelled else { return }
+                if let samples = await WaterMask.fetch(key) { second.append((key, samples)) }
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            guard !second.isEmpty, !Task.isCancelled else { return }
+            for (key, samples) in second { self.waterMask.insert(samples, for: key) }
+            self.apply(force: true)
+        }
     }
 
     func clear() {
         loadTask?.cancel()
         loadTask = nil
+        maskTask?.cancel()
+        maskTask = nil
         cells = []
         field = nil
         fieldRegion = nil
@@ -361,7 +541,7 @@ final class WindWashModel {
 
     /// The raster builder's bilinear walk, stopped at cell resolution.
     private static func buildCells(speeds: [Double?], region: MKCoordinateRegion,
-                                   layer: WashLayer) -> [Cell] {
+                                   layer: WashLayer, mask: WaterMask) -> [Cell] {
         let columns = FlowMapScreen.columns
         let rows = FlowMapScreen.rows
         let cellColumns = (columns - 1) * upsample
@@ -370,18 +550,45 @@ final class WindWashModel {
         func speed(atColumn column: Int, row: Int) -> Double? {
             speeds[row * columns + column]
         }
-        /// Bilinear sample at fractional grid coordinates.
-        func sample(gx: Double, gy: Double) -> Double? {
+        /// Bilinear sample at fractional grid coordinates, with however
+        /// much of the water it could actually see.
+        ///
+        /// The ocean model answers nil over land, and its nodes here are
+        /// kilometres apart — so a cell straddling a shoreline used to be
+        /// dropped outright the moment one corner fell on the beach. That is
+        /// what drew the coast as a staircase of hard rectangles: not the
+        /// water's shape, the sampling grid's. Now a cell keeps whatever
+        /// corners answered, weighted the same bilinear way, and reports the
+        /// weight it managed — so the wash thins out across the last
+        /// kilometre instead of ending on a right angle.
+        func sample(gx: Double, gy: Double) -> (knots: Double, coverage: Double)? {
             let column0 = min(Int(gx), columns - 2)
             let row0 = min(Int(gy), rows - 2)
             let tx = gx - Double(column0)
             let ty = gy - Double(row0)
-            guard let a = speed(atColumn: column0, row: row0),
-                  let b = speed(atColumn: column0 + 1, row: row0),
-                  let c = speed(atColumn: column0, row: row0 + 1),
-                  let d = speed(atColumn: column0 + 1, row: row0 + 1)
+            let corners = [
+                (speed(atColumn: column0, row: row0), (1 - tx) * (1 - ty)),
+                (speed(atColumn: column0 + 1, row: row0), tx * (1 - ty)),
+                (speed(atColumn: column0, row: row0 + 1), (1 - tx) * ty),
+                (speed(atColumn: column0 + 1, row: row0 + 1), tx * ty),
+            ]
+            // The nearest node has a veto. Averaging live corners alone
+            // paints straight over a headland: downtown San Francisco sits
+            // between nodes that are all in water — the bay one side, the
+            // ocean the other — so the wash ran up Market Street. Whichever
+            // node the cell sits closest to is the one that decides whether
+            // this is water at all; the rest only shade it.
+            guard let nearest = corners.max(by: { $0.1 < $1.1 }), nearest.0 != nil
             else { return nil }
-            return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty
+            var total = 0.0, weight = 0.0
+            for (value, w) in corners {
+                guard let value else { continue }
+                total += value * w
+                weight += w
+            }
+            // Under a quarter of the cell is a cell that is mostly land.
+            guard weight > 0.25 else { return nil }
+            return (total / weight, weight)
         }
 
         let south = region.center.latitude - region.span.latitudeDelta / 2
@@ -395,17 +602,31 @@ final class WindWashModel {
             for cellColumn in 0..<cellColumns {
                 let gx = (Double(cellColumn) + 0.5) / Double(upsample)
                 let gy = (Double(cellRow) + 0.5) / Double(upsample)
-                guard let knots = sample(gx: gx, gy: gy) else { continue }
+                guard let found = sample(gx: gx, gy: gy) else { continue }
+                let knots = found.knots
 
                 // The feather: the outer two rings of cells fade out, so
                 // the field ends the way the raster's does — a soft edge
-                // that says "this window stops", not a painted wall.
+                // that says "this window stops", not a painted wall. The
+                // same trick along the coast, where coverage rather than
+                // position decides: a cell the model half-saw is painted
+                // half as strongly.
                 let ring = min(min(cellRow, cellRows - 1 - cellRow),
                                min(cellColumn, cellColumns - 1 - cellColumn))
                 let alpha = washAlpha * min(1, (Double(ring) + 0.5) / 2.5)
+                    * min(1, (found.coverage - 0.25) / 0.45 + 0.25)
 
                 let latitude = south + Double(cellRow) * latStep
                 let longitude = west + Double(cellColumn) * lonStep
+
+                // A cell the elevation model calls dry is not painted at
+                // all. Unknown — a tile still in flight, or a zoom too wide
+                // to mask — paints as before: the wash arriving a moment
+                // before the coastline is better than a map that blinks.
+                let centre = CLLocationCoordinate2D(latitude: latitude + latStep / 2,
+                                                    longitude: longitude + lonStep / 2)
+                if mask.isWater(centre) == false { continue }
+
                 let band = smoothColour(for: knots, layer: layer)
                 out.append(Cell(
                     id: cellRow * cellColumns + cellColumn,
@@ -568,20 +789,15 @@ final class WashParticleSim {
     private var lastTick: TimeInterval?
     private var fieldID: UUID?
     private static let count = 220
-    /// The wind that crosses the viewport in `crossSeconds`. Everything
-    /// else is paced against it by its own speed, so the animation carries
-    /// absolute meaning: a glance at the pace is a reading of the wind.
-    private static let referenceKn = 18.0
-    /// How long `referenceKn` takes to cross the visible span — screen-space
-    /// pacing, so the flow reads the same at every zoom.
-    private static let crossSeconds = 6.0
 
-    /// How many seconds of travel the tail spans, ramped with the wind:
-    /// a stub in light air, a long streak when it is honking. Combined
-    /// with a velocity already proportional to speed, drawn tail length
-    /// grows faster than the wind does — which is the whole read.
-    private static func tailReach(forKnots knots: Double) -> Double {
-        let t = min(1, max(0, (knots - 3) / 22))
+    /// How many seconds of travel the tail spans, ramped with the speed:
+    /// a stub at the bottom of the fluid's range, a long streak at the top.
+    /// Combined with a velocity already proportional to speed, drawn tail
+    /// length grows faster than the speed does — which is the whole read.
+    private static func tailReach(forKnots knots: Double,
+                                  in flow: WindWashModel.Flow) -> Double {
+        let ramp = flow.tailRamp
+        let t = min(1, max(0, (knots - ramp.from) / max(0.01, ramp.to - ramp.from)))
         return 0.35 + 0.65 * t
     }
 
@@ -617,7 +833,7 @@ final class WashParticleSim {
             }
             let speed = (flow.u * flow.u + flow.v * flow.v).squareRoot()
             // Slack water and dead calm carry no comet at all.
-            guard speed > 0.05 else {
+            guard speed > field.flow.stillKn else {
                 particles[index] = Self.spawn(in: field, bounds: bounds, staggered: false)
                 continue
             }
@@ -626,18 +842,19 @@ final class WashParticleSim {
             particles[index].fade = max(0, min(1, min(phase / 0.15, (1 - phase) / 0.3)))
 
             // Degrees per second, scaled from the *visible* span so the
-            // pace reads the same on a street as on a sea — but against
-            // an absolute reference wind, never the field's own maximum.
+            // pace reads the same on a street as on a sea — but against an
+            // absolute reference speed, never the field's own maximum.
             // Normalising by the maximum was the bug the flow could not
             // shake: it made a six-knot afternoon and a thirty-knot gale
             // stream at exactly the same rate, because each field's
             // fastest node was always the one crossing in `crossSeconds`.
-            // Now `referenceKn` crosses in that time and everything else
-            // moves by its own true speed — half the wind, half the pace.
+            // The reference belongs to the fluid: eighteen knots of air and
+            // one and a bit of water are each an ordinary strong day, and
+            // pacing the tide by the wind's yardstick left it looking dead.
             let cellLat = field.region.span.latitudeDelta / Double(field.rows - 1)
             let cellLon = field.region.span.longitudeDelta / Double(field.columns - 1)
             let degreesPerKnot = max(bounds.visibleLatSpan, 0.0001)
-                / (Self.crossSeconds * Self.referenceKn)
+                / (field.flow.crossSeconds * field.flow.referenceKn)
             let stretch = 1 / max(0.2, cos(field.region.center.latitude * .pi / 180))
             let gridVX = flow.u * degreesPerKnot * stretch / cellLon
             let gridVY = flow.v * degreesPerKnot / cellLat
@@ -647,7 +864,7 @@ final class WashParticleSim {
             // The tail is velocity times reach, and the reach itself grows
             // with the wind — so drawn length rises faster than speed
             // alone: light air leaves a stub, a gale leaves a streak.
-            let reach = Self.tailReach(forKnots: speed)
+            let reach = Self.tailReach(forKnots: speed, in: field.flow)
             particles[index].tailGX = particles[index].gx - gridVX * reach
             particles[index].tailGY = particles[index].gy - gridVY * reach
         }

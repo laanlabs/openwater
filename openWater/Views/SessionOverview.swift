@@ -107,6 +107,18 @@ struct SessionOverview: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        // "Setting", never "from" — the water is named for
+                        // where it takes you, and this line sits directly
+                        // under one that says "from".
+                        if let drift = session.currentSpeed, drift > 0.02 {
+                            let speed = Format.speed(drift, unit: settings.units.speed, decimals: 1)
+                            Text(session.currentDirectionToward.map {
+                                "\(speed) current setting \(Format.cardinal($0))"
+                            } ?? "\(speed) current")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Spacer(minLength: 8)
@@ -571,8 +583,36 @@ struct HealthCard: View {
         session.track.points.compactMap(\.heartRate).min()
     }
 
+    /// A watch session with no beat in it at all.
+    ///
+    /// Worth saying rather than hiding. The watch collects heart rate only if
+    /// the rider granted the Health prompt at the very first session, and
+    /// HealthKit never reports a declined *read* — so the app cannot know it
+    /// was refused, and the card simply vanished. A rider who wore their
+    /// watch for three hours deserves to be told why the numbers are not
+    /// here, and where to turn them on.
+    private var heartRateMissingFromWatch: Bool {
+        guard summary.averageHeartRate == nil,
+              let device = session.deviceModel?.lowercased(),
+              device.contains("watch")
+        else { return false }
+        return !session.track.points.contains { $0.heartRate != nil }
+    }
+
     var body: some View {
-        if summary.averageHeartRate != nil || summary.activeEnergyKilojoules != nil {
+        if heartRateMissingFromWatch {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("No heart rate in this recording", systemImage: "heart.slash")
+                    .font(.subheadline.weight(.semibold))
+                Text("The watch reads it only with permission. Watch app on this iPhone ▸ Privacy & Security ▸ Health ▸ openWater — it applies to the next session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        } else if summary.averageHeartRate != nil || summary.activeEnergyKilojoules != nil {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Health", systemImage: "heart.fill")
                     .font(.headline)

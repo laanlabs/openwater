@@ -10,6 +10,15 @@ import WatchKit
 /// be one deliberate swipe away, never on the page you are reading. Everything
 /// else is to the right, in the order it gets checked: splits between runs,
 /// then the session totals, then the sport-specific detail.
+///
+/// The crown turns those same pages, one notch a page, and the swipe stays.
+/// Not fashion: a swipe needs a dry fingertip and a still wrist, and this app
+/// is used by people holding a wing in twenty knots with cold, wet hands.
+/// The crown works through all of that, and it works with the wrist held
+/// where a rider can actually read it. Apple's own Workout app pages with the
+/// crown for the same reason; the only difference here is the axis, because
+/// these pages already read left to right and moving them would move the one
+/// thing riders have learned.
 struct LiveSessionView: View {
 
     @Environment(SessionRecorder.self) private var recorder
@@ -19,8 +28,27 @@ struct LiveSessionView: View {
     @State private var page: Page = WatchScreenshotRoute.page ?? .speed
     @State private var showingEndConfirmation = false
 
+    /// Where the crown is, in pages. Kept in step with `page` in both
+    /// directions so a swipe and a notch never disagree about where the rider
+    /// is — a crown left behind by a swipe would jump the page back the
+    /// moment it was touched.
+    @State private var crown: Double = 0
+    @FocusState private var crownFocused: Bool
+
     enum Page: Int, CaseIterable, Hashable {
         case controls, speed, splits, session, angles, foil, countdown
+    }
+
+    /// The pages this sport actually shows, in the order a swipe crosses
+    /// them. The crown's track has to be this list rather than `allCases`:
+    /// angles exist only under a wing and foil only on a foil, so a notch
+    /// counted against every case would land on a page that is not there.
+    private var pages: [Page] {
+        var out: [Page] = [.controls, .speed, .splits, .session]
+        if recorder.sport.isWindPowered { out.append(.angles) }
+        if recorder.sport.isFoiling { out.append(.foil) }
+        out.append(.countdown)
+        return out
     }
 
     var body: some View {
@@ -38,6 +66,37 @@ struct LiveSessionView: View {
             CountdownPage().tag(Page.countdown)
         }
         .tabViewStyle(.page)
+        // The crown drives the same pages the finger does. Focus is what
+        // routes crown input, so the strip claims it on appear and takes it
+        // back whenever the page changes — a tap on a control inside a page
+        // can move focus, and a crown that has quietly stopped working is
+        // worse than one that never did.
+        .focusable(true)
+        .focused($crownFocused)
+        .digitalCrownRotation(
+            $crown,
+            from: 0,
+            through: Double(max(1, pages.count - 1)),
+            by: 1,
+            sensitivity: .low,
+            isContinuous: false,
+            isHapticFeedbackEnabled: true
+        )
+        .onChange(of: crown) { _, value in
+            let index = min(max(0, Int(value.rounded())), pages.count - 1)
+            guard pages[index] != page else { return }
+            withAnimation(.snappy) { page = pages[index] }
+        }
+        .onChange(of: page) { _, value in
+            crownFocused = true
+            guard let index = pages.firstIndex(of: value),
+                  Int(crown.rounded()) != index else { return }
+            crown = Double(index)
+        }
+        .onAppear {
+            crownFocused = true
+            if let index = pages.firstIndex(of: page) { crown = Double(index) }
+        }
         // Ending saves. Discard used to sit right underneath, on a screen the
         // size of a stamp, tapped by a wet finger — the single easiest way in
         // the whole app to destroy a session. It is gone: the session syncs to
@@ -64,6 +123,8 @@ struct SpeedPage: View {
     @Environment(SessionRecorder.self) private var recorder
     @Environment(WatchSettings.self) private var settings
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    @State private var showingHeartRateHelp = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -121,12 +182,29 @@ struct SpeedPage: View {
             if !isLuminanceReduced {
                 Divider().padding(.bottom, 3)
                 HStack {
-                    HStack(spacing: 3) {
-                        Text(heartRateText)
-                            .monospacedDigit()
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.pink)
+                    // A blank beat is worth a word. Nothing here used to
+                    // separate "no heart rate yet" from "no heart rate ever",
+                    // so a rider who declined the Health prompt at the start
+                    // watched a zero for three hours and found out on the
+                    // phone afterwards.
+                    if recorder.workout.heartRateUnavailable {
+                        Button { showingHeartRateHelp = true } label: {
+                            HStack(spacing: 3) {
+                                Text("Off")
+                                Image(systemName: "heart.slash")
+                                    .font(.system(size: 11))
+                            }
+                            .foregroundStyle(.pink.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        HStack(spacing: 3) {
+                            Text(heartRateText)
+                                .monospacedDigit()
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.pink)
+                        }
                     }
                     Spacer()
                     Text(Format.distance(recorder.metrics.distance, unit: settings.units.distance))
@@ -137,6 +215,23 @@ struct SpeedPage: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // watchOS cannot open its own Settings from an app, so the help is
+        // the instructions themselves rather than a button that pretends to
+        // take a rider somewhere.
+        .sheet(isPresented: $showingHeartRateHelp) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Heart rate is off", systemImage: "heart.slash")
+                        .font(.headline)
+                    Text("openWater was not given permission to read it, so this session will have none.")
+                        .font(.footnote)
+                    Text("Turn it on from the Watch app on your iPhone: Privacy & Security ▸ Health ▸ openWater. It applies to the next session.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 4)
+            }
+        }
     }
 
     /// `116°SE`, or an em dash until the receiver has a heading to give — a

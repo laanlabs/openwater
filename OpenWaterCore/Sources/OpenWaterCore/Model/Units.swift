@@ -180,11 +180,16 @@ public enum Format {
     /// have no business sharing a formatter. Heights stay in metres or feet
     /// whatever the number, and keep a decimal — riders quote 1.8 m, not 2 m.
     public static func height(_ metres: Double, unit: DistanceUnit) -> String {
+        // Negative zero is a real number and a silly reading. A tide table
+        // running a hair under the datum prints "-0.0 ft", which looks like
+        // a bug in a column of otherwise sober numbers; the sign only earns
+        // its place once it changes a digit.
+        func shown(_ value: Double) -> Double { abs(value) < 0.05 ? 0 : value }
         switch unit {
         case .metric, .nautical:
-            String(format: "%.1f m", metres)
+            return String(format: "%.1f m", shown(metres))
         case .imperial:
-            String(format: "%.1f ft", metres / DistanceUnit.metresPerFoot)
+            return String(format: "%.1f ft", shown(metres / DistanceUnit.metresPerFoot))
         }
     }
 

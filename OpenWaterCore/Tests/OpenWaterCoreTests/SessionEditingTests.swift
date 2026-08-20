@@ -44,6 +44,59 @@ struct SessionEditingTests {
         #expect(edited.track.count == original.track.count)
     }
 
+    @Test("The current is recorded, kept toward, and re-runs nothing")
+    func currentIsMetadata() throws {
+        let original = session()
+        var edits = Session.Edits(session: original)
+        // A knot of water setting west-south-west, the way a chart says it.
+        edits.currentSpeed = 0.51
+        edits.currentDirectionToward = 247
+
+        // Nothing in the analysis reads it yet, and a recompute a rider did
+        // not ask for is a stored summary quietly replaced.
+        #expect(!original.requiresReanalysis(for: edits))
+
+        let edited = original.applying(edits)
+        #expect(edited.currentSpeed == 0.51)
+        #expect(edited.currentDirectionToward == 247)
+        #expect(edited.summary?.maxSpeed == original.summary?.maxSpeed)
+
+        // And it survives the trip back out through Edits, so a second edit
+        // does not silently drop what the first one set.
+        let again = Session.Edits(session: edited)
+        #expect(again.currentSpeed == 0.51)
+        #expect(again.currentDirectionToward == 247)
+    }
+
+    @Test("A session written before the current existed still opens")
+    func archiveWithoutCurrentDecodes() throws {
+        let original = session()
+        let data = try SessionArchive(session: original).encoded()
+        var json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        var stored = json["session"] as! [String: Any]
+        stored.removeValue(forKey: "currentSpeed")
+        stored.removeValue(forKey: "currentDirectionToward")
+        json["session"] = stored
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+
+        let decoded = try SessionArchive.decode(stripped).session
+        #expect(decoded.currentSpeed == nil)
+        #expect(decoded.currentDirectionToward == nil)
+        #expect(decoded.track.count == original.track.count)
+    }
+
+    @Test("The current survives an archive round trip")
+    func currentSurvivesArchive() throws {
+        var original = session()
+        original.currentSpeed = 0.72
+        original.currentDirectionToward = 15
+
+        let data = try SessionArchive(session: original).encoded()
+        let decoded = try SessionArchive.decode(data).session
+        #expect(decoded.currentSpeed == 0.72)
+        #expect(decoded.currentDirectionToward == 15)
+    }
+
     @Test("Changing the sport re-runs the analysis")
     func sportChangeReanalyses() {
         let original = session(sport: .wingfoil)

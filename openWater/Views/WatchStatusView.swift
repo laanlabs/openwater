@@ -121,6 +121,32 @@ struct WatchStatusView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                // The one check a rider cannot make for themselves. Health
+                // permissions live on the watch, the phone has no HealthKit
+                // to ask with, and a declined prompt is invisible until a
+                // session arrives with no beat in it.
+                Button {
+                    sync.checkHeartRate()
+                } label: {
+                    HStack(spacing: 6) {
+                        if sync.isCheckingHeartRate {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "heart.text.square")
+                        }
+                        Text(sync.isCheckingHeartRate ? "Asking the watch…" : "Check heart rate")
+                    }
+                    .font(.subheadline)
+                }
+                .disabled(sync.isCheckingHeartRate)
+
+                if let message = sync.heartRateMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Button {
                     sync.pushRecords()
                 } label: {

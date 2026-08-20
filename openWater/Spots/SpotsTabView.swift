@@ -80,6 +80,11 @@ struct SpotsTabView: View {
     /// under this map's own pins: the flow map's wind, or the ocean
     /// model's current.
     @AppStorage("spots.washLayer") private var washLayerRaw = WashLayer.off.rawValue
+    /// The current wash cut to the coastline — on by default, and a switch
+    /// because the coastline comes from a second free endpoint that can be
+    /// refused or absent, and a rider who wants the field back should not
+    /// have to wait for one.
+    @AppStorage("spots.maskLand") private var masksLand = true
     @State private var windWash = WindWashModel()
 
     /// The hardware layers: the guide's wind meters and cams, and NDBC's
@@ -1513,6 +1518,17 @@ struct SpotsTabView: View {
                 Label("No wash", systemImage: "square.slash").tag(WashLayer.off.rawValue)
                 Label("Wind", systemImage: "wind").tag(WashLayer.wind.rawValue)
                 Label("Current", systemImage: "water.waves").tag(WashLayer.currents.rawValue)
+            }
+            if washLayer == .currents {
+                Section("Current wash") {
+                    Toggle(isOn: $masksLand) {
+                        Label("Keep it off the land", systemImage: "map")
+                    }
+                    .onChange(of: masksLand) { _, _ in
+                        guard let region = visibleRegion else { return }
+                        windWash.maskPreferenceChanged(for: region, layer: washLayer)
+                    }
+                }
             }
             Section("On the map") {
                 Toggle(isOn: $showSpots) {

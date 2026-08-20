@@ -267,9 +267,8 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isSettingWind) {
             if let session {
-                WindSetterView(session: session) { direction, speed, swell, swellFrom, timeline in
-                    applyWind(direction: direction, speed: speed, swell: swell,
-                              swellFrom: swellFrom, timeline: timeline, to: session)
+                WindSetterView(session: session) { applied in
+                    applyConditions(applied, to: session)
                 }
             }
         }
@@ -342,9 +341,8 @@ struct SessionDetailView: View {
         archiveToSend = SharedFile(url: url)
     }
 
-    private func applyWind(direction: Double, speed: Double?, swell: Double?,
-                           swellFrom: Double?, timeline: WindTimeline? = nil,
-                           to session: Session) {
+    private func applyConditions(_ applied: WindSetterView.Applied,
+                                 to session: Session) {
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
         // Said before the work starts, not after it finishes.
@@ -358,11 +356,13 @@ struct SessionDetailView: View {
             defer { isReanalysing = false }
             let edited = await Task.detached {
                 var edits = Session.Edits(session: session)
-                edits.windDirection = direction
-                edits.windSpeed = speed
-                edits.windTimeline = timeline
-                edits.swellHeight = swell
-                edits.swellDirection = swellFrom
+                edits.windDirection = applied.windDirection
+                edits.windSpeed = applied.windSpeed
+                edits.windTimeline = applied.windTimeline
+                edits.swellHeight = applied.swellHeight
+                edits.swellDirection = applied.swellDirection
+                edits.currentSpeed = applied.currentSpeed
+                edits.currentDirectionToward = applied.currentDirectionToward
                 return session.applying(edits, categories: categories, overrides: overrides)
             }.value
             library.save(edited)

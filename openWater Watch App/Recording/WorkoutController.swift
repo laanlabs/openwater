@@ -32,6 +32,23 @@ final class WorkoutController: NSObject {
 
     private(set) var state: HKWorkoutSessionState = .notStarted
     private(set) var heartRate: Double?
+    /// When collection began, and whether a single beat has ever landed.
+    ///
+    /// HealthKit will not say whether a *read* was granted — the API refuses
+    /// to reveal it on purpose, so that an app cannot infer what a rider
+    /// declined — which means silence is the only signal there is. Forty
+    /// seconds of a running workout with no heart rate is either a permission
+    /// that was never given or a watch nobody is wearing, and both mean the
+    /// same thing to somebody staring at a blank number: this session will
+    /// have none.
+    private(set) var collectionStartedAt: Date?
+    private(set) var hasEverReadHeartRate = false
+
+    /// Whether to stop pretending a number is coming.
+    var heartRateUnavailable: Bool {
+        guard !hasEverReadHeartRate, let started = collectionStartedAt else { return false }
+        return Date().timeIntervalSince(started) > 40
+    }
     private(set) var activeEnergyKilocalories: Double = 0
     private(set) var isAuthorized = false
 
@@ -65,6 +82,42 @@ final class WorkoutController: NSObject {
         }
     }
 
+    /// Whether Health will actually hand a heartbeat over, asked directly.
+    ///
+    /// Two facts, because neither is enough alone. `statusForAuthorizationRequest`
+    /// says whether the rider has ever been asked — it reports `shouldRequest`
+    /// until the prompt is answered — but it will not say what they answered,
+    /// because HealthKit refuses to reveal a denied *read* to the app that was
+    /// denied. So the second fact is empirical: ask for one heart-rate sample,
+    /// any heart-rate sample. A refused read returns an empty result rather
+    /// than an error, so a sample coming back is proof of access, and no
+    /// sample on a watch somebody has been wearing means the answer was no.
+    ///
+    /// Static, and on its own store, so the phone's question can be answered
+    /// without a recording in progress.
+    static func heartRateProbe() async -> (asked: Bool, canRead: Bool) {
+        guard HKHealthStore.isHealthDataAvailable() else { return (false, false) }
+        let store = HKHealthStore()
+        let share: Set<HKSampleType> = [HKQuantityType.workoutType(), HKSeriesType.workoutRoute()]
+        let read: Set<HKObjectType> = [HKQuantityType(.heartRate)]
+        let status = try? await store.statusForAuthorizationRequest(toShare: share, read: read)
+        let asked = status != .shouldRequest
+
+        let canRead: Bool = await withCheckedContinuation { continuation in
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let query = HKSampleQuery(
+                sampleType: HKQuantityType(.heartRate),
+                predicate: nil,
+                limit: 1,
+                sortDescriptors: [sort]
+            ) { @Sendable _, samples, _ in
+                continuation.resume(returning: samples?.isEmpty == false)
+            }
+            store.execute(query)
+        }
+        return (asked, canRead)
+    }
+
     // MARK: - Lifecycle
 
     func start(sport: Sport, startDate: Date) throws {
@@ -89,6 +142,8 @@ final class WorkoutController: NSObject {
         self.builder = builder
         self.routeBuilder = HKWorkoutRouteBuilder(healthStore: store, device: nil)
 
+        collectionStartedAt = startDate
+        hasEverReadHeartRate = false
         session.startActivity(with: startDate)
         // Same hazard as MotionProvider: HealthKit's completion handler is not
         // Sendable in the SDK, so a closure written inside this class inherits
@@ -142,6 +197,7 @@ final class WorkoutController: NSObject {
         session = nil
         builder = nil
         routeBuilder = nil
+        collectionStartedAt = nil
     }
 }
 
@@ -192,7 +248,10 @@ extension WorkoutController: HKLiveWorkoutBuilderDelegate {
         }
 
         Task { @MainActor in
-            if let newHeartRate { self.heartRate = newHeartRate }
+            if let newHeartRate {
+                self.heartRate = newHeartRate
+                self.hasEverReadHeartRate = true
+            }
             if let newEnergy { self.activeEnergyKilocalories = newEnergy }
         }
     }

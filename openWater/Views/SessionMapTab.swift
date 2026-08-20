@@ -69,6 +69,41 @@ struct SessionMapTab: View {
     @State private var chartSamples: [(elapsed: TimeInterval, speed: Double)] = []
     @State private var previewIndex: TrimPreview.Index?
 
+    /// A cut is being applied and the track rebuilt off the main actor.
+    ///
+    /// Trimming is not free — the whole track is re-ingested and re-analysed —
+    /// so the panel would close, nothing would happen for a beat, and then
+    /// the chart would snap to a new shape. A jump with no warning reads as a
+    /// glitch; the same jump with a spinner in front of it reads as work. Set
+    /// when the work is handed off, cleared when the new track arrives.
+    @State private var rebuilding: Rebuild?
+
+    enum Rebuild {
+        case trimming, restoring
+
+        var caption: String {
+            switch self {
+            case .trimming: "Trimming…"
+            case .restoring: "Restoring…"
+            }
+        }
+    }
+
+    /// What makes one track a different track: a trim keeps the session's
+    /// identity and replaces its samples, so a view that wants to rebuild
+    /// when the *shape* changes has to watch the shape.
+    private struct TrackFingerprint: Equatable {
+        let id: UUID
+        let count: Int
+        let duration: TimeInterval
+
+        init(session: Session) {
+            id = session.id
+            count = session.track.count
+            duration = session.track.duration
+        }
+    }
+
     enum TrimMode: String, CaseIterable, Identifiable {
         case trim = "Trim"
         case removeSegment = "Remove Segment"
@@ -130,13 +165,31 @@ struct SessionMapTab: View {
         // Everything derived from the track that does not change while it is
         // being edited, built once when the session appears rather than on
         // every frame of a drag.
-        .task(id: session.id) {
+        // Keyed on the *track*, not on the session.
+        //
+        // Keyed on the id alone — which is what this was — a trim saved from
+        // this very screen left the sparkline and the preview index still
+        // describing the recording that had just been cut. The data
+        // underneath was trimmed and the picture of it was not, so the strip
+        // a rider had just dragged their thumb along went on showing the
+        // dead time they had removed, and the only way to see the real shape
+        // was to leave the session and come back — which is exactly what
+        // somebody mid-edit does not do. A trim keeps the id and changes the
+        // track, so the track is what the key has to be about.
+        .task(id: TrackFingerprint(session: session)) {
             let track = session.track
             let derived = await Task.detached(priority: .userInitiated) {
                 (samples: Self.makeChartSamples(track), index: TrimPreview.Index(track: track))
             }.value
             guard !Task.isCancelled else { return }
-            chartSamples = derived.samples
+            withAnimation(.easeInOut(duration: 0.3)) {
+                chartSamples = derived.samples
+                // The playhead was somewhere in a recording that is now
+                // shorter. Left alone it sits past the end, and the numbers
+                // under it read for a moment that no longer exists.
+                elapsed = min(elapsed, duration)
+                rebuilding = nil
+            }
             previewIndex = derived.index
         }
     }
@@ -193,7 +246,10 @@ struct SessionMapTab: View {
                 // other tabs is measured from it.
                 Button(action: onEditConditions) {
                     WindDial(wind: wind, swell: session.swellHeight,
-                             swellFrom: session.swellDirection, units: settings.units)
+                             swellFrom: session.swellDirection,
+                             current: session.currentSpeed,
+                             currentToward: session.currentDirectionToward,
+                             units: settings.units)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -241,6 +297,7 @@ struct SessionMapTab: View {
 
             if session.trim.isTrimmed {
                 Button(restoreTitle, systemImage: "arrow.uturn.backward") {
+                    beginRebuild(.restoring)
                     onTrim(.none, false)
                 }
             }
@@ -359,6 +416,22 @@ struct SessionMapTab: View {
             } else {
                 liveNumbers
                 speedChart
+                    .opacity(rebuilding == nil ? 1 : 0.3)
+                    .overlay {
+                        if let rebuilding {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text(rebuilding.caption)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(.regularMaterial, in: Capsule())
+                            .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.25), value: rebuilding)
                 transport
             }
         }
@@ -552,6 +625,11 @@ struct SessionMapTab: View {
                 Text("of \(Format.duration(duration))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    // The one number on this row that a trim changes. Rolled
+                    // rather than swapped, so the new length reads as the
+                    // result of what just happened.
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.3), value: duration)
             }
             .frame(maxWidth: .infinity)
 
@@ -583,6 +661,10 @@ struct WindDial: View {
     let wind: Wind
     var swell: Double? = nil
     var swellFrom: Double? = nil
+    /// Drift in m/s and the bearing the water sets *toward*. Only the bearing
+    /// is drawn — a third number in a 64-point circle is not a glance.
+    var current: Double? = nil
+    var currentToward: Double? = nil
     let units: UnitPreferences
 
     /// Diameter of the dial. 64 on the Map tab; smaller maps pass smaller —
@@ -610,8 +692,8 @@ struct WindDial: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Wind \(Format.cardinal(wind.directionFrom))\(wind.speed == nil ? "" : ", \(speedText)")")
-        .accessibilityHint("Edit the wind and swell")
+        .accessibilityLabel("Wind \(Format.cardinal(wind.directionFrom))\(wind.speed == nil ? "" : ", \(speedText)")\(currentLabel)")
+        .accessibilityHint("Edit the wind, swell and current")
     }
 
     private var dial: some View {
@@ -634,6 +716,17 @@ struct WindDial: View {
                     .foregroundStyle(.teal)
                     .offset(y: -24 * f)
                     .rotationEffect(.degrees(swellFrom))
+            }
+
+            // The current rides the same rim in orange, pointing *outward*:
+            // the other two arrows come from their bearing, this one goes to
+            // it, and the shape has to say so without a caption.
+            if let currentToward, (current ?? 0) > 0.02 {
+                Image(systemName: "arrowtriangle.up.fill")
+                    .font(.system(size: 8 * f))
+                    .foregroundStyle(.orange)
+                    .offset(y: -24 * f)
+                    .rotationEffect(.degrees(currentToward))
             }
 
             Image(systemName: "arrowtriangle.down.fill")
@@ -663,6 +756,11 @@ struct WindDial: View {
     private var speedText: String {
         guard let speed = wind.speed else { return Format.bearing(wind.directionFrom, includeCardinal: false) }
         return Format.speed(speed, unit: units.speed, decimals: 0)
+    }
+
+    private var currentLabel: String {
+        guard let current, current > 0.02, let currentToward else { return "" }
+        return ". Current \(Format.speed(current, unit: units.speed, decimals: 1)) setting \(Format.cardinal(currentToward))"
     }
 
     private func swellText(_ metres: Double) -> String {
@@ -879,8 +977,26 @@ extension SessionMapTab {
         let trim = trimMode == .trim
             ? selectedTrim
             : session.trim.removing(start: trimStart, end: trimEnd)
+        // Saving as a new activity leaves this session exactly as it is, so
+        // there is no rebuild to wait for and nothing to say about one.
+        if !asNewActivity { beginRebuild(.trimming) }
         onTrim(trim, asNewActivity)
         withAnimation(.snappy) { isTrimming = false }
+    }
+
+    /// Show the work, and never show it for ever.
+    ///
+    /// The spinner is cleared by the new track arriving, which is the honest
+    /// signal — but a trim that changes nothing produces no new track and no
+    /// arrival, and a failed one produces neither. Ten seconds is far longer
+    /// than the rebuild has ever taken and short enough that a stuck spinner
+    /// is a blink rather than a bug report.
+    private func beginRebuild(_ kind: Rebuild) {
+        withAnimation(.easeInOut(duration: 0.25)) { rebuilding = kind }
+        Task {
+            try? await Task.sleep(for: .seconds(10))
+            withAnimation(.easeInOut(duration: 0.25)) { rebuilding = nil }
+        }
     }
 }
 
@@ -1059,8 +1175,14 @@ struct TrimTimeline: View {
                         .offset(x: endX)
                 }
 
+                // `strokeBorder`, not `stroke`: a stroke straddles its path,
+                // so three points of yellow put a point and a half of itself
+                // on each side of the cut — covering a sliver of the kept
+                // data and claiming a sliver of the discarded. Bordered
+                // inward, the line's outer edge *is* the cut, which is the
+                // same edge the handle beside it presents.
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(invertSelection ? Color.red : Color.yellow, lineWidth: 3)
+                    .strokeBorder(invertSelection ? Color.red : Color.yellow, lineWidth: 3)
                     .frame(width: max(0, endX - startX), height: height)
                     .offset(x: startX)
 

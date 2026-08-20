@@ -75,6 +75,31 @@ public struct Session: Sendable, Codable, Identifiable {
     /// and would throw on a missing key for anything else.
     public var swellDirection: Double?
 
+    /// How fast the water itself was moving, m/s, if the rider called it or
+    /// looked it up.
+    ///
+    /// Nothing here reads it yet — GPS speed is speed over ground, and every
+    /// metric in the analysis still lives in that frame. It is recorded
+    /// because a knot of current is the difference between a session that
+    /// made sense and one that did not: the same rig on the same wind reads
+    /// a knot slower on one tack than the other, and a rider who knows the
+    /// river was running can see why. Speed through water is the work this
+    /// unblocks, not the work this does.
+    public var currentSpeed: Double?
+
+    /// Degrees the current was setting *toward*, 0–360.
+    ///
+    /// Toward, not from — the opposite of the wind convention on purpose,
+    /// because it is the convention every chart, every tide table and every
+    /// current station uses: a westerly wind blows from the west, a westerly
+    /// set carries you to the west. `CurrentsOutlook` states the same rule
+    /// for the spot screens, and the two must not drift apart.
+    ///
+    /// Optional in storage, so archives written before it existed still
+    /// decode — the synthesised decoder uses `decodeIfPresent` for Optionals
+    /// and would throw on a missing key for anything else.
+    public var currentDirectionToward: Double?
+
     /// Wind for the session — estimated on import, overridable by the rider.
     ///
     /// Prefer `effectiveWind` when reading: the analysis carries its own copy,
@@ -191,6 +216,8 @@ public struct Session: Sendable, Codable, Identifiable {
         foilTakeoffSpeed: Double? = nil,
         swellHeight: Double? = nil,
         swellDirection: Double? = nil,
+        currentSpeed: Double? = nil,
+        currentDirectionToward: Double? = nil,
         equipment: Equipment? = nil,
         summary: SessionSummary? = nil
     ) {
@@ -218,6 +245,8 @@ public struct Session: Sendable, Codable, Identifiable {
         self.foilTakeoffSpeed = foilTakeoffSpeed
         self.swellHeight = swellHeight
         self.swellDirection = swellDirection
+        self.currentSpeed = currentSpeed
+        self.currentDirectionToward = currentDirectionToward
         self.equipment = equipment
         self.summary = summary
     }

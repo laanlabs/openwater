@@ -1109,6 +1109,10 @@ enum OpenMeteo {
         var windGustKn: Double?
         var swellMetres: Double?
         var swellDirectionFrom: Double?
+        /// Net drift over the session's hours, knots, and the bearing it set
+        /// *toward* — the chart convention the currents screens already use.
+        var currentKn: Double?
+        var currentSettingToward: Double?
         /// The hour-by-hour record the averages were taken from, worth
         /// keeping on the session rather than dying in a label here.
         var windTimeline: WindTimeline?
@@ -1116,17 +1120,19 @@ enum OpenMeteo {
         var isEmpty: Bool { windDirectionFrom == nil && swellMetres == nil }
     }
 
-    /// Wind and swell for a session that already happened, averaged over the
-    /// hours it spanned.
+    /// Wind, swell and current for a session that already happened, averaged
+    /// over the hours it spanned.
     static func historical(at coordinate: Geo.Coordinate,
                            during window: DateInterval) async -> Historical {
         async let wind = historicalWind(at: coordinate, during: window)
-        async let sea = historicalSwell(at: coordinate, during: window)
+        async let sea = historicalSea(at: coordinate, during: window)
         let (w, s) = await (wind, sea)
         return Historical(windDirectionFrom: w?.directionFrom,
                           windSpeedKn: (w?.speed).map { $0 * 1.94384 },
                           windGustKn: (w?.gust).map { $0 * 1.94384 },
-                          swellMetres: s?.metres, swellDirectionFrom: s?.direction,
+                          swellMetres: s?.swellMetres, swellDirectionFrom: s?.swellDirection,
+                          currentKn: s?.currentKn,
+                          currentSettingToward: s?.currentToward,
                           windTimeline: w?.timeline)
     }
 
@@ -1204,15 +1210,21 @@ enum OpenMeteo {
         return (averaged.directionFrom, averaged.speed, averaged.gust, timeline)
     }
 
-    private static func historicalSwell(
+    /// What the sea was doing: the swell that was running, and the net set the
+    /// water carried while it ran.
+    ///
+    /// One request for both, because they come off the same marine grid and a
+    /// second call would buy nothing — `ocean_current_velocity` rides in the
+    /// same `hourly` list the swell already asks for.
+    private static func historicalSea(
         at coordinate: Geo.Coordinate, during window: DateInterval
-    ) async -> (metres: Double, direction: Double?)? {
+    ) async -> Sea? {
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
         let (from, to) = utcDays(of: window)
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
             .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
-            .init(name: "hourly", value: "swell_wave_height,swell_wave_direction,wave_height,wave_direction"),
+            .init(name: "hourly", value: "swell_wave_height,swell_wave_direction,wave_height,wave_direction,ocean_current_velocity,ocean_current_direction"),
             .init(name: "start_date", value: from),
             .init(name: "end_date", value: to),
             .init(name: "timeformat", value: "unixtime"),
@@ -1226,6 +1238,8 @@ enum OpenMeteo {
                 let swell_wave_direction: [Double?]?
                 let wave_height: [Double?]?
                 let wave_direction: [Double?]?
+                let ocean_current_velocity: [Double?]?
+                let ocean_current_direction: [Double?]?
             }
             let hourly: Hourly?
         }
@@ -1243,8 +1257,49 @@ enum OpenMeteo {
             heights = picked.compactMap { hourly.wave_height?[safe: $0] ?? nil }
             directions = picked.compactMap { hourly.wave_direction?[safe: $0] ?? nil }
         }
-        guard !heights.isEmpty else { return nil }
-        return (heights.reduce(0, +) / Double(heights.count), circularMean(of: directions))
+
+        // The current is averaged as a vector, never as a speed beside a
+        // bearing. A session that spans a turn of the tide runs one way and
+        // then the other, and the mean of two opposed knots is no net set at
+        // all — which is the true answer, and the one a mean speed of one
+        // knot pointing at the circular mean of two opposite bearings would
+        // hide. Speeds arrive in km/h from this endpoint.
+        let drift = picked.compactMap { index -> (Double, Double)? in
+            guard let speed = hourly.ocean_current_velocity?[safe: index] ?? nil,
+                  let toward = hourly.ocean_current_direction?[safe: index] ?? nil
+            else { return nil }
+            return (speed, toward)
+        }
+        var current: (kn: Double, toward: Double)?
+        if !drift.isEmpty {
+            var u = 0.0, v = 0.0
+            for (speed, toward) in drift {
+                u += speed * sin(toward * .pi / 180)
+                v += speed * cos(toward * .pi / 180)
+            }
+            u /= Double(drift.count)
+            v /= Double(drift.count)
+            let kmh = sqrt(u * u + v * v)
+            if kmh > 0 {
+                current = (kmh * 0.539957, Geo.normalizeDegrees(atan2(u, v) * 180 / .pi))
+            }
+        }
+
+        guard !heights.isEmpty || current != nil else { return nil }
+        return Sea(
+            swellMetres: heights.isEmpty ? nil : heights.reduce(0, +) / Double(heights.count),
+            swellDirection: heights.isEmpty ? nil : circularMean(of: directions),
+            currentKn: current?.kn,
+            currentToward: current?.toward
+        )
+    }
+
+    /// The sea's half of a historical lookup.
+    struct Sea {
+        var swellMetres: Double?
+        var swellDirection: Double?
+        var currentKn: Double?
+        var currentToward: Double?
     }
 
     /// Indices of the hours inside the window, padded so a forty-minute
@@ -2833,22 +2888,43 @@ struct TideCurve {
     }
 
     var nextTurn: Turn? { turns.first { $0.at > Date() } }
+
+    /// A slice of the run, for the places that draw a shape rather than a
+    /// table.
+    ///
+    /// The detail screen wants every day there is; the card on the sheet is
+    /// a picture the width of a phone, and ten days of tide in it is a
+    /// hairline scribble with its turn labels on top of each other. Cutting
+    /// here rather than at the fetch keeps one request behind both, and the
+    /// three hours of run-up keep the curve from starting at the line.
+    func window(hours: Int, from now: Date = Date()) -> TideCurve {
+        let start = now.addingTimeInterval(-3 * 3600)
+        let end = now.addingTimeInterval(Double(hours) * 3600)
+        let cut = points.filter { $0.at >= start && $0.at <= end }
+        guard cut.count > 2 else { return self }
+        var window = TideCurve(points: cut, source: source, timeZone: timeZone)
+        window.staleAge = staleAge
+        return window
+    }
 }
 
 extension OpenMeteo {
 
-    /// Two days of sea level, hourly. Global.
+    /// Ten days of sea level, hourly. Global.
     static func tide(at coordinate: Geo.Coordinate) async -> TideCurve {
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
             .init(name: "longitude", value: String(format: "%.4f", coordinate.longitude)),
             .init(name: "hourly", value: "sea_level_height_msl"),
-            // Three, not two. The API returns whole local days, so two of
-            // them leaves only the rest of today plus tomorrow — measured at
-            // 24 hours ahead, which is not enough to plan around a tide for
-            // a session the day after next. Three guarantees at least 48.
-            .init(name: "forecast_days", value: "3"),
+            // Ten. A tide is the one forecast on this screen that is not
+            // really a forecast — it is arithmetic on the moon and the sun,
+            // and it is as right a week out as it is tomorrow. So the horizon
+            // is set by what a rider plans rather than by what a model can
+            // hold: booking a weekend, or reading which morning of a trip has
+            // the water. Measured 2026-08-19: the marine API answers 240
+            // hourly rows for this field, the last few nil.
+            .init(name: "forecast_days", value: "10"),
             .init(name: "past_days", value: "1"),
             .init(name: "timeformat", value: "unixtime"),
             .init(name: "timezone", value: "auto"),
@@ -2909,7 +2985,11 @@ extension TidesAndCurrents {
             .init(name: "product", value: "predictions"),
             .init(name: "station", value: station.id),
             .init(name: "begin_date", value: stamp.string(from: begin)),
-            .init(name: "range", value: "72"),
+            // Hours, and the same window the model gets: a day behind for
+            // the run-up plus ten ahead. Measured 2026-08-19: 2,641
+            // six-minute rows, 100 KB, a quarter of a second — and cached
+            // for six hours, so a rider pays that once a morning.
+            .init(name: "range", value: "264"),
             .init(name: "datum", value: "MLLW"),
             .init(name: "units", value: "metric"),
             .init(name: "time_zone", value: "lst_ldt"),

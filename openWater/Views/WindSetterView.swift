@@ -30,28 +30,54 @@ struct WindSetterView: View {
     /// Degrees the swell comes from, if this session already has one.
     let initialSwellDirection: Double?
     let showsSwell: Bool
-    /// Degrees the wind comes from, m/s (nil when the rider skips speed),
-    /// swell in metres, degrees the swell comes from — the middle two nil
-    /// when not offered, left at zero, or never pointed at — and the hourly
-    /// timeline when a lookup fetched one. The timeline is the model's
-    /// record of the day and travels regardless of how far the rider drags
-    /// the dials away from it: their call and the archive's account are
-    /// allowed to disagree, and both are worth keeping.
-    let onApply: (Double, Double?, Double?, Double?, WindTimeline?) -> Void
+    /// Current to pre-fill: m/s, and the bearing it set toward.
+    let initialCurrent: Double?
+    let initialCurrentToward: Double?
+    /// Whether this caller deals in current at all. The session screens do —
+    /// "what was that day like" is exactly where a knot of water belongs —
+    /// and the record screen does not: it is asking what the wind is doing
+    /// now, and the recorder has nowhere to put a set.
+    let showsCurrent: Bool
+
+    /// What the sheet hands back.
+    ///
+    /// A struct rather than six positional arguments: four of them are
+    /// `Double?` and two of those are bearings, so a call site that
+    /// transposed swell and current would compile perfectly and be wrong on
+    /// the water. Everything is nil when it was not offered, left at zero, or
+    /// never pointed at. The timeline is the model's record of the day and
+    /// travels regardless of how far the rider drags the dials away from it:
+    /// their call and the archive's account are allowed to disagree, and both
+    /// are worth keeping.
+    struct Applied {
+        var windDirection: Double
+        /// m/s, nil when the rider skips speed.
+        var windSpeed: Double?
+        var swellHeight: Double?
+        var swellDirection: Double?
+        /// m/s, and the bearing the water sets *toward*.
+        var currentSpeed: Double?
+        var currentDirectionToward: Double?
+        var windTimeline: WindTimeline?
+    }
+
+    let onApply: (Applied) -> Void
 
     /// Where and when the session happened, so the models can be asked what
     /// that day was doing. Nil on the record screen — the forecast already
     /// covers "now", and there is nothing historical about it yet.
     let lookup: (coordinate: Geo.Coordinate, window: DateInterval)?
 
-    init(session: Session,
-         onApply: @escaping (Double, Double?, Double?, Double?, WindTimeline?) -> Void) {
+    init(session: Session, onApply: @escaping (Applied) -> Void) {
         self.trackPoints = session.track.points
         self.reference = session.effectiveWind
         self.referenceLabel = "the estimate"
         self.initialSwell = session.swellHeight
         self.initialSwellDirection = session.swellDirection
         self.showsSwell = true
+        self.initialCurrent = session.currentSpeed
+        self.initialCurrentToward = session.currentDirectionToward
+        self.showsCurrent = true
         self.onApply = onApply
         let points = session.track.points
         self.lookup = points.isEmpty ? nil : (
@@ -71,9 +97,13 @@ struct WindSetterView: View {
         self.initialSwell = initialSwell
         self.initialSwellDirection = initialSwellDirection
         self.showsSwell = showsSwell
+        self.initialCurrent = nil
+        self.initialCurrentToward = nil
+        self.showsCurrent = false
         // No lookup on this path, so there is never a timeline to hand on.
-        self.onApply = { direction, speed, swell, swellFrom, _ in
-            onApply(direction, speed, swell, swellFrom)
+        self.onApply = { applied in
+            onApply(applied.windDirection, applied.windSpeed,
+                    applied.swellHeight, applied.swellDirection)
         }
         self.lookup = nil
     }
@@ -97,6 +127,12 @@ struct WindSetterView: View {
     /// Swell direction is only reported once it has actually been given. An
     /// untouched dial sitting at north is not a rider saying "north".
     @State private var hasSwellDirection = false
+    @State private var currentKnots: Double = 0
+    /// Degrees the water sets *toward* — the chart convention, opposite to
+    /// the wind's, and the one `Session.currentDirectionToward` stores.
+    @State private var currentToward: Double = 0
+    /// Same rule as the swell's: a dial nobody dragged is not an assertion.
+    @State private var hasCurrentToward = false
 
     @State private var isLookingUp = false
     @State private var isRestoringEstimate = false
@@ -108,15 +144,149 @@ struct WindSetterView: View {
     private enum Pointing: String, CaseIterable, Identifiable {
         case wind = "Wind"
         case swell = "Swell"
+        case current = "Current"
         var id: String { rawValue }
+
+        /// What the legend calls this tab when it is still empty. The wind
+        /// tab is never short of a direction — it is the strength that goes
+        /// missing — so it is named for the thing that is actually blank.
+        var waitingName: String {
+            switch self {
+            case .wind: "wind speed"
+            case .swell: "swell"
+            case .current: "current"
+            }
+        }
+    }
+
+    /// Which arrows this caller offers. Current rides on its own flag, so the
+    /// record screen keeps the two it can store.
+    private var pointings: [Pointing] {
+        showsCurrent ? Pointing.allCases : Pointing.allCases.filter { $0 != .current }
+    }
+
+    /// The segments, drawn rather than picked.
+    ///
+    /// One dial answers three questions and two of them are a tap away, so a
+    /// rider who never touches the segments never learns that the swell and
+    /// the current can be given at all — hence a mark on any segment whose
+    /// tab is still empty, the same orange triangle `AnalysisRow` wears for a
+    /// metric running on a guess, going out the moment that slider leaves
+    /// zero.
+    ///
+    /// It is hand-built because `Picker(.segmented)` cannot carry it:
+    /// interpolating an image into a segment's `Text` renders the words and
+    /// drops the glyph on the floor, which was measured on screen rather than
+    /// assumed. The styling is the system control's — a fill track, a raised
+    /// pill under the selection — so nothing about it announces that it is
+    /// ours.
+    private var arrowPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(pointings) { option in
+                Button {
+                    pointing = option
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(option.rawValue)
+                            .font(.subheadline.weight(pointing == option ? .semibold : .regular))
+                            .foregroundStyle(.primary)
+                        if isUnanswered(option) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background {
+                        if pointing == option {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+                        }
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isUnanswered(option) ? "\(option.rawValue), not set" : option.rawValue)
+                .accessibilityAddTraits(pointing == option ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(2)
+        .background(Color(.tertiarySystemFill),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.horizontal, showsCurrent ? 24 : 40)
+        // The arrows dim and brighten with this, and the row below swaps with
+        // it — all of which is one movement.
+        .animation(.snappy, value: pointing)
+    }
+
+    /// What the mark on a segment means, said once at the foot of the sheet.
+    ///
+    /// A badge nobody can decode is just an alarm. So the legend names the
+    /// tabs still waiting — a rider should not have to visit all three to
+    /// find out which one the triangle was about — and it says the thing that
+    /// stops the mark reading as an error: none of this is required. It is
+    /// here only while there is a badge to explain, and goes when the last
+    /// one does.
+    @ViewBuilder
+    private var badgeLegend: some View {
+        let waiting = pointings.filter(isUnanswered)
+        if !waiting.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("marks a tab nobody has filled in yet — \(named(waiting)). Each is optional; the arrows alone are a complete answer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.top, 4)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// The waiting tabs in a sentence: "swell", "swell and current",
+    /// "wind speed, swell and current".
+    private func named(_ options: [Pointing]) -> String {
+        let names = options.map(\.waitingName)
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+    }
+
+    /// Whether a segment's tab still has nothing in it.
+    ///
+    /// Strength decides, never direction: the estimator always has an opinion
+    /// about where the wind came from, and an untouched arrow still points
+    /// somewhere, so a bearing is never evidence that anybody answered.
+    private func isUnanswered(_ option: Pointing) -> Bool {
+        switch option {
+        case .wind: knots <= 0.5
+        case .swell: swell <= 0.05
+        case .current: currentKnots <= 0.05
+        }
     }
 
     /// The angle currently under the drag.
     private var pointed: Double {
-        get { pointing == .wind ? direction : swellDirection }
+        get {
+            switch pointing {
+            case .wind: direction
+            case .swell: swellDirection
+            case .current: currentToward
+            }
+        }
         nonmutating set {
-            if pointing == .wind { direction = newValue }
-            else { swellDirection = newValue; hasSwellDirection = true }
+            switch pointing {
+            case .wind: direction = newValue
+            case .swell: swellDirection = newValue; hasSwellDirection = true
+            case .current: currentToward = newValue; hasCurrentToward = true
+            }
         }
     }
 
@@ -137,13 +307,7 @@ struct WindSetterView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal)
 
-                if showsSwell {
-                    Picker("", selection: $pointing) {
-                        ForEach(Pointing.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 40)
-                }
+                if showsSwell { arrowPicker }
 
                 // The two ways to fill these dials without guessing — snap
                 // back to the model's number, or ask the archive what that
@@ -192,7 +356,19 @@ struct WindSetterView: View {
                 .contentTransition(.numericText())
                 .animation(.snappy, value: Int(pointed))
 
-                if showsSwell, hasSwellDirection {
+                // Which way round this bearing means, said out loud. Wind and
+                // swell are named for where they come from; a current is
+                // named for where it takes you, and a dial carrying all three
+                // has to settle that every time the arrow changes.
+                Text(pointing == .current ? "setting toward" : "coming from")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if pointing == .current, hasCurrentToward {
+                    Text(currentLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if showsSwell, hasSwellDirection, pointing != .current {
                     Text(offsetLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -210,9 +386,25 @@ struct WindSetterView: View {
                         .transition(.opacity)
                 }
 
-                speedRow
+                // One slider, and it is the one the segment is pointing at.
+                //
+                // Three stacked rows made the sheet a scroll: the dial, its
+                // readout, then a wind slider, a swell slider with its wave
+                // graphic, and a current slider — most of them answering a
+                // question the rider was not being asked. The segment already
+                // says which of the three is under the hand, so the row below
+                // follows it, and the sheet fits a screen again.
+                Group {
+                    switch pointing {
+                    case .wind: speedRow
+                    case .swell: swellRow
+                    case .current: currentRow
+                    }
+                }
+                .transition(.opacity)
+                .animation(.snappy, value: pointing)
 
-                if showsSwell { swellRow }
+                if showsSwell { badgeLegend }
             }
             .padding(.top, 12)
             .padding(.bottom, 16)
@@ -226,11 +418,15 @@ struct WindSetterView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onApply(direction,
-                                knots > 0.5 ? knots / 1.94384 : nil,
-                                showsSwell && swell > 0.05 ? swell : nil,
-                                showsSwell && hasSwellDirection ? swellDirection : nil,
-                                fetchedTimeline)
+                        onApply(Applied(
+                            windDirection: direction,
+                            windSpeed: knots > 0.5 ? knots / 1.94384 : nil,
+                            swellHeight: showsSwell && swell > 0.05 ? swell : nil,
+                            swellDirection: showsSwell && hasSwellDirection ? swellDirection : nil,
+                            currentSpeed: showsCurrent && currentKnots > 0.05 ? currentKnots / 1.94384 : nil,
+                            currentDirectionToward: showsCurrent && hasCurrentToward ? currentToward : nil,
+                            windTimeline: fetchedTimeline
+                        ))
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -242,6 +438,17 @@ struct WindSetterView: View {
                     if let s = estimate.speed { knots = s * 1.94384 }
                 }
                 if let initialSwell { swell = initialSwell }
+                if let initialCurrent { currentKnots = initialCurrent * 1.94384 }
+                if let initialCurrentToward {
+                    currentToward = initialCurrentToward
+                    hasCurrentToward = true
+                } else if let estimate {
+                    // Somewhere to start, never an assertion: dead downwind is
+                    // where a rider expects the water to be going before they
+                    // know better, and `hasCurrentToward` stays false until
+                    // they say so.
+                    currentToward = Geo.normalizeDegrees(estimate.directionFrom + 180)
+                }
                 if let initialSwellDirection {
                     swellDirection = initialSwellDirection
                     hasSwellDirection = true
@@ -344,9 +551,19 @@ struct WindSetterView: View {
                         .opacity(pointing == .swell ? 1 : 0.4)
                 }
 
+                // Rotated by the bearing it sets *toward*, with the head at
+                // that rim pointing outward — no +180 anywhere, because the
+                // stored number already means "this way", the same as
+                // `CurrentsOutlook`'s.
+                if showsCurrent {
+                    currentArrow(size: size)
+                        .rotationEffect(.degrees(currentToward))
+                        .opacity(pointing == .current ? 1 : 0.4)
+                }
+
                 windArrow(size: size)
                     .rotationEffect(.degrees(direction))
-                    .opacity(showsSwell && pointing == .swell ? 0.4 : 1)
+                    .opacity(pointing == .wind ? 1 : 0.4)
             }
             .contentShape(Circle())
             // High priority, because the dial now lives inside a scroll
@@ -369,6 +586,11 @@ struct WindSetterView: View {
     }
 
     private var prompt: String {
+        if pointing == .current {
+            return trackPoints.isEmpty
+                ? "Drag the arrow to point the way the water is running — where it takes you, not where it comes from."
+                : "Drag the arrow to point the way the water was taking you."
+        }
         if pointing == .swell {
             return trackPoints.isEmpty
                 ? "Drag the arrow to point the way the swell is coming from."
@@ -427,6 +649,11 @@ struct WindSetterView: View {
                 swellDirection = d
                 hasSwellDirection = true
             }
+            if showsCurrent, let kn = found.currentKn, let toward = found.currentSettingToward {
+                currentKnots = min(6, kn)
+                currentToward = toward
+                hasCurrentToward = true
+            }
             fetchedTimeline = found.windTimeline
 
             var parts: [String] = []
@@ -438,6 +665,12 @@ struct WindSetterView: View {
             if let h = found.swellMetres {
                 let from = found.swellDirectionFrom.map { " from \(Format.cardinal($0))" } ?? ""
                 parts.append("swell \(Format.height(h, unit: settings.units.distance))\(from)")
+            }
+            if showsCurrent, let kn = found.currentKn, let toward = found.currentSettingToward {
+                // Named for where it goes, in the same breath as two things
+                // named for where they come from — so the word is said here
+                // as well as under the dial.
+                parts.append("current \(String(format: "%.1f", kn)) kn setting \(Format.cardinal(toward))")
             }
             lookupNote = "That day, by the model: \(parts.joined(separator: " · ")). Yours to correct."
         }
@@ -460,6 +693,50 @@ struct WindSetterView: View {
         case ..<110: return "Swell across the wind — \(rounded)°"
         default: return "Swell against the wind — \(rounded)°"
         }
+    }
+
+    /// Wind against water, said the way a rider would say it.
+    ///
+    /// The wind blows *from* its bearing, so it travels toward the opposite
+    /// one, and that is what the current has to be compared against. Wind
+    /// against tide is the sentence worth printing: it is the day the chop
+    /// stands up and the same fifteen knots feels like twenty-five.
+    private var currentLine: String {
+        let windToward = Geo.normalizeDegrees(direction + 180)
+        let raw = Geo.normalizeDegrees(currentToward - windToward)
+        let between = raw > 180 ? 360 - raw : raw
+        let rounded = Int(between.rounded())
+        switch between {
+        case ..<30: return "Water running with the wind"
+        case ..<70: return "Water \(rounded)° off the wind's way"
+        case ..<110: return "Water across the wind — \(rounded)°"
+        default: return "Wind against tide — the day the chop stands up"
+        }
+    }
+
+    /// Squarer than the wind's and pointing outward, because a current is the
+    /// one arrow here that means "this way", not "from here".
+    private func currentArrow(size: CGFloat) -> some View {
+        VStack(spacing: 3) {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 28, height: 28)
+                .overlay {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(radius: 2)
+            // A wake behind the head, tapering back the way it came.
+            ForEach(0..<3, id: \.self) { i in
+                Capsule()
+                    .fill(Color.orange.opacity(0.5 - Double(i) * 0.12))
+                    .frame(width: 12 - CGFloat(i) * 3, height: 2.5)
+            }
+            Spacer()
+        }
+        .frame(height: size - 8)
+        .padding(.top, 8)
     }
 
     /// Rounder and hollow, so it never reads as a second wind arrow.
@@ -582,8 +859,8 @@ extension WindSetterView {
                 .frame(height: 64)
             Slider(value: $swell, in: 0...5, step: 0.1)
             Text("Your call, not a measurement — nothing on the phone can see a wave.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 24)
@@ -591,6 +868,39 @@ extension WindSetterView {
 
     private var swellText: String {
         Format.height(swell, unit: settings.units.distance)
+    }
+
+    /// What the water was doing under the session.
+    ///
+    /// Sliders in knots like the wind's, because a rider who knows their
+    /// river knows it in knots — and capped at six, which is faster than any
+    /// water anybody rides on purpose. Net set, not peak: a session that
+    /// spanned the turn had the water go both ways, and the honest number is
+    /// what it did on balance.
+    private var currentRow: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text("Current")
+                    .font(.subheadline)
+                Spacer()
+                Text(currentKnots > 0.05 ? currentText : "not set")
+                    .font(.subheadline.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(currentKnots > 0.05 ? .primary : .secondary)
+            }
+            Slider(value: $currentKnots, in: 0...6, step: 0.1)
+            Text("Optional, and nothing on the phone can measure it — Look up fills it from the model, or slide to zero.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private var currentText: String {
+        let speed = String(format: "%.1f kn", currentKnots)
+        guard hasCurrentToward else { return speed }
+        return "\(speed) setting \(Format.cardinal(currentToward))"
     }
 
     private var speedRow: some View {
@@ -606,8 +916,8 @@ extension WindSetterView {
             }
             Slider(value: $knots, in: 0...40, step: 1)
             Text("Optional — slide to zero if you don't know.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 24)

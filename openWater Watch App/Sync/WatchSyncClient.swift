@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 import OpenWaterCore
 import WatchConnectivity
 import os
@@ -189,16 +190,29 @@ extension WatchSyncClient: WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        guard message["request"] as? String == "sync" else {
+        switch message["request"] as? String {
+        case "sync":
+            Task { @MainActor in
+                self.retryQueued()
+                replyHandler([
+                    "queued": self.queuedSessions.count,
+                    "outstanding": self.pendingTransfers,
+                ])
+            }
+        case "heartRate":
+            // Settings on the phone asking whether this watch can actually
+            // read a heartbeat. Only the watch can answer: HealthKit
+            // permissions live here, and the phone has no HealthKit at all.
+            Task {
+                let probe = await WorkoutController.heartRateProbe()
+                replyHandler([
+                    "available": HKHealthStore.isHealthDataAvailable(),
+                    "asked": probe.asked,
+                    "canRead": probe.canRead,
+                ])
+            }
+        default:
             replyHandler([:])
-            return
-        }
-        Task { @MainActor in
-            self.retryQueued()
-            replyHandler([
-                "queued": self.queuedSessions.count,
-                "outstanding": self.pendingTransfers,
-            ])
         }
     }
 

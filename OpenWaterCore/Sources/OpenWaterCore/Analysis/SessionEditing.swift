@@ -44,6 +44,12 @@ extension Session {
         public var swellHeight: Double?
         /// Degrees the swell comes from, if the rider called it.
         public var swellDirection: Double?
+        /// Speed of the water itself in m/s, if the rider called it.
+        public var currentSpeed: Double?
+        /// Degrees the current sets *toward* — the chart convention, and the
+        /// opposite of the wind's. Nothing in the analysis reads either yet,
+        /// so both ride along as metadata and force no recompute.
+        public var currentDirectionToward: Double?
         /// What the rider was on.
         public var equipment: Equipment?
 
@@ -60,6 +66,8 @@ extension Session {
             windTimeline: WindTimeline? = nil,
             swellHeight: Double? = nil,
             swellDirection: Double? = nil,
+            currentSpeed: Double? = nil,
+            currentDirectionToward: Double? = nil,
             equipment: Equipment? = nil
         ) {
             self.sport = sport
@@ -74,6 +82,8 @@ extension Session {
             self.windTimeline = windTimeline
             self.swellHeight = swellHeight
             self.swellDirection = swellDirection
+            self.currentSpeed = currentSpeed
+            self.currentDirectionToward = currentDirectionToward
             self.equipment = equipment
         }
 
@@ -98,6 +108,8 @@ extension Session {
             self.windTimeline = nil
             self.swellHeight = session.swellHeight
             self.swellDirection = session.swellDirection
+            self.currentSpeed = session.currentSpeed
+            self.currentDirectionToward = session.currentDirectionToward
             self.equipment = session.equipment
         }
     }
@@ -132,6 +144,8 @@ extension Session {
         result.feeling = edits.feeling
         result.swellHeight = edits.swellHeight
         result.swellDirection = edits.swellDirection
+        result.currentSpeed = edits.currentSpeed
+        result.currentDirectionToward = edits.currentDirectionToward
         result.equipment = edits.equipment.flatMap { $0.isEmpty ? nil : $0 }
         // Reference data rides along with any edit and never forces a
         // recompute — the analysis still runs on the scalar wind.

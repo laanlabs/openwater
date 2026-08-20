@@ -105,9 +105,8 @@ struct UpwindDetailView: View {
             samples = computeVMGSamples()
         }
         .sheet(isPresented: $isSettingWind) {
-            WindSetterView(session: session) { direction, speed, swell, swellFrom, timeline in
-                applyWind(direction: direction, speed: speed, swell: swell,
-                          swellFrom: swellFrom, timeline: timeline)
+            WindSetterView(session: session) { applied in
+                applyConditions(applied)
             }
         }
         .fullScreenCover(isPresented: $isMapFullScreen) {
@@ -134,8 +133,7 @@ struct UpwindDetailView: View {
     /// Every number on this screen is measured from one direction, so
     /// changing it re-runs the whole chain: analysis, polar, legs, samples —
     /// and the library keeps the saved result so the rest of the app agrees.
-    private func applyWind(direction: Double, speed: Double?, swell: Double?,
-                           swellFrom: Double?, timeline: WindTimeline? = nil) {
+    private func applyConditions(_ applied: WindSetterView.Applied) {
         isRecomputing = true
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
@@ -143,11 +141,13 @@ struct UpwindDetailView: View {
         Task {
             let edited = await Task.detached {
                 var edits = Session.Edits(session: current)
-                edits.windDirection = direction
-                edits.windSpeed = speed
-                edits.windTimeline = timeline
-                edits.swellHeight = swell
-                edits.swellDirection = swellFrom
+                edits.windDirection = applied.windDirection
+                edits.windSpeed = applied.windSpeed
+                edits.windTimeline = applied.windTimeline
+                edits.swellHeight = applied.swellHeight
+                edits.swellDirection = applied.swellDirection
+                edits.currentSpeed = applied.currentSpeed
+                edits.currentDirectionToward = applied.currentDirectionToward
                 return current.applying(edits, categories: categories, overrides: overrides)
             }.value
             library.save(edited)

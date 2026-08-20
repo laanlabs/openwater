@@ -133,6 +133,13 @@ struct SessionReviewView: View {
                         Text(swellSummary)
                             .foregroundStyle(edits.swellHeight == nil ? .secondary : .primary)
                     }
+
+                    HStack {
+                        Text("Current")
+                        Spacer()
+                        Text(currentSummary)
+                            .foregroundStyle(edits.currentSpeed == nil ? .secondary : .primary)
+                    }
                     // Right where a rider is already being asked what the wind
                     // was doing, and the one moment they might not remember —
                     // they have just come off the water, not been watching a
@@ -159,14 +166,16 @@ struct SessionReviewView: View {
             }
             .sheet(isPresented: $isSettingConditions) {
                 if let session {
-                    WindSetterView(session: sessionWithStagedEdits(session)) { direction, speed, swell, swellFrom, timeline in
-                        windDirectionText = String(Int(direction.rounded()))
-                        windSpeedText = speed.map {
+                    WindSetterView(session: sessionWithStagedEdits(session)) { applied in
+                        windDirectionText = String(Int(applied.windDirection.rounded()))
+                        windSpeedText = applied.windSpeed.map {
                             String(Int(settings.units.speed.convert(fromMetresPerSecond: $0).rounded()))
                         } ?? ""
-                        edits.windTimeline = timeline
-                        edits.swellHeight = swell
-                        edits.swellDirection = swellFrom
+                        edits.windTimeline = applied.windTimeline
+                        edits.swellHeight = applied.swellHeight
+                        edits.swellDirection = applied.swellDirection
+                        edits.currentSpeed = applied.currentSpeed
+                        edits.currentDirectionToward = applied.currentDirectionToward
                     }
                 }
             }
@@ -240,6 +249,8 @@ struct SessionReviewView: View {
         var staged = session
         staged.swellHeight = edits.swellHeight
         staged.swellDirection = edits.swellDirection
+        staged.currentSpeed = edits.currentSpeed
+        staged.currentDirectionToward = edits.currentDirectionToward
         if let direction = Double(windDirectionText.trimmingCharacters(in: .whitespaces)) {
             let speed = Double(windSpeedText.trimmingCharacters(in: .whitespaces))
                 .map { settings.units.speed.toMetresPerSecond($0) }
@@ -274,6 +285,15 @@ struct SessionReviewView: View {
         return Format.height(swell, unit: settings.units.distance)
     }
 
+    /// Named for where it takes you, so the word "setting" carries the
+    /// convention every time the number is shown.
+    private var currentSummary: String {
+        guard let speed = edits.currentSpeed, speed > 0.02 else { return "Not set" }
+        let knots = String(format: "%.1f kn", speed * 1.94384)
+        guard let toward = edits.currentDirectionToward else { return knots }
+        return "\(knots) setting \(Format.cardinal(toward))"
+    }
+
     // MARK: - Save
 
     @MainActor
@@ -289,6 +309,8 @@ struct SessionReviewView: View {
         // written, which the guard below handles by saving either way.
         edited.swellHeight = edits.swellHeight
         edited.swellDirection = edits.swellDirection
+        edited.currentSpeed = edits.currentSpeed
+        edited.currentDirectionToward = edits.currentDirectionToward
 
         guard session.requiresReanalysis(for: edited) else {
             library.save(session.applying(edited, categories: settings.categories,

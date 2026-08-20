@@ -73,6 +73,12 @@ struct NearbyConditionsSheet: View {
     @State private var swellModels = SwellOutlook(hours: [], models: [])
     /// The wave model minus what the nearest wave buoy just disagreed by.
     @State private var swellNowcast: SwellNowcastAdjustment?
+    /// The next two hours of rain — radar while it reaches, hourly after.
+    @State private var minuteRain = MinuteRain()
+    /// What this week normally does here, to read the forecast against.
+    @State private var typicalWeek = TypicalWeek()
+    /// And the half of that Apple does not publish — wind, from the archive.
+    @State private var typicalWind = TypicalWind()
     @State private var isSearching = true
 
     /// How far out to look. Persisted, because a rider in a thin part of the
@@ -189,6 +195,13 @@ struct NearbyConditionsSheet: View {
     private var conditionsTab: some View {
         modelCard
 
+        // Directly above the radar link on purpose: "is it about to rain on
+        // me" and "show me the rain" are the same thought a second apart, and
+        // the nowcast answers it in words before the map has to be read.
+        MinuteRainCard(rain: minuteRain)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.25), value: minuteRain.isEmpty)
+
         NavigationLink {
             RadarScreen(centre: coordinate, title: "Radar · \(title)")
         } label: {
@@ -250,6 +263,15 @@ struct NearbyConditionsSheet: View {
         .buttonStyle(.plain)
 
         windAheadCard
+
+        // Under the week's forecast, because that is what it is for: the
+        // normals are the scale the numbers above are read against, and they
+        // mean nothing on their own.
+        TypicalWeekCard(typical: typicalWeek, wind: typicalWind,
+                        forecast: full.days, timeZone: full.timeZone)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.25), value: typicalWeek.isEmpty)
+            .animation(.easeInOut(duration: 0.25), value: typicalWind.isEmpty)
 
         section("REAL STATIONS NEARBY, FREE", trailing: {
             mapLink("Wind stations", places: stationPlaces, search: searchStations)
@@ -1584,12 +1606,27 @@ struct NearbyConditionsSheet: View {
         // The multi-day outlook is two more calls, so it lands after the tab
         // is usable rather than holding it blank — the strip appears when it
         // arrives, in space the rest of the tab is not occupying.
+        //
+        // The three normals-and-nowcast calls ride in the same wave, and the
+        // Apple pair for a stronger reason: they are the only calls on this
+        // sheet that can fail for something the rider cannot fix — no
+        // entitlement, no Apple service in this country. Nothing above them
+        // may wait on that.
         async let quarterly = OpenMeteo.nearTerm(at: here)
         async let waveAgencies = OpenMeteo.swellOutlook(at: here)
+        async let radarMinutes = AppleWeather.minuteRain(at: here)
+        // Keyed to the spot's own midnight, which the detail run above has
+        // already resolved — the normals only line up with the forecast they
+        // are drawn against if both weeks start on the same day.
+        async let normals = AppleWeather.typicalWeek(at: here, timeZone: full.timeZone)
+        async let windNormals = OpenMeteo.typicalWind(at: here, timeZone: full.timeZone)
         surfOutlook = await OpenMeteo.surfOutlook(at: here)
             .applyingShoreFacing(shoreFacingDeg)
         nearTerm = await quarterly
         swellModels = await waveAgencies
+        minuteRain = await radarMinutes
+        typicalWeek = await normals
+        typicalWind = await windNormals
 
         // Predictions and buoy rows come second, for the same reason station
         // readings do: the lists are useful the moment they exist, and half a

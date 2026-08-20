@@ -5,7 +5,7 @@ import WeatherKit
 
 // MARK: - The next hour
 
-/// Rain at this point, minute by minute, for the next six hours.
+/// Rain at this point, minute by minute, for as long as the card asks for.
 ///
 /// Every other forecast on this sheet is a grid: a model cell a few kilometres
 /// across, published on the hour. Asked "is it about to rain at the launch",
@@ -21,7 +21,10 @@ import WeatherKit
 /// over is whether the session is worth starting at all. So the rest of the
 /// window is filled from Apple's hourly forecast — a weaker claim, carried at
 /// a higher bar and drawn as its own stretch of the strip rather than passed
-/// off as radar. Six hours is a session and the drive home either side of it.
+/// off as radar. Twelve hours is a session, the drive home either side of it,
+/// and the evening after — far enough that the far end is a forecast rather
+/// than a nowcast, which is why the card lets it be scrolled to rather than
+/// putting it all on screen as though it were one claim.
 ///
 /// The radar half exists only where there is radar to derive it from. Outside
 /// those regions WeatherKit returns nil rather than an error and the whole
@@ -334,13 +337,17 @@ struct MinuteRain {
     /// The minutes pooled into groups of `stride`, each group standing for
     /// its wettest minute.
     ///
-    /// Six hours is three hundred and sixty columns, and a phone is about
-    /// three hundred and fifty points wide — a column narrower than a point
-    /// is a column nobody can see, and a comb of them reads as texture rather
-    /// than as weather. Pooling is the fix, and the *worst* minute has to be
-    /// the one that speaks for its group: averaging is what makes a
-    /// three-minute squall inside a dry quarter-hour disappear, which is
-    /// exactly the minute a rider needed.
+    /// A whole window laid across a phone is a column narrower than a point,
+    /// and a comb of them reads as texture rather than as weather. Pooling is
+    /// the fix, and the *worst* minute has to be the one that speaks for its
+    /// group: averaging is what makes a three-minute squall inside a dry
+    /// quarter-hour disappear, which is exactly the minute a rider needed.
+    ///
+    /// Since the strip scrolls, what has to fit is a screenful rather than
+    /// the window — see `MinuteRainCard.stride`, which is where the rate is
+    /// chosen. At three hours a screen that comes out at one minute a column
+    /// and this does nothing, which is the point: it is a floor, not a
+    /// resolution.
     static func pool(_ minutes: [Minute], stride: Int) -> [Minute] {
         guard stride > 1 else { return minutes }
         return Swift.stride(from: 0, to: minutes.count, by: stride).map { start in
@@ -420,7 +427,7 @@ extension AppleWeather {
         converter: UnitConverterLinear(coefficient: 1.0 / 3_600_000.0)
     )
 
-    /// The next six hours of precipitation at a point, or nothing.
+    /// The next `hours` of precipitation at a point, or nothing.
     ///
     /// One request for both datasets: WeatherKit bills by the call, not by the
     /// dataset, and asking for radar and the hourly model separately would
@@ -477,13 +484,13 @@ extension AppleWeather {
 
 // MARK: - The card
 
-/// The next six hours of rain as one strip, with the sentence that matters
-/// over it.
+/// The next twelve hours of rain as one scrolling strip, with the sentence
+/// that matters over it.
 ///
 /// Two shapes, and the difference between them is the whole design. Rain
 /// coming gets the full card — the headline, the strip, how hard and how
 /// sure. A dry window gets one line saying so and nothing else, because the
-/// answer is the entire content and a strip of empty columns is six hours of
+/// answer is the entire content and a strip of empty columns is half a day of
 /// blank ink. The sheet decides *where* each goes; this decides how loudly.
 struct MinuteRainCard: View {
 
@@ -492,7 +499,30 @@ struct MinuteRainCard: View {
     private static let plotHeight: CGFloat = 54
     /// About one column per point on a phone. Past this the strip stops being
     /// readable as a shape and starts being a hatch pattern.
+    ///
+    /// Counted per *screenful* now rather than per strip, because the strip
+    /// is no longer as wide as the card. What has to stay readable is what a
+    /// rider is looking at, and that is `hoursVisible` of it.
     private static let maxColumns = 180
+
+    /// How far the strip runs, and how much of it the card shows at once.
+    ///
+    /// Twelve hours of window, three of them in view — so the strip is four
+    /// card-widths long and the rest is a swipe away. Six hours used to fit
+    /// edge to edge, and fitting was the constraint that set everything
+    /// else: three hundred and sixty minutes across a phone is a column
+    /// narrower than a point, which is what the pooling exists to prevent.
+    /// Scrolling lifts that constraint rather than working around it — at
+    /// three hours a screen the columns are back to about a minute each,
+    /// which is the resolution the radar half actually has.
+    ///
+    /// The honest caveat, which the strip's own rule and `provenance` both
+    /// state: only the first hour or so is radar. The eleven after it are
+    /// Apple's hourly forecast spread across their minutes, and at the far
+    /// end of the window that is the same number the ordinary forecast row
+    /// carries. The window is longer; the nowcast is not.
+    static let windowHours = 12
+    private static let hoursVisible = 3
 
     var body: some View {
         if let summary = rain.summary {
@@ -583,32 +613,61 @@ struct MinuteRainCard: View {
     /// between themselves, so a divider laid *in* the row lands exactly on the
     /// handover by construction and cannot drift away from it.
     private func strip(_ summary: MinuteRain.Summary) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .bottom, spacing: 0) {
-                ForEach(columns(rain.radarMinutes)) { column($0, kind: summary.kind) }
-                if !rain.radarMinutes.isEmpty, !rain.modelMinutes.isEmpty {
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.22))
-                        .frame(width: 1, height: Self.plotHeight)
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .bottom, spacing: 0) {
+                    ForEach(columns(rain.radarMinutes)) { column($0, kind: summary.kind) }
+                    if !rain.radarMinutes.isEmpty, !rain.modelMinutes.isEmpty {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.22))
+                            .frame(width: 1, height: Self.plotHeight)
+                    }
+                    ForEach(columns(rain.modelMinutes)) { column($0, kind: summary.kind) }
                 }
-                ForEach(columns(rain.modelMinutes)) { column($0, kind: summary.kind) }
-            }
-            .frame(height: Self.plotHeight, alignment: .bottom)
-            .background(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.12))
-                    .frame(height: 1)
-            }
+                .frame(height: Self.plotHeight, alignment: .bottom)
+                .background(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(height: 1)
+                }
 
-            HStack(spacing: 0) {
-                axisLabel(axisMarks.0, alignment: .leading)
-                axisLabel(axisMarks.1, alignment: .center)
-                axisLabel(axisMarks.2, alignment: .trailing)
+                axis
             }
+            // The strip is `windowHours / hoursVisible` card-widths long, and
+            // it is the container that says so — no geometry read, no state,
+            // no second layout pass. Everything inside still divides the
+            // width it is given evenly between itself, which is what keeps
+            // the rule and the hour marks on their own boundaries by
+            // construction rather than by arithmetic.
+            .containerRelativeFrame(.horizontal, count: Self.hoursVisible,
+                                    span: Self.windowHours, spacing: 0)
         }
+        // The card is a fixed height whatever the window is; only the strip
+        // moves. Clipped so the columns stop at the card's own edge.
+        .scrollClipDisabled(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(summary.headline)
         .accessibilityValue(summary.detail ?? "")
+    }
+
+    /// One mark an hour, each label sitting at the left edge of the hour it
+    /// names.
+    ///
+    /// The old axis was three labels pinned leading, centre and trailing,
+    /// which put them at nought, a half and one exactly — right for a strip
+    /// as wide as the card and meaningless for one four times that. Equal
+    /// frames do the same job here without the arithmetic: an hour's frame is
+    /// an hour's width because there are `windowHours` of them across a strip
+    /// of `windowHours`, so a label cannot drift off its own hour.
+    private var axis: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<Self.windowHours, id: \.self) { hour in
+                Text(hour == 0 ? "NOW" : "\(hour) HR")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     /// One half of the strip, pooled down to something a phone can draw.
@@ -621,31 +680,16 @@ struct MinuteRainCard: View {
         MinuteRain.pool(minutes, stride: stride)
     }
 
-    private var stride: Int {
-        max(1, Int((Double(rain.minutes.count) / Double(Self.maxColumns)).rounded(.up)))
-    }
-
-    /// Start, middle and end of the window, in hours.
+    /// Measured against what is on screen, not against the whole window.
     ///
-    /// Three marks, not four: they are laid out as equal frames pinned
-    /// leading, centre and trailing, which puts them at nought, a half and
-    /// one exactly. A fourth would have to sit at a third and two thirds and
-    /// would land at three eighths and five eighths instead — close enough to
-    /// look deliberate and wrong enough to misread a squall's arrival by
-    /// twenty minutes.
-    private var axisMarks: (String, String, String) {
-        let total = rain.minutes.count
-        switch total {
-        case ..<90: return ("NOW", "30 MIN", "1 HR")
-        case ..<150: return ("NOW", "1 HR", "2 HR")
-        default:
-            let hours = Int((Double(total) / 60).rounded())
-            let half = Double(hours) / 2
-            let middle = half == half.rounded()
-                ? "\(Int(half)) HR"
-                : "\(Int(half * 60).formatted()) MIN"
-            return ("NOW", middle, "\(hours) HR")
-        }
+    /// The budget was always about readability — a column narrower than a
+    /// point is a column nobody can see — and readability is a property of
+    /// the visible three hours, not of the twelve behind them. At three
+    /// hours a screen that works out at a column a minute, which is the
+    /// radar half's own resolution and as fine as this can honestly go.
+    private var stride: Int {
+        let visibleMinutes = Double(Self.hoursVisible * 60)
+        return max(1, Int((visibleMinutes / Double(Self.maxColumns)).rounded(.up)))
     }
 
     private func column(_ minute: MinuteRain.Minute, kind: MinuteRain.Kind) -> some View {
@@ -666,13 +710,6 @@ struct MinuteRainCard: View {
         default:
             return "Apple's hourly forecast for this point, spread across its minutes. No radar nowcast reaches here, so this is the hour's own odds rather than a minute-by-minute read of what is actually falling."
         }
-    }
-
-    private func axisLabel(_ text: String, alignment: Alignment) -> some View {
-        Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: alignment)
     }
 
     /// How tall a minute's column stands.

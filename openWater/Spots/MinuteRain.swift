@@ -5,7 +5,7 @@ import WeatherKit
 
 // MARK: - The next hour
 
-/// Rain at this point, minute by minute, for the next two hours.
+/// Rain at this point, minute by minute, for the next six hours.
 ///
 /// Every other forecast on this sheet is a grid: a model cell a few kilometres
 /// across, published on the hour. Asked "is it about to rain at the launch",
@@ -16,11 +16,12 @@ import WeatherKit
 /// Apple's minute forecast is a different instrument. It is machine learning
 /// run over live Doppler radar rather than a physics model stepped forward, so
 /// it can say "in twelve minutes" and mean it. It runs for an hour, which is
-/// not long enough on its own: this card only appears when there is rain to
-/// announce, and an hour of warning arrives about when you have finished
-/// rigging. So the second hour is filled from Apple's hourly forecast — a
-/// weaker claim, carried at a higher bar and drawn as its own stretch of the
-/// strip rather than passed off as radar.
+/// not long enough on its own: an hour of warning arrives about when you have
+/// finished rigging, and the question a rider is actually asking on the drive
+/// over is whether the session is worth starting at all. So the rest of the
+/// window is filled from Apple's hourly forecast — a weaker claim, carried at
+/// a higher bar and drawn as its own stretch of the strip rather than passed
+/// off as radar. Six hours is a session and the drive home either side of it.
 ///
 /// The radar half exists only where there is radar to derive it from. Outside
 /// those regions WeatherKit returns nil rather than an error and the whole
@@ -117,11 +118,14 @@ struct MinuteRain {
 
     var isEmpty: Bool { minutes.isEmpty }
 
-    /// Whether there is anything here worth putting on the screen.
+    /// Whether this has news, which is what decides where it sits rather than
+    /// whether it appears at all.
     ///
-    /// The card shows up only when rain is coming. A standing row that says
-    /// "no rain" every dry day is a row a rider learns to skip, and by the
-    /// time it has something to say they are no longer reading it.
+    /// A card that says "no rain" in the best seat on the sheet is one a rider
+    /// learns to skip, and by the time it has something to say they are no
+    /// longer reading it. So the sheet keeps it either way and moves it: rain
+    /// coming puts it directly under the readings, a dry window puts it below
+    /// the wind, where a rider who wants to check can still find it.
     var isWorthShowing: Bool { summary.map { !$0.isDry } ?? false }
 
     /// The stretch read off radar, which leads the strip.
@@ -206,9 +210,14 @@ struct MinuteRain {
         }
 
         /// The second line — how hard, how long, how sure.
+        ///
+        /// The wet stretch is spelled as a duration rather than counted in
+        /// minutes: "215 of the next 360 minutes" is arithmetic handed to
+        /// someone standing on a beach, and it was only ever readable while
+        /// the window was an hour long.
         var detail: String? {
             guard !isDry else { return nil }
-            let span = "\(wetMinutes) of the next \(totalMinutes) minutes are wet, \(Int((peakChance * 100).rounded()))% at the likeliest."
+            let span = "Wet for \(Self.spell(wetMinutes)) of the next \(Self.window(totalMinutes)), \(Int((peakChance * 100).rounded()))% at the likeliest."
             // Some regions publish the odds without the millimetres. There the
             // rate sentence would read "Barely measurable at its worst, barely
             // measurable", which is not a sentence — the probability is the
@@ -322,6 +331,35 @@ struct MinuteRain {
         return minutes
     }
 
+    /// The minutes pooled into groups of `stride`, each group standing for
+    /// its wettest minute.
+    ///
+    /// Six hours is three hundred and sixty columns, and a phone is about
+    /// three hundred and fifty points wide — a column narrower than a point
+    /// is a column nobody can see, and a comb of them reads as texture rather
+    /// than as weather. Pooling is the fix, and the *worst* minute has to be
+    /// the one that speaks for its group: averaging is what makes a
+    /// three-minute squall inside a dry quarter-hour disappear, which is
+    /// exactly the minute a rider needed.
+    static func pool(_ minutes: [Minute], stride: Int) -> [Minute] {
+        guard stride > 1 else { return minutes }
+        return Swift.stride(from: 0, to: minutes.count, by: stride).map { start in
+            let group = minutes[start..<Swift.min(start + stride, minutes.count)]
+            let worst = group.max {
+                ($0.isWet ? 1 : 0, $0.intensityMmH, $0.chance)
+                    < ($1.isWet ? 1 : 0, $1.intensityMmH, $1.chance)
+            }
+            // Kept at the group's own first minute so the columns stay in
+            // order and keep their identity — `Minute` is identified by its
+            // date, and a pooled column that borrowed the worst minute's date
+            // would jitter along the axis as the window slides.
+            guard let worst else { return group[start] }
+            return Minute(at: group[start].at, chance: worst.chance,
+                          intensityMmH: worst.intensityMmH,
+                          kind: worst.kind, isRadar: worst.isRadar)
+        }
+    }
+
     /// Where the first run of `value` at least `lasting` long begins, ignoring
     /// any run already in progress at index zero — a shower that is already
     /// falling has no start to report.
@@ -382,7 +420,7 @@ extension AppleWeather {
         converter: UnitConverterLinear(coefficient: 1.0 / 3_600_000.0)
     )
 
-    /// The next two hours of precipitation at a point, or nothing.
+    /// The next six hours of precipitation at a point, or nothing.
     ///
     /// One request for both datasets: WeatherKit bills by the call, not by the
     /// dataset, and asking for radar and the hourly model separately would
@@ -397,7 +435,7 @@ extension AppleWeather {
     /// never exposes one. Apple's own daemon caches the response, and a
     /// nowcast is stale within minutes anyway, so there is nothing here worth
     /// keeping on disk.
-    static func minuteRain(at coordinate: Geo.Coordinate, hours: Int = 2,
+    static func minuteRain(at coordinate: Geo.Coordinate, hours: Int = 6,
                            from now: Date = Date()) async -> MinuteRain {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         guard let (radar, hourly) = try? await WeatherService.shared.weather(
@@ -439,29 +477,65 @@ extension AppleWeather {
 
 // MARK: - The card
 
-/// The next two hours of rain as one strip, with the sentence that matters
+/// The next six hours of rain as one strip, with the sentence that matters
 /// over it.
 ///
-/// Present only when there is rain to announce. A card that stands there
-/// saying "no rain" on every dry day is one a rider learns to scroll past, and
-/// the day it finally has something to say it has already trained them not to
-/// look. Its absence is the good news; its presence is the message.
+/// Two shapes, and the difference between them is the whole design. Rain
+/// coming gets the full card — the headline, the strip, how hard and how
+/// sure. A dry window gets one line saying so and nothing else, because the
+/// answer is the entire content and a strip of empty columns is six hours of
+/// blank ink. The sheet decides *where* each goes; this decides how loudly.
 struct MinuteRainCard: View {
 
     let rain: MinuteRain
 
     private static let plotHeight: CGFloat = 54
+    /// About one column per point on a phone. Past this the strip stops being
+    /// readable as a shape and starts being a hatch pattern.
+    private static let maxColumns = 180
 
     var body: some View {
-        if let summary = rain.summary, !summary.isDry {
-            full(summary)
+        if let summary = rain.summary {
+            if summary.isDry { quiet(summary) } else { full(summary) }
         }
+    }
+
+    /// The dry card: the sentence, where it came from, and nothing else.
+    private func quiet(_ summary: MinuteRain.Summary) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(summary.headline)
+                .font(.system(size: 15, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(quietDetail(summary))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.deepCard, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    /// What a dry window is worth saying about itself: what looked, and how
+    /// close it came to being wrong.
+    private func quietDetail(_ summary: MinuteRain.Summary) -> String {
+        let looked = rain.radarMinutes.isEmpty
+            ? "Apple's hourly forecast for this point — no radar nowcast reaches here."
+            : "Radar for the first hour, Apple's hourly forecast after it."
+        guard summary.peakChance >= 0.05 else { return looked }
+        return "\(looked) The likeliest minute in the window is \(Int((summary.peakChance * 100).rounded()))%."
     }
 
     private func full(_ summary: MinuteRain.Summary) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("NEXT \(MinuteRain.Summary.window(summary.totalMinutes).uppercased()), MINUTE BY MINUTE")
+                // Named for its subject the way the wind and tide headers
+                // are. "Minute by minute" has come off it: it was true of a
+                // one-hour window and is true of the first sixth of this one,
+                // and the strip's own rule already says where that stops.
+                Text("\(summary.kind.noun.uppercased()), NEXT \(MinuteRain.Summary.window(summary.totalMinutes).uppercased())")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
@@ -513,13 +587,13 @@ struct MinuteRainCard: View {
     private func strip(_ summary: MinuteRain.Summary) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .bottom, spacing: 0) {
-                ForEach(rain.radarMinutes) { column($0, kind: summary.kind) }
+                ForEach(columns(rain.radarMinutes)) { column($0, kind: summary.kind) }
                 if !rain.radarMinutes.isEmpty, !rain.modelMinutes.isEmpty {
                     Rectangle()
                         .fill(Color.primary.opacity(0.22))
                         .frame(width: 1, height: Self.plotHeight)
                 }
-                ForEach(rain.modelMinutes) { column($0, kind: summary.kind) }
+                ForEach(columns(rain.modelMinutes)) { column($0, kind: summary.kind) }
             }
             .frame(height: Self.plotHeight, alignment: .bottom)
             .background(alignment: .bottom) {
@@ -529,19 +603,51 @@ struct MinuteRainCard: View {
             }
 
             HStack(spacing: 0) {
-                axisLabel("NOW", alignment: .leading)
-                if rain.minutes.count > 90 {
-                    axisLabel("1 HR", alignment: .center)
-                    axisLabel("2 HR", alignment: .trailing)
-                } else {
-                    axisLabel("30 MIN", alignment: .center)
-                    axisLabel("1 HR", alignment: .trailing)
-                }
+                axisLabel(axisMarks.0, alignment: .leading)
+                axisLabel(axisMarks.1, alignment: .center)
+                axisLabel(axisMarks.2, alignment: .trailing)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(summary.headline)
         .accessibilityValue(summary.detail ?? "")
+    }
+
+    /// One half of the strip, pooled down to something a phone can draw.
+    ///
+    /// Both halves pool at the same rate, so the rule between them still
+    /// lands exactly on the handover — it is a child of the row rather than
+    /// an overlay at a fraction, and the columns divide the width evenly
+    /// between themselves either way.
+    private func columns(_ minutes: [MinuteRain.Minute]) -> [MinuteRain.Minute] {
+        MinuteRain.pool(minutes, stride: stride)
+    }
+
+    private var stride: Int {
+        max(1, Int((Double(rain.minutes.count) / Double(Self.maxColumns)).rounded(.up)))
+    }
+
+    /// Start, middle and end of the window, in hours.
+    ///
+    /// Three marks, not four: they are laid out as equal frames pinned
+    /// leading, centre and trailing, which puts them at nought, a half and
+    /// one exactly. A fourth would have to sit at a third and two thirds and
+    /// would land at three eighths and five eighths instead — close enough to
+    /// look deliberate and wrong enough to misread a squall's arrival by
+    /// twenty minutes.
+    private var axisMarks: (String, String, String) {
+        let total = rain.minutes.count
+        switch total {
+        case ..<90: return ("NOW", "30 MIN", "1 HR")
+        case ..<150: return ("NOW", "1 HR", "2 HR")
+        default:
+            let hours = Int((Double(total) / 60).rounded())
+            let half = Double(hours) / 2
+            let middle = half == half.rounded()
+                ? "\(Int(half)) HR"
+                : "\(Int(half * 60).formatted()) MIN"
+            return ("NOW", middle, "\(hours) HR")
+        }
     }
 
     private func column(_ minute: MinuteRain.Minute, kind: MinuteRain.Kind) -> some View {

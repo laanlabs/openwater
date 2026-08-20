@@ -1251,11 +1251,28 @@ struct ModelSeries {
     var nowIndex: Int?
     /// The header, already formatted.
     var headings: [Heading] = []
+    /// One row of arrows per switched-on model, under the blend's own row.
+    ///
+    /// The blend's direction is a vector average, and an average hides the
+    /// argument: four models at 6 kn from the west and one at 6 kn from the
+    /// south still average to something west-ish, and the rider never learns
+    /// that a model they trust is calling a different wind entirely. The
+    /// speed lines have always been shown model by model for exactly that
+    /// reason; the direction had no such row until now.
+    var directionRows: [DirectionRow] = []
 
     struct Heading: Identifiable {
         let id: Int
         let text: String
         let isMidnight: Bool
+    }
+
+    /// A model's directions, and the hue its trace already wears.
+    struct DirectionRow: Identifiable {
+        let id: String
+        let label: String
+        let tint: Color
+        let directions: [Double?]
     }
 
     init() {}
@@ -1283,6 +1300,20 @@ struct ModelSeries {
         // "12 PM" and was never enough for a weekday.
         ticks = outlook.hours.indices.filter { $0 % 6 == 0 }
         arrowTicks = outlook.hours.indices.filter { $0 % 6 == 0 }
+
+        // In the order the plot draws them, wearing the same hues, so a row
+        // of arrows and the line above it are obviously the same model. A
+        // model that reports no direction at all — some regional runs only
+        // carry speed — gets no row rather than an empty lane.
+        directionRows = outlook.models.enumerated().compactMap { index, model in
+            guard enabled.contains(model.id),
+                  model.directions.contains(where: { $0 != nil })
+            else { return nil }
+            return DirectionRow(id: model.id,
+                                label: model.label,
+                                tint: ModelCompareScreen.palette[index % ModelCompareScreen.palette.count],
+                                directions: model.directions)
+        }
 
         var calendar = Calendar.current
         calendar.timeZone = zone
@@ -1329,6 +1360,7 @@ private struct ModelChart: View, Equatable {
             && lhs.series.peak == rhs.series.peak
             && lhs.series.blend.count == rhs.series.blend.count
             && lhs.series.nowIndex == rhs.series.nowIndex
+            && lhs.series.directionRows.count == rhs.series.directionRows.count
     }
 
     /// Drives the initial scroll. Anchor views cannot do it here: the ticks
@@ -1342,14 +1374,24 @@ private struct ModelChart: View, Equatable {
     @State private var probe: Int?
 
     static let headerHeight: CGFloat = 24
-    /// The arrow band, plus the gap that keeps it off the plot floor. They
-    /// were sitting directly on the axis, which read as part of the chart
-    /// rather than as its own row.
+    /// The blend's arrow band, plus the gap that keeps it off the plot floor.
+    /// They were sitting directly on the axis, which read as part of the
+    /// chart rather than as its own row.
     static let arrowsHeight: CGFloat = 46
+    /// One lane per model beneath it. Fourteen points is an eleven-point
+    /// glyph with air around it — enough that five lanes still fit under a
+    /// plot worth reading, and the whole point of the lanes is the moment
+    /// one of them disagrees, which is legible at any size.
+    static let modelArrowsHeight: CGFloat = 14
     static let arrowsGap: CGFloat = 10
     private static let axisWidth: CGFloat = 32
 
-    static var footerHeight: CGFloat { arrowsHeight + arrowsGap }
+    /// The band grows with the switches, so the plot has to be measured
+    /// against however many lanes are showing rather than a fixed footer.
+    var footerHeight: CGFloat {
+        Self.arrowsGap + Self.arrowsHeight
+            + CGFloat(series.directionRows.count) * Self.modelArrowsHeight
+    }
 
     /// The chart's own greys. Named rather than sprinkled, because the whole
     /// argument of this screen is that chrome is grey and data is coloured —
@@ -1372,7 +1414,7 @@ private struct ModelChart: View, Equatable {
         // here and handed down.
         GeometryReader { outer in
             chartBody(plotHeight: max(80, outer.size.height
-                                      - Self.headerHeight - Self.footerHeight - 20))
+                                      - Self.headerHeight - footerHeight - 20))
         }
     }
 
@@ -1483,8 +1525,35 @@ private struct ModelChart: View, Equatable {
                     .frame(width: Self.axisWidth - 6, alignment: .trailing)
                     .offset(y: Self.headerHeight + plotHeight * (1 - level / series.peak) - 7)
             }
+            directionKey(plotHeight: plotHeight)
         }
         .frame(width: Self.axisWidth)
+    }
+
+    /// Which lane of arrows belongs to which model, in the gutter.
+    ///
+    /// The lanes themselves scroll, so anything naming them has to live out
+    /// here beside the scale or it slides away with the forecast. A dot in
+    /// the model's hue is enough: the chips below and the traces above
+    /// already spend that colour on the same claim.
+    private func directionKey(plotHeight: CGFloat) -> some View {
+        let top = Self.headerHeight + plotHeight + Self.arrowsGap
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.primary)
+                .frame(width: 12, height: 3)
+                .frame(width: Self.axisWidth - 6, alignment: .trailing)
+                .offset(y: top + 8)
+            ForEach(Array(series.directionRows.enumerated()), id: \.element.id) { index, row in
+                Circle()
+                    .fill(row.tint)
+                    .frame(width: 6, height: 6)
+                    .frame(width: Self.axisWidth - 6, alignment: .trailing)
+                    .offset(y: top + Self.arrowsHeight
+                            + CGFloat(index) * Self.modelArrowsHeight
+                            + Self.modelArrowsHeight / 2 - 3)
+            }
+        }
     }
 
     /// Horizontal rules only, one per five knots, quiet enough that four
@@ -1547,6 +1616,7 @@ private struct ChartContent: View, Equatable {
             && lhs.series.peak == rhs.series.peak
             && lhs.series.blend.count == rhs.series.blend.count
             && lhs.series.nowIndex == rhs.series.nowIndex
+            && lhs.series.directionRows.count == rhs.series.directionRows.count
     }
 
     private var hourWidth: CGFloat { ModelCompareScreen.hourWidth }
@@ -1667,12 +1737,30 @@ private struct ChartContent: View, Equatable {
         .drawingGroup()
     }
 
-    /// The direction row.
+    /// The direction band: the blend's arrows, then a lane per model.
     ///
     /// Speed alone decides whether you go; direction decides whether the spot
     /// works at all, and reading it off a table while looking at a chart is
     /// the split every wind site closes by putting the arrows under the plot.
+    /// The lanes are the same argument one level down — the blend's arrow is
+    /// an average, and an average of a westerly and a southerly is a
+    /// direction no model forecast. Stacked, a disagreement is a kink in one
+    /// row against four that stay in line, which is the shape of it a rider
+    /// can actually see.
     private func arrowRow(width: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            blendArrows(width: width)
+            ForEach(series.directionRows) { row in
+                modelArrows(row, width: width)
+            }
+        }
+        .padding(.top, ModelChart.arrowsGap)
+    }
+
+    /// The answer's own arrows, and the only ones that get a cardinal under
+    /// them — five rows of "WSW" is a wall of text where four of the rows
+    /// are agreeing with the fifth.
+    private func blendArrows(width: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(series.arrowTicks, id: \.self) { hour in
                 if let direction = series.directions[safe: hour] ?? nil {
@@ -1694,7 +1782,44 @@ private struct ChartContent: View, Equatable {
         // origin, so a centred frame shifts every arrow by half the chart's
         // width — which on a sixteen-day chart is a long way off screen.
         .frame(width: width, height: ModelChart.arrowsHeight, alignment: .topLeading)
-        .padding(.top, ModelChart.arrowsGap)
+    }
+
+    /// One model's lane. Smaller than the blend's arrows and no cardinal
+    /// beneath them: these are for comparing against each other and against
+    /// the row above, not for reading a direction off.
+    ///
+    /// Drawn into a `Canvas` rather than as a row of rotated images. A
+    /// sixteen-day forecast is around seventy arrows a lane, and five lanes
+    /// of that is three hundred and fifty views laid out and composited over
+    /// a chart whose whole performance story is about not doing exactly
+    /// this. One glyph is resolved and stamped seventy times instead.
+    private func modelArrows(_ row: ModelSeries.DirectionRow, width: CGFloat) -> some View {
+        Canvas { context, size in
+            guard let arrow = context.resolveSymbol(id: row.id) else { return }
+            for hour in series.arrowTicks {
+                guard let direction = row.directions[safe: hour] ?? nil else { continue }
+                context.drawLayer { layer in
+                    layer.translateBy(x: CGFloat(hour) * hourWidth + hourWidth / 2,
+                                      y: size.height / 2)
+                    // The glyph points up and the wind is named for where it
+                    // comes from, so it is turned to face the way the wind
+                    // is going — the same half-turn the readout makes.
+                    layer.rotate(by: .degrees(direction + 180))
+                    layer.draw(arrow, at: .zero)
+                }
+            }
+        } symbols: {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(row.tint)
+                .tag(row.id)
+        }
+        .frame(width: width, height: ModelChart.modelArrowsHeight)
+        // A canvas is a picture as far as VoiceOver is concerned, and a
+        // lane of arrows with no name is a picture of nothing. The reading
+        // at the top of the screen is what actually speaks the direction;
+        // this only has to say whose row was just passed over.
+        .accessibilityLabel(Text("\(row.label) wind direction"))
     }
 }
 

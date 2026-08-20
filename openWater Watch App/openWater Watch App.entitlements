@@ -3,8 +3,6 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  HealthKit only, and nothing else.
-
 	  The workout session is what keeps the app alive with the wrist down, and
 	  that is all this entitlement is for. Two others used to sit here and
 	  neither was ever used: `healthkit.background-delivery`, which is for
@@ -17,6 +15,31 @@
 	  app that quietly never installs — with nothing on screen to say why.
 	-->
 	<key>com.apple.developer.healthkit</key>
+	<true/>
+
+	<!--
+	  WeatherKit, for the wind a session gets measured against.
+
+	  Nothing on the watch calls it yet. Today a session syncs to the phone and
+	  `WeatherLookup.recordedWind` does the lookup there, replacing the wind
+	  guessed from the shape of the track with the wind that was actually
+	  blowing. This entitlement is here ahead of the watch doing any of that
+	  itself.
+
+	  Read the paragraph above about unused entitlements before the next
+	  archive, because it applies to this one until the watch actually uses it.
+	  The App ID it has to be present on is com.laan.labs.openWater.watchkitapp
+	  — its own identifier, not the phone's — and WeatherKit has to be enabled
+	  there on BOTH tabs, Capabilities and App Services. Capabilities alone is
+	  what cost three weeks on the phone App ID: it produces a correct-looking
+	  binary and profile that fails every call with
+
+	    WeatherDaemon.WDSJWTAuthenticatorServiceListener.Errors Code=2 "(null)"
+
+	  and the App Services half leaves nothing on this machine to check against.
+	  See openWater/openWater.entitlements for the longer version.
+	-->
+	<key>com.apple.developer.weatherkit</key>
 	<true/>
 </dict>
 </plist>

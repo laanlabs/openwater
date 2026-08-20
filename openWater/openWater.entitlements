@@ -7,14 +7,29 @@
 	  and the observed wind offered for a saved session in place of the one
 	  guessed from the shape of the track.
 
-	  This file is only half of it. The capability also has to be enabled on the
-	  App ID at developer.apple.com → Certificates, Identifiers & Profiles →
-	  Identifiers → com.laan.labs.openWater → WeatherKit, and the provisioning
-	  profile regenerated. `scripts/testflight.sh` passes
-	  `-allowProvisioningUpdates`, so it picks the new profile up on the next
-	  archive; a local build needs Xcode to refresh it once.
+	  This file is one of three places WeatherKit has to be switched on, and the
+	  other two are both at developer.apple.com → Certificates, Identifiers &
+	  Profiles → Identifiers → com.laan.labs.openWater. That page has two tabs,
+	  and WeatherKit appears on each of them under the same name:
 
-	  Without both halves WeatherKit returns an error on every call. That is
+	    Capabilities  — what gets written into the provisioning profile, so the
+	                    signed binary is allowed to ask.
+	    App Services  — what the token service checks when the app actually
+	                    asks. This is the one that is easy to miss.
+
+	  Enabling only the Capabilities tab produces a build that looks correct
+	  from every angle you can inspect locally — the entitlement is in the
+	  binary, the entitlement is in the profile — and still fails every single
+	  call with:
+
+	    WeatherDaemon.WDSJWTAuthenticatorServiceListener.Errors Code=2 "(null)"
+
+	  which says nothing about which half is missing. It cost about three weeks
+	  here, on the theory that a service-side registration was stuck, because
+	  the App Services tab leaves no artifact on this machine to check against.
+	  Regenerate the profile after changing either tab.
+
+	  Without all three WeatherKit returns an error on every call. That is
 	  handled — the strip hides itself and the session keeps its estimated wind —
 	  but nothing about the app depends on it, which is the point.
 	-->

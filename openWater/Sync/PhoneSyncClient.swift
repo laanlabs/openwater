@@ -111,6 +111,14 @@ final class PhoneSyncClient: NSObject {
             heartRateMessage = "The watch is not connected."
             return
         }
+        guard session.isPaired else {
+            heartRateMessage = "No Apple Watch is paired with this iPhone."
+            return
+        }
+        guard session.isWatchAppInstalled else {
+            heartRateMessage = "openWater is not on your watch yet. Install it from the Watch app on this iPhone."
+            return
+        }
         guard session.isReachable else {
             heartRateMessage = "Your watch is out of range. Open openWater on it while it is near your phone."
             return

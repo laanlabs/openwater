@@ -23,6 +23,9 @@ struct SettingsView: View {
     @State private var exportedArchive: ExportedArchive?
     @State private var exportProblem: String?
     @State private var recomputeMessage: String?
+    /// Read here as well as inside the page, so the row can carry a warning
+    /// before anybody opens it.
+    @State private var permissions = PermissionsCheck()
 
     var body: some View {
         @Bindable var settings = settings
@@ -106,6 +109,23 @@ struct SettingsView: View {
                     } label: {
                         Label("Apple Watch", systemImage: "applewatch")
                     }
+
+                    // Wearing its own warning, because the whole problem with
+                    // a refused permission is that nothing tells you: a rider
+                    // does not go looking in Settings for a feature they think
+                    // this app simply does not have.
+                    NavigationLink {
+                        PermissionsView()
+                    } label: {
+                        HStack {
+                            Label("Permissions", systemImage: "hand.raised")
+                            if permissions.needsAttention {
+                                Spacer()
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
                 }
 
                 Section {
@@ -147,6 +167,11 @@ struct SettingsView: View {
             .readableContentColumn()
             .navigationTitle("Settings")
             .feedbackButton("Settings")
+            // A rider comes back to this page *after* changing something in
+            // iOS Settings, which puts the app through the background — so the
+            // state is re-read on every appearance rather than trusted from
+            // the last one.
+            .onAppear { permissions.refresh() }
             // A decimal pad has no return key, so without a way out the
             // keyboard stayed up through scrolling and even a tab switch,
             // sitting over the rest of Settings. Two ways out, because there

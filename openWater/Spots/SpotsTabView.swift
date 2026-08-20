@@ -905,7 +905,9 @@ struct SpotsTabView: View {
         }
         .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
-            windWash.cameraSettled()
+            // `viewSettled` gives the camera's hold back itself, after it has
+            // worked out whether the window moved — releasing it here would
+            // drain the queue against the slice the rider has just left.
             windWash.viewSettled(on: context.region, layer: washLayer,
                                  widthPoints: mapWidth, displayScale: displayScale)
         }
@@ -942,22 +944,33 @@ struct SpotsTabView: View {
         // the rider waits, and this says what the waiting is for rather than
         // letting the water simply go empty.
         .overlay(alignment: .center) {
-            if washLayer != .off, windWash.isBusy {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(windWash.isLoading ? "Getting the wind" : "Drawing the field")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            ZStack {
+                if washLayer != .off, windWash.isBusy {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        // Named for what is actually being fetched. The
+                        // current wash asks the ocean model, and a hud that
+                        // said "wind" over it is the label on the wrong tin
+                        // this file argues about everywhere else.
+                        Text(windWash.isLoading ? washLayer.loadingLabel : "Drawing the field")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
-                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-                .allowsHitTesting(false)
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
+            // Scoped to the hud, not chained onto the map. `isBusy` goes
+            // false in the same update that installs the new quads, so on
+            // the map it opened an animation transaction over a fresh field
+            // of polygons — asking the one frame this all exists to make
+            // cheap to interpolate a full swap.
+            .animation(.snappy, value: windWash.isBusy)
         }
-        .animation(.snappy, value: windWash.isBusy)
         // The centre pin: pinned to the glass, never a map annotation. As an
         // annotation it would join MapKit's diffing — the strobe class of bug
         // the pins-as-state comment above exists to prevent — and its
@@ -1480,7 +1493,7 @@ struct SpotsTabView: View {
     /// both washes answer for the hour the thumb settles on; the drag
     /// itself stays inside `MapClock`, for the reasons written there.
     private var timeSlider: some View {
-        MapClock(hoursFromNow: mapScrub.map { Int(($0.timeIntervalSinceNow / 3600).rounded()) },
+        MapClock(scrub: mapScrub,
                  commit: { setScrub(hoursFromNow: $0) },
                  close: { withAnimation(.snappy) { isShowingTimeControl = false } })
     }
@@ -3359,8 +3372,15 @@ struct FlowLayout: Layout {
 /// were never worth a redraw.
 private struct MapClock: View {
 
-    /// The committed hour, in whole hours off now; nil is "now".
-    let hoursFromNow: Int?
+    /// The instant the map is holding, straight from the tab; nil is "now".
+    ///
+    /// The instant rather than an hour count, because the count drifts. An
+    /// hour set at five past reads as one hour ahead, and as nought thirty
+    /// minutes later — which is the right answer for where the thumb sits and
+    /// the wrong one for everything else. Keyed on the count, the headline
+    /// came to read "Now" and the reset button disappeared while the map was
+    /// still on a future hour and the chip above still said so.
+    let scrub: Date?
     let commit: (Int) -> Void
     let close: () -> Void
 
@@ -3373,7 +3393,16 @@ private struct MapClock: View {
     /// somewhere feels like it answered.
     private static let pause = Duration.milliseconds(250)
 
-    private var hours: Int { Int(dragged ?? Double(hoursFromNow ?? 0)) }
+    /// Where the thumb sits. Drift is correct here: the slider is a dial of
+    /// hours from now, and an hour that is closer than it was belongs closer
+    /// to the middle.
+    private var hours: Int {
+        Int(dragged ?? Double(scrub.map { ($0.timeIntervalSinceNow / 3600).rounded() } ?? 0))
+    }
+
+    /// Whether the map is scrubbed at all — the tab's own answer rather than
+    /// one derived from a clock, so it cannot drift to "no".
+    private var isScrubbed: Bool { dragged != nil || scrub != nil }
 
     /// The instant a whole-hour offset means: the top of that hour. Zero is
     /// "now", and now is nil — the live reading is a better answer for this
@@ -3385,8 +3414,13 @@ private struct MapClock: View {
     }
 
     /// The full day and hour, or "Now".
+    ///
+    /// Reads the committed instant while the thumb is up, so it names the
+    /// hour the map is actually on rather than re-deriving one that has since
+    /// drifted; a live drag names the hour under the thumb.
     private var headline: String {
-        guard let instant = Self.instant(hoursFromNow: hours) else { return "Now" }
+        let held = dragged == nil ? scrub : Self.instant(hoursFromNow: hours)
+        guard let instant = held else { return "Now" }
         let formatter = DateFormatter()
         formatter.dateFormat = Calendar.current.isDateInToday(instant)
             ? "'Today' HH:mm" : "EEE d MMM · HH:mm"
@@ -3400,7 +3434,7 @@ private struct MapClock: View {
                     .font(.subheadline.weight(.bold))
                     .monospacedDigit()
                 Spacer(minLength: 0)
-                if hours != 0 {
+                if isScrubbed {
                     Button("Now") { pick(0) }
                         .font(.subheadline.weight(.semibold))
                 }
@@ -3446,6 +3480,10 @@ private struct MapClock: View {
             try? await Task.sleep(for: Self.pause)
             guard !Task.isCancelled else { return }
             commit(Int(hour))
+            // Handed over, so the thumb goes back to following the tab. Left
+            // set, `lift()` would find it and commit the same hour a second
+            // time when the finger came up.
+            dragged = nil
         }
     }
 

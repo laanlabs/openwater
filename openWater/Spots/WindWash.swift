@@ -35,6 +35,16 @@ enum WashLayer: String, CaseIterable {
         case .currents: "Current wash · Open-Meteo ocean model"
         }
     }
+
+    /// What the hud says while this layer's field is in the air. Named for
+    /// the thing being asked for, because the two layers ask different
+    /// services and only one of them is about wind.
+    var loadingLabel: String {
+        switch self {
+        case .off, .wind: "Getting the wind"
+        case .currents: "Getting the current"
+        }
+    }
 }
 
 @MainActor
@@ -193,6 +203,9 @@ final class WindWashModel {
     private(set) var fieldRegion: MKCoordinateRegion?
     private(set) var isLoading = false
     private var loadTask: Task<Void, Never>?
+    /// Bumped whenever a load is superseded, so only the newest one may say
+    /// the fetching is over.
+    @ObservationIgnored private var loadToken = 0
     private var loadedLayer: WashLayer = .off
 
     /// The slice of the field the layout was actually built for.
@@ -210,7 +223,7 @@ final class WindWashModel {
     /// How much wider than the view the drawn window is. Big enough that
     /// panning a screen's width does not need a redraw, small enough that
     /// the redraw it eventually needs is cheap.
-    nonisolated private static let drawPadding = 2.4
+    nonisolated static let drawPadding = 2.4
 
     /// The visible region the loaded field was sized for — the yardstick
     /// `needsReload` measures a zoom change against.
@@ -275,25 +288,30 @@ final class WindWashModel {
     /// reads — the wash's clock has to name the field the rider can see,
     /// not the one being built for them.
     private var displayedIndex: Int?
-    /// Whether a rebuild is being held back for a moving thumb.
+    /// Why the wash may not repaint right now.
     ///
-    /// Bookings still land during a drag; nothing is built until the thumb
-    /// pauses or lifts. Handing MapKit seventeen hundred fresh polygons
-    /// costs about half a second of main thread, and no thread can be
-    /// borrowed for it — overlay updates are the main thread's by
-    /// definition. Several of those a second is the lockup, so the field
-    /// waits for the rider to stop somewhere before it redraws.
-    private var isScrubbing = false
-    /// Whether the gesture itself is still going, which is what re-arms
-    /// the pause timer. Kept apart from `isScrubbing` because a pause
-    /// clears the hold without ending the drag.
-    @ObservationIgnored private var thumbIsDown = false
-    @ObservationIgnored private var scrubSettle: Task<Void, Never>?
-    /// True between the camera starting to move and settling. Repainting
-    /// costs the main thread about a second, and spending it in the middle
-    /// of somebody's pan is the whole complaint — so the field waits for the
-    /// map to stop, the same bargain the slider makes.
-    private var cameraIsMoving = false
+    /// Handing MapKit its polygons costs the main thread the better part of a
+    /// second and no other thread may do it, so the field waits until the
+    /// rider has stopped moving something. That was three Bools — a thumb, a
+    /// pause, a camera — each with exactly one path that cleared it, and each
+    /// therefore able to stick if that path never ran: a slider that drops
+    /// its lift, a camera change with no end, a `clear()` that reset one and
+    /// not its neighbour. One set, one question, one watchdog over the lot.
+    struct Holds: OptionSet {
+        let rawValue: Int
+        /// A finger is on a time slider.
+        static let thumb = Holds(rawValue: 1 << 0)
+        /// The camera is between its first move and settling.
+        static let camera = Holds(rawValue: 1 << 1)
+    }
+
+    @ObservationIgnored private var holds: Holds = []
+    /// When the held-down thing last reported that it is still moving. The
+    /// watchdog measures quiet from here rather than being re-armed, because
+    /// a pan reports sixty times a second and cancelling a task that often
+    /// costs more than the hold saves.
+    @ObservationIgnored private var lastHoldTouch: ContinuousClock.Instant?
+    @ObservationIgnored private var holdWatchdog: Task<Void, Never>?
 
     /// Whether the rider is owed a field they cannot see yet — fetching, or
     /// rebuilding, or holding a rebuilt one back for a moving map. The view
@@ -302,7 +320,14 @@ final class WindWashModel {
     /// How still a thumb has to be before the field catches up under it.
     /// Short enough to feel like an answer, long enough that a sweep
     /// across three days never triggers one.
-    private static let scrubPause = Duration.milliseconds(350)
+    private static let thumbPause = Duration.milliseconds(350)
+    /// How long the camera may go quiet before the hold is assumed stale.
+    ///
+    /// Purely a safety net. A pan reports continuously and then ends, and the
+    /// end is what releases this hold; the timeout only matters when that end
+    /// never arrives, which is the case that used to freeze the wash for the
+    /// life of the screen.
+    private static let cameraQuiet = Duration.milliseconds(600)
     /// An hour has been asked for that the map is not showing yet.
     private(set) var isRebuilding = false
     private var fieldStamp = UUID()
@@ -370,10 +395,9 @@ final class WindWashModel {
         if force { layout = nil }
         pendingIndex = index
         isRebuilding = true
-        if thumbIsDown {
-            isScrubbing = true
-            armScrubPause()
-        }
+        // A booking is a sign the thumb is still moving, so it re-arms the
+        // watchdog's quiet clock the way a camera frame does.
+        if holds.contains(.thumb) { lastHoldTouch = Self.clock.now }
         drainRebuilds()
     }
 
@@ -389,41 +413,65 @@ final class WindWashModel {
     /// `MapClock` and only reports the hours it settles on, which is the
     /// same bargain made one level up. This is for the route panel's run
     /// slider, whose thumb genuinely does drive the map continuously.
-    func beginScrub() {
-        thumbIsDown = true
-        isScrubbing = true
-        armScrubPause()
+    func beginScrub() { hold(.thumb) }
+    func endScrub() { release(.thumb) }
+
+    /// The camera moved. Called on every frame of a pan, so it has to be
+    /// cheap: a timestamp, and a set insert only the first time.
+    func cameraMoving() { hold(.camera) }
+
+    /// Take a hold, or give one back.
+    ///
+    /// `release` is the only place a hold is deliberately given up, and
+    /// `releaseAllHolds` the only place they are dropped wholesale — so
+    /// there is one list to check when asking why the wash is not painting,
+    /// rather than three Bools in three files.
+    private func hold(_ reason: Holds) {
+        lastHoldTouch = Self.clock.now
+        guard !holds.contains(reason) else { return }
+        holds.insert(reason)
+        startHoldWatchdog()
     }
 
-    /// The map's camera started moving, and stopped.
-    func cameraMoving() {
-        cameraIsMoving = true
-    }
-
-    func cameraSettled() {
-        cameraIsMoving = false
+    private func release(_ reason: Holds) {
+        guard holds.contains(reason) else { return }
+        holds.remove(reason)
+        if holds.isEmpty { stopHoldWatchdog() }
         drainRebuilds()
     }
 
-    func endScrub() {
-        thumbIsDown = false
-        scrubSettle?.cancel()
-        scrubSettle = nil
-        isScrubbing = false
-        drainRebuilds()
+    private func releaseAllHolds() {
+        holds = []
+        stopHoldWatchdog()
     }
 
-    /// Catch the field up if the thumb goes still. Doubles as the safety
-    /// net: a slider that never reports the lift — and SwiftUI's does drop
-    /// one now and then — must not be able to freeze the wash forever.
-    private func armScrubPause() {
-        scrubSettle?.cancel()
-        scrubSettle = Task {
-            try? await Task.sleep(for: Self.scrubPause)
-            guard !Task.isCancelled, isScrubbing else { return }
-            isScrubbing = false
-            drainRebuilds()
+    /// Catch the field up when whatever was moving goes quiet.
+    ///
+    /// Two jobs in one loop. For a thumb it is a feature — a rider who stops
+    /// on Thursday afternoon is asking about Thursday afternoon and should
+    /// not have to lift their finger to see it. For the camera it is a
+    /// safety net, and the only thing standing between a dropped
+    /// `onMapCameraChange(.onEnd)` and a wash that never paints again.
+    private func startHoldWatchdog() {
+        guard holdWatchdog == nil else { return }
+        holdWatchdog = Task {
+            while !Task.isCancelled, !holds.isEmpty {
+                let timeout = holds.contains(.camera) ? Self.cameraQuiet : Self.thumbPause
+                let quiet = lastHoldTouch.map { Self.clock.now - $0 } ?? timeout
+                guard quiet < timeout else {
+                    releaseAllHolds()
+                    drainRebuilds()
+                    return
+                }
+                try? await Task.sleep(for: timeout - quiet)
+            }
+            if !Task.isCancelled { holdWatchdog = nil }
         }
+    }
+
+    private func stopHoldWatchdog() {
+        holdWatchdog?.cancel()
+        holdWatchdog = nil
     }
 
     /// The worker: takes whatever hour is waiting, colours it away from the
@@ -434,12 +482,11 @@ final class WindWashModel {
     /// only suspension points are the detached build and the throttle, and
     /// both are guarded by the token on the way back.
     private func drainRebuilds() {
-        guard !isScrubbing, !cameraIsMoving, rebuildTask == nil else { return }
+        guard holds.isEmpty, rebuildTask == nil else { return }
         rebuildToken += 1
         let token = rebuildToken
         rebuildTask = Task {
-            while !Task.isCancelled, rebuildToken == token, !isScrubbing, !cameraIsMoving,
-                  pendingIndex != nil {
+            while !Task.isCancelled, rebuildToken == token, holds.isEmpty, pendingIndex != nil {
                 // The throttle is a clock, not a queue check. Publishing
                 // blocks the main thread long enough that the slider's next
                 // step has not been delivered yet when the worker looks —
@@ -487,6 +534,16 @@ final class WindWashModel {
                 }.value
 
                 guard !Task.isCancelled, rebuildToken == token else { return }
+                // A gesture that began while this was in the oven. Publishing
+                // now is the ~1 s of blocked main thread the hold exists to
+                // keep out of somebody's pan, so the hour goes back on the
+                // slot for the next drain to paint. The geometry is kept: the
+                // window has not moved, only the rider's finger.
+                guard holds.isEmpty else {
+                    layout = built.0
+                    pendingIndex = pendingIndex ?? index
+                    break
+                }
                 layout = built.0
                 cells = built.1
                 field = Field(
@@ -536,7 +593,7 @@ final class WindWashModel {
     /// It adds no information — the model has what it has — but a smooth
     /// surface is the honest picture of a field that genuinely is smooth,
     /// where hard squares imply edges the water does not have.
-    nonisolated private static let minUpsample = 6
+    nonisolated static let minUpsample = 6
 
     /// How many quads the drawn window may hold.
     ///
@@ -544,7 +601,7 @@ final class WindWashModel {
     /// main thread about six tenths of a millisecond and no other thread
     /// may do it, so this number *is* the hitch when the hour changes:
     /// four hundred is a couple of frames, seventeen hundred was a second.
-    nonisolated private static let drawBudget = 420
+    nonisolated static let drawBudget = 420
 
     /// How fine to cut the field for the window being drawn.
     ///
@@ -561,8 +618,8 @@ final class WindWashModel {
     /// the quads over the whole field, but only the ones in the window are
     /// ever built, so the count that reaches MapKit stays near the budget
     /// at every zoom.
-    nonisolated private static func drawUpsample(field: MKCoordinateRegion,
-                                                 window: MKCoordinateRegion?) -> Int {
+    nonisolated static func drawUpsample(field: MKCoordinateRegion,
+                                         window: MKCoordinateRegion?) -> Int {
         guard let window else { return minUpsample }
         let share = min(1, window.span.latitudeDelta / field.span.latitudeDelta)
             * min(1, window.span.longitudeDelta / field.span.longitudeDelta)
@@ -659,22 +716,34 @@ final class WindWashModel {
         UserDefaults.standard.object(forKey: "spots.maskLand") as? Bool ?? true
     }
 
+    /// The camera stopped somewhere. This is also where its hold is given
+    /// back, and deliberately *after* the decision below rather than before
+    /// it: releasing first drains the queue against the window the rider has
+    /// just left, which paints a field for the old slice and then throws it
+    /// away when the new slice is worked out a line later. Two full repaints
+    /// where one will do.
     func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer,
                      widthPoints: CGFloat, displayScale: CGFloat) {
         mapMeasured(widthPoints: widthPoints, displayScale: displayScale, visible: visible)
+        holds.remove(.camera)
+        if holds.isEmpty { stopHoldWatchdog() }
+
         guard layer != .off else { return clear() }
         if layer != loadedLayer || needsReload(for: visible) {
             return reload(for: visible, layer: layer)
         }
         // The data still covers this view; only the drawn slice of it may
         // have to move, and that is arithmetic rather than a round trip.
-        guard needsRecull(for: visible) else { return }
-        drawWindow = Self.paddedWindow(for: visible)
-        apply(force: true)
+        if needsRecull(for: visible) {
+            drawWindow = Self.paddedWindow(for: visible)
+            return apply(force: true)
+        }
+        // Nothing to change, but a rebuild may have been waiting on the pan.
+        drainRebuilds()
     }
 
     /// The window the quads are drawn for: the view, opened out.
-    nonisolated private static func paddedWindow(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
+    nonisolated static func paddedWindow(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
         MKCoordinateRegion(
             center: visible.center,
             span: MKCoordinateSpan(latitudeDelta: visible.span.latitudeDelta * drawPadding,
@@ -686,7 +755,14 @@ final class WindWashModel {
     /// trip, so it can afford to be stricter.
     private func needsRecull(for visible: MKCoordinateRegion) -> Bool {
         guard let window = drawWindow else { return true }
-        let zoom = visible.span.latitudeDelta / (window.span.latitudeDelta / Self.drawPadding)
+        return Self.needsRecull(visible: visible, window: window)
+    }
+
+    /// The rule itself, over nothing but its inputs — see `needsReload` for
+    /// why these are worth being able to test.
+    nonisolated static func needsRecull(visible: MKCoordinateRegion,
+                                        window: MKCoordinateRegion) -> Bool {
+        let zoom = visible.span.latitudeDelta / (window.span.latitudeDelta / drawPadding)
         if zoom > 1.35 || zoom < 0.7 { return true }
         let marginLat = (window.span.latitudeDelta - visible.span.latitudeDelta) / 2
         let marginLon = (window.span.longitudeDelta - visible.span.longitudeDelta) / 2
@@ -721,9 +797,7 @@ final class WindWashModel {
         loadTask = nil
         maskTask?.cancel()
         maskTask = nil
-        scrubSettle?.cancel()
-        scrubSettle = nil
-        isScrubbing = false
+        releaseAllHolds()
         cancelRebuild()
         cells = []
         field = nil
@@ -736,6 +810,7 @@ final class WindWashModel {
         bookedIndex = nil
         displayedIndex = nil
         loadedLayer = .off
+        loadToken += 1
         isLoading = false
     }
 
@@ -758,7 +833,21 @@ final class WindWashModel {
     /// inside a rectangle that has already been fetched needs nothing at all.
     private func needsReload(for visible: MKCoordinateRegion) -> Bool {
         guard let field = fieldRegion, let loaded = loadedVisible else { return true }
-        let zoom = visible.span.latitudeDelta / loaded.span.latitudeDelta
+        return Self.needsReload(visible: visible, field: field, loadedVisible: loaded)
+    }
+
+    /// The rule itself, over nothing but its inputs.
+    ///
+    /// Lifted out of the model so it can be exercised without a network, a
+    /// map or a clock. The version this replaced shipped and stayed wrong for
+    /// months because it looked reasonable and nothing could see it — a rule
+    /// made of four constants and a margin that changes character when the
+    /// field clamp leaves the field no bigger than the view is exactly the
+    /// kind of thing that regresses silently.
+    nonisolated static func needsReload(visible: MKCoordinateRegion,
+                                        field: MKCoordinateRegion,
+                                        loadedVisible: MKCoordinateRegion) -> Bool {
+        let zoom = visible.span.latitudeDelta / loadedVisible.span.latitudeDelta
         if zoom > 1.6 || zoom < 0.6 { return true }
         // How far the centre may wander before the view starts running off
         // the fetched rectangle. The floor keeps this sane at the widest
@@ -787,6 +876,10 @@ final class WindWashModel {
     private func reload(for visible: MKCoordinateRegion, layer: WashLayer) {
         let target = clampedField(for: visible)
         loadTask?.cancel()
+        // A coastline drawn for the rectangle being left would land during
+        // the fetch and force a rebuild of it.
+        maskTask?.cancel()
+        maskTask = nil
         // Let the old field go before the new one is asked for. It was drawn
         // for a rectangle the rider has left, and — more to the point —
         // seventeen hundred polygons on the map is what makes the map
@@ -796,8 +889,23 @@ final class WindWashModel {
         cells = []
         field = nil
         layout = nil
+        // The day goes with them. Clearing only what was drawn left the hours
+        // behind it live, so a route panel's fifteen-second tick during the
+        // fetch would find them, rebuild the rectangle the rider had left and
+        // put the field straight back — the drop undone, and its cost paid
+        // twice over.
+        hourly = []
+        bookedIndex = nil
+        displayedIndex = nil
+
+        loadToken += 1
+        let token = loadToken
+        isLoading = true
         loadTask = Task {
-            isLoading = true
+            // Every exit below is a `return` that used to skip the reset at
+            // the bottom and strand the hud spinning. The token keeps a
+            // superseded load from clearing a newer one's flag.
+            defer { if loadToken == token { isLoading = false } }
             let coords = gridCoordinates(for: target)
             let count = FlowMapScreen.columns * FlowMapScreen.rows
             // Three days deep and six hours behind, rather than one
@@ -890,7 +998,6 @@ final class WindWashModel {
             } else {
                 apply()
             }
-            isLoading = false
         }
     }
 

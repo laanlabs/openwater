@@ -564,8 +564,6 @@ struct MinuteRainCard: View {
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            AppleWeatherAttribution(showsLegalLabel: true, prefix: "Nowcast from")
-                .font(.caption2)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

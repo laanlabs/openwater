@@ -129,14 +129,6 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    WeatherStatusView()
-                } header: {
-                    Text("Weather")
-                } footer: {
-                    Text("Apple's weather service supplies the observed wind offered for a saved session — the \"Use recorded conditions\" button when setting a session's wind. Without it a session's wind is estimated from the shape of the track, and every angle and polar figure is measured from that estimate.\n\nIt is a model on a roughly 2 km grid, not an anemometer on the beach.")
-                }
-
-                Section {
                     Button("Export all sessions") { exportAll() }
                     if !library.staleSessions().isEmpty {
                         Button("Recompute \(library.staleSessions().count) session(s)") {
@@ -161,6 +153,18 @@ struct SettingsView: View {
                     Text("About")
                 } footer: {
                     Text("Every feature is free, including the ones other apps charge for — the full speed categories, foiling analysis, gybe and tack analysis, session replay and the race countdown. There is no subscription, no trial and no account.\n\nDetected events — flights, gybes, falls, jumps — are labelled with a confidence and can be wrong. The raw samples are always kept so any number can be checked.")
+                }
+
+                // Last on the page, deliberately. Nothing here is a control —
+                // it is the answer to "where did that number come from",
+                // which is a question a rider asks once and a reviewer asks
+                // when they are already looking for it.
+                Section {
+                    WeatherSourcesView()
+                } header: {
+                    Text("Where the weather comes from")
+                } footer: {
+                    Text("Every forecast in this app is somebody else's measurement or model, and they are not interchangeable — a buoy has been in the water, a station has an anemometer on a mast, a model has an opinion about a cell a few kilometres across. Where two disagree the app says so rather than averaging them into one confident number.")
                 }
             }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)

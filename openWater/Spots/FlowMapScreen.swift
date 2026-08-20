@@ -227,8 +227,9 @@ struct FlowMapScreen: View {
     /// About sixty kilometres of coast — the water a rider would actually
     /// drive along, at a span where ~10 km arrows still read as a field.
     static let spanMetres: Double = 60_000
-    static let columns = 7
-    static let rows = 9
+    // Read from the wash's cell builder, which runs off the main actor.
+    nonisolated static let columns = 7
+    nonisolated static let rows = 9
 
     /// Whether the view has wandered far enough from the loaded field to
     /// deserve a fresh one. Nil field means nothing loaded yet — the first
@@ -341,7 +342,7 @@ struct FlowMapScreen: View {
 /// rider is squinting for. The arrow ramp is the app's own coarser
 /// thresholds, used when the wash is off and the arrows carry the colour
 /// themselves.
-enum WindPalette {
+nonisolated enum WindPalette {
 
     /// The wash bands, knots. Pale colours for light air on purpose: a
     /// calm should let the map show through, not sit on it like a slab.
@@ -455,6 +456,17 @@ private struct WindFieldMapView: UIViewRepresentable {
         ), animated: false)
         map.pointOfInterestFilter = .excludingAll
         map.showsCompass = false
+        // The basemap stays light whatever the app is wearing.
+        //
+        // Everything drawn on this map assumes a pale ground: the wash's own
+        // palette starts at white for calm and `arrowNeutral` is a dark grey.
+        // MapKit's dark basemap answers that with white place names, and they
+        // land on the pale wash rather than under it — measured at 2.0:1
+        // against it, which is not a label, it is a rumour. The map is already
+        // bright wherever the field covers it, so lighting the ground under it
+        // is the coherent half of the choice, not the loud one; the screen
+        // around it stays dark.
+        map.overrideUserInterfaceStyle = .light
         map.isPitchEnabled = false
         map.isRotateEnabled = false
 

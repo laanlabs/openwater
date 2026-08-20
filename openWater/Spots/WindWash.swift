@@ -35,6 +35,16 @@ enum WashLayer: String, CaseIterable {
         case .currents: "Current wash · Open-Meteo ocean model"
         }
     }
+
+    /// What the hud says while this layer's field is in the air. Named for
+    /// the thing being asked for, because the two layers ask different
+    /// services and only one of them is about wind.
+    var loadingLabel: String {
+        switch self {
+        case .off, .wind: "Getting the wind"
+        case .currents: "Getting the current"
+        }
+    }
 }
 
 @MainActor
@@ -168,12 +178,100 @@ final class WindWashModel {
         }
     }
 
+    /// The half of a cell the clock cannot change: where the quad is, and
+    /// how far into the field's own feathered edge it sits.
+    ///
+    /// Split out because the expensive half of building a field is the
+    /// geometry — four coordinates and a coastline lookup per quad,
+    /// seventeen hundred quads — and none of it moves when the hour does.
+    /// Built once per field rectangle, then every scrubbed hour is a
+    /// bilinear sample and a colour lerp over a table that already exists:
+    /// a few thousand multiplies, on a thread that is not the map's.
+    struct CellLayout {
+        let id: Int
+        /// Fractional model-grid coordinates of the quad's centre, so the
+        /// hour's speeds can be sampled without re-deriving them.
+        let gx: Double
+        let gy: Double
+        let coordinates: [CLLocationCoordinate2D]
+        /// The edge feather, already worked out from the cell's ring.
+        let ringAlpha: Double
+    }
+
     private(set) var cells: [Cell] = []
     private(set) var field: Field?
     private(set) var fieldRegion: MKCoordinateRegion?
     private(set) var isLoading = false
     private var loadTask: Task<Void, Never>?
+    /// Bumped whenever a load is superseded, so only the newest one may say
+    /// the fetching is over.
+    @ObservationIgnored private var loadToken = 0
     private var loadedLayer: WashLayer = .off
+
+    /// The slice of the field the layout was actually built for.
+    ///
+    /// The field is fetched wide on purpose — one request buys 45 km, and
+    /// panning inside it costs nothing. Drawing it wide is a different
+    /// matter: at the zoom a rider reads a launch at, a 3 km view sits
+    /// inside a 45 km field, so under one per cent of the quads are on
+    /// screen and the other ninety-nine are a second of main thread spent
+    /// on geometry nobody can see. So the fetch stays wide and the drawing
+    /// is cut to a window around the view, generous enough that an ordinary
+    /// pan stays inside it.
+    @ObservationIgnored private var drawWindow: MKCoordinateRegion?
+
+    /// How much wider than the view the drawn window is. Big enough that
+    /// panning a screen's width does not need a redraw, small enough that
+    /// the redraw it eventually needs is cheap.
+    nonisolated static let drawPadding = 2.4
+
+    /// The visible region the loaded field was sized for — the yardstick
+    /// `needsReload` measures a zoom change against.
+    @ObservationIgnored private var loadedVisible: MKCoordinateRegion?
+
+    /// How many degrees of longitude one device pixel covered at the zoom
+    /// the field was last loaded for. Nil until a load has happened.
+    ///
+    /// This is the whole input to the seam inset — see `buildLayout`. It is
+    /// a snapshot, and the camera can drift by up to the reload threshold
+    /// before a fresh one is taken, so the inset is right to within a factor
+    /// of about two. That is fine: the failure at either end is a fraction
+    /// of a pixel of overlap or of gap, against the two whole pixels of
+    /// overlap it is cancelling.
+    @ObservationIgnored private var degreesPerPixel: Double?
+
+    /// The current field's geometry, kept across hours. Dropped whenever
+    /// the rectangle or the land mask changes — the only two things that
+    /// can move a quad.
+    ///
+    /// The rebuild's bookkeeping is all `@ObservationIgnored`: none of it is
+    /// anything a view has a reason to redraw for, and the wash publishes
+    /// through `cells` and `field` alone.
+    @ObservationIgnored private var layout: [CellLayout]?
+    /// The hour a rebuild has been asked for but not yet started. One slot,
+    /// not a queue: a thumb sweeping three days puts a hundred hours
+    /// through here and only the last one is worth drawing.
+    @ObservationIgnored private var pendingIndex: Int?
+    @ObservationIgnored private var rebuildTask: Task<Void, Never>?
+    /// Bumped whenever the field underneath a running rebuild is replaced,
+    /// so a worker that is mid-flight when the map moves retires quietly
+    /// instead of publishing cells for a rectangle that is gone.
+    @ObservationIgnored private var rebuildToken = 0
+    /// The floor between two published fields.
+    ///
+    /// Colouring the cells is cheap and off the main actor now — about
+    /// thirty milliseconds, and none of them the map's. Handing MapKit the
+    /// finished quads is neither: overlay updates are the main thread's by
+    /// definition, and seventeen hundred of them measured around 400 ms on
+    /// a simulator. Nothing can make that concurrent, so the only lever is
+    /// how often it happens, and this is the floor under it — for the paths
+    /// that book hours continuously rather than one settled hour at a time.
+    private static let rebuildInterval = Duration.milliseconds(120)
+    nonisolated private static let clock = ContinuousClock()
+    /// When the last field reached the map, for the throttle to measure
+    /// from. Nil means nothing has been published since the field landed,
+    /// so the first one never waits.
+    @ObservationIgnored private var lastPublish: ContinuousClock.Instant?
 
     /// The day the wash was fetched with, kept whole so a route's slider
     /// can scrub the field through its hours without touching the network.
@@ -181,10 +279,57 @@ final class WindWashModel {
     private var hourly: [(speeds: [Double?], directions: [Double?])] = []
     /// The instant a route's slider is holding, nil for "now".
     private var scrubbedTo: Date?
-    /// Which axis hour the cells/field currently show — the no-op guard
-    /// that keeps fifteen-second scrub ticks from rebuilding anything
-    /// until the thumb actually crosses an hour.
+    /// Which axis hour has been *asked* for — the no-op guard that keeps
+    /// fifteen-second scrub ticks from rebuilding anything until the thumb
+    /// actually crosses an hour.
+    private var bookedIndex: Int?
+    /// Which axis hour the cells on screen are actually showing. Behind
+    /// `bookedIndex` while a rebuild is in flight, and the one the caption
+    /// reads — the wash's clock has to name the field the rider can see,
+    /// not the one being built for them.
     private var displayedIndex: Int?
+    /// Why the wash may not repaint right now.
+    ///
+    /// Handing MapKit its polygons costs the main thread the better part of a
+    /// second and no other thread may do it, so the field waits until the
+    /// rider has stopped moving something. That was three Bools — a thumb, a
+    /// pause, a camera — each with exactly one path that cleared it, and each
+    /// therefore able to stick if that path never ran: a slider that drops
+    /// its lift, a camera change with no end, a `clear()` that reset one and
+    /// not its neighbour. One set, one question, one watchdog over the lot.
+    struct Holds: OptionSet {
+        let rawValue: Int
+        /// A finger is on a time slider.
+        static let thumb = Holds(rawValue: 1 << 0)
+        /// The camera is between its first move and settling.
+        static let camera = Holds(rawValue: 1 << 1)
+    }
+
+    @ObservationIgnored private var holds: Holds = []
+    /// When the held-down thing last reported that it is still moving. The
+    /// watchdog measures quiet from here rather than being re-armed, because
+    /// a pan reports sixty times a second and cancelling a task that often
+    /// costs more than the hold saves.
+    @ObservationIgnored private var lastHoldTouch: ContinuousClock.Instant?
+    @ObservationIgnored private var holdWatchdog: Task<Void, Never>?
+
+    /// Whether the rider is owed a field they cannot see yet — fetching, or
+    /// rebuilding, or holding a rebuilt one back for a moving map. The view
+    /// puts a quiet progress hud up on this.
+    var isBusy: Bool { isLoading || isRebuilding }
+    /// How still a thumb has to be before the field catches up under it.
+    /// Short enough to feel like an answer, long enough that a sweep
+    /// across three days never triggers one.
+    private static let thumbPause = Duration.milliseconds(350)
+    /// How long the camera may go quiet before the hold is assumed stale.
+    ///
+    /// Purely a safety net. A pan reports continuously and then ends, and the
+    /// end is what releases this hold; the timeout only matters when that end
+    /// never arrives, which is the case that used to freeze the wash for the
+    /// life of the screen.
+    private static let cameraQuiet = Duration.milliseconds(600)
+    /// An hour has been asked for that the map is not showing yet.
+    private(set) var isRebuilding = false
     private var fieldStamp = UUID()
     /// Where the land is, for the layer that must not paint over it.
     ///
@@ -225,59 +370,288 @@ final class WindWashModel {
         apply()
     }
 
-    /// Cells and field for the hour nearest the scrubbed instant. The
-    /// field keeps its stamp across hours so the comets ride the change
-    /// instead of reseeding.
-    /// `force` is for a mask tile landing: the hour has not changed, but what
-    /// counts as water has, so the no-op guard has to be stepped past.
+    /// Ask for the hour nearest the scrubbed instant. The field keeps its
+    /// stamp across hours so the comets ride the change instead of reseeding.
+    ///
+    /// This only *books* the work. The cells themselves are built off the
+    /// main actor by `drainRebuilds()`, and the booking is a single slot —
+    /// a thumb crossing an hour every few milliseconds leaves one hour
+    /// waiting, never a backlog to grind through after the finger lifts.
+    ///
+    /// `force` is for a mask landing: the hour has not changed, but what
+    /// counts as water has, so the no-op guard has to be stepped past and
+    /// the geometry redrawn.
     private func apply(force: Bool = false) {
-        guard let region = fieldRegion, !hourAxis.isEmpty else { return }
+        guard fieldRegion != nil, !hourAxis.isEmpty else { return }
         let target = scrubbedTo ?? Date()
         let index = hourAxis.indices.min {
             abs(hourAxis[$0].timeIntervalSince(target)) < abs(hourAxis[$1].timeIntervalSince(target))
         } ?? 0
-        guard force || index != displayedIndex, hourly.indices.contains(index) else { return }
-        displayedIndex = index
-        let hour = hourly[index]
-        // The mask is the current layer's business only — wind blows over
-        // land, and a wind wash that stopped at the shoreline would hide the
-        // very thing a rider on a beach is asking about.
-        let mask = loadedLayer == .currents && Self.masksLand ? waterMask : WaterMask()
-        cells = Self.buildCells(speeds: hour.speeds, region: region,
-                                layer: loadedLayer, mask: mask)
-        field = Field(
-            id: fieldStamp,
-            flow: loadedLayer == .currents ? .current : .wind,
-            mask: mask,
-            region: region,
-            columns: FlowMapScreen.columns, rows: FlowMapScreen.rows,
-            vectors: zip(hour.speeds, hour.directions).map { speed, direction in
-                guard let speed, let direction else { return nil }
-                let runs = (loadedLayer == .wind ? direction + 180 : direction) * .pi / 180
-                return (u: speed * sin(runs), v: speed * cos(runs))
-            })
+        guard force || index != bookedIndex, hourly.indices.contains(index) else { return }
+        // Claimed here rather than when the rebuild lands, so the fifteen-
+        // second scrub ticks the route panel runs on keep no-opping while
+        // the hour they asked for is still in the oven.
+        bookedIndex = index
+        if force { layout = nil }
+        pendingIndex = index
+        isRebuilding = true
+        // A booking is a sign the thumb is still moving, so it re-arms the
+        // watchdog's quiet clock the way a camera frame does.
+        if holds.contains(.thumb) { lastHoldTouch = Self.clock.now }
+        drainRebuilds()
     }
 
-    /// How much finer the cells are than the model grid.
+    /// A finger took hold of a time slider, and let go of it.
+    ///
+    /// The wash holds still in between — except where the thumb stops
+    /// moving, which is a rider arriving somewhere rather than passing
+    /// through, and is worth a field. Rebuilding on every hour a sweep
+    /// crosses costs half a second of blocked main thread apiece, and none
+    /// of those intermediate fields is one anybody asked to look at.
+    ///
+    /// The map's own clock does not call this: it keeps the drag inside
+    /// `MapClock` and only reports the hours it settles on, which is the
+    /// same bargain made one level up. This is for the route panel's run
+    /// slider, whose thumb genuinely does drive the map continuously.
+    func beginScrub() { hold(.thumb) }
+    func endScrub() { release(.thumb) }
+
+    /// The camera moved. Called on every frame of a pan, so it has to be
+    /// cheap: a timestamp, and a set insert only the first time.
+    func cameraMoving() { hold(.camera) }
+
+    /// Take a hold, or give one back.
+    ///
+    /// `release` is the only place a hold is deliberately given up, and
+    /// `releaseAllHolds` the only place they are dropped wholesale — so
+    /// there is one list to check when asking why the wash is not painting,
+    /// rather than three Bools in three files.
+    private func hold(_ reason: Holds) {
+        lastHoldTouch = Self.clock.now
+        guard !holds.contains(reason) else { return }
+        holds.insert(reason)
+        startHoldWatchdog()
+    }
+
+    private func release(_ reason: Holds) {
+        guard holds.contains(reason) else { return }
+        holds.remove(reason)
+        if holds.isEmpty { stopHoldWatchdog() }
+        drainRebuilds()
+    }
+
+    private func releaseAllHolds() {
+        holds = []
+        stopHoldWatchdog()
+    }
+
+    /// Catch the field up when whatever was moving goes quiet.
+    ///
+    /// Two jobs in one loop. For a thumb it is a feature — a rider who stops
+    /// on Thursday afternoon is asking about Thursday afternoon and should
+    /// not have to lift their finger to see it. For the camera it is a
+    /// safety net, and the only thing standing between a dropped
+    /// `onMapCameraChange(.onEnd)` and a wash that never paints again.
+    private func startHoldWatchdog() {
+        guard holdWatchdog == nil else { return }
+        holdWatchdog = Task {
+            while !Task.isCancelled, !holds.isEmpty {
+                let timeout = holds.contains(.camera) ? Self.cameraQuiet : Self.thumbPause
+                let quiet = lastHoldTouch.map { Self.clock.now - $0 } ?? timeout
+                guard quiet < timeout else {
+                    releaseAllHolds()
+                    drainRebuilds()
+                    return
+                }
+                try? await Task.sleep(for: timeout - quiet)
+            }
+            if !Task.isCancelled { holdWatchdog = nil }
+        }
+    }
+
+    private func stopHoldWatchdog() {
+        holdWatchdog?.cancel()
+        holdWatchdog = nil
+    }
+
+    /// The worker: takes whatever hour is waiting, colours it away from the
+    /// main actor, publishes, and goes round again if the thumb moved on.
+    ///
+    /// One worker at a time. Everything here is `@MainActor`, so the reads
+    /// and writes of `pendingIndex` cannot interleave with `apply()`; the
+    /// only suspension points are the detached build and the throttle, and
+    /// both are guarded by the token on the way back.
+    private func drainRebuilds() {
+        guard holds.isEmpty, rebuildTask == nil else { return }
+        rebuildToken += 1
+        let token = rebuildToken
+        rebuildTask = Task {
+            while !Task.isCancelled, rebuildToken == token, holds.isEmpty, pendingIndex != nil {
+                // The throttle is a clock, not a queue check. Publishing
+                // blocks the main thread long enough that the slider's next
+                // step has not been delivered yet when the worker looks —
+                // so "is anything waiting?" always answered no, the worker
+                // retired, and the queued step started a fresh one with no
+                // wait at all. Timing the gap between *publishes* is the
+                // only version that actually holds the pace.
+                if let lastPublish {
+                    let waited = Self.clock.now - lastPublish
+                    if waited < Self.rebuildInterval {
+                        try? await Task.sleep(for: Self.rebuildInterval - waited)
+                        guard !Task.isCancelled, rebuildToken == token else { return }
+                    }
+                }
+                // Read *after* the wait: whatever the thumb reached while
+                // this worker was asleep is the hour worth drawing, and
+                // every hour it swept past on the way is not.
+                guard let index = pendingIndex else { break }
+                pendingIndex = nil
+                guard let region = fieldRegion, hourly.indices.contains(index) else { break }
+                let layer = loadedLayer
+                let hour = hourly[index]
+                // The mask is the current layer's business only — wind blows
+                // over land, and a wind wash that stopped at the shoreline
+                // would hide the very thing a rider on a beach is asking
+                // about.
+                let mask = layer == .currents && Self.masksLand ? waterMask : WaterMask()
+                let known = layout
+                // Half a device pixel per side, which is the whole pixel
+                // MapKit bleeds across a shared edge. Measured: a full pixel
+                // each side overshoots into a visible dark gap, half lands
+                // on the field's own brightness. Nothing known about the
+                // zoom yet means no correction rather than a guessed one.
+                let inset = (degreesPerPixel ?? 0) * Self.seamPixels
+                let window = drawWindow
+
+                // `nonisolated` is not enough to leave the main actor under
+                // approachable concurrency — a nonisolated call from here
+                // runs here. Detached is the honest way to say "another
+                // thread", and it is the same handover `loadMask` uses.
+                let built = await Task.detached(priority: .userInitiated) {
+                    let table = known ?? Self.buildLayout(region: region, mask: mask,
+                                                          insetLon: inset, window: window)
+                    return (table, Self.colourCells(table, speeds: hour.speeds, layer: layer))
+                }.value
+
+                guard !Task.isCancelled, rebuildToken == token else { return }
+                // A gesture that began while this was in the oven. Publishing
+                // now is the ~1 s of blocked main thread the hold exists to
+                // keep out of somebody's pan, so the hour goes back on the
+                // slot for the next drain to paint. The geometry is kept: the
+                // window has not moved, only the rider's finger.
+                guard holds.isEmpty else {
+                    layout = built.0
+                    pendingIndex = pendingIndex ?? index
+                    break
+                }
+                layout = built.0
+                cells = built.1
+                field = Field(
+                    id: fieldStamp,
+                    flow: layer == .currents ? .current : .wind,
+                    mask: mask,
+                    region: region,
+                    columns: FlowMapScreen.columns, rows: FlowMapScreen.rows,
+                    vectors: zip(hour.speeds, hour.directions).map { speed, direction in
+                        guard let speed, let direction else { return nil }
+                        let runs = (layer == .wind ? direction + 180 : direction) * .pi / 180
+                        return (u: speed * sin(runs), v: speed * cos(runs))
+                    })
+
+                displayedIndex = index
+                lastPublish = Self.clock.now
+            }
+            if rebuildToken == token {
+                rebuildTask = nil
+                isRebuilding = pendingIndex != nil
+            }
+        }
+    }
+
+    /// Retire the running rebuild and forget what it was working towards —
+    /// for whenever the field under it is being replaced.
+    private func cancelRebuild() {
+        rebuildToken += 1
+        rebuildTask?.cancel()
+        rebuildTask = nil
+        pendingIndex = nil
+        isRebuilding = false
+        // A new field is not a scrub: it should paint the moment it lands,
+        // without serving out the throttle the old one was under.
+        lastPublish = nil
+    }
+
+    /// How much finer the cells are than the model grid — the floor, and
+    /// what the whole field is drawn at when the view is as wide as it.
     ///
     /// Three left a 45 km field in cells about two and a half kilometres
     /// across, which at the zoom a rider actually reads a launch at is a
     /// quad the size of a thumbnail — the field stopped looking like water
     /// and started looking like a spreadsheet. Six halves that again in
-    /// both directions: 1,440 quads instead of 432, which MapKit composites
-    /// without complaint, and the gradient between the model's own nodes
-    /// finally reads as a gradient. It adds no information — the model has
-    /// what it has — but a smooth surface is the honest picture of a field
-    /// that genuinely is smooth, where hard squares imply edges the water
-    /// does not have.
-    private static let upsample = 6
+    /// both directions, which MapKit composites without complaint, and the
+    /// gradient between the model's own nodes finally reads as a gradient.
+    /// It adds no information — the model has what it has — but a smooth
+    /// surface is the honest picture of a field that genuinely is smooth,
+    /// where hard squares imply edges the water does not have.
+    nonisolated static let minUpsample = 6
+
+    /// How many quads the drawn window may hold.
+    ///
+    /// The one real cost in this file. Handing MapKit a polygon costs the
+    /// main thread about six tenths of a millisecond and no other thread
+    /// may do it, so this number *is* the hitch when the hour changes:
+    /// four hundred is a couple of frames, seventeen hundred was a second.
+    nonisolated static let drawBudget = 420
+
+    /// How fine to cut the field for the window being drawn.
+    ///
+    /// Six was a constant, and a constant is only right at one zoom. It was
+    /// chosen for a view as wide as the field; but the field has a 45 km
+    /// floor, so a rider zoomed in on their launch was looking at two of
+    /// those quads with a seam between them — a flat sheet with a line
+    /// across it, which is not what a wind field looks like. The model has
+    /// nothing more to say at that scale, and this does not pretend it
+    /// does; it just stops the interpolation it is already doing from being
+    /// drawn in slabs.
+    ///
+    /// The window is what makes this affordable. Cutting finer multiplies
+    /// the quads over the whole field, but only the ones in the window are
+    /// ever built, so the count that reaches MapKit stays near the budget
+    /// at every zoom.
+    nonisolated static func drawUpsample(field: MKCoordinateRegion,
+                                         window: MKCoordinateRegion?) -> Int {
+        guard let window else { return minUpsample }
+        let share = min(1, window.span.latitudeDelta / field.span.latitudeDelta)
+            * min(1, window.span.longitudeDelta / field.span.longitudeDelta)
+        guard share > 0 else { return minUpsample }
+        // total ≈ columns² · (rows−1)/(columns−1) · share, in cells across
+        // the *field*; solve that for the cells-across that spends the
+        // budget on the window.
+        let aspect = Double(FlowMapScreen.rows - 1) / Double(FlowMapScreen.columns - 1)
+        let across = (Double(drawBudget) / (aspect * share)).squareRoot()
+        let steps = Int((across / Double(FlowMapScreen.columns - 1)).rounded(.down))
+        return max(minUpsample, min(steps, 512))
+    }
     /// The wash's strength. The balance that took three tries: heavy
     /// enough that the field's colours read as a surface, light enough
     /// that the muted map's coastline still shows through — you can see
     /// the wind *and* where the wind is. The basemap goes muted while a
     /// wash is up (SpotsTabView), so the wash owns all the colour; the
     /// outer rings fade so the field ends in a feather, not a wall.
-    private static let washAlpha = 0.5
+    nonisolated private static let washAlpha = 0.5
+    /// Device pixels of overlap to pull out of each side of a quad.
+    ///
+    /// Measured, not derived. Against a field reading 138 on a 3× simulator,
+    /// a seam ran +73 with the old stroke, +31 with no correction at all,
+    /// +12 at half a pixel and −27 at a whole one; it crosses around six
+    /// tenths, and past that it opens a dark gap instead.
+    ///
+    /// It cannot be nulled everywhere at once — each seam falls differently
+    /// across the pixel grid, and repeat runs of the same measurement move
+    /// by a few counts — so what is left is under a tenth of the field's own
+    /// brightness either way, against the half the stroke was adding. The
+    /// unit is device pixels precisely so this holds at every zoom.
+    nonisolated private static let seamPixels = 0.6
 
     // MARK: The gradient
 
@@ -285,7 +659,7 @@ final class WindWashModel {
     /// palettes' own band midpoints, so every cell wears its own shade and
     /// the field reads as one continuous surface. The palettes remain the
     /// single source of the colours — this only smooths between them.
-    private static func smoothColour(for knots: Double, layer: WashLayer) -> Color {
+    nonisolated private static func smoothColour(for knots: Double, layer: WashLayer) -> Color {
         // Wind reads its own palette's continuous form — the conditions
         // strip reads the same one, which is why it lives on the palette
         // rather than here.
@@ -304,7 +678,7 @@ final class WindWashModel {
 
     /// The current palette's band midpoints, sampled through the palette
     /// itself so the two can never drift apart.
-    private static let currentStops: [(at: Double, colour: UIColor)] =
+    nonisolated private static let currentStops: [(at: Double, colour: UIColor)] =
         [0.1, 0.35, 0.65, 1.0, 1.4, 1.9, 2.6].map {
             ($0, UIColor(CurrentPalette.color(for: $0)))
         }
@@ -314,6 +688,14 @@ final class WindWashModel {
     func maskPreferenceChanged(for visible: MKCoordinateRegion, layer: WashLayer) {
         guard layer == .currents else { return }
         if Self.masksLand { loadMask() } else { apply(force: true) }
+    }
+
+    /// Tell the wash how big the map is drawn, so the cell builder can size
+    /// its seam inset in real pixels. Cheap and idempotent; the view calls
+    /// it whenever the map's frame changes.
+    func mapMeasured(widthPoints: CGFloat, displayScale: CGFloat, visible: MKCoordinateRegion) {
+        guard widthPoints > 0, displayScale > 0 else { return }
+        degreesPerPixel = visible.span.longitudeDelta / (Double(widthPoints) * Double(displayScale))
     }
 
     /// The map settled somewhere — refetch if it wandered far enough from
@@ -334,10 +716,58 @@ final class WindWashModel {
         UserDefaults.standard.object(forKey: "spots.maskLand") as? Bool ?? true
     }
 
-    func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer) {
+    /// The camera stopped somewhere. This is also where its hold is given
+    /// back, and deliberately *after* the decision below rather than before
+    /// it: releasing first drains the queue against the window the rider has
+    /// just left, which paints a field for the old slice and then throws it
+    /// away when the new slice is worked out a line later. Two full repaints
+    /// where one will do.
+    func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer,
+                     widthPoints: CGFloat, displayScale: CGFloat) {
+        mapMeasured(widthPoints: widthPoints, displayScale: displayScale, visible: visible)
+        holds.remove(.camera)
+        if holds.isEmpty { stopHoldWatchdog() }
+
         guard layer != .off else { return clear() }
-        guard layer != loadedLayer || needsReload(for: visible) else { return }
-        reload(for: visible, layer: layer)
+        if layer != loadedLayer || needsReload(for: visible) {
+            return reload(for: visible, layer: layer)
+        }
+        // The data still covers this view; only the drawn slice of it may
+        // have to move, and that is arithmetic rather than a round trip.
+        if needsRecull(for: visible) {
+            drawWindow = Self.paddedWindow(for: visible)
+            return apply(force: true)
+        }
+        // Nothing to change, but a rebuild may have been waiting on the pan.
+        drainRebuilds()
+    }
+
+    /// The window the quads are drawn for: the view, opened out.
+    nonisolated static func paddedWindow(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
+        MKCoordinateRegion(
+            center: visible.center,
+            span: MKCoordinateSpan(latitudeDelta: visible.span.latitudeDelta * drawPadding,
+                                   longitudeDelta: visible.span.longitudeDelta * drawPadding))
+    }
+
+    /// Whether the view has moved far enough that the drawn slice no longer
+    /// comfortably covers it. Cheaper than `needsReload` by a network round
+    /// trip, so it can afford to be stricter.
+    private func needsRecull(for visible: MKCoordinateRegion) -> Bool {
+        guard let window = drawWindow else { return true }
+        return Self.needsRecull(visible: visible, window: window)
+    }
+
+    /// The rule itself, over nothing but its inputs — see `needsReload` for
+    /// why these are worth being able to test.
+    nonisolated static func needsRecull(visible: MKCoordinateRegion,
+                                        window: MKCoordinateRegion) -> Bool {
+        let zoom = visible.span.latitudeDelta / (window.span.latitudeDelta / drawPadding)
+        if zoom > 1.35 || zoom < 0.7 { return true }
+        let marginLat = (window.span.latitudeDelta - visible.span.latitudeDelta) / 2
+        let marginLon = (window.span.longitudeDelta - visible.span.longitudeDelta) / 2
+        return abs(visible.center.latitude - window.center.latitude) > marginLat * 0.75
+            || abs(visible.center.longitude - window.center.longitude) > marginLon * 0.75
     }
 
     /// Draw the coastline for the field's own rectangle.
@@ -367,24 +797,67 @@ final class WindWashModel {
         loadTask = nil
         maskTask?.cancel()
         maskTask = nil
+        releaseAllHolds()
+        cancelRebuild()
         cells = []
         field = nil
         fieldRegion = nil
+        loadedVisible = nil
+        drawWindow = nil
+        layout = nil
         hourAxis = []
         hourly = []
+        bookedIndex = nil
         displayedIndex = nil
         loadedLayer = .off
+        loadToken += 1
         isLoading = false
     }
 
-    /// The flow map's drift rule, verbatim.
+    /// Whether the view has left what was fetched for it.
+    ///
+    /// This was the flow map's drift rule, verbatim, and on this map it was
+    /// wrong in a way that cost a network round trip and a repaint on *every
+    /// pan*. That rule compares the view against the field, which works on
+    /// the flow map because the field there is the view. Here the field is
+    /// the view widened and then clamped to a 45 km floor — so at any zoom
+    /// closer than about eighty kilometres the view is a small fraction of
+    /// the field by construction, `spanRatio < 0.55` is permanently true,
+    /// and the map refetched every time the camera stopped. Measured: a fetch
+    /// and a 1.3 s repaint after each pan, over data that already covered
+    /// where the rider had panned to.
+    ///
+    /// So the two questions are asked separately. Zoom is measured against
+    /// the *view* the field was sized for, because that is what set the cell
+    /// size. Drift is measured against the field's own edge, because a pan
+    /// inside a rectangle that has already been fetched needs nothing at all.
     private func needsReload(for visible: MKCoordinateRegion) -> Bool {
-        guard let field = fieldRegion else { return true }
-        let spanRatio = visible.span.latitudeDelta / field.span.latitudeDelta
-        let centreShift =
-            abs(visible.center.latitude - field.center.latitude) / field.span.latitudeDelta
-            + abs(visible.center.longitude - field.center.longitude) / field.span.longitudeDelta
-        return spanRatio > 1.3 || spanRatio < 0.55 || centreShift > 0.3
+        guard let field = fieldRegion, let loaded = loadedVisible else { return true }
+        return Self.needsReload(visible: visible, field: field, loadedVisible: loaded)
+    }
+
+    /// The rule itself, over nothing but its inputs.
+    ///
+    /// Lifted out of the model so it can be exercised without a network, a
+    /// map or a clock. The version this replaced shipped and stayed wrong for
+    /// months because it looked reasonable and nothing could see it — a rule
+    /// made of four constants and a margin that changes character when the
+    /// field clamp leaves the field no bigger than the view is exactly the
+    /// kind of thing that regresses silently.
+    nonisolated static func needsReload(visible: MKCoordinateRegion,
+                                        field: MKCoordinateRegion,
+                                        loadedVisible: MKCoordinateRegion) -> Bool {
+        let zoom = visible.span.latitudeDelta / loadedVisible.span.latitudeDelta
+        if zoom > 1.6 || zoom < 0.6 { return true }
+        // How far the centre may wander before the view starts running off
+        // the fetched rectangle. The floor keeps this sane at the widest
+        // zooms, where the clamp can leave the field no bigger than the view.
+        let marginLat = max((field.span.latitudeDelta - visible.span.latitudeDelta) / 2,
+                            visible.span.latitudeDelta * 0.25)
+        let marginLon = max((field.span.longitudeDelta - visible.span.longitudeDelta) / 2,
+                            visible.span.longitudeDelta * 0.25)
+        return abs(visible.center.latitude - field.center.latitude) > marginLat * 0.6
+            || abs(visible.center.longitude - field.center.longitude) > marginLon * 0.6
     }
 
     /// The flow map's field sizing, verbatim.
@@ -403,8 +876,36 @@ final class WindWashModel {
     private func reload(for visible: MKCoordinateRegion, layer: WashLayer) {
         let target = clampedField(for: visible)
         loadTask?.cancel()
+        // A coastline drawn for the rectangle being left would land during
+        // the fetch and force a rebuild of it.
+        maskTask?.cancel()
+        maskTask = nil
+        // Let the old field go before the new one is asked for. It was drawn
+        // for a rectangle the rider has left, and — more to the point —
+        // seventeen hundred polygons on the map is what makes the map
+        // expensive to move. Dropping them here is what keeps panning free
+        // while the fetch is in the air; the hud says why the water is bare.
+        cancelRebuild()
+        cells = []
+        field = nil
+        layout = nil
+        // The day goes with them. Clearing only what was drawn left the hours
+        // behind it live, so a route panel's fifteen-second tick during the
+        // fetch would find them, rebuild the rectangle the rider had left and
+        // put the field straight back — the drop undone, and its cost paid
+        // twice over.
+        hourly = []
+        bookedIndex = nil
+        displayedIndex = nil
+
+        loadToken += 1
+        let token = loadToken
+        isLoading = true
         loadTask = Task {
-            isLoading = true
+            // Every exit below is a `return` that used to skip the reset at
+            // the bottom and strand the hud spinning. The token keeps a
+            // superseded load from clearing a newer one's flag.
+            defer { if loadToken == token { isLoading = false } }
             let coords = gridCoordinates(for: target)
             let count = FlowMapScreen.columns * FlowMapScreen.rows
             // Three days deep and six hours behind, rather than one
@@ -414,31 +915,34 @@ final class WindWashModel {
             // simply the one nearest now.
             var axis: [Date] = []
             var day: [(speeds: [Double?], directions: [Double?])] = []
-            func blank() -> (speeds: [Double?], directions: [Double?]) {
-                ([Double?](repeating: nil, count: count),
-                 [Double?](repeating: nil, count: count))
-            }
             switch layer {
             case .wind:
                 let field = await OpenMeteo.windAlong(
                     coords, hours: SpotGuideStore.scrubForecastHours,
                     pastHours: SpotGuideStore.scrubPastHours)
                 guard !Task.isCancelled else { return }
-                axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
-                day = axis.map { _ in blank() }
-                // A hash of the axis, not a linear search per row: three
-                // days across sixty-three points is ~4,500 rows, and
-                // `firstIndex(of:)` would walk seventy-two dates for each
-                // of them on the main actor — a third of a million
-                // comparisons where a dictionary costs one.
-                let slots = Self.slotIndex(of: axis)
-                for (coordIndex, rows) in field.enumerated() where coordIndex < count {
-                    for row in rows {
-                        guard let slot = slots[row.date] else { continue }
-                        day[slot].speeds[coordIndex] = row.speedKn
-                        day[slot].directions[coordIndex] = row.directionDeg
+                // Laying the answer onto a shared axis is ~4,500 rows of
+                // pure arithmetic over values, and it lands mid-pan — so it
+                // goes to another thread rather than into the frame the map
+                // was about to draw.
+                (axis, day) = await Task.detached(priority: .userInitiated) {
+                    let axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
+                    // A hash of the axis, not a linear search per row: three
+                    // days across sixty-three points is ~4,500 rows, and
+                    // `firstIndex(of:)` would walk seventy-two dates for each
+                    // of them — a third of a million comparisons where a
+                    // dictionary costs one.
+                    let slots = Self.slotIndex(of: axis)
+                    var day = Self.blankDay(hours: axis.count, points: count)
+                    for (coordIndex, rows) in field.enumerated() where coordIndex < count {
+                        for row in rows {
+                            guard let slot = slots[row.date] else { continue }
+                            day[slot].speeds[coordIndex] = row.speedKn
+                            day[slot].directions[coordIndex] = row.directionDeg
+                        }
                     }
-                }
+                    return (axis, day)
+                }.value
             case .currents:
                 // The ocean model answers nil over land, so the current
                 // wash paints only the water — the field's own honesty,
@@ -447,25 +951,39 @@ final class WindWashModel {
                     coords, hours: SpotGuideStore.scrubForecastHours,
                     pastHours: SpotGuideStore.scrubPastHours)
                 guard !Task.isCancelled else { return }
-                axis = field.map(\.currents).max { $0.count < $1.count }?.map(\.at) ?? []
-                day = axis.map { _ in blank() }
-                let slots = Self.slotIndex(of: axis)
-                for (coordIndex, point) in field.enumerated() where coordIndex < count {
-                    for row in point.currents {
-                        guard let slot = slots[row.at] else { continue }
-                        day[slot].speeds[coordIndex] = row.speedKn
-                        day[slot].directions[coordIndex] = row.directionDeg
+                (axis, day) = await Task.detached(priority: .userInitiated) {
+                    let axis = field.map(\.currents).max { $0.count < $1.count }?.map(\.at) ?? []
+                    let slots = Self.slotIndex(of: axis)
+                    var day = Self.blankDay(hours: axis.count, points: count)
+                    for (coordIndex, point) in field.enumerated() where coordIndex < count {
+                        for row in point.currents {
+                            guard let slot = slots[row.at] else { continue }
+                            day[slot].speeds[coordIndex] = row.speedKn
+                            day[slot].directions[coordIndex] = row.directionDeg
+                        }
                     }
-                }
+                    return (axis, day)
+                }.value
             case .off:
                 return
             }
+            guard !Task.isCancelled else { return }
+            // Whatever the old field's rebuild was working towards, it is
+            // about to be answering for the wrong rectangle — retired here,
+            // in the same breath as the field it belonged to.
+            cancelRebuild()
             hourAxis = axis
             hourly = day
             fieldRegion = target
+            loadedVisible = visible
+            drawWindow = Self.paddedWindow(for: visible)
             loadedLayer = layer
             fieldStamp = UUID()
+            bookedIndex = nil
             displayedIndex = nil
+            // New rectangle, new quads: the geometry is redrawn against it
+            // by the first rebuild, not carried over from the old one.
+            layout = nil
             // The rectangle just changed, so the coastline drawn for the old
             // one is the wrong shape. Redrawn against the new field before
             // anything asks it a question.
@@ -480,12 +998,20 @@ final class WindWashModel {
             } else {
                 apply()
             }
-            isLoading = false
+        }
+    }
+
+    /// An empty day, one row per hour and one slot per grid point.
+    nonisolated private static func blankDay(hours: Int, points: Int)
+    -> [(speeds: [Double?], directions: [Double?])] {
+        (0..<hours).map { _ in
+            (speeds: [Double?](repeating: nil, count: points),
+             directions: [Double?](repeating: nil, count: points))
         }
     }
 
     /// Hour to row, for laying each point's series onto the shared axis.
-    private static func slotIndex(of axis: [Date]) -> [Date: Int] {
+    nonisolated private static func slotIndex(of axis: [Date]) -> [Date: Int] {
         Dictionary(axis.enumerated().map { ($1, $0) }) { first, _ in first }
     }
 
@@ -505,17 +1031,137 @@ final class WindWashModel {
         return out
     }
 
-    /// The raster builder's bilinear walk, stopped at cell resolution.
-    private static func buildCells(speeds: [Double?], region: MKCoordinateRegion,
-                                   layer: WashLayer, mask: WaterMask) -> [Cell] {
+    /// The raster builder's bilinear walk, stopped at cell resolution —
+    /// the geometry half, run once per field rectangle.
+    ///
+    /// Everything here is about *where*, and nothing about how hard the
+    /// wind is blowing: the quads, the edge feather, and the land test that
+    /// decides whether a quad exists at all. All three survive a change of
+    /// hour untouched, and all three are what used to make scrubbing
+    /// expensive — seventeen hundred four-coordinate arrays allocated and
+    /// thrown away for every hour the thumb crossed, plus a coastline
+    /// lookup apiece.
+    /// `insetLon` is half the overlap MapKit leaves between abutting
+    /// polygons, in degrees of longitude — see the call site for where it
+    /// comes from. Zero disables the correction.
+    nonisolated private static func buildLayout(region: MKCoordinateRegion,
+                                                mask: WaterMask,
+                                                insetLon: Double,
+                                                window: MKCoordinateRegion?) -> [CellLayout] {
         let columns = FlowMapScreen.columns
         let rows = FlowMapScreen.rows
+        let upsample = drawUpsample(field: region, window: window)
         let cellColumns = (columns - 1) * upsample
         let cellRows = (rows - 1) * upsample
+        // The feather is a width of *field*, not a count of cells — so it
+        // has to widen as the cells get finer, or cutting finer would turn
+        // the field's soft edge into a wall.
+        let featherCells = 2.5 * Double(upsample) / Double(minUpsample)
 
-        func speed(atColumn column: Int, row: Int) -> Double? {
-            speeds[row * columns + column]
+        let south = region.center.latitude - region.span.latitudeDelta / 2
+        let west = region.center.longitude - region.span.longitudeDelta / 2
+        let latStep = region.span.latitudeDelta / Double(cellRows)
+        let lonStep = region.span.longitudeDelta / Double(cellColumns)
+
+        // The seam. MapKit fills a polygon about a pixel past its own edge,
+        // so two quads that share an edge both paint the pixels along it —
+        // and the wash is translucent, where painting twice is not painting
+        // once. Half-opacity over half-opacity is three-quarters, so every
+        // shared edge came out brighter than the field either side of it: a
+        // faint grid on the light basemap, a lit one on the dark basemap,
+        // which is what a rider photographed. Pulling each quad in by that
+        // one pixel lets them meet instead of overlap.
+        //
+        // A pixel, not a fraction of a cell: the overlap is a fact about the
+        // screen, not about the field, so a percentage would be right at one
+        // zoom and wrong at every other. Measured on a simulator, the seam
+        // went from +53% of the field's own brightness to under a per cent.
+        let insetLat = insetLon * cos(region.center.latitude * .pi / 180)
+
+        // Only the drawn slice is built — quads outside the window are not
+        // dimmed or simplified, they are never made, because off screen they
+        // cost MapKit exactly what a visible one costs. Their indices are
+        // still counted from the field's own corner, so `ringAlpha` measures
+        // the field's edge and the feather does not travel with the window.
+        //
+        // Walked as index ranges rather than the whole field with a test
+        // inside it. Cutting finer multiplies the field's cells by the
+        // square, and at the zoom where cutting finer matters the window is
+        // a thousandth of the field — so a loop over the field would spend a
+        // million iterations to keep four hundred. These ranges are what let
+        // the resolution above be chosen freely.
+        func range(_ lo: Double, _ hi: Double, step: Double, origin: Double, count: Int) -> Range<Int> {
+            guard step > 0 else { return 0..<count }
+            let first = max(0, Int(((lo - origin) / step).rounded(.down)) - 1)
+            let last = min(count, Int(((hi - origin) / step).rounded(.up)) + 1)
+            return first < last ? first..<last : 0..<0
         }
+        let rowRange = window.map {
+            range($0.center.latitude - $0.span.latitudeDelta / 2,
+                  $0.center.latitude + $0.span.latitudeDelta / 2,
+                  step: latStep, origin: south, count: cellRows)
+        } ?? 0..<cellRows
+        let columnRange = window.map {
+            range($0.center.longitude - $0.span.longitudeDelta / 2,
+                  $0.center.longitude + $0.span.longitudeDelta / 2,
+                  step: lonStep, origin: west, count: cellColumns)
+        } ?? 0..<cellColumns
+
+        var out: [CellLayout] = []
+        out.reserveCapacity(rowRange.count * columnRange.count)
+        for cellRow in rowRange {
+            for cellColumn in columnRange {
+                let latitude = south + Double(cellRow) * latStep
+                let longitude = west + Double(cellColumn) * lonStep
+
+                // A cell the elevation model calls dry is not painted at
+                // all. Unknown — a zoom too wide to mask, or a coastline
+                // still being drawn — paints as before: the wash arriving a
+                // moment before the coastline is better than a map that
+                // blinks.
+                let centre = CLLocationCoordinate2D(latitude: latitude + latStep / 2,
+                                                    longitude: longitude + lonStep / 2)
+                if mask.isWater(centre) == false { continue }
+
+                // The feather: the outer two rings of cells fade out, so
+                // the field ends the way the raster's does — a soft edge
+                // that says "this window stops", not a painted wall.
+                let ring = min(min(cellRow, cellRows - 1 - cellRow),
+                               min(cellColumn, cellColumns - 1 - cellColumn))
+
+
+                out.append(CellLayout(
+                    id: cellRow * cellColumns + cellColumn,
+                    gx: (Double(cellColumn) + 0.5) / Double(upsample),
+                    gy: (Double(cellRow) + 0.5) / Double(upsample),
+                    coordinates: [
+                        CLLocationCoordinate2D(latitude: latitude + insetLat,
+                                               longitude: longitude + insetLon),
+                        CLLocationCoordinate2D(latitude: latitude + insetLat,
+                                               longitude: longitude + lonStep - insetLon),
+                        CLLocationCoordinate2D(latitude: latitude + latStep - insetLat,
+                                               longitude: longitude + lonStep - insetLon),
+                        CLLocationCoordinate2D(latitude: latitude + latStep - insetLat,
+                                               longitude: longitude + insetLon),
+                    ],
+                    ringAlpha: washAlpha * min(1, (Double(ring) + 0.5) / featherCells)))
+            }
+        }
+        return out
+    }
+
+    /// The clock half: one hour's speeds, sampled onto a layout that
+    /// already exists.
+    ///
+    /// No allocation per cell beyond the output — the quads are handed on
+    /// by reference, which is the point of splitting them out. A whole
+    /// field is a few thousand multiplies, which is why the throttle in
+    /// `drainRebuilds` is about MapKit's diffing rather than this.
+    nonisolated private static func colourCells(_ layout: [CellLayout], speeds: [Double?],
+                                                layer: WashLayer) -> [Cell] {
+        let columns = FlowMapScreen.columns
+        let rows = FlowMapScreen.rows
+
         /// Bilinear sample at fractional grid coordinates, with however
         /// much of the water it could actually see.
         ///
@@ -532,79 +1178,49 @@ final class WindWashModel {
             let row0 = min(Int(gy), rows - 2)
             let tx = gx - Double(column0)
             let ty = gy - Double(row0)
-            let corners = [
-                (speed(atColumn: column0, row: row0), (1 - tx) * (1 - ty)),
-                (speed(atColumn: column0 + 1, row: row0), tx * (1 - ty)),
-                (speed(atColumn: column0, row: row0 + 1), (1 - tx) * ty),
-                (speed(atColumn: column0 + 1, row: row0 + 1), tx * ty),
-            ]
+            // Unrolled onto locals rather than an array of tuples: this runs
+            // seventeen hundred times per hour and the array was a heap
+            // allocation each pass, which is most of what a scrubbed hour
+            // used to cost.
+            let s00 = speeds[row0 * columns + column0]
+            let s10 = speeds[row0 * columns + column0 + 1]
+            let s01 = speeds[(row0 + 1) * columns + column0]
+            let s11 = speeds[(row0 + 1) * columns + column0 + 1]
+            let w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty)
+            let w01 = (1 - tx) * ty, w11 = tx * ty
+
             // The nearest node has a veto. Averaging live corners alone
             // paints straight over a headland: downtown San Francisco sits
             // between nodes that are all in water — the bay one side, the
             // ocean the other — so the wash ran up Market Street. Whichever
             // node the cell sits closest to is the one that decides whether
             // this is water at all; the rest only shade it.
-            guard let nearest = corners.max(by: { $0.1 < $1.1 }), nearest.0 != nil
-            else { return nil }
+            var nearestWeight = w00, nearest = s00
+            if w10 > nearestWeight { nearestWeight = w10; nearest = s10 }
+            if w01 > nearestWeight { nearestWeight = w01; nearest = s01 }
+            if w11 > nearestWeight { nearestWeight = w11; nearest = s11 }
+            guard nearest != nil else { return nil }
+
             var total = 0.0, weight = 0.0
-            for (value, w) in corners {
-                guard let value else { continue }
-                total += value * w
-                weight += w
-            }
+            if let s00 { total += s00 * w00; weight += w00 }
+            if let s10 { total += s10 * w10; weight += w10 }
+            if let s01 { total += s01 * w01; weight += w01 }
+            if let s11 { total += s11 * w11; weight += w11 }
             // Under a quarter of the cell is a cell that is mostly land.
             guard weight > 0.25 else { return nil }
             return (total / weight, weight)
         }
 
-        let south = region.center.latitude - region.span.latitudeDelta / 2
-        let west = region.center.longitude - region.span.longitudeDelta / 2
-        let latStep = region.span.latitudeDelta / Double(cellRows)
-        let lonStep = region.span.longitudeDelta / Double(cellColumns)
-
         var out: [Cell] = []
-        out.reserveCapacity(cellColumns * cellRows)
-        for cellRow in 0..<cellRows {
-            for cellColumn in 0..<cellColumns {
-                let gx = (Double(cellColumn) + 0.5) / Double(upsample)
-                let gy = (Double(cellRow) + 0.5) / Double(upsample)
-                guard let found = sample(gx: gx, gy: gy) else { continue }
-                let knots = found.knots
-
-                // The feather: the outer two rings of cells fade out, so
-                // the field ends the way the raster's does — a soft edge
-                // that says "this window stops", not a painted wall. The
-                // same trick along the coast, where coverage rather than
-                // position decides: a cell the model half-saw is painted
-                // half as strongly.
-                let ring = min(min(cellRow, cellRows - 1 - cellRow),
-                               min(cellColumn, cellColumns - 1 - cellColumn))
-                let alpha = washAlpha * min(1, (Double(ring) + 0.5) / 2.5)
-                    * min(1, (found.coverage - 0.25) / 0.45 + 0.25)
-
-                let latitude = south + Double(cellRow) * latStep
-                let longitude = west + Double(cellColumn) * lonStep
-
-                // A cell the elevation model calls dry is not painted at
-                // all. Unknown — a tile still in flight, or a zoom too wide
-                // to mask — paints as before: the wash arriving a moment
-                // before the coastline is better than a map that blinks.
-                let centre = CLLocationCoordinate2D(latitude: latitude + latStep / 2,
-                                                    longitude: longitude + lonStep / 2)
-                if mask.isWater(centre) == false { continue }
-
-                let band = smoothColour(for: knots, layer: layer)
-                out.append(Cell(
-                    id: cellRow * cellColumns + cellColumn,
-                    coordinates: [
-                        CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-                        CLLocationCoordinate2D(latitude: latitude, longitude: longitude + lonStep),
-                        CLLocationCoordinate2D(latitude: latitude + latStep, longitude: longitude + lonStep),
-                        CLLocationCoordinate2D(latitude: latitude + latStep, longitude: longitude),
-                    ],
-                    color: band.opacity(alpha)
-                ))
-            }
+        out.reserveCapacity(layout.count)
+        for cell in layout {
+            guard let found = sample(gx: cell.gx, gy: cell.gy) else { continue }
+            // The feather again, along the coast this time, where coverage
+            // rather than position decides: a cell the model half-saw is
+            // painted half as strongly.
+            let alpha = cell.ringAlpha * min(1, (found.coverage - 0.25) / 0.45 + 0.25)
+            out.append(Cell(id: cell.id, coordinates: cell.coordinates,
+                            color: smoothColour(for: found.knots, layer: layer).opacity(alpha)))
         }
         return out
     }

@@ -87,13 +87,14 @@ struct CurrentFlowView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .frame(height: 34)
-                        .background(Color.primary.opacity(0.85), in: Capsule())
+                        // Dark in both appearances — see CentrePinReadout.
+                        .background(Color.mapInk.opacity(0.85), in: Capsule())
                         .overlay(Capsule().stroke(.white, lineWidth: 1.5))
                         Rectangle()
-                            .fill(Color.primary.opacity(0.85))
+                            .fill(Color.mapInk.opacity(0.85))
                             .frame(width: 2, height: 12)
                         Circle()
-                            .fill(Color.primary.opacity(0.85))
+                            .fill(Color.mapInk.opacity(0.85))
                             .strokeBorder(.white, lineWidth: 2.5)
                             .frame(width: 12, height: 12)
                     }
@@ -379,6 +380,17 @@ private struct CurrentFieldMapView: UIViewRepresentable {
         ), animated: false)
         map.pointOfInterestFilter = .excludingAll
         map.showsCompass = false
+        // The basemap stays light whatever the app is wearing.
+        //
+        // Everything drawn on this map assumes a pale ground: the wash's own
+        // palette starts at white for calm and `arrowNeutral` is a dark grey.
+        // MapKit's dark basemap answers that with white place names, and they
+        // land on the pale wash rather than under it — measured at 2.0:1
+        // against it, which is not a label, it is a rumour. The map is already
+        // bright wherever the field covers it, so lighting the ground under it
+        // is the coherent half of the choice, not the loud one; the screen
+        // around it stays dark.
+        map.overrideUserInterfaceStyle = .light
         map.isPitchEnabled = false
         map.isRotateEnabled = false
         return map

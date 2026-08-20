@@ -195,12 +195,16 @@ struct NearbyConditionsSheet: View {
     private var conditionsTab: some View {
         modelCard
 
-        // Directly above the radar link on purpose: "is it about to rain on
-        // me" and "show me the rain" are the same thought a second apart, and
-        // the nowcast answers it in words before the map has to be read.
-        MinuteRainCard(rain: minuteRain)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.25), value: minuteRain.isEmpty)
+        // Rain coming sits directly under the readings, above the radar link:
+        // "is it about to rain on me" and "show me the rain" are the same
+        // thought a second apart, and the nowcast answers it in words before
+        // the map has to be read. A dry window says so further down, under
+        // the wind — see `dryRainCard`.
+        if minuteRain.isWorthShowing {
+            MinuteRainCard(rain: minuteRain)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.25), value: minuteRain.isEmpty)
+        }
 
         NavigationLink {
             RadarScreen(centre: coordinate, title: "Radar · \(title)")
@@ -263,6 +267,17 @@ struct NearbyConditionsSheet: View {
         .buttonStyle(.plain)
 
         windAheadCard
+
+        // The dry half of the nowcast, below the wind rather than above it.
+        // "No rain in the next six hours" is worth being able to check and
+        // never worth the seat directly under the readings — a card that
+        // spends the best place on the sheet saying nothing is one a rider
+        // stops reading before the day it matters.
+        if !minuteRain.isWorthShowing {
+            MinuteRainCard(rain: minuteRain)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.25), value: minuteRain.isEmpty)
+        }
 
         // Under the week's forecast, because that is what it is for: the
         // normals are the scale the numbers above are read against, and they

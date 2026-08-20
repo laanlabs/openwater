@@ -3,20 +3,27 @@ import WeatherKit
 
 /// The " Weather" mark with Apple's legal page behind it.
 ///
-/// WeatherKit's terms require both halves wherever its data is shown: the
-/// trademark *and* a working link to the legal attribution page — App Review
-/// rejects for either one missing (Guideline 5.2.5). The live URL comes from
-/// the attribution API, but that is a network call that can fail on exactly
-/// the screens that already managed to show weather; Apple's published
+/// WeatherKit's terms ask for both halves wherever its data is shown: the
+/// trademark *and* a working link to the legal attribution page, and App
+/// Review has rejected for either one missing (Guideline 5.2.5). The live URL
+/// comes from the attribution API, but that is a network call that can fail on
+/// exactly the screens that already managed to show weather; Apple's published
 /// address stands in until it answers, so the link is never absent.
+///
+/// Where it actually appears is Settings and the session rows. The cards on
+/// the conditions sheet carry no attribution at all — a product decision, made
+/// deliberately, on the grounds that Settings states the arrangement in one
+/// place. Worth knowing before the next submission: it is the part of this
+/// that Apple's terms do not obviously allow, and if a build comes back citing
+/// 5.2.5, this is the first thing to put back.
 struct AppleWeatherAttribution: View {
 
     /// Apple's published legal page, shown until the API's answer arrives.
     static let legalPage = URL(string: "https://weatherkit.apple.com/legal-attribution.html")!
 
     /// An explicit "Legal" word beside the mark — the convention Apple's own
-    /// maps use — where the row has room for it. The bare mark stays the
-    /// default for tight corners.
+    /// maps use — where the row has room for it. Both callers that are left
+    /// ask for it; the bare mark stays the default for tight corners.
     var showsLegalLabel = false
 
     /// Plain-language words before the mark ("Weather data provided by"),

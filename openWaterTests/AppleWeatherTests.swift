@@ -309,6 +309,43 @@ final class AppleWeatherTests: XCTestCase {
         XCTAssertEqual(minutes.count, 60)
     }
 
+    /// Six hours is three hundred and sixty minutes, which is more columns
+    /// than a phone has points — so the strip pools them. The pooling is what
+    /// decides whether a short squall survives being drawn.
+    func testPoolingKeepsTheWorstMinuteOfEachGroup() {
+        var rates = [Double?](repeating: nil, count: 12)
+        // One wet minute inside the third group of four.
+        rates[9] = 6.0
+
+        let pooled = MinuteRain.pool(minutes(rates), stride: 4)
+        XCTAssertEqual(pooled.count, 3)
+        XCTAssertEqual(pooled.map(\.intensityMmH), [0, 0, 6])
+        XCTAssertTrue(pooled[2].isWet, "the squall inside the group has to survive the pooling")
+        // Columns keep their group's own place on the axis, not the worst
+        // minute's — a column that jumped forward would draw the shower late.
+        XCTAssertEqual(pooled[2].at, start.addingTimeInterval(8 * 60))
+    }
+
+    /// A window short enough to draw a column a minute is left exactly alone.
+    func testPoolingAtStrideOneChangesNothing() {
+        let run = minutes([1.0, nil, 2.0])
+        XCTAssertEqual(MinuteRain.pool(run, stride: 1), run)
+    }
+
+    /// The six-hour window says its own length in every sentence it writes.
+    func testSixHourWindowSpellsItsLength() {
+        let dry = MinuteRain.summarise(minutes(Array(repeating: nil, count: 360)), now: start)
+        XCTAssertEqual(dry?.headline, "No rain in the next 6 hours")
+
+        var rates = [Double?](repeating: nil, count: 360)
+        for index in 200..<260 { rates[index] = 3.0 }
+        let wet = MinuteRain.summarise(minutes(rates), now: start)
+        XCTAssertEqual(wet?.change, .starting(minutesAway: 200))
+        XCTAssertEqual(wet?.headline, "Rain starting in 3 hr 20 min")
+        // Spelled as a duration rather than counted out in minutes.
+        XCTAssertEqual(wet?.detail?.contains("Wet for 1 hr of the next 6 hours"), true)
+    }
+
     // MARK: - Wind normals, from the reanalysis archive
 
     /// Ten Augusts of daily peak wind at one point, trimmed from a real

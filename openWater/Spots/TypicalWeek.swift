@@ -314,15 +314,6 @@ struct TypicalWeekCard: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                // Apple's mark rides on Apple's data. The wind half is
-                // Open-Meteo's and does not earn the trademark, so a card
-                // showing only wind must not carry it (Guideline 5.2.5 cuts
-                // both ways — the mark has to be there, and only there).
-                if !typical.isEmpty {
-                    AppleWeatherAttribution(showsLegalLabel: true, prefix: "Temperature and rain from")
-                        .font(.caption2)
-                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)

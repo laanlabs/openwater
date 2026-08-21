@@ -82,6 +82,24 @@ struct CurrentsOutlook {
                     directionDeg: fraction < 0.5 ? a.directionDeg : b.directionDeg)
     }
 
+    /// The water at whatever instant a screen is holding: `now` when the
+    /// clock is at now, else the model's own row nearest the scrubbed hour.
+    ///
+    /// Nearest rather than interpolated, for the reason `now` states — the
+    /// set flips across slack, and a scrub landing between two hours would
+    /// average 50° with 230° into a direction the water never ran. The
+    /// tolerance is what keeps a thumb past the end of the series from
+    /// being answered with the last row it happens to have: the axis is
+    /// hourly, so anything genuinely inside it lands within half an hour.
+    func hour(at instant: Date?) -> Hour? {
+        guard let instant else { return now }
+        let nearest = hours.min {
+            abs($0.at.timeIntervalSince(instant)) < abs($1.at.timeIntervalSince(instant))
+        }
+        guard let nearest, abs(nearest.at.timeIntervalSince(instant)) < 5400 else { return nil }
+        return nearest
+    }
+
     var nextEvent: Event? { events.first { $0.at > Date() } }
 
     /// The station's top-of-hour rows laid onto another axis — the flow

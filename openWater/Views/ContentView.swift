@@ -44,7 +44,9 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             ZStack {
                 page(.sessions) { SessionListView(reset: sessionsTabReset) }
-                page(.spots) { SpotsTabView(reset: spotsTabReset) }
+                page(.spots) {
+                    SpotsTabView(isActive: selection == .spots, reset: spotsTabReset)
+                }
                 page(.record) {
                     RecordTabView(isActive: selection == .record, reset: recordTabReset)
                 }

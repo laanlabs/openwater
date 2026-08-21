@@ -24,6 +24,15 @@ struct SpotsTabView: View {
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var path: [SpotsRoute] = []
 
+    /// Whether this is the tab on screen.
+    ///
+    /// Every visited tab stays mounted, so a hidden Spots page is a live map
+    /// with a live wash on it — see `WindWashModel.sleep`, which is what this
+    /// exists to drive. Deliberately not used to tear anything else down: the
+    /// camera, the panel and the pins are cheap and are what makes coming back
+    /// feel like returning rather than reopening.
+    var isActive: Bool = true
+
     /// Bumped every time the Spots tab is tapped, including when it is
     /// already showing. The bar is the way back when the way back is not
     /// obvious — see `returnToTop`.
@@ -277,6 +286,13 @@ struct SpotsTabView: View {
         // over the edge.
         screen
             .onChange(of: reset) { _, _ in returnToTop() }
+            // The field is only worth carrying while somebody is looking at
+            // it. Up here with `reset` rather than down in `screen` for the
+            // reason the comment above gives: that chain is already as long
+            // as the type-checker will sit through.
+            .onChange(of: isActive, initial: true) { _, active in
+                if active { windWash.wake() } else { windWash.sleep() }
+            }
     }
 
     private var screen: some View {
@@ -943,33 +959,11 @@ struct SpotsTabView: View {
         // map is still. That is what leaves the map free to be panned while
         // the rider waits, and this says what the waiting is for rather than
         // letting the water simply go empty.
+        //
+        // A view of its own, and that is the half of "pannable" this file
+        // kept giving back — see `WashProgressHud`.
         .overlay(alignment: .center) {
-            ZStack {
-                if washLayer != .off, windWash.isBusy {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        // Named for what is actually being fetched. The
-                        // current wash asks the ocean model, and a hud that
-                        // said "wind" over it is the label on the wrong tin
-                        // this file argues about everywhere else.
-                        Text(windWash.isLoading ? washLayer.loadingLabel : "Drawing the field")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                }
-            }
-            // Scoped to the hud, not chained onto the map. `isBusy` goes
-            // false in the same update that installs the new quads, so on
-            // the map it opened an animation transaction over a fresh field
-            // of polygons — asking the one frame this all exists to make
-            // cheap to interpolate a full swap.
-            .animation(.snappy, value: windWash.isBusy)
+            WashProgressHud(wash: windWash, layer: washLayer)
         }
         // The centre pin: pinned to the glass, never a map annotation. As an
         // annotation it would join MapKit's diffing — the strobe class of bug
@@ -1397,44 +1391,9 @@ struct SpotsTabView: View {
                     // they are about now — or about a slider's hour, and
                     // then the clock says which — and the model has a name
                     // the rider can change by tapping it.
-                    Button { isPickingModel = true } label: {
-                        HStack(spacing: 4) {
-                            // Two things the caption has to be honest
-                            // about: the field is refetched whenever the map
-                            // wanders far enough, and it is rebuilt a beat
-                            // behind the clock while a thumb is on the time
-                            // slider. In both the wash on screen is older
-                            // than the caption's own hour, and the spinner
-                            // is the smallest way to say "catching up"
-                            // rather than let the map quietly disagree with
-                            // itself.
-                            if windWash.isLoading || windWash.isRebuilding {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                    .transition(.opacity)
-                            }
-                            Text("\(caption) · \(windWash.scrubLabel ?? "now")")
-                                // A model name, a clock and a chevron: at
-                                // large text sizes this wrapped to two lines
-                                // and sat across the map's own labels.
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            if washLayer == .wind {
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 8, weight: .bold))
-                            }
-                        }
-                        .animation(.snappy, value: windWash.isLoading || windWash.isRebuilding)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(.regularMaterial, in: Capsule())
-                        .contentShape(Capsule())
+                    WashCaptionChip(wash: windWash, layer: washLayer, caption: caption) {
+                        isPickingModel = true
                     }
-                    .buttonStyle(.plain)
-                    .disabled(washLayer != .wind)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
         }
@@ -3350,6 +3309,126 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+// MARK: - What the wash is doing
+
+/// "Getting the wind", then "Drawing the field": the wash's progress, said
+/// where the rider is already looking.
+///
+/// Above the centre pin, never across it. Dead centre is where the readout a
+/// rider opened this map for already stands, and the hud was landing over its
+/// number and down the stem — which on a bare, still-loading map is the only
+/// wind reading on screen. The box is bottom-aligned so a capsule grown by
+/// large text sizes rises away from the pin rather than settling back over it.
+///
+/// A view of its own, and that is not tidiness. The map's body re-resolves
+/// every wash quad into a MapKit overlay each time it runs — about 130 ms of
+/// blocked main thread whether or not a single cell changed, which is the
+/// measurement the rest of this file is arranged around. Read inline from the
+/// tab, `isBusy` put that bill on the map, and put it on precisely the passes
+/// where a field is already up: scrubbing an hour, or crossing the draw
+/// window, flips the flag twice with the whole field on screen, so a wash
+/// catching up spent a quarter of a second of frozen map on two booleans that
+/// had drawn nothing. That is what a rider feels as "I can't pan while it's
+/// loading". Read in here, the flags redraw a capsule and the map never hears
+/// about them. (A cold fetch is cheap either way — `reload` drops the quads
+/// before it asks, which is the same bargain from the other end.)
+private struct WashProgressHud: View {
+
+    let wash: WindWashModel
+    let layer: WashLayer
+
+    /// Between the pin's top edge and the hud's bottom.
+    private static let clearance: CGFloat = 10
+    /// The hud's own box. Anything taller overflows upward, which is the
+    /// direction with nothing in it.
+    private static let box: CGFloat = 44
+
+    var body: some View {
+        ZStack {
+            if layer != .off, wash.isBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    // Named for what is actually being fetched. The current
+                    // wash asks the ocean model, and a hud that said "wind"
+                    // over it is the label on the wrong tin this file argues
+                    // about everywhere else.
+                    Text(wash.isLoading ? layer.loadingLabel : "Drawing the field")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
+        }
+        .frame(height: Self.box, alignment: .bottom)
+        .offset(y: -(CentrePinReadout.heightAboveCentre + Self.clearance + Self.box / 2))
+        // Scoped to the hud, not chained onto the map. `isBusy` goes false in
+        // the same update that installs the new quads, so on the map it opened
+        // an animation transaction over a fresh field of polygons — asking the
+        // one frame this all exists to make cheap to interpolate a full swap.
+        .animation(.snappy, value: wash.isBusy)
+        // The water underneath stays the water. Nothing in here ever takes a
+        // touch, so a drag that starts on the hud pans the map through it.
+        .allowsHitTesting(false)
+    }
+}
+
+/// The wash's caption: which model is talking, for which hour, and whether
+/// the field on screen has caught up with either.
+///
+/// Its own view for `WashProgressHud`'s reason and no other — the spinner and
+/// the clock both read the wash, and read from the tab they charged a whole
+/// polygon field for a caption that had changed one word.
+private struct WashCaptionChip: View {
+
+    let wash: WindWashModel
+    let layer: WashLayer
+    let caption: String
+    let onPick: () -> Void
+
+    var body: some View {
+        Button(action: onPick) {
+            HStack(spacing: 4) {
+                // Two things the caption has to be honest about: the field is
+                // refetched whenever the map wanders far enough, and it is
+                // rebuilt a beat behind the clock while a thumb is on the time
+                // slider. In both the wash on screen is older than the
+                // caption's own hour, and the spinner is the smallest way to
+                // say "catching up" rather than let the map quietly disagree
+                // with itself.
+                if wash.isBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .transition(.opacity)
+                }
+                Text("\(caption) · \(wash.scrubLabel ?? "now")")
+                    // A model name, a clock and a chevron: at large text sizes
+                    // this wrapped to two lines and sat across the map's own
+                    // labels.
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if layer == .wind {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+            }
+            .animation(.snappy, value: wash.isBusy)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(.regularMaterial, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(layer != .wind)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 

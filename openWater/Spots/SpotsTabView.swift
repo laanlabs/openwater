@@ -382,10 +382,10 @@ struct SpotsTabView: View {
                 .overlay {
                     if isSearching {
                         SpotSearchOverlay(isPresented: $isSearching, biasRegion: visibleRegion) { route in
-                            isSearching = false
+                            searchAnswered()
                             path.append(route)
                         } onPlace: { place in
-                            isSearching = false
+                            searchAnswered()
                             // A place is a camera move: the map goes there and
                             // the centre pin samples it — the same pipeline as
                             // a drag, with no new fetch code at all.
@@ -1105,15 +1105,10 @@ struct SpotsTabView: View {
     }
 
     private func detail(for station: FreeStation) -> StationDetail {
-        let network = switch station.source {
-        case .weatherService: "National Weather Service · \(station.id)"
-        case .dataBuoyCenter: "NOAA Data Buoy Center · \(station.id.uppercased())"
-        case .tidesAndCurrents: "NOAA Tides and Currents · \(station.id)"
-        }
         return StationDetail(
             id: station.id,
             name: station.name,
-            source: network,
+            source: station.source.label(for: station.id),
             access: .government,
             metres: station.metres,
             coordinate: station.coordinate,
@@ -1565,6 +1560,25 @@ struct SpotsTabView: View {
 
     private var scrubbedSpotsKey: String {
         "\(mapScrub != nil)|\(forecastModelRaw)|\(pins.map(\.spotId).joined(separator: ","))"
+    }
+
+    /// A search that found what it was asked for: the overlay goes, and so
+    /// does the bar it was opened from.
+    ///
+    /// Two pieces of state, one gesture. The magnifier expands `floatingControls`
+    /// into a search bar and the filter chips; tapping that bar raises the
+    /// overlay. Clearing only the overlay dropped a rider back onto an empty
+    /// "Search spots, cams, places" lying across the top of the map they had
+    /// just moved — which reads as a search that did not take, and cost a
+    /// second tap on the ✕ to clear. Answered is answered: the map is the
+    /// point, and it should be the whole screen again.
+    ///
+    /// Cancel is deliberately not routed through here. That is a rider saying
+    /// "not this one", and leaving the bar up is what lets them try again
+    /// without reopening it.
+    private func searchAnswered() {
+        isSearching = false
+        withAnimation(.snappy) { controlsExpanded = false }
     }
 
     private func setScrub(hoursFromNow hours: Int) {
@@ -2357,24 +2371,34 @@ struct StationPin: View {
 
     /// What the instrument sent, if it sent anything about the wind.
     ///
-    /// A gust counts. A station reading zero mean and gusting four is
-    /// reporting — the weather service's own page writes that "0G4" — and
-    /// treating it as silence threw away the only number on it that was
-    /// telling a rider anything. Zero counts too: nothing is a reading.
-    private var reading: (speed: Double, gust: Double?, direction: Double?)? {
+    /// A gust counts. A station reading no mean and gusting four is
+    /// reporting, and treating it as silence threw away the only number on it
+    /// that was telling a rider anything. Zero counts too: nothing is a
+    /// reading, so the mean stays optional rather than collapsing to nought —
+    /// "no mean" and "calm" are answers a pin must not confuse.
+    private var reading: (mean: Double?, gust: Double?, direction: Double?)? {
         guard let observation, !observation.isStale else { return nil }
-        guard observation.windKn != nil || observation.gustKn != nil else { return nil }
-        return (observation.windKn ?? 0, observation.gustKn, observation.directionDeg)
+        guard observation.reports else { return nil }
+        return (observation.windKn, observation.gustKn, observation.directionDeg)
     }
 
-    /// "5" on its own, "0G4" when the gust is the part worth knowing.
+    /// The mean, and only the mean: "17".
+    ///
+    /// The gust used to ride along as "17G23", and at a glance that reads as
+    /// one strange number rather than two — a pin is the one place on this map
+    /// with no room to explain itself. The tap-through card says "17 kn
+    /// gusting 23" in words, which is where the second number belongs.
+    ///
+    /// One exception, and it is not a compromise: a mast reporting a gust and
+    /// no mean is telling a rider the only thing it knows, and the old
+    /// `windKn ?? 0` fallback would print "0" on a pin over water that is
+    /// gusting twenty. It goes up as "g20" — visibly not a mean.
     private var label: String {
         guard let reading else { return "" }
-        let mean = Int(reading.speed.rounded())
-        guard let gust = reading.gust.map({ Int($0.rounded()) }), gust >= mean + 3 else {
-            return "\(mean)"
+        guard let mean = reading.mean else {
+            return reading.gust.map { "g\(Int($0.rounded()))" } ?? ""
         }
-        return "\(mean)G\(gust)"
+        return "\(Int(mean.rounded()))"
     }
 
     var body: some View {
@@ -2392,7 +2416,10 @@ struct StationPin: View {
                 }
                 Text(label)
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(max(reading.speed, reading.gust ?? 0) >= 15
+                    // The gust still decides the tint even though it no
+                    // longer shows: fifteen mean and twenty-five in the puffs
+                    // is a firing pin whichever number is printed on it.
+                    .foregroundStyle(max(reading.mean ?? 0, reading.gust ?? 0) >= 15
                                      ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                 + Text("kn")
                     .font(.system(size: 8, weight: .semibold))
@@ -2504,7 +2531,7 @@ struct StationDetailSheet: View {
 
     private var measured: StationObservation? {
         guard let observation = fetched ?? station.observation, !observation.isStale,
-              observation.windKn != nil || observation.gustKn != nil else { return nil }
+              observation.reports else { return nil }
         return observation
     }
 
@@ -2517,6 +2544,19 @@ struct StationDetailSheet: View {
         default:
             return what + " Open \(source) below to read this station's own numbers — free, no account needed."
         }
+    }
+
+    /// Who actually answered.
+    ///
+    /// The pin is filed under one network's id, but three of them can carry
+    /// the same mast and the reading comes from whichever spoke most recently
+    /// — see `FreeStations.latest(for:)`. Naming the filing rather than the
+    /// speaker is the label on the wrong tin this app argues about elsewhere,
+    /// and here it was pointing a rider at an agency page that did not have
+    /// the number on the card.
+    private var sourceLine: String {
+        guard let address = measured?.reportedBy else { return station.source }
+        return address.source.label(for: address.id)
     }
 
     /// The provider's name on its own, for sentences that mention it.
@@ -2601,7 +2641,7 @@ struct StationDetailSheet: View {
             // cache" is not the same claim as "not reporting".
             if let free = station.free {
                 fetched = await FreeStations.latest(for: free)
-                if let fetched, fetched.windKn != nil || fetched.gustKn != nil {
+                if let fetched, fetched.reports {
                     onReading(free.id, fetched)
                 }
                 if measured != nil { return }
@@ -2624,7 +2664,7 @@ struct StationDetailSheet: View {
                 Text(station.name)
                     .font(.title3.weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(station.source)
+                Text(sourceLine)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -1364,6 +1364,18 @@ struct FreeStation: Identifiable, Hashable {
         /// riders actually launch from. Montauk stands in this one and in
         /// neither of the others.
         case tidesAndCurrents
+
+        /// Who is talking, for a caption: the network's name and the id it
+        /// files this mast under. Both, because a rider checking the number
+        /// against the agency's own page needs the id to find it — and the
+        /// three networks name the same instrument three different ways.
+        func label(for id: String) -> String {
+            switch self {
+            case .weatherService: "National Weather Service · \(id)"
+            case .dataBuoyCenter: "NOAA Data Buoy Center · \(id.uppercased())"
+            case .tidesAndCurrents: "NOAA Tides and Currents · \(id)"
+            }
+        }
     }
 
     let id: String
@@ -1386,7 +1398,12 @@ struct FreeStation: Identifiable, Hashable {
         let id: String
     }
 
-    var alternate: Alternate?
+    /// *Every* other network carrying this mast, not just the first one to
+    /// turn up. Montauk stands in all three, and a single slot dropped
+    /// whichever was absorbed last — which is CO-OPS, the one publishing
+    /// every six minutes and, via the buoy centre's naming, the one the
+    /// surviving pin ends up named after.
+    var alternates: [Alternate] = []
 
     /// Filled in lazily — the list arrives first, readings trickle in after.
     var observation: StationObservation?
@@ -1423,6 +1440,22 @@ struct StationObservation: Hashable {
         guard let at else { return true }
         return Date().timeIntervalSince(at) > 3 * 3600
     }
+
+    /// Whether the instrument said anything about the wind at all.
+    ///
+    /// A gust on its own counts, which is `StationPin`'s rule and now this
+    /// file's too: a mast reading zero mean and gusting four is reporting —
+    /// the weather service writes that "0G4" — and the fetch used to reject
+    /// exactly the reading the pin would have drawn.
+    var reports: Bool { windKn != nil || gustKn != nil }
+
+    /// Which network's copy of the mast actually produced these numbers.
+    ///
+    /// Stamped by `FreeStations.latest(for:)`, which asks every network
+    /// carrying one instrument and keeps the newest answer — so the pin's own
+    /// filing is no longer a safe caption for the reading under it. Nil from
+    /// anything that read a single address, where the asker already knows.
+    var reportedBy: FreeStation.Alternate?
 }
 
 /// Every free anemometer near a point, from both of the networks that have
@@ -1471,8 +1504,12 @@ enum FreeStations {
                 $0.id.caseInsensitiveCompare(candidate.id) == .orderedSame
                     || Geo.distance($0.coordinate, candidate.coordinate) < 150
             }) {
-                if merged[twin].alternate == nil {
-                    merged[twin].alternate = .init(source: candidate.source, id: candidate.id)
+                let address = FreeStation.Alternate(source: candidate.source,
+                                                    id: candidate.id)
+                let isItself = merged[twin].source == candidate.source
+                    && merged[twin].id.caseInsensitiveCompare(candidate.id) == .orderedSame
+                if !isItself, !merged[twin].alternates.contains(address) {
+                    merged[twin].alternates.append(address)
                 }
                 return
             }
@@ -1503,18 +1540,46 @@ enum FreeStations {
             }
     }
 
-    /// The station's own network answers for it.
+    /// Every network carrying this mast answers for it, and the *newest*
+    /// answer wins.
+    ///
+    /// Not the first one holding a number, which is what this used to take.
+    /// The three networks do not report on the same clock: CO-OPS publishes
+    /// every six minutes, while the forecast office's record of the same mast
+    /// can sit ninety minutes old — with a null mean speed and a lone gust
+    /// beside it. Asking in a fixed order and keeping the first number found
+    /// put a ninety-minute-old 13G21 on the Montauk pin while the mast it is
+    /// named after was reading 17G23, which is exactly what "the station is
+    /// not reading the wind correctly" looks like from the beach.
+    ///
+    /// The mast is not silent until every network carrying it has been asked,
+    /// and they are asked at once rather than in turn — most stations stand in
+    /// one network and have no alternates at all, so this is a second or third
+    /// request only for the handful that are genuinely duplicated.
     static func latest(for station: FreeStation) async -> StationObservation? {
-        let primary = await read(station.source, station.id)
-        if primary?.windKn != nil { return primary }
-        // The mast is not silent until every network carrying it has been
-        // asked. A record that survived deduplication is not automatically
-        // the one reporting this hour.
-        guard let alternate = station.alternate,
-              let second = await read(alternate.source, alternate.id),
-              second.windKn != nil
-        else { return primary }
-        return second
+        let addresses = [FreeStation.Alternate(source: station.source, id: station.id)]
+            + station.alternates
+        let readings = await withTaskGroup(of: StationObservation?.self) { group in
+            for address in addresses {
+                group.addTask {
+                    guard var reading = await read(address.source, address.id) else { return nil }
+                    // Stamped here, where which address answered is still
+                    // known: the caption downstream names the network that
+                    // produced the number rather than the one the pin
+                    // happens to be filed under.
+                    reading.reportedBy = address
+                    return reading
+                }
+            }
+            var reporting: [StationObservation] = []
+            for await reading in group where reading?.reports == true {
+                if let reading { reporting.append(reading) }
+            }
+            return reporting
+        }
+        // A reading with no timestamp cannot claim to be the fresh one, so it
+        // only wins when nothing else answered at all.
+        return readings.max { ($0.at ?? .distantPast) < ($1.at ?? .distantPast) }
     }
 
     private static func read(_ source: FreeStation.Source,

@@ -20,6 +20,9 @@ struct SpotsTabView: View {
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
     @Environment(\.openURL) private var openURL
 
+    /// Where the map is looking. It opens on the rider and then *stops*
+    /// following them — see the settle handler, which converts a following
+    /// camera into the region it settled on.
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var path: [SpotsRoute] = []
@@ -921,6 +924,27 @@ struct SpotsTabView: View {
         }
         .onMapCameraChange(frequency: .onEnd) { context in
             visibleRegion = context.region
+            // Leave follow mode the moment the map has settled once.
+            //
+            // A `.userLocation` camera does not resolve to a region and stay
+            // there: it re-resolves against every fix the receiver delivers,
+            // and each one re-lays out the map. Inside this screen — a map in
+            // a `GeometryReader` at the root of a `NavigationStack` — that
+            // never reaches a fixed point, and UIKit says so: "Observation
+            // tracking feedback loop detected … repeated [layout]
+            // invalidations", thousands of them a minute, with the receiver
+            // warning separately that a CoreLocation call rate had been
+            // exceeded. Measured on a phone: about five thousand of those
+            // messages in a twenty-eight second window with the camera
+            // following, and none at all with it pinned.
+            //
+            // Nothing about the behaviour goes: the map still opens on the
+            // rider, because the first settle is the one that lands there,
+            // and the locate button re-enters follow mode whenever it is
+            // asked to — it just leaves again a frame later, having arrived.
+            if camera.followsUserLocation {
+                camera = .region(context.region)
+            }
             // `viewSettled` gives the camera's hold back itself, after it has
             // worked out whether the window moved — releasing it here would
             // drain the queue against the slice the rider has just left.

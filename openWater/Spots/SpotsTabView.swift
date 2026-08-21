@@ -62,6 +62,13 @@ struct SpotsTabView: View {
     /// Drives the chip's fade while the weather is in flight.
     @State private var isBreathing = false
     @State private var localWind: WindReading?
+    /// The ocean model's day of current for wherever the pin stands —
+    /// fetched only while the readout is asking for it, and whole, because
+    /// the map's clock scrubs through these rows without touching the
+    /// network. Nil means "on its way"; a fetched-but-empty outlook is the
+    /// model saying there is no marine cell here, which is a different
+    /// answer and the pill draws it differently.
+    @State private var localCurrent: CurrentsOutlook?
 
     /// The two spot lists, worked out when something they depend on moves
     /// rather than every time the body runs.
@@ -102,6 +109,17 @@ struct SpotsTabView: View {
     /// in `WindWashModel.masksLand`, which is read from a model with no view
     /// around it; the two have to agree.
     @AppStorage("spots.maskLand") private var masksLand = true
+    /// The water's own reading on the centre pin, under the wind's. Off by
+    /// default and remembered, like everything else in the layers menu: the
+    /// wind is what this map opens for, and a rider who never rides a tide
+    /// should not have to read past a second number to find it.
+    ///
+    /// Deliberately independent of the current *wash*. The wash is a field
+    /// over the whole view and costs a fetch per pan; this is one point, and
+    /// a rider watching a channel wants the number without repainting the
+    /// bay — while one reading the wash still wants the pin to say what it
+    /// is standing on.
+    @AppStorage("spots.centreCurrent") private var showsCentreCurrent = false
     @State private var windWash = WindWashModel()
     /// How wide the map is drawn. The wash needs it to turn "one device
     /// pixel" into degrees — see `WindWashModel.buildLayout`.
@@ -495,6 +513,16 @@ struct SpotsTabView: View {
             async let air = guide.weather(at: here)
             async let blowing = guide.currentWind(at: here)
             (localWeather, localWind) = await (air, blowing)
+        }
+        // The water under the pin, on the same "moved about a kilometre"
+        // rule as the weather — and only while the readout is showing it,
+        // so a rider with the pill off never asks the marine API at all.
+        .task(id: centreCurrentKey) {
+            localCurrent = nil
+            guard showsCentreCurrent, let here = localCoordinate else { return }
+            let outlook = await OpenMeteo.currents(at: here)
+            guard !Task.isCancelled else { return }
+            localCurrent = outlook
         }
         .task { await guide.load() }
         .onChange(of: forecastModelRaw) { _, _ in
@@ -987,7 +1015,8 @@ struct SpotsTabView: View {
         // A view of its own, and that is the half of "pannable" this file
         // kept giving back — see `WashProgressHud`.
         .overlay(alignment: .center) {
-            WashProgressHud(wash: windWash, layer: washLayer)
+            WashProgressHud(wash: windWash, layer: washLayer,
+                            showsCurrentPill: showsCentreCurrent)
         }
         // The centre pin: pinned to the glass, never a map annotation. As an
         // annotation it would join MapKit's diffing — the strobe class of bug
@@ -999,7 +1028,8 @@ struct SpotsTabView: View {
             // points is how a map lies.
             if !isSearching, routeMode == nil {
                 CentrePinReadout(reading: scrubbedLocalWind,
-                                 isUnavailable: mapScrub != nil && centreHourMissing) {
+                                 isUnavailable: mapScrub != nil && centreHourMissing,
+                                 current: centreCurrent) {
                     isShowingConditions = true
                 }
             }
@@ -1504,6 +1534,25 @@ struct SpotsTabView: View {
         return guide.reading(for: SpotGuideStore.windKey(for: here), at: mapScrub)
     }
 
+    /// What the pin's second pill is saying. The three not-a-number states
+    /// are kept apart on purpose: off is no pill, waiting is a pulse, and a
+    /// model with no cell here is a dash — a shimmer that never ends is
+    /// indistinguishable from a broken app.
+    private var centreCurrent: CentrePinReadout.CurrentState {
+        guard showsCentreCurrent else { return .hidden }
+        guard let localCurrent else { return .loading }
+        guard let hour = localCurrent.hour(at: mapScrub),
+              let speedKn = hour.speedKn, let setDeg = hour.directionDeg
+        else { return .unavailable }
+        return .running(speedKn: speedKn, setDeg: setDeg)
+    }
+
+    /// One fetch per point, and none at all while the pill is off — the
+    /// day's rows cover the whole scrub window, so the clock never asks.
+    private var centreCurrentKey: String {
+        showsCentreCurrent ? localWeatherKey : ""
+    }
+
     /// Refetch the hourly series when the pinned set changes — never when
     /// the thumb moves, since one fetch already covers the whole window.
     /// The model belongs in here beside the coordinate: picking a new one
@@ -1566,6 +1615,21 @@ struct SpotsTabView: View {
                     }
                 }
             }
+            // The pin already says the wind; this is the other half of what
+            // the water under it is doing. Its own section because it dresses
+            // the readout, not the map — the wash above paints the whole
+            // view, these switches hang pins on it, and this changes one
+            // capsule at the centre.
+            Section("On the center pin") {
+                Toggle(isOn: $showsCentreCurrent) {
+                    // Short, because anything longer wraps onto a second
+                    // line in the menu — and "the", because the wash picker
+                    // a few rows up already has a "Current" and these two do
+                    // different things: that one paints the whole view, this
+                    // one adds a number to the pin.
+                    Label("The current", systemImage: "water.waves")
+                }
+            }
             Section("On the map") {
                 Toggle(isOn: $showSpots) {
                     Label("Spots", systemImage: "mappin.and.ellipse")
@@ -1584,7 +1648,7 @@ struct SpotsTabView: View {
             // Hidden spots are as much a dressed map as a wash — the lit
             // button is the reminder that the map is not in its default suit.
             let isDressed = washLayer != .off || showWindStations || showCameras || showBuoys
-                || !showSpots
+                || showsCentreCurrent || !showSpots
             Image(systemName: "square.3.layers.3d")
                 .font(.body.weight(.semibold))
                 // Capped for the reason in `squareLabel`: a fixed 44pt frame
@@ -3363,6 +3427,8 @@ private struct WashProgressHud: View {
 
     let wash: WindWashModel
     let layer: WashLayer
+    /// Whether the pin is wearing its current pill, which makes it taller.
+    let showsCurrentPill: Bool
 
     /// Between the pin's top edge and the hud's bottom.
     private static let clearance: CGFloat = 10
@@ -3391,7 +3457,8 @@ private struct WashProgressHud: View {
             }
         }
         .frame(height: Self.box, alignment: .bottom)
-        .offset(y: -(CentrePinReadout.heightAboveCentre + Self.clearance + Self.box / 2))
+        .offset(y: -(CentrePinReadout.heightAboveCentre(showingCurrent: showsCurrentPill)
+                     + Self.clearance + Self.box / 2))
         // Scoped to the hud, not chained onto the map. `isBusy` goes false in
         // the same update that installs the new quads, so on the map it opened
         // an animation transaction over a fresh field of polygons — asking the

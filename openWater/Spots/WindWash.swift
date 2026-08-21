@@ -303,6 +303,10 @@ final class WindWashModel {
         static let thumb = Holds(rawValue: 1 << 0)
         /// The camera is between its first move and settling.
         static let camera = Holds(rawValue: 1 << 1)
+        /// The Spots tab is behind another one. Unlike its neighbours this
+        /// is not a gesture and cannot go stale, so the watchdog leaves it
+        /// alone — see `releaseAllHolds`.
+        static let asleep = Holds(rawValue: 1 << 2)
     }
 
     @ObservationIgnored private var holds: Holds = []
@@ -441,8 +445,51 @@ final class WindWashModel {
     }
 
     private func releaseAllHolds() {
-        holds = []
+        // Everything except sleep. The watchdog's whole job is handing back a
+        // hold whose owner never came to release it — a dropped lift, a pan
+        // with no end — and sleep has an owner: the tab, which releases it by
+        // coming back. Dropped here it would repaint the field behind whatever
+        // the rider is actually looking at, which is the thing `sleep` exists
+        // to stop.
+        holds.formIntersection(.asleep)
         stopHoldWatchdog()
+    }
+
+    /// The tab went behind another one.
+    ///
+    /// Every visited tab stays mounted — see `ContentView` — so with nothing
+    /// said, this map keeps its whole field of overlays on the GPU and its
+    /// comets running at display rate behind an opaque list. Measured on a
+    /// simulator: about a twentieth of a core, and a MapKit overlay set, spent
+    /// on a screen nobody can see.
+    ///
+    /// The quads and the comets go; the *data* stays. The day, the rectangle
+    /// and the cell geometry are what the round trip bought, and they are
+    /// still true when the rider comes back — so waking is a colour pass off
+    /// the main actor rather than another fetch.
+    func sleep() {
+        guard !holds.contains(.asleep) else { return }
+        // Inserted directly rather than through `hold`: that arms the watchdog,
+        // and this is the one reason that must not be watched.
+        holds.insert(.asleep)
+        cancelRebuild()
+        cells = []
+        field = nil
+    }
+
+    /// The tab came back.
+    func wake() {
+        guard holds.contains(.asleep) else { return }
+        holds.remove(.asleep)
+        guard loadedLayer != .off else { return }
+        // The map is bare whatever the books say. Anything that asked for an
+        // hour while the tab was away booked it and then found the drain shut,
+        // so the no-op guard in `apply` would answer "you already have that
+        // one" about a field that is no longer on the map. Un-book first, and
+        // the hour is asked for again — off the main actor, over geometry that
+        // survived the sleep.
+        bookedIndex = nil
+        apply()
     }
 
     /// Catch the field up when whatever was moving goes quiet.

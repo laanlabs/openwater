@@ -25,22 +25,33 @@ struct CentrePinReadout: View {
     /// centre: the dot's middle must sit on the camera's centre coordinate,
     /// so the whole stack rises by half its own height less half the dot —
     /// the same trick as the location picker's `-17`, with a taller pin.
-    private var lift: CGFloat { (pillHeight + stemHeight + dotSize) / 2 - dotSize / 2 }
-    private let pillHeight: CGFloat = 34
-    private let stemHeight: CGFloat = 12
-    private let dotSize: CGFloat = 12
+    private var lift: CGFloat {
+        (Self.pillHeight + Self.stemHeight + Self.dotSize) / 2 - Self.dotSize / 2
+    }
+    private static let pillHeight: CGFloat = 34
+    private static let stemHeight: CGFloat = 12
+    private static let dotSize: CGFloat = 12
+
+    /// How far the readout reaches above the map's centre point: the pill,
+    /// its stem, and the half of the dot that sits above the coordinate.
+    ///
+    /// Published because it is the one number anything else parked in the
+    /// middle of the glass needs — the wash's progress hud sat dead centre
+    /// and landed across the pill's own number, which is the reading a
+    /// rider opened this map for.
+    static var heightAboveCentre: CGFloat { pillHeight + stemHeight + dotSize / 2 }
 
     var body: some View {
         VStack(spacing: 0) {
             pill
             Rectangle()
                 .fill(Color.mapInk.opacity(0.85))
-                .frame(width: 2, height: stemHeight)
+                .frame(width: 2, height: Self.stemHeight)
                 .allowsHitTesting(false)
             Circle()
                 .fill(Color.mapInk.opacity(0.85))
                 .strokeBorder(.white, lineWidth: 2.5)
-                .frame(width: dotSize, height: dotSize)
+                .frame(width: Self.dotSize, height: Self.dotSize)
                 .allowsHitTesting(false)
         }
         .offset(y: -lift)
@@ -98,7 +109,7 @@ struct CentrePinReadout: View {
             .padding(.vertical, 5)
             .padding(.leading, 6)
             .padding(.trailing, 12)
-            .frame(height: pillHeight)
+            .frame(height: Self.pillHeight)
             .foregroundStyle(.white)
             // `mapInk`, not `.primary`: everything on this pill is white,
             // and `.primary` inverts — in dark mode the pill came out white

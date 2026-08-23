@@ -109,6 +109,18 @@ final class AppSettings {
     /// Everything the rider owns, offered when tagging a session.
     var quiver: [GearItem] = [] { didSet { persist() } }
 
+    /// Show every live page on the watch, rather than the two that are usable
+    /// with wet hands. Mirrors the same preference on the watch; whichever was
+    /// changed more recently wins, so this is stamped when it is set here.
+    var watchExtendedDisplay: Bool {
+        didSet {
+            watchExtendedDisplayChangedAt = Date()
+            persist()
+        }
+    }
+
+    private(set) var watchExtendedDisplayChangedAt: Date
+
     /// Per-sport adjustments to the detection defaults.
     ///
     /// Keyed by sport, and only sports the rider has actually changed appear —
@@ -142,6 +154,9 @@ final class AppSettings {
         mapStyle = defaults.string(forKey: "mapStyle").flatMap(MapStyleOption.init(rawValue:)) ?? .standard
         lastSport = defaults.string(forKey: "lastSport").flatMap(Sport.init(rawValue:)) ?? .wingfoil
         autoPauseWhileRecording = defaults.bool(forKey: "autoPauseWhileRecording")
+        watchExtendedDisplay = defaults.bool(forKey: "watchExtendedDisplay")
+        watchExtendedDisplayChangedAt =
+            defaults.object(forKey: "watchExtendedDisplayChangedAt") as? Date ?? .distantPast
         sportOverrides = defaults.data(forKey: "sportOverrides")
             .flatMap { try? JSONDecoder().decode([Sport: SportThresholds.Overrides].self, from: $0) }
             ?? [:]
@@ -174,6 +189,8 @@ final class AppSettings {
         defaults.set(mapStyle.rawValue, forKey: "mapStyle")
         defaults.set(lastSport.rawValue, forKey: "lastSport")
         defaults.set(autoPauseWhileRecording, forKey: "autoPauseWhileRecording")
+        defaults.set(watchExtendedDisplay, forKey: "watchExtendedDisplay")
+        defaults.set(watchExtendedDisplayChangedAt, forKey: "watchExtendedDisplayChangedAt")
         if let data = try? JSONEncoder().encode(sharingPrivacy) {
             defaults.set(data, forKey: "sharingPrivacy")
         }

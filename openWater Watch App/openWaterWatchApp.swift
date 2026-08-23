@@ -30,6 +30,13 @@ struct openWaterWatchApp: App {
                     sync.requestBests { bests in
                         recorder.allTimeBests = bests
                     }
+                    // The phone can carry this preference too. It only lands
+                    // if the phone's change is newer than the one made here,
+                    // so a switch flipped on the wrist is not undone by a
+                    // context the phone queued before it.
+                    sync.onExtendedDisplay = { value, changedAt in
+                        settings.applyPushedExtendedDisplay(value, changedAt: changedAt)
+                    }
                 }
         }
     }
@@ -67,6 +74,31 @@ final class WatchSettings {
         didSet { persist() }
     }
 
+    /// Show every live page rather than the two that matter with wet hands.
+    ///
+    /// Off by default. Seven pages is a lot to swipe past on a wrist that is
+    /// cold, wet and moving, and the two a rider actually needs mid-session are
+    /// the controls and the big number — the rest are for reading afterwards,
+    /// or for people who genuinely want them.
+    ///
+    /// Set on the wrist, this also stamps `extendedDisplayChangedAt`, which is
+    /// what lets a change made here survive a later push from the phone.
+    var extendedDisplay: Bool {
+        didSet {
+            extendedDisplayChangedAt = Date()
+            persist()
+        }
+    }
+
+    /// When this watch last set `extendedDisplay` itself.
+    ///
+    /// The phone can push the same preference, and the two can disagree — a
+    /// rider who flips it on the wrist mid-session must not have it flipped
+    /// back by an application context the phone queued an hour ago. Both sides
+    /// carry a stamp and the newer one wins, so "wins" is about which change is
+    /// more recent rather than which device it came from.
+    private(set) var extendedDisplayChangedAt: Date
+
     private let defaults = UserDefaults.standard
 
     init() {
@@ -77,6 +109,27 @@ final class WatchSettings {
         keepScreenBright = defaults.bool(forKey: "keepScreenBright")
         autoPause = defaults.bool(forKey: "autoPause")
         recordHaptics = defaults.object(forKey: "recordHaptics") as? Bool ?? true
+        extendedDisplay = defaults.bool(forKey: "extendedDisplay")
+        extendedDisplayChangedAt =
+            defaults.object(forKey: "extendedDisplayChangedAt") as? Date ?? .distantPast
+    }
+
+    /// Take the phone's value, if its change is newer than this watch's own.
+    ///
+    /// Returns whether it was applied, so the caller can tell "ignored because
+    /// stale" from "nothing to do".
+    @discardableResult
+    func applyPushedExtendedDisplay(_ value: Bool, changedAt: Date) -> Bool {
+        guard SyncedPreference.accepts(incoming: changedAt,
+                                       over: extendedDisplayChangedAt) else { return false }
+        extendedDisplay = value
+        // `extendedDisplay` stamped *now* on the way through its setter, which
+        // would make this watch look like the most recent author of a change it
+        // merely accepted. Carry the phone's stamp instead, so a third device —
+        // or the phone again — still compares against the real edit time.
+        extendedDisplayChangedAt = changedAt
+        persist()
+        return true
     }
 
     private func persist() {
@@ -86,5 +139,7 @@ final class WatchSettings {
         defaults.set(keepScreenBright, forKey: "keepScreenBright")
         defaults.set(autoPause, forKey: "autoPause")
         defaults.set(recordHaptics, forKey: "recordHaptics")
+        defaults.set(extendedDisplay, forKey: "extendedDisplay")
+        defaults.set(extendedDisplayChangedAt, forKey: "extendedDisplayChangedAt")
     }
 }

@@ -214,6 +214,14 @@ struct WatchSettingsView: View {
                     Text("mi").tag(DistanceUnit.imperial)
                 }
             }
+            Section("Display") {
+                Toggle("Extended display", isOn: $settings.extendedDisplay)
+            }
+            Section {
+                Text("Extended display adds splits, totals, angles and the countdown to the live screens. Off, you get the controls and your speed — which is all most people want with wet hands.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Section("Recording") {
                 Toggle("Auto-pause", isOn: $settings.autoPause)
                 Toggle("Record haptics", isOn: $settings.recordHaptics)

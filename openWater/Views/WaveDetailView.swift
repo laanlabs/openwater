@@ -21,6 +21,14 @@ struct WaveDetailView: View {
     @State private var waves: WaveRideSummary?
     @State private var selectedRide: Int?
 
+    /// The replay. `elapsed` is on whichever clock `ridesOnly` selects — the
+    /// riding time with the paddling cut out, or the session's own.
+    @State private var elapsed: TimeInterval = 0
+    @State private var isPlaying = false
+    @State private var ridesOnly = true
+    @State private var speedMultiplier: Double = 4
+    @State private var timeline = RideTimeline(rides: [])
+
     /// How the rows are stacked. Time order is the default because the list
     /// reads like the session; the other two answer "which was my best wave"
     /// without scanning seventy-eight rows. A ride keeps its number whatever
@@ -80,13 +88,19 @@ struct WaveDetailView: View {
         .navigationTitle("Wave Rides")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Session · Waves")
+        .task(id: isPlaying) { await runPlayback() }
         .task(id: session.swellDirection) {
+            isPlaying = false
+            elapsed = 0
             guard let swellFrom = session.swellDirection else {
                 waves = nil
+                timeline = RideTimeline(rides: [])
                 return
             }
-            waves = WaveRideFinder(thresholds: thresholds)
+            let found = WaveRideFinder(thresholds: thresholds)
                 .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
+            waves = found
+            timeline = RideTimeline(rides: found.rides)
         }
     }
 
@@ -204,28 +218,48 @@ struct WaveDetailView: View {
     // MARK: - Map
 
     private func mapCard(_ waves: WaveRideSummary) -> some View {
+        VStack(spacing: 0) {
+            map(waves)
+                .frame(height: 260)
+            replayBar
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func map(_ waves: WaveRideSummary) -> some View {
         Map {
             MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
                 .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
             // The others first, the chosen one last — same as every map that
             // draws runs, and for the same reason.
-            ForEach(waves.rides.filter { $0.id != selectedRide }) { ride in
+            ForEach(waves.rides.filter { $0.id != focusedRide }) { ride in
                 MapPolyline(coordinates: coordinates(of: ride))
-                    .stroke(selectedRide == nil ? Self.waveColour
+                    .stroke(focusedRide == nil ? Self.waveColour
                             : Color.secondary.opacity(0.22),
                             style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
             }
-            ForEach(waves.rides.filter { $0.id == selectedRide }) { ride in
+            ForEach(waves.rides.filter { $0.id == focusedRide }) { ride in
                 MapPolyline(coordinates: coordinates(of: ride))
                     .stroke(Self.waveColour,
                             style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
             }
 
-            // The chosen ride wears an arrow at its kick-out, pointed the way
-            // the ride made ground — so "which way was I going" is answered
-            // by looking, not by trusting.
-            ForEach(waves.rides.filter { $0.id == selectedRide }) { ride in
+            // Once one is chosen — by tap, or by the replay reaching it —
+            // only its own badge stays.
+            ForEach(waves.rides.filter { focusedRide == nil || $0.id == focusedRide }) { ride in
+                Annotation("", coordinate: midpoint(of: ride), anchor: .center) {
+                    Button { select(ride) } label: {
+                        rideBadge(ride)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .annotationTitles(.hidden)
+            }
+
+            // The chosen ride also wears an arrow at its kick-out, so the end
+            // it finished on is visible and not just inferred from the badge.
+            ForEach(waves.rides.filter { $0.id == focusedRide }) { ride in
                 Annotation("", coordinate: endpoint(of: ride), anchor: .center) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 11, weight: .black))
@@ -239,36 +273,24 @@ struct WaveDetailView: View {
                 .annotationTitles(.hidden)
             }
 
-            // Once one is chosen, only its own badge stays.
-            ForEach(waves.rides.filter { selectedRide == nil || $0.id == selectedRide }) { ride in
-                Annotation("", coordinate: midpoint(of: ride), anchor: .center) {
-                    Button {
-                        withAnimation(.snappy) {
-                            selectedRide = selectedRide == ride.id ? nil : ride.id
-                        }
-                    } label: {
-                        Text("\(ride.id + 1)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .frame(width: selectedRide == ride.id ? 24 : 18,
-                                   height: selectedRide == ride.id ? 24 : 18)
-                            .background(Self.waveColour, in: Circle())
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-                    }
-                    .buttonStyle(.plain)
+            // The replay's dot. The camera is deliberately left alone: a map
+            // that follows a playhead re-lays itself out on every frame, and
+            // this one lives inside a scroll view.
+            if let position = playheadCoordinate {
+                Annotation("", coordinate: position, anchor: .center) {
+                    Playhead(speed: session.track.speed(atElapsed: sessionElapsed),
+                             maxSpeed: max(summary.maxSpeed, 1))
                 }
                 .annotationTitles(.hidden)
             }
         }
         .mapStyle(settings.mapStyle.mapStyle)
-        .frame(height: 260)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(alignment: .bottomLeading) {
-            if selectedRide != nil {
-                Button("Show all") {
-                    withAnimation(.snappy) { selectedRide = nil }
-                }
+            // Offered whenever *anything* is singled out, not just when a
+            // wave was tapped: pausing mid-replay also leaves one wave lit,
+            // and a highlight with no way out is a trap.
+            if focusedRide != nil {
+                Button("Show all") { showAll() }
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -276,6 +298,43 @@ struct WaveDetailView: View {
                 .padding(8)
             }
         }
+    }
+
+    /// A ride's marker: its number, and a pointer on the rim turned the way
+    /// the ride made ground.
+    ///
+    /// The direction belongs *on* the badge rather than beside it. Teal lines
+    /// crossing each other have no direction until something says which end is
+    /// the finish, and a session's kick-outs all converge on the same downwind
+    /// corner — a second puck per ride there would bury the numbers it was
+    /// meant to clarify. One marker, both facts, at the ride's midpoint.
+    private func rideBadge(_ ride: WaveRide) -> some View {
+        let lead = focusedRide == ride.id
+        let size: CGFloat = lead ? 24 : 18
+        return ZStack {
+            // White under teal, so the pointer keeps its edge over the ride
+            // lines on a dark map and over open water on a light one.
+            ZStack {
+                Image(systemName: "arrowtriangle.up.fill")
+                    .font(.system(size: lead ? 13 : 11))
+                    .foregroundStyle(.white)
+                Image(systemName: "arrowtriangle.up.fill")
+                    .font(.system(size: lead ? 9 : 7.5))
+                    .foregroundStyle(Self.waveColour)
+            }
+            .offset(y: -(size / 2 + (lead ? 7 : 6)))
+            .rotationEffect(.degrees(ride.netBearing))
+
+            Text("\(ride.id + 1)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(Self.waveColour, in: Circle())
+                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+        }
+        .frame(width: size + 28, height: size + 28)
+        .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+        .accessibilityLabel("Wave \(ride.id + 1), ran \(Format.cardinal(ride.netBearing))")
     }
 
     private func coordinates(of ride: WaveRide) -> [CLLocationCoordinate2D] {
@@ -292,6 +351,221 @@ struct WaveDetailView: View {
         session.track.points[min(ride.endIndex, session.track.points.count - 1)].clCoordinate
     }
 
+    // MARK: - Replay
+
+    /// A scrubber for the waves, not a second playback screen.
+    ///
+    /// The session already has a full-screen replay with every readout on it;
+    /// what is wanted here is smaller — watch the waves go by on the map that
+    /// is already showing them. Ticked, the paddling between rides is cut out
+    /// and the waves play back to back; unticked, the whole session runs and
+    /// the waves arrive where they actually did.
+    private var replayBar: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                Button {
+                    if elapsed >= replayRange.upperBound - 0.05 {
+                        elapsed = replayRange.lowerBound
+                    }
+                    isPlaying.toggle()
+                } label: {
+                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundStyle(Self.waveColour)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPlaying ? "Pause replay" : "Play replay")
+
+                // Scrubbing takes the wheel: playing on under a dragging
+                // thumb fights the finger.
+                Slider(value: scrub, in: 0...1) { editing in
+                    if editing { isPlaying = false }
+                }
+                .tint(Self.waveColour)
+
+                Button {
+                    let i = Self.rates.firstIndex(of: speedMultiplier) ?? 0
+                    speedMultiplier = Self.rates[(i + 1) % Self.rates.count]
+                } label: {
+                    Text("\(Int(speedMultiplier))×")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .frame(minWidth: 32)
+                        .padding(.vertical, 5)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Replay speed \(Int(speedMultiplier)) times")
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    let atSession = sessionElapsed
+                    ridesOnly.toggle()
+                    // The two clocks measure different things, so the playhead
+                    // is carried across rather than reset: scrubbed to wave six
+                    // and then ticked, it should still be wave six.
+                    elapsed = ridesOnly
+                        ? timeline.compressed(atSessionElapsed: atSession)
+                        : atSession
+                } label: {
+                    Label {
+                        Text("Waves only")
+                    } icon: {
+                        Image(systemName: ridesOnly ? "checkmark.square.fill" : "square")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(ridesOnly ? Self.waveColour : Color.secondary)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 6)
+
+                Text(replayLabel)
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.background)
+    }
+
+    /// Choosing a wave aims the replay at it: the playhead drops to that
+    /// ride's takeoff and the transport is bounded by it, so play means play
+    /// *this wave* rather than resume the session from wherever the playhead
+    /// was left. Letting the wave go hands the whole clock back, and leaves
+    /// the playhead where it stopped rather than rewinding the session.
+    private func select(_ ride: WaveRide) {
+        guard selectedRide != ride.id else { return showAll() }
+        withAnimation(.snappy) { selectedRide = ride.id }
+        isPlaying = false
+        elapsed = replayRange.lowerBound
+    }
+
+    /// Back to the whole session: no wave singled out, and the playhead
+    /// rewound so it cannot quietly single one out again.
+    ///
+    /// Clearing the selection alone is not enough — a playhead parked inside a
+    /// wave still names it, so the map would keep showing that one wave while
+    /// the control that clears it has already gone.
+    private func showAll() {
+        withAnimation(.snappy) { selectedRide = nil }
+        isPlaying = false
+        elapsed = 0
+    }
+
+    /// What the transport covers: the chosen wave, or the whole clock.
+    private var replayRange: ClosedRange<TimeInterval> {
+        guard let window = selectedWindow else { return 0...replayDuration }
+        let lower = ridesOnly ? window.offset : window.start
+        let upper = ridesOnly ? window.offset + window.duration : window.end
+        return lower...max(upper, lower + 0.1)
+    }
+
+    /// The slider's position within whatever the transport covers, as a
+    /// fraction — never in seconds.
+    ///
+    /// Its bounds must not move. A `Slider` whose range and value change in
+    /// the same update hands the new value to a control still holding the old
+    /// range, which clamps it and writes the clamped number back through the
+    /// binding: rewinding the playhead while clearing a selection was undone
+    /// on the spot, leaving the map stuck on one wave. Fractions keep the
+    /// bounds fixed at 0...1 for the life of the screen, so there is nothing
+    /// to clamp against.
+    private var scrub: Binding<Double> {
+        Binding(
+            get: {
+                let range = replayRange
+                let span = range.upperBound - range.lowerBound
+                return span > 0 ? (elapsed - range.lowerBound) / span : 0
+            },
+            set: { fraction in
+                let range = replayRange
+                elapsed = range.lowerBound
+                    + fraction * (range.upperBound - range.lowerBound)
+            }
+        )
+    }
+
+    private static let rates: [Double] = [1, 2, 4, 8, 16]
+
+    /// 20 Hz — a playhead that moves smoothly without waking the CPU more
+    /// than the display needs.
+    private static let tick: TimeInterval = 1.0 / 20.0
+
+    /// The clock the slider runs on: the riding time when the paddling is cut
+    /// out, the session's own when it is not.
+    private var replayDuration: TimeInterval {
+        max(1, ridesOnly ? timeline.duration : session.track.duration)
+    }
+
+    /// Where the playhead is on the session's own clock, whichever clock the
+    /// slider happens to be showing.
+    ///
+    /// A chosen wave reads through its own window rather than through the
+    /// timeline: its kick-out instant is also the next wave's takeoff, and the
+    /// timeline-wide lookup would answer with the next wave — sending the dot
+    /// across the bay the moment the ride finished.
+    private var sessionElapsed: TimeInterval {
+        guard ridesOnly else { return elapsed }
+        if let window = selectedWindow { return window.sessionElapsed(at: elapsed) }
+        return timeline.sessionElapsed(at: elapsed)
+    }
+
+    private var selectedWindow: RideTimeline.Window? {
+        selectedRide.flatMap(timeline.window(forRide:))
+    }
+
+    /// The replay has been used — pressed, or scrubbed off zero. Until then
+    /// the map is the map it always was and the playhead stays out of it.
+    private var replayEngaged: Bool {
+        isPlaying || selectedRide != nil || elapsed > 0
+    }
+
+    private var playheadRide: Int? {
+        guard replayEngaged else { return nil }
+        // While a wave is chosen the playhead is that wave's, all the way to
+        // its last instant.
+        if let id = selectedRide { return id }
+        return ridesOnly ? timeline.rideID(at: elapsed)
+                         : timeline.rideID(atSessionElapsed: elapsed)
+    }
+
+    private var playheadCoordinate: CLLocationCoordinate2D? {
+        guard replayEngaged else { return nil }
+        return session.track.coordinate(atElapsed: sessionElapsed)?.clCoordinate
+    }
+
+    /// The ride the map draws boldly: the rider's own choice, or — once the
+    /// replay is running — whichever wave the playhead is on.
+    private var focusedRide: Int? { selectedRide ?? playheadRide }
+
+    /// What the playhead is on, and where in the replay it sits.
+    private var replayLabel: String {
+        let range = replayRange
+        let clock = "\(Format.duration(elapsed - range.lowerBound)) / "
+            + "\(Format.duration(range.upperBound - range.lowerBound))"
+        guard replayEngaged else { return clock }
+        if let ride = playheadRide { return "Wave \(ride + 1) · \(clock)" }
+        return "Between waves · \(clock)"
+    }
+
+    private func runPlayback() async {
+        guard isPlaying else { return }
+        while isPlaying, !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(Self.tick))
+            guard isPlaying else { return }
+            let end = replayRange.upperBound
+            elapsed = min(end, elapsed + Self.tick * speedMultiplier)
+            if elapsed >= end {
+                isPlaying = false
+                return
+            }
+        }
+    }
+
     // MARK: - The rides
 
     private func ridesCard(_ waves: WaveRideSummary) -> some View {
@@ -305,17 +579,13 @@ struct WaveDetailView: View {
             .padding(.bottom, 8)
 
             ForEach(ordered(waves)) { ride in
-                Button {
-                    withAnimation(.snappy) {
-                        selectedRide = selectedRide == ride.id ? nil : ride.id
-                    }
-                } label: {
+                Button { select(ride) } label: {
                     HStack(spacing: 10) {
                         Text("\(ride.id + 1)")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .frame(width: 20, height: 20)
-                            .background(selectedRide == nil || selectedRide == ride.id
+                            .background(focusedRide == nil || focusedRide == ride.id
                                         ? Self.waveColour
                                         : Color.secondary.opacity(0.35), in: Circle())
 
@@ -340,7 +610,7 @@ struct WaveDetailView: View {
                     }
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
-                    .background(selectedRide == ride.id
+                    .background(focusedRide == ride.id
                                 ? AnyShapeStyle(Self.waveColour.opacity(0.12))
                                 : AnyShapeStyle(.clear))
                 }
@@ -370,7 +640,10 @@ struct WaveDetailView: View {
                  + "was travelling — and the whole ride, takeoff to kick-out, "
                  + "made ground that way. The wind is not consulted: waves keep "
                  + "their own direction. Runs and glides are unchanged by any "
-                 + "of this. Tap a ride for the arrow showing which way it went.")
+                 + "of this. Each ride's number carries a pointer turned the "
+                 + "way that ride made ground, and the one you tap also shows "
+                 + "an arrow where it kicked out. Press play under the map to "
+                 + "watch them in the order they came.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

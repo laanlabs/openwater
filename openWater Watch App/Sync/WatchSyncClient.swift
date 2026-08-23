@@ -52,7 +52,13 @@ final class WatchSyncClient: NSObject {
     // MARK: - Sending
 
     /// Write a session to the outbox and hand it to the transfer queue.
-    func send(_ session: Session) {
+    ///
+    /// Returns whether the session reached the outbox. The outbox write is what
+    /// makes it safe — the transfer itself can fail for hours without costing
+    /// anything — so the answer is about the file landing on disk, not about
+    /// the phone having heard about it yet.
+    @discardableResult
+    func send(_ session: Session) -> Bool {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -64,9 +70,11 @@ final class WatchSyncClient: NSObject {
 
             queuedSessions.append(url)
             transfer(url, sessionID: session.id)
+            return true
         } catch {
             lastError = error.localizedDescription
             Self.logger.error("failed to queue session: \(error.localizedDescription)")
+            return false
         }
     }
 

@@ -28,6 +28,16 @@ struct LiveSessionView: View {
     @State private var page: Page = WatchScreenshotRoute.page ?? .speed
     @State private var showingEndConfirmation = false
 
+    /// Set only when stopping could not put the session anywhere safe. A rider
+    /// who pressed stop and was dropped back on the start screen has no way to
+    /// tell "saved" from "gone", so silence is not an option here.
+    @State private var saveFailure: SaveFailure?
+
+    /// Stopping is not re-entrant: the dialog can be tapped twice on a wet
+    /// screen, and the second pass would find the engine already finishing and
+    /// report a failure for a session that saved perfectly well.
+    @State private var isEnding = false
+
     /// Where the crown is, in pages. Kept in step with `page` in both
     /// directions so a swipe and a notch never disagree about where the rider
     /// is — a crown left behind by a swipe would jump the page back the
@@ -106,11 +116,102 @@ struct LiveSessionView: View {
             Button("End & Save") { Task { await end() } }
             Button("Keep Recording", role: .cancel) {}
         }
+        .sheet(item: $saveFailure) { failure in
+            SaveFailureView(failure: failure)
+        }
     }
 
+    /// Stop, and say so plainly if the session did not get anywhere safe.
+    ///
+    /// The old version was `if let session = await recorder.finish() { send }`,
+    /// which did nothing at all when the session could not be built and nothing
+    /// when the write failed — the rider was returned to the start screen with
+    /// no session and no explanation, which is indistinguishable from having
+    /// saved. Every outcome now ends in either a saved session or a sheet.
     private func end() async {
-        if let session = await recorder.finish() {
-            sync.send(session)
+        guard !isEnding else { return }
+        isEnding = true
+        defer { isEnding = false }
+
+        var saved = false
+        let session = await recorder.finish { session in
+            saved = sync.send(session)
+            return saved
+        }
+
+        guard let session else {
+            // Nothing was built. Either there were too few fixes to make a
+            // session, or this is a second press — and a second press has
+            // nothing to report.
+            if recorder.state == .idle, !saved { saveFailure = .tooShort }
+            return
+        }
+        if !saved { saveFailure = .notWritten(session) }
+    }
+}
+
+/// Why stopping could not save, in the rider's terms.
+enum SaveFailure: Identifiable {
+    /// Too few fixes to build a session at all.
+    case tooShort
+    /// The session exists but could not be written to the outbox.
+    case notWritten(Session)
+
+    var id: String {
+        switch self {
+        case .tooShort: "tooShort"
+        case .notWritten(let session): session.id.uuidString
+        }
+    }
+}
+
+struct SaveFailureView: View {
+
+    let failure: SaveFailure
+
+    @Environment(WatchSyncClient.self) private var sync
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(title, systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+
+                Text(explanation)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if case .notWritten(let session) = failure {
+                    Button("Try Again") {
+                        if sync.send(session) { dismiss() }
+                    }
+                    .tint(.green)
+                }
+
+                Button("OK") { dismiss() }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private var title: String {
+        switch failure {
+        case .tooShort: "Nothing to save"
+        case .notWritten: "Couldn't save"
+        }
+    }
+
+    /// The second case deliberately promises the recovery prompt: the engine
+    /// keeps the track log whenever the save says no, so the session really is
+    /// still on the watch and really will be offered back.
+    private var explanation: String {
+        switch failure {
+        case .tooShort:
+            "That session was too short to record — openWater never got enough fixes to build a track."
+        case .notWritten:
+            "openWater couldn't write this session to your watch's storage. The track is still here and will be offered back next time you open the app."
         }
     }
 }

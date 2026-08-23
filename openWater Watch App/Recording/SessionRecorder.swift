@@ -138,15 +138,27 @@ final class SessionRecorder {
         WKInterfaceDevice.current().play(.start)
     }
 
+    /// End the session, saving it before anything else is allowed to fail.
+    ///
+    /// `save` writes the session down and says whether it is safe; the engine
+    /// keeps the crash log until it says yes.
+    ///
+    /// HealthKit is deliberately settled *afterwards*. Closing a workout and
+    /// inserting its route is the slowest part of stopping and the part most
+    /// able to fail or stall, and it was previously awaited before the session
+    /// was built at all — so a wrist dropped at the wrong moment took the whole
+    /// session with the Health entry. Losing the Health entry costs a duplicate
+    /// row in Fitness. Losing the session costs the session.
     @discardableResult
-    func finish() async -> Session? {
+    func finish(save: (Session) -> Bool) async -> Session? {
         location.stop()
         motion.stop()
 
         let end = Date()
+        let session = engine.finish(at: end, save: save)
+
         await workout.finish(endDate: end, route: routeLocations)
 
-        let session = engine.finish(at: end)
         if session != nil { WKInterfaceDevice.current().play(.success) }
         return session
     }
@@ -159,8 +171,9 @@ final class SessionRecorder {
         routeLocations.removeAll()
     }
 
-    func recover(_ candidate: RecordingEngine.RecoverableSession) -> Session? {
-        engine.recover(candidate)
+    func recover(_ candidate: RecordingEngine.RecoverableSession,
+                 save: (Session) -> Bool) -> Session? {
+        engine.recover(candidate, save: save)
     }
 
     func dismissRecovery() {

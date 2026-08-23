@@ -157,7 +157,21 @@ public final class RecordingEngine {
     /// Deliberately the *full* pipeline, not the live one: these are the numbers
     /// the rider keeps, so they get the two-pass filter and the exact solvers
     /// rather than the battery-conscious live approximations.
-    public func finish(at date: Date = Date()) -> Session? {
+    ///
+    /// `save` is handed the finished session and answers whether it is now
+    /// somewhere durable — the library on the phone, the sync outbox on the
+    /// watch. The crash log is released only when it says yes, so a complete
+    /// copy of the session exists on disk at every instant: either the shell's
+    /// own, or the log recovery can rebuild from. A shell that cannot save gets
+    /// the session back anyway and finds the log still waiting next launch.
+    ///
+    /// Saving is a parameter rather than something the caller does afterwards
+    /// because the ordering is the whole guarantee. Released too early and a
+    /// failed write loses the session outright; never released and every clean
+    /// session is offered back as unfinished, which teaches riders to dismiss
+    /// the one prompt that ever matters.
+    @discardableResult
+    public func finish(at date: Date = Date(), save: (Session) -> Bool) -> Session? {
         guard state == .recording || state == .paused else { return nil }
         state = .finishing
 
@@ -166,6 +180,7 @@ public final class RecordingEngine {
         log = nil
 
         guard let startDate, points.count >= 2 else {
+            // A single fix is not a session and nothing can be rebuilt from it.
             if let logURL { TrackLog.delete(logURL) }
             state = .idle
             return nil
@@ -185,6 +200,8 @@ public final class RecordingEngine {
             swellHeight: swellHeight,
             swellDirection: swellDirection
         )
+
+        if save(session), let logURL { TrackLog.delete(logURL) }
 
         state = .idle
         return session
@@ -266,7 +283,13 @@ public final class RecordingEngine {
     }
 
     /// Rebuild a session from an interrupted log.
-    public func recover(_ candidate: RecoverableSession) -> Session? {
+    ///
+    /// Takes `save` for the same reason `finish` does, and with more at stake:
+    /// this log is the *only* copy of the session, so releasing it before the
+    /// shell has the session written down would lose outright the thing this
+    /// whole path exists to rescue. A recovery that cannot be saved stays on
+    /// offer rather than being spent.
+    public func recover(_ candidate: RecoverableSession, save: (Session) -> Bool) -> Session? {
         guard let (header, points) = try? TrackLog.read(candidate.url), points.count >= 2 else {
             TrackLog.delete(candidate.url)
             recoverable = nil
@@ -282,6 +305,8 @@ public final class RecordingEngine {
             deviceModel: header.deviceModel,
             appVersion: header.appVersion
         )
+        guard save(session) else { return nil }
+
         TrackLog.delete(candidate.url)
         recoverable = nil
         return session

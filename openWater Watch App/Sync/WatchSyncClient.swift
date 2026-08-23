@@ -31,6 +31,11 @@ final class WatchSyncClient: NSObject {
 
     private var bestsHandler: (([SpeedCategory: Double]) -> Void)?
 
+    /// Applies a display preference the phone published. Set by the app at
+    /// launch; the watch decides for itself whether the pushed value is newer
+    /// than its own.
+    var onExtendedDisplay: ((Bool, Date) -> Void)?
+
     private var session: WCSession? {
         WCSession.isSupported() ? WCSession.default : nil
     }
@@ -229,9 +234,13 @@ extension WatchSyncClient: WCSessionDelegate {
         didReceiveApplicationContext applicationContext: [String: Any]
     ) {
         let bests = Self.decodeBests(from: applicationContext)
+        let extended = applicationContext["extendedDisplay"] as? Bool
+        let changedAt = applicationContext["extendedDisplayChangedAt"] as? Date
         Task { @MainActor in
-            guard !bests.isEmpty else { return }
-            self.bestsHandler?(bests)
+            if !bests.isEmpty { self.bestsHandler?(bests) }
+            if let extended, let changedAt {
+                self.onExtendedDisplay?(extended, changedAt)
+            }
         }
     }
 }

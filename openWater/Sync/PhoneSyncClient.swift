@@ -31,7 +31,7 @@ final class PhoneSyncClient: NSObject {
         // Any change to the record book is pushed straight to the watch, so a
         // PB set on the phone (via an import, say) is known on the wrist.
         library.onRecordsChanged = { [weak self] _ in
-            self?.pushRecords()
+            self?.pushContext()
         }
     }
 
@@ -154,14 +154,41 @@ final class PhoneSyncClient: NSObject {
         return "Heart rate is off. On this iPhone: Health app ▸ your profile ▸ Privacy ▸ Apps ▸ openWater, and turn on Heart Rate. It applies to the next session."
     }
 
-    func pushRecords() {
+    /// Everything the watch is told about, sent as one payload.
+    ///
+    /// Application context is a single latest-value slot, so a push carrying
+    /// only the bests would erase the display preference and vice versa. There
+    /// is one writer for that slot, and it always sends the lot.
+    ///
+    /// `settings` is optional because the record book changes on its own —
+    /// an import, a session arriving — with no settings object to hand. Those
+    /// pushes carry the last preference the phone published rather than
+    /// dropping the key and blanking it on the watch.
+    func pushContext(settings: AppSettings? = nil) {
         guard let session, session.activationState == .activated else { return }
+
+        if let settings {
+            publishedExtendedDisplay = settings.watchExtendedDisplay
+            publishedExtendedDisplayChangedAt = settings.watchExtendedDisplayChangedAt
+        }
+
+        var payload: [String: Any] = ["bests": library.recordsForWatch()]
+        if let value = publishedExtendedDisplay, let stamp = publishedExtendedDisplayChangedAt {
+            payload["extendedDisplay"] = value
+            payload["extendedDisplayChangedAt"] = stamp
+        }
+
         do {
-            try session.updateApplicationContext(["bests": library.recordsForWatch()])
+            try session.updateApplicationContext(payload)
         } catch {
-            Self.logger.notice("could not push records: \(error.localizedDescription)")
+            Self.logger.notice("could not push context: \(error.localizedDescription)")
         }
     }
+
+    /// The last display preference this phone published, so record-book pushes
+    /// can carry it again rather than clearing it.
+    private var publishedExtendedDisplay: Bool?
+    private var publishedExtendedDisplayChangedAt: Date?
 }
 
 extension PhoneSyncClient: WCSessionDelegate {
@@ -180,7 +207,7 @@ extension PhoneSyncClient: WCSessionDelegate {
             self.isReachable = reachable
             self.isPaired = paired
             self.isWatchAppInstalled = installed
-            if activated { self.pushRecords() }
+            if activated { self.pushContext() }
         }
     }
 

@@ -11,6 +11,19 @@ import SwiftUI
 struct WatchStatusView: View {
 
     @Environment(PhoneSyncClient.self) private var sync
+    @Environment(AppSettings.self) private var settings
+
+    /// Writes through to settings and pushes in one go, so the watch is told
+    /// the moment the switch moves rather than at some later sync.
+    private var extendedDisplay: Binding<Bool> {
+        Binding(
+            get: { settings.watchExtendedDisplay },
+            set: { newValue in
+                settings.watchExtendedDisplay = newValue
+                sync.pushContext(settings: settings)
+            }
+        )
+    }
 
     enum State: Equatable {
         case noWatch
@@ -148,11 +161,27 @@ struct WatchStatusView: View {
                 }
 
                 Button {
-                    sync.pushRecords()
+                    sync.pushContext(settings: settings)
                 } label: {
                     Label("Send my bests to the watch", systemImage: "trophy")
                         .font(.subheadline)
                 }
+
+                Divider()
+
+                // Set here as a convenience — the watch has the same switch in
+                // its own settings, and a rider with cold hands should not have
+                // to find their phone. Whichever was changed last is the one
+                // that holds.
+                Toggle(isOn: extendedDisplay) {
+                    Text("Extended display")
+                        .font(.subheadline)
+                }
+
+                Text("Off, the watch shows two live screens: the controls and your speed. On, it adds splits, totals, angles and the countdown. Takes effect the next time the watch hears from this phone.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let error = sync.lastError {

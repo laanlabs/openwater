@@ -53,7 +53,14 @@ struct LiveSessionView: View {
     /// them. The crown's track has to be this list rather than `allCases`:
     /// angles exist only under a wing and foil only on a foil, so a notch
     /// counted against every case would land on a page that is not there.
+    ///
+    /// Unless the rider asks for the extended display, it stops after the big
+    /// number. Seven pages is a long swipe on a cold wet wrist, and the two
+    /// that are genuinely wanted mid-session are the one you stop from and the
+    /// one you glance at. Controls is never dropped whatever else goes: it is
+    /// how a session ends.
     private var pages: [Page] {
+        guard settings.extendedDisplay else { return [.controls, .speed] }
         var out: [Page] = [.controls, .speed, .splits, .session]
         if recorder.sport.isWindPowered { out.append(.angles) }
         if recorder.sport.isFoiling { out.append(.foil) }
@@ -61,19 +68,28 @@ struct LiveSessionView: View {
         return out
     }
 
+    @ViewBuilder
+    private func view(for page: Page) -> some View {
+        switch page {
+        case .controls: ControlsPage(showingEndConfirmation: $showingEndConfirmation)
+        case .speed: SpeedPage()
+        case .splits: SplitsPage()
+        case .session: SessionPage()
+        case .angles: AnglesPage()
+        case .foil: FoilPage()
+        case .countdown: CountdownPage()
+        }
+    }
+
     var body: some View {
+        // Built from `pages` rather than listed again here. The crown's track
+        // and the strip of pages have to be the same list or a notch lands
+        // somewhere a swipe cannot reach, and keeping two copies in step by
+        // hand is how that drift starts.
         TabView(selection: $page) {
-            ControlsPage(showingEndConfirmation: $showingEndConfirmation).tag(Page.controls)
-            SpeedPage().tag(Page.speed)
-            SplitsPage().tag(Page.splits)
-            SessionPage().tag(Page.session)
-            if recorder.sport.isWindPowered {
-                AnglesPage().tag(Page.angles)
+            ForEach(pages, id: \.self) { page in
+                view(for: page).tag(page)
             }
-            if recorder.sport.isFoiling {
-                FoilPage().tag(Page.foil)
-            }
-            CountdownPage().tag(Page.countdown)
         }
         .tabViewStyle(.page)
         // The crown drives the same pages the finger does. Focus is what
@@ -106,6 +122,14 @@ struct LiveSessionView: View {
         .onAppear {
             crownFocused = true
             if let index = pages.firstIndex(of: page) { crown = Double(index) }
+        }
+        // Turning the extended display off from the settings sheet can strand
+        // the rider on a page that no longer exists — a blank strip and a
+        // crown that does nothing. Land them back on the number.
+        .onChange(of: pages) { _, available in
+            guard !available.contains(page) else { return }
+            page = .speed
+            crown = Double(available.firstIndex(of: .speed) ?? 0)
         }
         // Ending saves. Discard used to sit right underneath, on a screen the
         // size of a stamp, tapped by a wet finger — the single easiest way in

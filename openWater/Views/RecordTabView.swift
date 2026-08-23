@@ -406,8 +406,13 @@ struct RecordTabView: View {
         // Landing back on an empty Record tab after an hour on the water is the
         // wrong answer to "what did I just do?" — the session opens instead,
         // with the debrief over it while the conditions are still fresh.
-        if let session = recorder.finish() {
-            let stored = library.save(session)
+        var stored: StoredSession?
+        recorder.finish { session in
+            let result = library.save(session)
+            stored = result.stored
+            return result.persisted
+        }
+        if let stored {
             path = [stored.id]
             reviewing = stored
         }

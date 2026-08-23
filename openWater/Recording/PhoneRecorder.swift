@@ -170,13 +170,18 @@ final class PhoneRecorder {
         impactHaptics.impactOccurred()
     }
 
+    /// End the session, saving it before the crash log is released.
+    ///
+    /// `save` writes the session into the library and says whether it landed;
+    /// the engine keeps the log until it does, so a failed write leaves the
+    /// session recoverable rather than gone.
     @discardableResult
-    func finish() -> Session? {
+    func finish(save: (Session) -> Bool) -> Session? {
         location.stop()
         motion.stop()
         UIApplication.shared.isIdleTimerDisabled = false
 
-        let session = engine.finish()
+        let session = engine.finish(save: save)
         if session != nil { notificationHaptics.notificationOccurred(.success) }
         return session
     }
@@ -188,8 +193,9 @@ final class PhoneRecorder {
         engine.discard()
     }
 
-    func recover(_ candidate: RecordingEngine.RecoverableSession) -> Session? {
-        engine.recover(candidate)
+    func recover(_ candidate: RecordingEngine.RecoverableSession,
+                 save: (Session) -> Bool) -> Session? {
+        engine.recover(candidate, save: save)
     }
 
     func dismissRecovery() {

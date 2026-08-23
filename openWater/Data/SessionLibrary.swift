@@ -40,8 +40,12 @@ final class SessionLibrary {
     /// Idempotent by design: the watch retries transfers when the phone comes
     /// back in range, so the same session can legitimately arrive twice and
     /// must not become two entries.
+    /// Returns the stored model, and whether the store actually took it.
+    /// `persisted` is what the stop path needs: the recorder holds the crash
+    /// log until the session is durably somewhere, and the model alone cannot
+    /// say — SwiftData hands one back whether or not the context saved.
     @discardableResult
-    func save(_ session: Session) -> StoredSession {
+    func save(_ session: Session) -> (stored: StoredSession, persisted: Bool) {
         let id = session.id
         let existing = try? context.fetch(
             FetchDescriptor<StoredSession>(predicate: #Predicate { $0.id == id })
@@ -49,14 +53,12 @@ final class SessionLibrary {
 
         if let existing {
             existing.update(with: session)
-            persist()
-            return existing
+            return (existing, persist())
         }
 
         let stored = StoredSession(session: session)
         context.insert(stored)
-        persist()
-        return stored
+        return (stored, persist())
     }
 
     /// The encoded archive for a session, fetched fresh from the store.
@@ -126,12 +128,15 @@ final class SessionLibrary {
         persist()
     }
 
-    private func persist() {
+    @discardableResult
+    private func persist() -> Bool {
         do {
             try context.save()
             refreshRecords()
+            return true
         } catch {
             Self.logger.error("save failed: \(error.localizedDescription)")
+            return false
         }
     }
 

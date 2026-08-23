@@ -42,9 +42,17 @@ struct RecoveryView: View {
     @Environment(WatchSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
+    @State private var failedToSave = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
+                if failedToSave {
+                    Text("Couldn't save that just now — the session is still on your watch. Try again.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+
                 Label("Unfinished session", systemImage: "arrow.clockwise.circle.fill")
                     .font(.headline)
                     .foregroundStyle(.orange)
@@ -62,10 +70,15 @@ struct RecoveryView: View {
                 .font(.caption2)
 
                 Button("Recover") {
-                    if let session = recorder.recover(candidate) {
-                        sync.send(session)
+                    // Only dismissed once the session is genuinely somewhere.
+                    // If the write fails the log is untouched and the prompt
+                    // stays up, so the rider can try again rather than watch
+                    // their one copy disappear into a tap.
+                    if recorder.recover(candidate, save: { sync.send($0) }) != nil {
+                        dismiss()
+                    } else {
+                        failedToSave = true
                     }
-                    dismiss()
                 }
                 .tint(.green)
 

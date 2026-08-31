@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Apple's privacy manifest. Required since May 2024, and its absence is
+	  what App Store Connect warns about on upload (ITMS-91053).
+
+	  The phone's manifest with one section removed, because the television
+	  does one fewer thing:
+
+	  - There are no third-party SDKs here either. The guide and the forecasts
+	    are REST calls over URLSession — Firestore and Open-Meteo — so there is
+	    no vendored framework carrying its own manifest and nothing here is
+	    inherited.
+	  - The only required-reason API used is UserDefaults, for the rider's own
+	    favourites and their chosen forecast model.
+	  - Nothing leaves the device. Sharing is a phone feature; an Apple TV
+	    records nothing, uploads nothing and has no account to attach anything
+	    to. So there is no NSPrivacyCollectedDataTypes section rather than an
+	    empty one — the phone declares precise location because a shared
+	    session carries a track, and this app has no such path at all.
+	  - There is no analytics, no advertising, no accounts and no tracking.
+	-->
+
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!--
+			  Starred spots, their order, and the forecast model.
+			  CA92.1: accessed only to read and write this app's own settings,
+			  never written anywhere it could identify a device.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+</dict>
+</plist>

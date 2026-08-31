@@ -20,8 +20,16 @@
 #          > ~/.appstoreconnect/openwater.env
 #
 #   Usage:
-#     scripts/testflight.sh            # next build number
-#     scripts/testflight.sh 12         # a specific build number
+#     scripts/testflight.sh            # phone and watch, next build number
+#     scripts/testflight.sh 12         # phone and watch, a specific build
+#     scripts/testflight.sh --tv       # Apple TV
+#     scripts/testflight.sh --all 12   # every platform, one build number
+#
+# The Apple TV app is not in the default, and that is a statement about the
+# App Store record rather than about the build: a tvOS upload is rejected until
+# tvOS has been added to the app in App Store Connect (the app → Add Platform).
+# The rejection does not say so in those words, so it is worth knowing before
+# it happens. Once the platform is live, --all is the one to run.
 #
 set -euo pipefail
 
@@ -43,6 +51,18 @@ if [ ! -f "$KEY_PATH" ]; then
     exit 1
 fi
 
+# Which platforms. The phone and the watch are one archive — the watch app is
+# embedded in the phone's — and the television is its own, because it is its
+# own product on its own SDK.
+WANT_IOS=yes
+WANT_TV=no
+case "${1:-}" in
+    --ios)  shift ;;
+    --tv)   WANT_IOS=no; WANT_TV=yes; shift ;;
+    --all)  WANT_TV=yes; shift ;;
+    -*)     echo "Unknown option: $1. See the usage notes at the top." >&2; exit 1 ;;
+esac
+
 # Build number: the argument, or one past whatever the project says now.
 CURRENT=$(grep -m1 -o 'CURRENT_PROJECT_VERSION = [0-9]*' openWater.xcodeproj/project.pbxproj | grep -o '[0-9]*')
 BUILD=${1:-$((CURRENT + 1))}
@@ -51,46 +71,83 @@ if [ "$BUILD" != "$CURRENT" ]; then
     echo "==> Build number $CURRENT → $BUILD"
     # Every configuration, so the watch app and the phone app agree. A mismatch
     # is rejected at upload with a message that does not mention build numbers.
+    #
+    # The television is swept up in the same pass, which is what we want: a
+    # universal purchase is one product, and two platforms drifting apart by a
+    # build number is a thing to notice here rather than in the TestFlight list.
     sed -i '' "s/CURRENT_PROJECT_VERSION = ${CURRENT};/CURRENT_PROJECT_VERSION = ${BUILD};/g" \
         openWater.xcodeproj/project.pbxproj
 fi
 
-ARCHIVE=$(mktemp -d)/openWater.xcarchive
-EXPORT=$(mktemp -d)
+# The upload, shared. The export options are identical for both platforms —
+# the archive knows which SDK it came from — so the only thing that differs is
+# which archive is handed over and what to call it on the way past.
+upload() {
+    local archive=$1 label=$2
+    local export_dir
+    export_dir=$(mktemp -d)
 
-echo "==> Archiving"
-xcodebuild -project openWater.xcodeproj \
-    -scheme openWater \
-    -configuration Release \
-    -destination 'generic/platform=iOS' \
-    -archivePath "$ARCHIVE" \
-    -allowProvisioningUpdates \
-    -authenticationKeyPath "$KEY_PATH" \
-    -authenticationKeyID "$ASC_KEY_ID" \
-    -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-    archive
+    cat > "$export_dir/ExportOptions.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>teamID</key><string>${OPENWATER_TEAM_ID:-34FWY7G2HB}</string>
+  <key>destination</key><string>upload</string>
+  <key>uploadSymbols</key><true/>
+  <key>manageAppVersionAndBuildNumber</key><false/>
+</dict>
+</plist>
+PLIST
 
-# Checked against the built product rather than the source, because the two have
-# disagreed before: Xcode silently drops UIBackgroundModes supplied as a build
-# setting, and a watch app missing WKBackgroundModes builds and runs and is then
-# rejected at upload.
-# The test recordings ride along with debug builds so the analysis can be
-# compared against sessions the pages describe. They are bundle resources, and
-# Xcode copies resources in every configuration — the `#if DEBUG` around the
-# seeding code keeps them from being *loaded* in release and does nothing to
-# keep them from being *shipped*. Verified: a release build contained all ten.
-#
-# They are other riders' GPS traces. Stripped here, where the archive is
-# already being opened, and then checked for below so a change to this script
-# cannot quietly stop stripping them.
-echo "==> Removing test recordings from the archive"
-APP="$ARCHIVE/Products/Applications/openWater.app"
-REMOVED=$(find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) | wc -l | tr -d ' ')
-find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) -delete
-echo "    removed $REMOVED"
+    echo "==> Uploading $label to TestFlight"
+    xcodebuild -exportArchive \
+        -archivePath "$archive" \
+        -exportOptionsPlist "$export_dir/ExportOptions.plist" \
+        -exportPath "$export_dir" \
+        -allowProvisioningUpdates \
+        -authenticationKeyPath "$KEY_PATH" \
+        -authenticationKeyID "$ASC_KEY_ID" \
+        -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+}
 
-echo "==> Verifying the archive"
-python3 - "$ARCHIVE" <<'PY'
+if [ "$WANT_IOS" = yes ]; then
+    IOS_ARCHIVE=$(mktemp -d)/openWater.xcarchive
+
+    echo "==> Archiving the phone and watch apps"
+    xcodebuild -project openWater.xcodeproj \
+        -scheme openWater \
+        -configuration Release \
+        -destination 'generic/platform=iOS' \
+        -archivePath "$IOS_ARCHIVE" \
+        -allowProvisioningUpdates \
+        -authenticationKeyPath "$KEY_PATH" \
+        -authenticationKeyID "$ASC_KEY_ID" \
+        -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+        archive
+
+    # Checked against the built product rather than the source, because the two have
+    # disagreed before: Xcode silently drops UIBackgroundModes supplied as a build
+    # setting, and a watch app missing WKBackgroundModes builds and runs and is then
+    # rejected at upload.
+    # The test recordings ride along with debug builds so the analysis can be
+    # compared against sessions the pages describe. They are bundle resources, and
+    # Xcode copies resources in every configuration — the `#if DEBUG` around the
+    # seeding code keeps them from being *loaded* in release and does nothing to
+    # keep them from being *shipped*. Verified: a release build contained all ten.
+    #
+    # They are other riders' GPS traces. Stripped here, where the archive is
+    # already being opened, and then checked for below so a change to this script
+    # cannot quietly stop stripping them.
+    echo "==> Removing test recordings from the archive"
+    APP="$IOS_ARCHIVE/Products/Applications/openWater.app"
+    REMOVED=$(find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) | wc -l | tr -d ' ')
+    find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) -delete
+    echo "    removed $REMOVED"
+
+    echo "==> Verifying the archive"
+    python3 - "$IOS_ARCHIVE" <<'PY'
 import plistlib, sys, pathlib
 archive = pathlib.Path(sys.argv[1])
 app = archive / "Products/Applications/openWater.app"
@@ -168,29 +225,88 @@ if problems:
     sys.exit(1)
 print(f"  ✓ version {phone.get('CFBundleShortVersionString')} build {phone.get('CFBundleVersion')}")
 PY
+    upload "$IOS_ARCHIVE" "the phone and watch apps"
+fi
 
-cat > "$EXPORT/ExportOptions.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key><string>app-store-connect</string>
-  <key>teamID</key><string>${OPENWATER_TEAM_ID:-34FWY7G2HB}</string>
-  <key>destination</key><string>upload</string>
-  <key>uploadSymbols</key><true/>
-  <key>manageAppVersionAndBuildNumber</key><false/>
-</dict>
-</plist>
-PLIST
+if [ "$WANT_TV" = yes ]; then
+    TV_ARCHIVE=$(mktemp -d)/openWaterTV.xcarchive
 
-echo "==> Uploading to TestFlight"
-xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE" \
-    -exportOptionsPlist "$EXPORT/ExportOptions.plist" \
-    -exportPath "$EXPORT" \
-    -allowProvisioningUpdates \
-    -authenticationKeyPath "$KEY_PATH" \
-    -authenticationKeyID "$ASC_KEY_ID" \
-    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+    echo "==> Archiving the Apple TV app"
+    xcodebuild -project openWater.xcodeproj \
+        -scheme 'openWater TV' \
+        -configuration Release \
+        -destination 'generic/platform=tvOS' \
+        -archivePath "$TV_ARCHIVE" \
+        -allowProvisioningUpdates \
+        -authenticationKeyPath "$KEY_PATH" \
+        -authenticationKeyID "$ASC_KEY_ID" \
+        -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+        archive
+
+    # Nothing to strip here. The television carries no recordings — it has no
+    # DevSeed, no sample tracks and no way to make one — so the check below is
+    # the whole of it, and it is a check rather than an assumption for the same
+    # reason the phone's is.
+    echo "==> Verifying the archive"
+    python3 - "$TV_ARCHIVE" <<'PY'
+import plistlib, sys, pathlib
+archive = pathlib.Path(sys.argv[1])
+app = archive / "Products/Applications/openWater TV.app"
+if not app.exists():
+    print("  ✗ no tvOS app in the archive")
+    sys.exit(1)
+info = plistlib.loads((app / "Info.plist").read_bytes())
+
+problems = []
+
+strays = [p for p in archive.rglob("*")
+          if p.suffix.lower() in {".openwater", ".gpx", ".fit", ".tcx"}]
+if strays:
+    problems.append("recordings in the archive: "
+                    + ", ".join(sorted(p.name for p in strays)[:5]))
+
+# The brand assets are the failure this check exists for. An image stack whose
+# layers are listed back-first compiles without a word from actool, ships, and
+# draws a blank navy rectangle on the home screen; a missing top shelf image is
+# rejected at upload instead. Neither is visible at build time.
+if not (info.get("CFBundleIcons") or {}).get("CFBundlePrimaryIcon"):
+    problems.append("no app icon — check ASSETCATALOG_COMPILER_APPICON_NAME and "
+                    "that the brandassets carry an App Icon imagestack")
+shelf = info.get("TVTopShelfImage") or {}
+if not shelf.get("TVTopShelfPrimaryImage"):
+    problems.append("no top shelf image")
+if not shelf.get("TVTopShelfPrimaryImageWide"):
+    problems.append("no wide top shelf image")
+
+# The same required-reason API as the phone, and the same warning if it goes
+# undeclared: this app reads UserDefaults for the rider's favourites.
+if not (app / "PrivacyInfo.xcprivacy").exists():
+    problems.append("tvOS app is missing PrivacyInfo.xcprivacy")
+else:
+    manifest = plistlib.loads((app / "PrivacyInfo.xcprivacy").read_bytes())
+    used = {entry.get("NSPrivacyAccessedAPIType")
+            for entry in manifest.get("NSPrivacyAccessedAPITypes") or []}
+    if "NSPrivacyAccessedAPICategoryUserDefaults" not in used:
+        problems.append("privacy manifest does not declare its UserDefaults use")
+    for entry in manifest.get("NSPrivacyAccessedAPITypes") or []:
+        if not entry.get("NSPrivacyAccessedAPITypeReasons"):
+            problems.append(f"{entry.get('NSPrivacyAccessedAPIType')} has no reason code")
+
+# A universal purchase is one app record, which means one bundle id shared with
+# the phone. Wrong here and the upload arrives as a different product, or as
+# nothing at all.
+if info.get("CFBundleIdentifier") != "com.laan.labs.openWater":
+    problems.append(f"bundle id is {info.get('CFBundleIdentifier')}, not the "
+                    "phone's — a universal purchase needs both platforms on one id")
+
+if problems:
+    print("\n".join("  ✗ " + p for p in problems))
+    sys.exit(1)
+print(f"  ✓ version {info.get('CFBundleShortVersionString')} "
+      f"build {info.get('CFBundleVersion')}")
+PY
+
+    upload "$TV_ARCHIVE" "the Apple TV app"
+fi
 
 echo "==> Build $BUILD uploaded. Processing takes a few minutes before it appears in TestFlight."

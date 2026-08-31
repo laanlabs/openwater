@@ -97,7 +97,7 @@ private struct FiringBanner: View {
                 .foregroundStyle(firing.isEmpty ? .secondary : Color.accentColor)
             Text(headline)
                 .font(.system(size: 46, weight: .bold, design: .rounded))
-                .foregroundStyle(firing.isEmpty ? .secondary : .primary)
+                .foregroundStyle(firing.isEmpty ? Color.secondary : Color.white)
             Spacer()
         }
     }
@@ -130,6 +130,12 @@ private struct FavoriteRow: View {
         HStack(spacing: 32) {
             Text(spot.name)
                 .font(.system(size: 40, weight: .medium))
+                // A literal colour, not `.primary`: inside a focusable button
+                // tvOS resolves `.primary` to the app's accent, so a board
+                // built from links comes out entirely brand blue — the loudest
+                // thing on screen sitting on the part nobody is reading. The
+                // number carries the tint, and only when it earns it.
+                .foregroundStyle(.white)
                 .lineLimit(1)
             Spacer(minLength: 40)
             if let reading {
@@ -155,14 +161,14 @@ private struct FavoriteRow: View {
                         }
                     }
                 }
-                .foregroundStyle(reading.isFiring ? Color.accentColor : .primary)
+                .foregroundStyle(reading.isFiring ? Color.accentColor : Color.white)
                 .frame(width: 190, alignment: .leading)
             } else {
                 // A blank, not a spinner. The row is the right height already
                 // and a spinner on every row reads as a broken screen.
                 Text("—")
                     .font(.system(size: 62, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.white.opacity(0.3))
                     .frame(width: 190, alignment: .leading)
             }
         }

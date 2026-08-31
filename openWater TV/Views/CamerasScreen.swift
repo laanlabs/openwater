@@ -106,6 +106,7 @@ struct CamCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(cam.displayName)
                     .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
                 HStack(spacing: 10) {
                     if case .stream = cam.playback {

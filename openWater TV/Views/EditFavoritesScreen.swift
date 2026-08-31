@@ -52,6 +52,7 @@ struct EditFavoritesScreen: View {
                     Button { country = region } label: {
                         HStack {
                             Text(region.name).font(.system(size: 34))
+                                .foregroundStyle(.white)
                             Spacer()
                             Text("\(region.spotCount)")
                                 .font(.system(size: 28))
@@ -96,6 +97,7 @@ private struct SpotPicker: View {
                                 .foregroundStyle(starred ? Color.accentColor : .secondary)
                                 .frame(width: 44)
                             Text(spot.name).font(.system(size: 32))
+                                .foregroundStyle(.white)
                             Spacer()
                             if let region = spot.adminRegion {
                                 Text(region)

@@ -1,4 +1,5 @@
 import CoreLocation
+import OpenWaterSpots
 import SwiftUI
 import WeatherKit
 

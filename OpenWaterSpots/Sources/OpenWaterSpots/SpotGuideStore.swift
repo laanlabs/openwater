@@ -11,117 +11,117 @@ import SwiftUI
 /// carries no Firebase SDK for this, because the guide is a public read-only
 /// dataset behind rules that only expose published, real spots. The website's
 /// server does exactly this from Node; the phone can do it from URLSession.
-struct GuideSpot: Identifiable, Codable, Hashable {
-    let spotId: String
-    let slug: String?
-    let name: String
-    let latitude: Double
-    let longitude: Double
+public struct GuideSpot: Identifiable, Codable, Hashable, Sendable {
+    public let spotId: String
+    public let slug: String?
+    public let name: String
+    public let latitude: Double
+    public let longitude: Double
 
-    let country: String?
-    let countryId: String?
-    let adminRegion: String?
-    let adminRegionId: String?
-    let browseRegionIds: [String]
+    public let country: String?
+    public let countryId: String?
+    public let adminRegion: String?
+    public let adminRegionId: String?
+    public let browseRegionIds: [String]
 
     /// The headline discipline ("Wing Foiling"), plus everything flagged true.
-    let preferredActivity: String?
-    let activities: [String]
+    public let preferredActivity: String?
+    public let activities: [String]
 
-    let bestWinds: String?
-    let bestSeason: String?
-    let waterState: String?
+    public let bestWinds: String?
+    public let bestSeason: String?
+    public let waterState: String?
     /// Degrees true from the beach out to open water, when the guide knows
     /// it. Nobody writes this yet — the guide's editor has no field for it
     /// — but the read side costs a line, and the day the guide grows one,
     /// every spot's surf tab starts judging wind against its own shore.
-    let shoreFacingDeg: Double?
-    let experienceLevel: String?
-    let hazards: String?
-    let parking: String?
-    let googleMapsURL: String?
+    public let shoreFacingDeg: Double?
+    public let experienceLevel: String?
+    public let hazards: String?
+    public let parking: String?
+    public let googleMapsURL: String?
 
     /// Best non-rejected photo, approved first — the site's `bestImage` rule.
-    let imageURL: String?
-    let imageCredit: String?
+    public let imageURL: String?
+    public let imageCredit: String?
 
-    let windStationIds: [String]
-    let cameraIds: [String]
-    let guideIds: [String]
-    let surfSpotIds: [String]
-    let tideStationIds: [String]
+    public let windStationIds: [String]
+    public let cameraIds: [String]
+    public let guideIds: [String]
+    public let surfSpotIds: [String]
+    public let tideStationIds: [String]
 
     /// The nearest-tide-station match embedded on the spot itself — the
     /// fallback when no tideStations documents are linked.
-    let tideChartURL: String?
-    let tideProvider: String?
+    public let tideChartURL: String?
+    public let tideProvider: String?
 
-    var windStationCount: Int { windStationIds.count }
-    var cameraCount: Int { cameraIds.count }
-    var guideCount: Int { guideIds.count }
-    var surfCount: Int { surfSpotIds.count }
-    var tideCount: Int { max(tideStationIds.count, tideChartURL != nil ? 1 : 0) }
+    public var windStationCount: Int { windStationIds.count }
+    public var cameraCount: Int { cameraIds.count }
+    public var guideCount: Int { guideIds.count }
+    public var surfCount: Int { surfSpotIds.count }
+    public var tideCount: Int { max(tideStationIds.count, tideChartURL != nil ? 1 : 0) }
 
-    var id: String { spotId }
+    public var id: String { spotId }
 
-    var coordinate: CLLocationCoordinate2D {
+    public var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
-    var where_: String {
+    public var where_: String {
         [adminRegion, country].compactMap { $0 }.joined(separator: ", ")
     }
 
-    var resourceCount: Int {
+    public var resourceCount: Int {
         windStationCount + cameraCount + guideCount + surfCount + tideCount
     }
 }
 
 /// A region document: country, admin region, or curated destination.
-struct GuideRegion: Identifiable, Codable, Hashable {
-    let id: String
-    let name: String
-    let type: String
-    let description: String?
-    var spotCount: Int = 0
+public struct GuideRegion: Identifiable, Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let type: String
+    public let description: String?
+    public var spotCount: Int = 0
 }
 
 /// A current wind reading for a spot, from the same free model feed the
 /// website falls back to. Always a model estimate on the phone — labelled as
 /// such wherever it is shown, because a rider deciding whether to drive
 /// deserves to know it is not an anemometer.
-struct WindReading: Codable {
-    let speedKn: Double
-    let gustKn: Double?
-    let directionDeg: Double
-    let at: Date
+public struct WindReading: Codable, Sendable {
+    public let speedKn: Double
+    public let gustKn: Double?
+    public let directionDeg: Double
+    public let at: Date
 
-    var cardinal: String { Format.cardinal(directionDeg) }
+    public var cardinal: String { Format.cardinal(directionDeg) }
     /// The "is it on?" threshold the design leads with.
-    var isFiring: Bool { speedKn >= 15 }
+    public var isFiring: Bool { speedKn >= 15 }
 }
 
 /// One bar of the 12-hour outlook on the detail screen.
-struct WindForecastHour: Codable, Identifiable {
-    let date: Date
-    let speedKn: Double
-    let gustKn: Double?
-    let directionDeg: Double
-    var id: Date { date }
+public struct WindForecastHour: Codable, Identifiable, Sendable {
+    public let date: Date
+    public let speedKn: Double
+    public let gustKn: Double?
+    public let directionDeg: Double
+    public var id: Date { date }
 }
 
 // MARK: - A favorites row
 
 /// One row of the favorites tab, whichever kind of saved thing it is —
 /// the tab shows them all in one list, so the order has to speak all three.
-enum FavoriteItem: Identifiable {
+public enum FavoriteItem: Identifiable, Sendable {
     case spot(GuideSpot)
     case route(PlannedRoute)
     case privateSpot(PrivateSpot)
 
     /// The persisted order's vocabulary: typed, so a route and a spot
     /// sharing an id string could never collide.
-    var key: String {
+    public var key: String {
         switch self {
         case .spot(let spot): "spot:\(spot.spotId)"
         case .route(let route): "route:\(route.id.uuidString)"
@@ -129,7 +129,7 @@ enum FavoriteItem: Identifiable {
         }
     }
 
-    var id: String { key }
+    public var id: String { key }
 }
 
 // MARK: - Store
@@ -137,35 +137,35 @@ enum FavoriteItem: Identifiable {
 /// The spot guide: 1000+ launches, cached on disk, favorites, and live wind.
 @MainActor
 @Observable
-final class SpotGuideStore {
+public final class SpotGuideStore {
 
-    private(set) var spots: [GuideSpot] = []
-    private(set) var destinations: [GuideRegion] = []
-    private(set) var countries: [GuideRegion] = []
-    private(set) var isLoading = false
-    private(set) var loadError: String?
+    public private(set) var spots: [GuideSpot] = []
+    public private(set) var destinations: [GuideRegion] = []
+    public private(set) var countries: [GuideRegion] = []
+    public private(set) var isLoading = false
+    public private(set) var loadError: String?
 
     /// Wind readings by spotId. Filled in batches as spots become visible.
-    private(set) var wind: [String: WindReading] = [:]
+    public private(set) var wind: [String: WindReading] = [:]
 
     /// Hourly series by spotId, fetched only once the map's time slider
     /// asks for an hour that is not now. `wind` stays the authority for
     /// now — `current=` is the freshest thing the model will say — and
     /// these are the forecast a scrubbed hour is entitled to.
-    private(set) var windHours: [String: [WindForecastHour]] = [:]
+    public private(set) var windHours: [String: [WindForecastHour]] = [:]
 
     /// Ordered — the rider arranges these by hand in the favorites editor,
     /// so the array is the truth and membership checks ride on it. (It was
     /// a Set once; the persisted shape is the same string array, so old
     /// installs just inherit whatever order the Set happened to save.)
-    private(set) var favoriteIds: [String] {
+    public private(set) var favoriteIds: [String] {
         didSet { UserDefaults.standard.set(favoriteIds, forKey: Self.favoritesKey) }
     }
 
     /// Spots the rider saved for themselves — never sent anywhere, so they
     /// live wholly in defaults rather than behind the Firestore door the
     /// guide and suggestions go through.
-    private(set) var privateSpots: [PrivateSpot] = []
+    public private(set) var privateSpots: [PrivateSpot] = []
 
     private static let favoritesKey = "spotGuide.favorites"
     private static let favoritesOrderKey = "spotGuide.favoritesOrder"
@@ -182,14 +182,14 @@ final class SpotGuideStore {
     // Internal, not private: the suggestion client writes through the same
     // door (create-only, bounded by the rules) and must not grow its own copy
     // of these to drift out of sync.
-    static let project = "openwaterapp-2e0f7"
-    static let apiKey = "AIzaSyD_wieknJx9-v_nRuszJrzaNvohfl0gRq8"
-    static let storageBucket = "openwaterapp-2e0f7.firebasestorage.app"
-    static var firestoreBase: String {
+    public static let project = "openwaterapp-2e0f7"
+    public static let apiKey = "AIzaSyD_wieknJx9-v_nRuszJrzaNvohfl0gRq8"
+    public static let storageBucket = "openwaterapp-2e0f7.firebasestorage.app"
+    public static var firestoreBase: String {
         "https://firestore.googleapis.com/v1/projects/\(project)/databases/(default)/documents"
     }
 
-    init() {
+    public init() {
         favoriteIds = UserDefaults.standard.stringArray(forKey: Self.favoritesKey) ?? []
         favoritesOrder = UserDefaults.standard.stringArray(forKey: Self.favoritesOrderKey) ?? []
         if let data = UserDefaults.standard.data(forKey: Self.privateSpotsKey),
@@ -198,7 +198,7 @@ final class SpotGuideStore {
         }
     }
 
-    func toggleFavorite(_ spotId: String) {
+    public func toggleFavorite(_ spotId: String) {
         if let index = favoriteIds.firstIndex(of: spotId) { favoriteIds.remove(at: index) }
         else { favoriteIds.append(spotId) }
     }
@@ -206,11 +206,11 @@ final class SpotGuideStore {
     /// In the rider's own order. An id the loaded guide can't resolve is
     /// skipped here but kept in `favoriteIds` — the guide refreshes, the
     /// favorite comes back where it was.
-    var favorites: [GuideSpot] {
+    public var favorites: [GuideSpot] {
         favoriteIds.compactMap { id in spots.first { $0.spotId == id } }
     }
 
-    func removeFavorite(_ spotId: String) {
+    public func removeFavorite(_ spotId: String) {
         favoriteIds.removeAll { $0 == spotId }
     }
 
@@ -221,13 +221,13 @@ final class SpotGuideStore {
     /// keys, persisted whole. Items the list has never been told about
     /// keep their natural order at the end; keys whose item is gone just
     /// never match, and the next reorder writes them out.
-    private(set) var favoritesOrder: [String] {
+    public private(set) var favoritesOrder: [String] {
         didSet { UserDefaults.standard.set(favoritesOrder, forKey: Self.favoritesOrderKey) }
     }
 
     /// Everything the favorites tab shows, in the rider's own order.
     /// Routes are handed in because they live in their own store.
-    func favoriteItems(routes: [PlannedRoute]) -> [FavoriteItem] {
+    public func favoriteItems(routes: [PlannedRoute]) -> [FavoriteItem] {
         let items = favorites.map(FavoriteItem.spot)
             + routes.map(FavoriteItem.route)
             + privateSpots.map(FavoriteItem.privateSpot)
@@ -239,29 +239,29 @@ final class SpotGuideStore {
         }.map(\.element)
     }
 
-    func moveFavoriteItems(routes: [PlannedRoute], fromOffsets: IndexSet, toOffset: Int) {
+    public func moveFavoriteItems(routes: [PlannedRoute], fromOffsets: IndexSet, toOffset: Int) {
         var keys = favoriteItems(routes: routes).map(\.key)
         keys.move(fromOffsets: fromOffsets, toOffset: toOffset)
         favoritesOrder = keys
     }
 
-    func addPrivateSpot(_ spot: PrivateSpot) {
+    public func addPrivateSpot(_ spot: PrivateSpot) {
         privateSpots.append(spot)
         savePrivateSpots()
     }
 
-    func removePrivateSpot(_ id: UUID) {
+    public func removePrivateSpot(_ id: UUID) {
         privateSpots.removeAll { $0.id == id }
         savePrivateSpots()
     }
 
-    func renamePrivateSpot(_ id: UUID, to name: String) {
+    public func renamePrivateSpot(_ id: UUID, to name: String) {
         guard let index = privateSpots.firstIndex(where: { $0.id == id }) else { return }
         privateSpots[index].name = name
         savePrivateSpots()
     }
 
-    func setShoreFacing(_ id: UUID, to degrees: Double?) {
+    public func setShoreFacing(_ id: UUID, to degrees: Double?) {
         guard let index = privateSpots.firstIndex(where: { $0.id == id }) else { return }
         privateSpots[index].shoreFacingDeg = degrees
         savePrivateSpots()
@@ -272,23 +272,23 @@ final class SpotGuideStore {
                                   forKey: Self.privateSpotsKey)
     }
 
-    func spot(id: String) -> GuideSpot? {
+    public func spot(id: String) -> GuideSpot? {
         spots.first { $0.spotId == id }
     }
 
-    func spots(inDestination region: GuideRegion) -> [GuideSpot] {
+    public func spots(inDestination region: GuideRegion) -> [GuideSpot] {
         let byBrowse = spots.filter { $0.browseRegionIds.contains(region.id) }
         if !byBrowse.isEmpty { return byBrowse }
         if let inBox = Self.curatedBox(for: region.id) { return spots.filter(inBox) }
         return []
     }
 
-    func spots(inCountry region: GuideRegion) -> [GuideSpot] {
+    public func spots(inCountry region: GuideRegion) -> [GuideSpot] {
         spots.filter { $0.countryId == region.id }
     }
 
     /// The closest launch in the guide — what a call-out means by "here".
-    func nearestSpot(to coordinate: Geo.Coordinate) -> GuideSpot? {
+    public func nearestSpot(to coordinate: Geo.Coordinate) -> GuideSpot? {
         spots.min { a, b in
             Geo.distance(coordinate, .init(latitude: a.latitude, longitude: a.longitude)) <
             Geo.distance(coordinate, .init(latitude: b.latitude, longitude: b.longitude))
@@ -298,7 +298,7 @@ final class SpotGuideStore {
     /// Current model wind at an arbitrary coordinate — the tools' entry
     /// point. Same feed, cache and honesty rules as the spot pins; cached
     /// under a synthetic key derived from the rounded coordinate.
-    func currentWind(at coordinate: Geo.Coordinate) async -> WindReading? {
+    public func currentWind(at coordinate: Geo.Coordinate) async -> WindReading? {
         let key = String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)
         if let cached = wind[key], Date().timeIntervalSince(cached.at) < Self.windTTL {
             return cached
@@ -316,7 +316,7 @@ final class SpotGuideStore {
     /// The guide changes on the scale of days, so the app never blocks on the
     /// network: a cached dataset is served instantly and a background refresh
     /// swaps in the new one when it lands.
-    func load() async {
+    public func load() async {
         if spots.isEmpty, let cached = Self.readCache() {
             apply(cached)
         }
@@ -350,7 +350,7 @@ final class SpotGuideStore {
     /// Open-Meteo takes comma-separated coordinate lists, so forty visible
     /// pins are one request, not forty. Readings older than ten minutes are
     /// refetched; anything fresher is left alone.
-    func refreshWind(for targets: [GuideSpot]) async {
+    public func refreshWind(for targets: [GuideSpot]) async {
         let now = Date()
         let due = targets.filter { spot in
             guard let existing = wind[spot.spotId] else { return true }
@@ -403,13 +403,13 @@ final class SpotGuideStore {
 
     /// How far the time slider reaches either side of now, and the depth
     /// the hourly fetches buy to cover it.
-    static let scrubPastHours = 6
-    static let scrubForecastHours = 72
+    public static let scrubPastHours = 6
+    public static let scrubForecastHours = 72
 
     /// Hourly series for the spots the map is showing, one batched request
     /// — the route grid's own fetcher, pointed at pins. Only called once
     /// the slider leaves now, so a rider who never scrubs never pays.
-    func refreshWindHours(for targets: [GuideSpot]) async {
+    public func refreshWindHours(for targets: [GuideSpot]) async {
         let due = targets.filter { windHours[$0.spotId] == nil }
         guard !due.isEmpty else { return }
         // The same cap `refreshWind` uses; the nearest have priority
@@ -429,21 +429,21 @@ final class SpotGuideStore {
     /// answered by the old one, and both caches are keyed by spot rather
     /// than by model, so keeping them would mean showing ICON's wind under
     /// ECMWF's name until each TTL happened to expire.
-    func forgetWind() {
+    public func forgetWind() {
         wind.removeAll()
         windHours.removeAll()
     }
 
     /// The key both wind stores use for a bare coordinate — the centre
     /// pin's "here", which is a place rather than a spot.
-    static func windKey(for coordinate: Geo.Coordinate) -> String {
+    public static func windKey(for coordinate: Geo.Coordinate) -> String {
         String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)
     }
 
     /// The centre pin's own hourly series, so the map's headline pill can
     /// answer for the scrubbed hour instead of contradicting every other
     /// number on screen.
-    func refreshWindHours(at coordinate: Geo.Coordinate) async {
+    public func refreshWindHours(at coordinate: Geo.Coordinate) async {
         let key = Self.windKey(for: coordinate)
         guard windHours[key] == nil else { return }
         let series = await OpenMeteo.windAlong(
@@ -456,7 +456,7 @@ final class SpotGuideStore {
     /// any other hour is the nearest row of that spot's series, and nil
     /// until the series lands — a pin that shows this hour's number under
     /// tomorrow's label would be a lie the map cannot afford.
-    func reading(for spotId: String, at instant: Date?) -> WindReading? {
+    public func reading(for spotId: String, at instant: Date?) -> WindReading? {
         guard let instant else { return wind[spotId] }
         guard let rows = windHours[spotId], !rows.isEmpty else { return nil }
         let nearest = rows.min {
@@ -496,12 +496,12 @@ final class SpotGuideStore {
     }
 
     /// The 12-hour outlook for one spot, for the detail screen's bars.
-    func forecast(for spot: GuideSpot) async -> [WindForecastHour] {
+    public func forecast(for spot: GuideSpot) async -> [WindForecastHour] {
         await forecast(latitude: spot.latitude, longitude: spot.longitude)
     }
 
     /// The same outlook at an arbitrary coordinate, for the tools.
-    func forecast(latitude: Double, longitude: Double) async -> [WindForecastHour] {
+    public func forecast(latitude: Double, longitude: Double) async -> [WindForecastHour] {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", latitude)),
@@ -544,11 +544,11 @@ final class SpotGuideStore {
     /// One outbound link on a spot page — a wind meter on iKitesurf, a
     /// Surfline forecast, a tide chart, a webcam, a local guide. The guide's
     /// whole pitch is that these live in one place instead of five apps.
-    struct SpotLink: Identifiable, Hashable {
-        enum Kind: String {
+    public struct SpotLink: Identifiable, Hashable, Sendable {
+        public enum Kind: String, Sendable {
             case wind, camera, tide, surf, guide
 
-            var label: String {
+            public var label: String {
                 switch self {
                 case .wind: "Live wind"
                 case .camera: "Webcam"
@@ -558,7 +558,7 @@ final class SpotGuideStore {
                 }
             }
 
-            var symbol: String {
+            public var symbol: String {
                 switch self {
                 case .wind: "gauge.with.needle"
                 case .camera: "video"
@@ -569,13 +569,13 @@ final class SpotGuideStore {
             }
         }
 
-        let kind: Kind
-        let name: String
-        let url: URL
-        let provider: String?
-        var id: String { url.absoluteString + name }
+        public let kind: Kind
+        public let name: String
+        public let url: URL
+        public let provider: String?
+        public var id: String { url.absoluteString + name }
 
-        var providerLabel: String {
+        public var providerLabel: String {
             provider ?? url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
         }
     }
@@ -583,7 +583,7 @@ final class SpotGuideStore {
     private var linkCache: [String: [SpotLink]] = [:]
 
     /// Everything this spot links out to, fetched once and kept for the session.
-    func links(for spot: GuideSpot) async -> [SpotLink] {
+    public func links(for spot: GuideSpot) async -> [SpotLink] {
         if let cached = linkCache[spot.spotId] { return cached }
 
         let main: [(String, [String], SpotLink.Kind)] = [
@@ -650,13 +650,13 @@ final class SpotGuideStore {
     /// guide's resources all carry their own coordinates, so the uncurated
     /// answer — everything within a few kilometres, nearest first — is a
     /// query away and frequently more useful.
-    struct GuideResource: Identifiable, Hashable {
-        let kind: SpotLink.Kind
-        let name: String
-        let url: URL
-        let provider: String?
-        let detail: String?
-        let coordinate: Geo.Coordinate
+    public struct GuideResource: Identifiable, Hashable, Sendable {
+        public let kind: SpotLink.Kind
+        public let name: String
+        public let url: URL
+        public let provider: String?
+        public let detail: String?
+        public let coordinate: Geo.Coordinate
         /// What the registry says about getting a reading out of this one.
         ///
         /// `windStations` has carried these since the classification rules
@@ -665,24 +665,35 @@ final class SpotGuideStore {
         /// visitor can see was drawn exactly like one behind a paywall. On
         /// the East End, where a provider inventory of 181 rows was
         /// published in one go, that is most of the map.
-        var accessTier: String?
-        var requiresSubscription: Bool?
-        var guestWindVisible: Bool?
-        var providerType: String?
+        public var accessTier: String?
+        public var requiresSubscription: Bool?
+        public var guestWindVisible: Bool?
+        public var providerType: String?
+        /// The media behind a camera row, when the guide knows of any.
+        ///
+        /// A camera document is a `url` and nothing more for most of the
+        /// collection — a Surfline page, an ipcamlive player, a town's
+        /// webcam page — and opening one of those needs a browser. A
+        /// minority also carry the media itself: `streamUrl` is an HLS
+        /// playlist, `stillUrl` a JPEG that the operator overwrites. Those
+        /// two are the only rows a client without a browser can show, so
+        /// they are read here rather than left in the document.
+        public var streamUrl: URL?
+        public var stillUrl: URL?
         /// From the spot it was asked about — filled in per query, not stored,
         /// because the same regional cache serves every spot in the region.
-        var metres: Double = 0
+        public var metres: Double = 0
         /// And which way, for the same reason.
         ///
         /// Distance alone does not separate a row from the one under it when
         /// eleven Surfline map links all resolve to the same name. "3.7 mi
         /// WNW" and "4.3 mi ENE" are two different places on two different
         /// banks of the river, which is the thing a rider is choosing between.
-        var bearing: Double = 0
+        public var bearing: Double = 0
 
-        var id: String { url.absoluteString + name }
+        public var id: String { url.absoluteString + name }
 
-        var providerLabel: String {
+        public var providerLabel: String {
             provider ?? url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
         }
 
@@ -692,7 +703,7 @@ final class SpotGuideStore {
         /// iKitesurf is commercial and most of its rows are still readable
         /// without an account, which is the whole distinction a rider
         /// looking at a map of pins is trying to make.
-        var isLocked: Bool {
+        public var isLocked: Bool {
             if guestWindVisible == true { return false }
             if let requiresSubscription { return requiresSubscription }
             return accessTier == "subscription" || accessTier == "authenticated"
@@ -700,7 +711,7 @@ final class SpotGuideStore {
 
         /// A government sensor the app can read for itself, wearing whatever
         /// name the registry gave it.
-        var isGovernment: Bool {
+        public var isGovernment: Bool {
             providerType == "government"
                 || ["noaa", "nws", "ndbc", "coops"].contains(provider?.lowercased() ?? "")
         }
@@ -716,7 +727,7 @@ final class SpotGuideStore {
         ///    `/surf-report/bolinas-jetty/5842…` is Bolinas Jetty.
         /// 2. Failing that, say what it is and keep a short tail of the id, so
         ///    three stations from one provider stay tellable apart.
-        var displayName: String {
+        public var displayName: String {
             let head = name.components(separatedBy: " — ").first ?? name
             guard Self.isOpaque(head) else { return name }
             if let fromPath = Self.nameFromPath(url) { return fromPath }
@@ -787,14 +798,40 @@ final class SpotGuideStore {
         /// Stated because it is the first thing a rider wants to know and the
         /// last thing a link tells them. Anything not recognised gets no
         /// badge rather than a guess.
-        enum Access { case free, account, unknown }
+        public enum Access { case free, account, unknown }
 
-        var access: Access {
+        public var access: Access {
             let host = (provider ?? url.host ?? "").lowercased()
             if host.contains("weather.gov") || host.contains("noaa.gov")
                 || host.contains("ndbc") || host.contains("open-meteo") { return .free }
             if host.contains("ikitesurf") || host.contains("weatherflow") { return .account }
             return .unknown
+        }
+
+        /// What a client with no browser can actually show.
+        ///
+        /// The phone opens any camera, because it has a web view and can fall
+        /// back to Safari. Apple TV has neither, so a row is either media it
+        /// can play or a dead end, and a dead end on a television — pressed
+        /// from a sofa, ten feet away, with a remote — is worse than an
+        /// absence. This is the classification that decides which rows the TV
+        /// is allowed to draw at all.
+        public enum Playback: Hashable, Sendable {
+            /// An HLS playlist. `AVPlayer` handles these directly.
+            case stream(URL)
+            /// A JPEG the operator overwrites in place; refetch to advance it.
+            case still(URL)
+        }
+
+        /// The stream if there is one, else the still, else nothing.
+        ///
+        /// Stream first because a live picture is what somebody checking a
+        /// cam came for; the still is what forty-odd Surfline rows carry
+        /// alongside it and what a handful of small operators carry instead.
+        public var playback: Playback? {
+            if let streamUrl { return .stream(streamUrl) }
+            if let stillUrl { return .still(stillUrl) }
+            return nil
         }
     }
 
@@ -807,7 +844,7 @@ final class SpotGuideStore {
     /// anything within a sensible drive. Falls back to the country when a
     /// spot has no region, and caches per region because the second spot a
     /// rider opens in the same place should cost nothing.
-    func nearbyResources(to spot: GuideSpot, radius: Double = 40_000) async -> [GuideResource] {
+    public func nearbyResources(to spot: GuideSpot, radius: Double = 40_000) async -> [GuideResource] {
         await nearbyResources(
             near: Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude),
             region: spot, radius: radius
@@ -822,7 +859,7 @@ final class SpotGuideStore {
     /// which region to search. That is exact in practice, since a region is
     /// a state or a country and the nearest launch is inside the one you are
     /// standing in.
-    func nearbyResources(near coordinate: Geo.Coordinate, radius: Double = 40_000) async -> [GuideResource] {
+    public func nearbyResources(near coordinate: Geo.Coordinate, radius: Double = 40_000) async -> [GuideResource] {
         await nearbyResources(near: coordinate, region: nearestSpot(to: coordinate), radius: radius)
     }
 
@@ -933,7 +970,9 @@ final class SpotGuideStore {
                             accessTier: doc.fields["accessTier"]?.stringValue,
                             requiresSubscription: doc.fields["requiresSubscription"]?.booleanValue,
                             guestWindVisible: doc.fields["guestWindVisible"]?.booleanValue,
-                            providerType: doc.fields["providerType"]?.stringValue
+                            providerType: doc.fields["providerType"]?.stringValue,
+                            streamUrl: Self.playableStream(in: doc.fields),
+                            stillUrl: Self.playableStill(in: doc.fields)
                         )
                     }
                 }
@@ -953,6 +992,42 @@ final class SpotGuideStore {
         return found
     }
 
+    /// The HLS playlist in a camera document, under whichever key it landed.
+    ///
+    /// `streamUrl` is where the guide puts one deliberately. `directUrl` is
+    /// the looser field — mostly a snapshot JPEG or a YouTube page, but a few
+    /// rows put a playlist there, and one that ends `.m3u8` is a playlist
+    /// whatever field it arrived in. Nothing else is guessed: a player URL is
+    /// not a stream, and offering one would put a spinner on the television
+    /// that never resolves.
+    nonisolated private static func playableStream(in fields: [String: FirestoreValue]) -> URL? {
+        for key in ["streamUrl", "directUrl"] {
+            guard let text = fields[key]?.stringValue,
+                  text.split(separator: "?").first?.hasSuffix(".m3u8") == true,
+                  let url = URL(string: text), url.scheme?.hasPrefix("http") == true
+            else { continue }
+            return url
+        }
+        return nil
+    }
+
+    /// The still frame, under whichever key it landed.
+    ///
+    /// Four spellings are in use across the collection — the guide grew them
+    /// one operator at a time — and they mean the same thing, so they are
+    /// read in the order a deliberate one beats an incidental one.
+    nonisolated private static func playableStill(in fields: [String: FirestoreValue]) -> URL? {
+        for key in ["stillUrl", "directImageUrl", "imageUrl", "directUrl"] {
+            guard let text = fields[key]?.stringValue,
+                  let head = text.split(separator: "?").first,
+                  [".jpg", ".jpeg", ".png"].contains(where: { head.lowercased().hasSuffix($0) }),
+                  let url = URL(string: text), url.scheme?.hasPrefix("http") == true
+            else { continue }
+            return url
+        }
+        return nil
+    }
+
     // MARK: The resource disk cache
 
     private static let resourceCacheTTL: TimeInterval = 7 * 86_400
@@ -961,19 +1036,21 @@ final class SpotGuideStore {
     /// what the file holds is spelled here, so the domain type can grow
     /// without silently breaking old caches.
     private struct StoredResource: Codable {
-        let kind: String
-        let name: String
-        let url: String
-        let provider: String?
-        let detail: String?
-        let latitude: Double
-        let longitude: Double
+        public let kind: String
+        public let name: String
+        public let url: String
+        public let provider: String?
+        public let detail: String?
+        public let latitude: Double
+        public let longitude: Double
         // Optional so a cache written before the app read these still
         // decodes — it comes back unclassified until the week expires it.
-        var accessTier: String?
-        var requiresSubscription: Bool?
-        var guestWindVisible: Bool?
-        var providerType: String?
+        public var accessTier: String?
+        public var requiresSubscription: Bool?
+        public var guestWindVisible: Bool?
+        public var providerType: String?
+        public var streamUrl: String?
+        public var stillUrl: String?
     }
 
     private static func resourceCacheURL(for key: String) -> URL {
@@ -982,7 +1059,11 @@ final class SpotGuideStore {
         // classification decodes fine and answers "unclassified" for a
         // week, which would hold the free-versus-paid fix off every phone
         // that already has one. Bumping the name retires them today.
-        return URL.cachesDirectory.appending(path: "guide-resources-v2-\(String(safe)).json")
+        //
+        // v3 for the same reason again: a v2 file has no stream or still on
+        // any row, so a television reading one would say every camera near
+        // you is a web page for a week before the file expired.
+        return URL.cachesDirectory.appending(path: "guide-resources-v3-\(String(safe)).json")
     }
 
     private static func storedResources(for key: String) -> (resources: [GuideResource], age: TimeInterval)? {
@@ -1002,7 +1083,9 @@ final class SpotGuideStore {
                                  accessTier: row.accessTier,
                                  requiresSubscription: row.requiresSubscription,
                                  guestWindVisible: row.guestWindVisible,
-                                 providerType: row.providerType)
+                                 providerType: row.providerType,
+                                 streamUrl: row.streamUrl.flatMap(URL.init(string:)),
+                                 stillUrl: row.stillUrl.flatMap(URL.init(string:)))
         }
         return (resources, Date().timeIntervalSince(written))
     }
@@ -1017,7 +1100,9 @@ final class SpotGuideStore {
                            accessTier: resource.accessTier,
                            requiresSubscription: resource.requiresSubscription,
                            guestWindVisible: resource.guestWindVisible,
-                           providerType: resource.providerType)
+                           providerType: resource.providerType,
+                           streamUrl: resource.streamUrl?.absoluteString,
+                           stillUrl: resource.stillUrl?.absoluteString)
         }
         if let encoded = try? JSONEncoder().encode(rows) {
             try? encoded.write(to: resourceCacheURL(for: key), options: .atomic)
@@ -1046,14 +1131,14 @@ final class SpotGuideStore {
     /// Observed, like `wind`, so a card can read it during body evaluation
     /// rather than carrying its own copy of state that has to be threaded
     /// through every view that wants it.
-    private(set) var weatherBySpot: [String: SpotWeather] = [:]
+    public private(set) var weatherBySpot: [String: SpotWeather] = [:]
 
-    func weatherReading(for spot: GuideSpot) -> SpotWeather? { weatherBySpot[spot.spotId] }
+    public func weatherReading(for spot: GuideSpot) -> SpotWeather? { weatherBySpot[spot.spotId] }
 
     /// Temperature and sky for a spot, alongside the wind the card already
     /// shows. Same free model, same TTL.
     @discardableResult
-    func weather(for spot: GuideSpot) async -> SpotWeather? {
+    public func weather(for spot: GuideSpot) async -> SpotWeather? {
         await weather(
             at: Geo.Coordinate(latitude: spot.latitude, longitude: spot.longitude),
             key: spot.spotId
@@ -1065,12 +1150,12 @@ final class SpotGuideStore {
     /// coordinate rounded to about a hundred metres, the way the wind at a
     /// coordinate already is.
     @discardableResult
-    func weather(at coordinate: Geo.Coordinate) async -> SpotWeather? {
+    public func weather(at coordinate: Geo.Coordinate) async -> SpotWeather? {
         await weather(at: coordinate,
                       key: String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude))
     }
 
-    func weatherReading(at coordinate: Geo.Coordinate) -> SpotWeather? {
+    public func weatherReading(at coordinate: Geo.Coordinate) -> SpotWeather? {
         weatherBySpot[String(format: "@%.3f,%.3f", coordinate.latitude, coordinate.longitude)]
     }
 
@@ -1113,8 +1198,8 @@ final class SpotGuideStore {
     }
 
     private struct BatchDoc {
-        let path: String
-        let fields: [String: FirestoreValue]
+        public let path: String
+        public let fields: [String: FirestoreValue]
     }
 
     private static func batchGet(paths: [String]) async -> [BatchDoc] {
@@ -1148,11 +1233,11 @@ final class SpotGuideStore {
 
     // MARK: - Firestore REST
 
-    struct GuideDataset: Codable {
-        var spots: [GuideSpot]
-        var destinations: [GuideRegion]
-        var countries: [GuideRegion]
-        var fetchedAt: Date
+    public struct GuideDataset: Codable, Sendable {
+        public var spots: [GuideSpot]
+        public var destinations: [GuideRegion]
+        public var countries: [GuideRegion]
+        public var fetchedAt: Date
     }
 
     /// The website synthesizes these destination guides from bounding boxes
@@ -1244,7 +1329,7 @@ final class SpotGuideStore {
 
     /// Membership test for curated (bounding-box) destinations, mirrored from
     /// the fetch so `spots(inDestination:)` works for both kinds.
-    nonisolated static func curatedBox(for regionId: String) -> ((GuideSpot) -> Bool)? {
+    public nonisolated static func curatedBox(for regionId: String) -> ((GuideSpot) -> Bool)? {
         guard let curated = curatedDestinations.first(where: { $0.id == regionId }) else { return nil }
         let (latMin, latMax, lonMin, lonMax) = curated.box
         return { spot in
@@ -1258,24 +1343,24 @@ final class SpotGuideStore {
 
     /// A Firestore REST value — the tagged union the API wraps every field in.
     private struct FirestoreValue: Codable {
-        var stringValue: String?
-        var doubleValue: Double?
-        var integerValue: String?
-        var booleanValue: Bool?
-        var mapValue: MapValue?
-        var arrayValue: ArrayValue?
-        var geoPointValue: GeoPoint?
-        struct MapValue: Codable { var fields: [String: FirestoreValue]? }
-        struct ArrayValue: Codable { var values: [FirestoreValue]? }
-        struct GeoPoint: Codable { var latitude: Double?; var longitude: Double? }
+        public var stringValue: String?
+        public var doubleValue: Double?
+        public var integerValue: String?
+        public var booleanValue: Bool?
+        public var mapValue: MapValue?
+        public var arrayValue: ArrayValue?
+        public var geoPointValue: GeoPoint?
+        public struct MapValue: Codable { var fields: [String: FirestoreValue]? }
+        public struct ArrayValue: Codable { var values: [FirestoreValue]? }
+        public struct GeoPoint: Codable { var latitude: Double?; var longitude: Double? }
 
-        var number: Double? { doubleValue ?? integerValue.flatMap(Double.init) }
-        var strings: [String] { arrayValue?.values?.compactMap(\.stringValue) ?? [] }
-        subscript(key: String) -> FirestoreValue? { mapValue?.fields?[key] }
+        public var number: Double? { doubleValue ?? integerValue.flatMap(Double.init) }
+        public var strings: [String] { arrayValue?.values?.compactMap(\.stringValue) ?? [] }
+        public subscript(key: String) -> FirestoreValue? { mapValue?.fields?[key] }
 
         /// Every wind meter, camera and surf link carries its own geopoint,
         /// which is what makes "what else is near here" answerable at all.
-        var coordinate: Geo.Coordinate? {
+        public var coordinate: Geo.Coordinate? {
             guard let point = geoPointValue,
                   let latitude = point.latitude, let longitude = point.longitude
             else { return nil }
@@ -1284,8 +1369,8 @@ final class SpotGuideStore {
     }
 
     private struct FirestoreDoc {
-        let id: String
-        let fields: [String: FirestoreValue]
+        public let id: String
+        public let fields: [String: FirestoreValue]
     }
 
     private static func runQuery(
@@ -1447,5 +1532,5 @@ final class SpotGuideStore {
 
 extension Notification.Name {
     /// Posted by "Record here" on a spot page; ContentView switches tabs.
-    static let openWaterSwitchToRecord = Notification.Name("openWaterSwitchToRecord")
+    public static let openWaterSwitchToRecord = Notification.Name("openWaterSwitchToRecord")
 }

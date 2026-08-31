@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// The fixed centre pin and its readout: the Spots map's headline.

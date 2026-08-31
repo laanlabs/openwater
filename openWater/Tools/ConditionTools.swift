@@ -1,6 +1,7 @@
 import Combine
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 // The Shuttle Planner lived here until 2026-08-18. Its question — how far

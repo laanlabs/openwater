@@ -10,19 +10,19 @@ import OpenWaterCore
 /// planning content with no relationships. When "route from a past run"
 /// arrives it sets `sourceSessionId` and *queries* the library for speeds
 /// at read time — history never gets denormalized into the route.
-struct PlannedRoute: Codable, Identifiable, Hashable {
-    let id: UUID
-    var name: String
-    var waypoints: [Geo.Coordinate]
-    let createdAt: Date
+public struct PlannedRoute: Codable, Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var waypoints: [Geo.Coordinate]
+    public let createdAt: Date
     /// Nil rides the app's default sport.
-    var sport: Sport?
+    public var sport: Sport?
     /// The rider's own override; nil takes the sport's cruise default.
-    var expectedSpeedKn: Double?
+    public var expectedSpeedKn: Double?
     /// LATER: set when this route was traced from a recorded session.
-    var sourceSessionId: UUID?
+    public var sourceSessionId: UUID?
 
-    init(id: UUID = UUID(), name: String, waypoints: [Geo.Coordinate],
+    public init(id: UUID = UUID(), name: String, waypoints: [Geo.Coordinate],
          createdAt: Date = Date(), sport: Sport? = nil,
          expectedSpeedKn: Double? = nil, sourceSessionId: UUID? = nil) {
         self.id = id
@@ -36,7 +36,7 @@ struct PlannedRoute: Codable, Identifiable, Hashable {
 
     /// Decode with defaults, so routes saved before a field existed still
     /// load — the `shoreFacingDeg` lesson, learned once.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Route"
@@ -47,18 +47,18 @@ struct PlannedRoute: Codable, Identifiable, Hashable {
         sourceSessionId = try container.decodeIfPresent(UUID.self, forKey: .sourceSessionId)
     }
 
-    var path: RoutePath { RoutePath(waypoints: waypoints) }
+    public var path: RoutePath { RoutePath(waypoints: waypoints) }
 
     /// The speed the estimate runs on, in knots: the rider's override, else
     /// the sport's cruise.
-    var speedKn: Double {
+    public var speedKn: Double {
         expectedSpeedKn ?? Self.cruiseKn(for: sport)
     }
 
     /// Typical moving cruise by sport, in knots. Deliberately here and not
     /// in `SportThresholds` — that table tunes detectors against recorded
     /// tracks; this one seeds a guess about a run not yet ridden.
-    static func cruiseKn(for sport: Sport?) -> Double {
+    public static func cruiseKn(for sport: Sport?) -> Double {
         switch sport {
         case .wingfoil: 14
         case .parawing: 12
@@ -87,54 +87,54 @@ struct PlannedRoute: Codable, Identifiable, Hashable {
 /// already alive. The consumer clears the seam, so a stale ask cannot
 /// replay on a later visit.
 @MainActor
-enum RouteHandoff {
+public enum RouteHandoff: Sendable {
     /// A route the Spots tab should open on arrival.
-    static var pending: PlannedRoute?
+    public static var pending: PlannedRoute?
     /// Nothing to open — start the editor instead.
-    static var startPlanning = false
+    public static var startPlanning = false
 
-    static func post() {
+    public static func post() {
         NotificationCenter.default.post(name: .openWaterOpenRoute, object: nil)
     }
 }
 
 extension Notification.Name {
-    static let openWaterOpenRoute = Notification.Name("openWaterOpenRoute")
+    public static let openWaterOpenRoute = Notification.Name("openWaterOpenRoute")
 }
 
 /// The saved routes, owned by the phone.
 @MainActor
 @Observable
-final class RouteStore {
+public final class RouteStore {
 
     private static let key = "routes.planned"
 
-    private(set) var routes: [PlannedRoute] = []
+    public private(set) var routes: [PlannedRoute] = []
 
-    init() {
+    public init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
            let saved = try? JSONDecoder().decode([PlannedRoute].self, from: data) {
             routes = saved
         }
     }
 
-    func add(_ route: PlannedRoute) {
+    public func add(_ route: PlannedRoute) {
         routes.append(route)
         save()
     }
 
-    func remove(_ id: UUID) {
+    public func remove(_ id: UUID) {
         routes.removeAll { $0.id == id }
         save()
     }
 
-    func rename(_ id: UUID, to name: String) {
+    public func rename(_ id: UUID, to name: String) {
         guard let index = routes.firstIndex(where: { $0.id == id }) else { return }
         routes[index].name = name
         save()
     }
 
-    func update(_ route: PlannedRoute) {
+    public func update(_ route: PlannedRoute) {
         guard let index = routes.firstIndex(where: { $0.id == route.id }) else { return }
         routes[index] = route
         save()

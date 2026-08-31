@@ -1,6 +1,7 @@
 import Foundation
 import OpenWaterCore
 import OSLog
+import OpenWaterSpots
 import UIKit
 
 /// "This run says it did X and it actually did Y" — from the rider, about the

@@ -1,0 +1,211 @@
+import OpenWaterCore
+import OpenWaterSpots
+import SwiftUI
+
+/// The screen the app opens on: your spots, and what the wind is doing at each.
+///
+/// One row per spot and nothing else on it. The phone's favourites row carries
+/// a glyph, a name, an arrow and a number because that is what fits under a
+/// thumb; here the same four things are simply enormous, because the reader is
+/// three metres away and holding a cup of coffee rather than a phone.
+///
+/// The banner above them is the actual answer. "Two spots are firing" is what
+/// somebody came to the television to find out, and if it is nobody they can
+/// stop reading at the first line and go back to bed.
+struct FavoritesBoard: View {
+
+    @Environment(SpotGuideStore.self) private var guide
+
+    @State private var isEditing = false
+
+    /// Live wind for every starred spot is a single request — Open-Meteo takes
+    /// comma-separated coordinate lists — so this can run on a short loop
+    /// without being rude. `refreshWind` drops anything inside its ten-minute
+    /// TTL, so the timer costs nothing most times it fires.
+    private static let refreshInterval: Duration = .seconds(300)
+
+    private var favorites: [GuideSpot] { guide.favorites }
+
+    private var firing: [GuideSpot] {
+        favorites.filter { guide.wind[$0.spotId]?.isFiring == true }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if guide.spots.isEmpty && guide.isLoading {
+                    LoadingBoard()
+                } else if favorites.isEmpty {
+                    EmptyBoard { isEditing = true }
+                } else {
+                    board
+                }
+            }
+            .navigationDestination(for: GuideSpot.self) { SpotScreen(spot: $0) }
+        }
+        .sheet(isPresented: $isEditing) { EditFavoritesScreen() }
+        .task(id: favorites.map(\.spotId).joined()) {
+            // A loop rather than a timer: it dies with the view, and the first
+            // pass happens the moment the list exists rather than one interval
+            // later, which is the pass that matters on a screen somebody just
+            // turned on.
+            while !Task.isCancelled {
+                await guide.refreshWind(for: favorites)
+                try? await Task.sleep(for: Self.refreshInterval)
+            }
+        }
+    }
+
+    private var board: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                FiringBanner(firing: firing, total: favorites.count)
+                    .padding(.bottom, 8)
+
+                ForEach(favorites) { spot in
+                    NavigationLink(value: spot) {
+                        FavoriteRow(spot: spot, reading: guide.wind[spot.spotId])
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button("Edit spots") { isEditing = true }
+                    .padding(.top, 24)
+            }
+            .padding(.horizontal, 80)
+            .padding(.vertical, 40)
+        }
+    }
+}
+
+// MARK: - The answer, in one line
+
+/// "Three of your spots are firing — Rufus, Doug's, Stevenson."
+///
+/// Named rather than counted wherever they fit. A number alone sends somebody
+/// down the list to find out which; the names end the question on the first
+/// line, which is the entire job of this screen.
+private struct FiringBanner: View {
+
+    let firing: [GuideSpot]
+    let total: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 20) {
+            Image(systemName: firing.isEmpty ? "wind" : "flame.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(firing.isEmpty ? .secondary : Color.accentColor)
+            Text(headline)
+                .font(.system(size: 46, weight: .bold, design: .rounded))
+                .foregroundStyle(firing.isEmpty ? .secondary : .primary)
+            Spacer()
+        }
+    }
+
+    private var headline: String {
+        guard !firing.isEmpty else {
+            return total == 0 ? "Nothing saved yet" : "Nothing firing right now"
+        }
+        let names = firing.prefix(3).map(\.name).joined(separator: ", ")
+        let count = firing.count == 1 ? "1 spot is firing" : "\(firing.count) spots are firing"
+        return firing.count > 3 ? "\(count) — \(names)…" : "\(count) — \(names)"
+    }
+}
+
+// MARK: - One spot
+
+/// Name on the left, wind on the right, nothing in between.
+///
+/// The number is `monospacedDigit` for the reason the watch's speed page is:
+/// these refresh under the reader, and proportional digits make the whole row
+/// twitch sideways when 9 becomes 10.
+private struct FavoriteRow: View {
+
+    let spot: GuideSpot
+    let reading: WindReading?
+
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        HStack(spacing: 32) {
+            Text(spot.name)
+                .font(.system(size: 40, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 40)
+            if let reading {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 26))
+                    .rotationEffect(.degrees(reading.directionDeg + 180))
+                    .foregroundStyle(.secondary)
+                Text(reading.cardinal)
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 90, alignment: .leading)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("\(Int(reading.speedKn.rounded()))")
+                        .font(.system(size: 62, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("kn").font(.system(size: 24, weight: .semibold))
+                        if let gust = reading.gustKn {
+                            Text("g\(Int(gust.rounded()))")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+                .foregroundStyle(reading.isFiring ? Color.accentColor : .primary)
+                .frame(width: 190, alignment: .leading)
+            } else {
+                // A blank, not a spinner. The row is the right height already
+                // and a spinner on every row reads as a broken screen.
+                Text("—")
+                    .font(.system(size: 62, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 190, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 36)
+        .padding(.vertical, 24)
+        .background(isFocused ? Color.primary.opacity(0.14) : Color.primary.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: 20))
+        .scaleEffect(isFocused ? 1.02 : 1)
+        .animation(.easeOut(duration: 0.15), value: isFocused)
+    }
+}
+
+// MARK: - Before there is anything to show
+
+private struct LoadingBoard: View {
+    var body: some View {
+        VStack(spacing: 24) {
+            ProgressView()
+            Text("Loading the guide…")
+                .font(.system(size: 32))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct EmptyBoard: View {
+
+    let edit: () -> Void
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Image(systemName: "star")
+                .font(.system(size: 80))
+                .foregroundStyle(.secondary)
+            Text("No spots saved yet")
+                .font(.system(size: 46, weight: .bold))
+            Text("Pick the launches you actually go to. They live here with live\nwind, so \"is it on?\" is answered the moment you turn the TV on.")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Add spots", action: edit)
+                .padding(.top, 12)
+        }
+        .padding(60)
+    }
+}

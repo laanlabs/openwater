@@ -1,5 +1,6 @@
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 // MARK: - Mode

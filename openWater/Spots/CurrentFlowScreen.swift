@@ -1,5 +1,6 @@
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// The water as a field, not a number — the currents twin of the wind

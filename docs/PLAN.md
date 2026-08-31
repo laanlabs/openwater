@@ -527,3 +527,61 @@ index carries no readings, so the pin fetches the latest on the way
 in), a wind station is an outbound link. The refetch key is coarser
 than the weather key — ~10 km of panning — because the pins reach tens
 of kilometres out.
+
+## 12. openWater on Apple TV (2026-08-31)
+
+The phone is carried to the beach and the watch goes on the water. The
+television is for the kitchen at seven in the morning, before anybody
+has found their phone, and it answers one question from across the
+room: is it on? So the app is three screens — the starred spots with
+live wind, a wind map of the coast they sit on, and the cameras — and
+records nothing, because an Apple TV goes nowhere.
+
+**The shared package.** Target membership here is folder membership, so
+a file cannot belong to two apps; the watch has always shared code with
+the phone only through `OpenWaterCore`, and the television follows the
+same rule. `OpenWaterSpots` is the second local package: the guide
+store, the weather and observation clients, the forecast cache, the
+coastline mask and the wind field, with `WindPalette` lifted out of
+`FlowMapScreen` and the 7×9 grid out of it into `WindField`. Three
+files were split model-from-view on the way — `WindTrack` from its
+chart, `PrivateSpot` from its editors, `ForecastModel` from its picker
+— because in each case the model is what the television wanted and the
+view was iOS's own. The bundled indexes moved with them and are now
+read through `Bundle.module`, which is asserted by a test: a miss there
+is silent, and looks like a quiet day rather than a broken build.
+
+**The wash renders unchanged.** SwiftUI's `Map`, `MapPolygon` and
+`Annotation` are all available on tvOS 17, so the field the phone draws
+is the field the television draws, from the same `buildLayout` and
+`colourCells`. The map does not pan or zoom — there is no gesture worth
+building on a remote, and the frame is the box the rider's own spots
+sit in, which is the only coast this app is about. That frees the
+D-pad, and left and right go to the hour: the model already holds three
+days of it and scrubbing is a re-render rather than a fetch, so the
+clock is the thing the big screen finally earns.
+
+**The cameras are the platform limit.** tvOS has neither WebKit nor
+SafariServices, and those are the only two ways `CamViewerSheet`
+renders a cam, so the phone's whole camera collection does not come
+across. Measured against the live guide: of 842 cameras, 52 publish an
+HLS playlist and 24 a still image the operator overwrites — about one
+in eleven. Surfline's CDN serves its playlists to `AVPlayer`'s own user
+agent and 403s a browser's, so those play with no token and no account,
+and the 42 stills beside them make the grid real pictures rather than
+placeholder cards. `GuideResource` learned `streamUrl` and `stillUrl`
+to tell them apart (the resource cache went to v3 for it, or every
+device would have answered "no playable cams" for a week).
+
+The rest are not listed. A row that cannot be pressed is worse on a
+television than an absent one — there is no long-press, no tooltip,
+nothing to explain itself — so the empty state says plainly that most
+cams in the guide are web pages and they are on your phone. Widening
+this is the website's job, not the app's: every `stillUrl` harvested
+into a camera document lights up here for free.
+
+**Favourites are the TV's own.** They are `UserDefaults` on the phone
+with no sync behind them, and giving a shipped app an iCloud container
+to solve a once-per-household setup is a poor trade. The television
+picks its own, drilling country → spot, because there is no map gesture
+on a remote and no keyboard worth typing a launch name on.

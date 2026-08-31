@@ -1,6 +1,7 @@
 import Foundation
 import OpenWaterCore
 import OSLog
+import OpenWaterSpots
 import UIKit
 
 /// "This screen is confusing" / "it should do X" — from the rider, about the

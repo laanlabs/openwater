@@ -19,7 +19,7 @@ import SwiftUI
 /// quads.
 /// What the map's wash is showing, if anything. A picker, not a stack —
 /// two translucent fields over one another would say nothing about either.
-enum WashLayer: String, CaseIterable {
+public enum WashLayer: String, CaseIterable, Sendable {
     case off, wind, currents
 
     /// The caption's front half; the view appends the clock — "now", or
@@ -28,7 +28,7 @@ enum WashLayer: String, CaseIterable {
     /// "Open-Meteo model" over GFS's numbers is a label on the wrong tin;
     /// the current wash keeps the ocean model, which the picker does not
     /// govern — the marine API runs its own.
-    var caption: String? {
+    public var caption: String? {
         switch self {
         case .off: nil
         case .wind: "Wind wash · \(ForecastModel.selected.captionName)"
@@ -39,7 +39,7 @@ enum WashLayer: String, CaseIterable {
     /// What the hud says while this layer's field is in the air. Named for
     /// the thing being asked for, because the two layers ask different
     /// services and only one of them is about wind.
-    var loadingLabel: String {
+    public var loadingLabel: String {
         switch self {
         case .off, .wind: "Getting the wind"
         case .currents: "Getting the current"
@@ -49,13 +49,15 @@ enum WashLayer: String, CaseIterable {
 
 @MainActor
 @Observable
-final class WindWashModel {
+public final class WindWashModel {
+
+    public init() {}
 
     /// One cell of the field: a quad and the band its value falls in.
-    struct Cell: Identifiable {
-        let id: Int
-        let coordinates: [CLLocationCoordinate2D]
-        let color: Color
+    public struct Cell: Identifiable, Sendable {
+        public let id: Int
+        public let coordinates: [CLLocationCoordinate2D]
+        public let color: Color
     }
 
     /// The live field the particles stream through: the raw grids the
@@ -63,29 +65,29 @@ final class WindWashModel {
     /// bilinear surface. Directions are resolved at build time — wind
     /// flipped downwind (the streamline convention), currents as-is
     /// because they already state *toward* — so the sim advects blindly.
-    struct Field {
+    public struct Field: Sendable {
         /// Stamped per *fetch*, not per rebuild: scrubbing hours keeps the
         /// stamp, so the comet sim keeps its particles and only the wind
         /// under them changes.
-        let id: UUID
+        public let id: UUID
         /// Which fluid this is. Air and water differ by an order of
         /// magnitude — eighteen knots is an ordinary afternoon, one and a
         /// half is a strong tide — so they cannot share a pace.
-        let flow: Flow
+        public let flow: Flow
         /// Where the land is, so a comet cannot stream up a street. Empty
         /// for wind, which has every right to blow over a hill.
-        let mask: WaterMask
-        let region: MKCoordinateRegion
-        let columns: Int
-        let rows: Int
+        public let mask: WaterMask
+        public let region: MKCoordinateRegion
+        public let columns: Int
+        public let rows: Int
         /// Speed-weighted components per node — u east, v north, the way
         /// the fluid runs — nil where the model is silent.
-        let vectors: [(u: Double, v: Double)?]
+        public let vectors: [(u: Double, v: Double)?]
 
         /// Bilinear sample at fractional grid coordinates; components are
         /// interpolated rather than angles, which would spin the long way
         /// round across north.
-        func vector(gx: Double, gy: Double) -> (u: Double, v: Double)? {
+        public func vector(gx: Double, gy: Double) -> (u: Double, v: Double)? {
             let column0 = max(0, min(Int(gx), columns - 2))
             let row0 = max(0, min(Int(gy), rows - 2))
             let tx = gx - Double(column0), ty = gy - Double(row0)
@@ -116,7 +118,7 @@ final class WindWashModel {
             return (u: u / weight, v: v / weight)
         }
 
-        func coordinate(gx: Double, gy: Double) -> CLLocationCoordinate2D {
+        public func coordinate(gx: Double, gy: Double) -> CLLocationCoordinate2D {
             CLLocationCoordinate2D(
                 latitude: region.center.latitude - region.span.latitudeDelta / 2
                     + region.span.latitudeDelta * gy / Double(rows - 1),
@@ -126,7 +128,7 @@ final class WindWashModel {
 
         /// The inverse of `coordinate(gx:gy:)` — pins the sim to whatever
         /// slice of the field the camera is actually looking at.
-        func grid(of coordinate: CLLocationCoordinate2D) -> (gx: Double, gy: Double) {
+        public func grid(of coordinate: CLLocationCoordinate2D) -> (gx: Double, gy: Double) {
             let south = region.center.latitude - region.span.latitudeDelta / 2
             let west = region.center.longitude - region.span.longitudeDelta / 2
             return ((coordinate.longitude - west) / region.span.longitudeDelta * Double(columns - 1),
@@ -142,18 +144,18 @@ final class WindWashModel {
     /// the wind's numbers, a one-knot ebb crossed the screen in about four
     /// minutes: a field that reads as still, over water that is moving hard
     /// enough to decide whether a rider gets home.
-    enum Flow {
+    public enum Flow: Sendable {
         case wind, current
 
         /// The speed that crosses the visible span in `crossSeconds`.
-        var referenceKn: Double {
+        public var referenceKn: Double {
             switch self {
             case .wind: 18
             case .current: 1.2
             }
         }
 
-        var crossSeconds: Double {
+        public var crossSeconds: Double {
             switch self {
             case .wind: 6
             case .current: 5
@@ -161,7 +163,7 @@ final class WindWashModel {
         }
 
         /// The speeds between which the tail grows from a stub to a streak.
-        var tailRamp: (from: Double, to: Double) {
+        public var tailRamp: (from: Double, to: Double) {
             switch self {
             case .wind: (3, 25)
             case .current: (0.1, 2.2)
@@ -170,7 +172,7 @@ final class WindWashModel {
 
         /// Below this there is nothing honest to draw — dead calm, or slack
         /// water.
-        var stillKn: Double {
+        public var stillKn: Double {
             switch self {
             case .wind: 0.05
             case .current: 0.015
@@ -187,21 +189,21 @@ final class WindWashModel {
     /// Built once per field rectangle, then every scrubbed hour is a
     /// bilinear sample and a colour lerp over a table that already exists:
     /// a few thousand multiplies, on a thread that is not the map's.
-    struct CellLayout {
-        let id: Int
+    public struct CellLayout: Sendable {
+        public let id: Int
         /// Fractional model-grid coordinates of the quad's centre, so the
         /// hour's speeds can be sampled without re-deriving them.
-        let gx: Double
-        let gy: Double
-        let coordinates: [CLLocationCoordinate2D]
+        public let gx: Double
+        public let gy: Double
+        public let coordinates: [CLLocationCoordinate2D]
         /// The edge feather, already worked out from the cell's ring.
-        let ringAlpha: Double
+        public let ringAlpha: Double
     }
 
-    private(set) var cells: [Cell] = []
-    private(set) var field: Field?
-    private(set) var fieldRegion: MKCoordinateRegion?
-    private(set) var isLoading = false
+    public private(set) var cells: [Cell] = []
+    public private(set) var field: Field?
+    public private(set) var fieldRegion: MKCoordinateRegion?
+    public private(set) var isLoading = false
     private var loadTask: Task<Void, Never>?
     /// Bumped whenever a load is superseded, so only the newest one may say
     /// the fetching is over.
@@ -223,7 +225,7 @@ final class WindWashModel {
     /// How much wider than the view the drawn window is. Big enough that
     /// panning a screen's width does not need a redraw, small enough that
     /// the redraw it eventually needs is cheap.
-    nonisolated static let drawPadding = 2.4
+    public nonisolated static let drawPadding = 2.4
 
     /// The visible region the loaded field was sized for — the yardstick
     /// `needsReload` measures a zoom change against.
@@ -297,16 +299,17 @@ final class WindWashModel {
     /// therefore able to stick if that path never ran: a slider that drops
     /// its lift, a camera change with no end, a `clear()` that reset one and
     /// not its neighbour. One set, one question, one watchdog over the lot.
-    struct Holds: OptionSet {
-        let rawValue: Int
+    public struct Holds: OptionSet, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
         /// A finger is on a time slider.
-        static let thumb = Holds(rawValue: 1 << 0)
+        public static let thumb = Holds(rawValue: 1 << 0)
         /// The camera is between its first move and settling.
-        static let camera = Holds(rawValue: 1 << 1)
+        public static let camera = Holds(rawValue: 1 << 1)
         /// The Spots tab is behind another one. Unlike its neighbours this
         /// is not a gesture and cannot go stale, so the watchdog leaves it
         /// alone — see `releaseAllHolds`.
-        static let asleep = Holds(rawValue: 1 << 2)
+        public static let asleep = Holds(rawValue: 1 << 2)
     }
 
     @ObservationIgnored private var holds: Holds = []
@@ -320,7 +323,7 @@ final class WindWashModel {
     /// Whether the rider is owed a field they cannot see yet — fetching, or
     /// rebuilding, or holding a rebuilt one back for a moving map. The view
     /// puts a quiet progress hud up on this.
-    var isBusy: Bool { isLoading || isRebuilding }
+    public var isBusy: Bool { isLoading || isRebuilding }
     /// How still a thumb has to be before the field catches up under it.
     /// Short enough to feel like an answer, long enough that a sweep
     /// across three days never triggers one.
@@ -333,7 +336,7 @@ final class WindWashModel {
     /// life of the screen.
     private static let cameraQuiet = Duration.milliseconds(600)
     /// An hour has been asked for that the map is not showing yet.
-    private(set) var isRebuilding = false
+    public private(set) var isRebuilding = false
     private var fieldStamp = UUID()
     /// Where the land is, for the layer that must not paint over it.
     ///
@@ -358,7 +361,7 @@ final class WindWashModel {
     }()
 
     /// What the caption's clock should read; nil means "now".
-    var scrubLabel: String? {
+    public var scrubLabel: String? {
         guard scrubbedTo != nil, let displayedIndex,
               hourAxis.indices.contains(displayedIndex) else { return nil }
         let hour = hourAxis[displayedIndex]
@@ -368,7 +371,7 @@ final class WindWashModel {
 
     /// Point the wash at an instant (a route slider's), or back at now.
     /// Pure re-render from the stored day — never a fetch.
-    func scrub(to instant: Date?) {
+    public func scrub(to instant: Date?) {
         scrubbedTo = instant
         guard loadedLayer != .off else { return }
         apply()
@@ -417,12 +420,12 @@ final class WindWashModel {
     /// `MapClock` and only reports the hours it settles on, which is the
     /// same bargain made one level up. This is for the route panel's run
     /// slider, whose thumb genuinely does drive the map continuously.
-    func beginScrub() { hold(.thumb) }
-    func endScrub() { release(.thumb) }
+    public func beginScrub() { hold(.thumb) }
+    public func endScrub() { release(.thumb) }
 
     /// The camera moved. Called on every frame of a pan, so it has to be
     /// cheap: a timestamp, and a set insert only the first time.
-    func cameraMoving() { hold(.camera) }
+    public func cameraMoving() { hold(.camera) }
 
     /// Take a hold, or give one back.
     ///
@@ -467,7 +470,7 @@ final class WindWashModel {
     /// and the cell geometry are what the round trip bought, and they are
     /// still true when the rider comes back — so waking is a colour pass off
     /// the main actor rather than another fetch.
-    func sleep() {
+    public func sleep() {
         guard !holds.contains(.asleep) else { return }
         // Inserted directly rather than through `hold`: that arms the watchdog,
         // and this is the one reason that must not be watched.
@@ -478,7 +481,7 @@ final class WindWashModel {
     }
 
     /// The tab came back.
-    func wake() {
+    public func wake() {
         guard holds.contains(.asleep) else { return }
         holds.remove(.asleep)
         guard loadedLayer != .off else { return }
@@ -598,7 +601,7 @@ final class WindWashModel {
                     flow: layer == .currents ? .current : .wind,
                     mask: mask,
                     region: region,
-                    columns: FlowMapScreen.columns, rows: FlowMapScreen.rows,
+                    columns: WindField.columns, rows: WindField.rows,
                     vectors: zip(hour.speeds, hour.directions).map { speed, direction in
                         guard let speed, let direction else { return nil }
                         let runs = (layer == .wind ? direction + 180 : direction) * .pi / 180
@@ -640,7 +643,7 @@ final class WindWashModel {
     /// It adds no information — the model has what it has — but a smooth
     /// surface is the honest picture of a field that genuinely is smooth,
     /// where hard squares imply edges the water does not have.
-    nonisolated static let minUpsample = 6
+    public nonisolated static let minUpsample = 6
 
     /// How many quads the drawn window may hold.
     ///
@@ -648,7 +651,7 @@ final class WindWashModel {
     /// main thread about six tenths of a millisecond and no other thread
     /// may do it, so this number *is* the hitch when the hour changes:
     /// four hundred is a couple of frames, seventeen hundred was a second.
-    nonisolated static let drawBudget = 420
+    public nonisolated static let drawBudget = 420
 
     /// How fine to cut the field for the window being drawn.
     ///
@@ -665,7 +668,7 @@ final class WindWashModel {
     /// the quads over the whole field, but only the ones in the window are
     /// ever built, so the count that reaches MapKit stays near the budget
     /// at every zoom.
-    nonisolated static func drawUpsample(field: MKCoordinateRegion,
+    public nonisolated static func drawUpsample(field: MKCoordinateRegion,
                                          window: MKCoordinateRegion?) -> Int {
         guard let window else { return minUpsample }
         let share = min(1, window.span.latitudeDelta / field.span.latitudeDelta)
@@ -674,9 +677,9 @@ final class WindWashModel {
         // total ≈ columns² · (rows−1)/(columns−1) · share, in cells across
         // the *field*; solve that for the cells-across that spends the
         // budget on the window.
-        let aspect = Double(FlowMapScreen.rows - 1) / Double(FlowMapScreen.columns - 1)
+        let aspect = Double(WindField.rows - 1) / Double(WindField.columns - 1)
         let across = (Double(drawBudget) / (aspect * share)).squareRoot()
-        let steps = Int((across / Double(FlowMapScreen.columns - 1)).rounded(.down))
+        let steps = Int((across / Double(WindField.columns - 1)).rounded(.down))
         return max(minUpsample, min(steps, 512))
     }
     /// The wash's strength. The balance that took three tries: heavy
@@ -732,7 +735,7 @@ final class WindWashModel {
 
     /// The land-mask switch moved: rebuild what is on screen with the new
     /// answer, rasterizing the coastline if it just came on.
-    func maskPreferenceChanged(for visible: MKCoordinateRegion, layer: WashLayer) {
+    public func maskPreferenceChanged(for visible: MKCoordinateRegion, layer: WashLayer) {
         guard layer == .currents else { return }
         if Self.masksLand { loadMask() } else { apply(force: true) }
     }
@@ -740,7 +743,7 @@ final class WindWashModel {
     /// Tell the wash how big the map is drawn, so the cell builder can size
     /// its seam inset in real pixels. Cheap and idempotent; the view calls
     /// it whenever the map's frame changes.
-    func mapMeasured(widthPoints: CGFloat, displayScale: CGFloat, visible: MKCoordinateRegion) {
+    public func mapMeasured(widthPoints: CGFloat, displayScale: CGFloat, visible: MKCoordinateRegion) {
         guard widthPoints > 0, displayScale > 0 else { return }
         degreesPerPixel = visible.span.longitudeDelta / (Double(widthPoints) * Double(displayScale))
     }
@@ -759,7 +762,7 @@ final class WindWashModel {
     ///
     /// The default lives here *and* in `SpotsTabView`, because this is read
     /// from a model with no view around it. Both say on; they have to.
-    static var masksLand: Bool {
+    public static var masksLand: Bool {
         UserDefaults.standard.object(forKey: "spots.maskLand") as? Bool ?? true
     }
 
@@ -769,7 +772,7 @@ final class WindWashModel {
     /// just left, which paints a field for the old slice and then throws it
     /// away when the new slice is worked out a line later. Two full repaints
     /// where one will do.
-    func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer,
+    public func viewSettled(on visible: MKCoordinateRegion, layer: WashLayer,
                      widthPoints: CGFloat, displayScale: CGFloat) {
         mapMeasured(widthPoints: widthPoints, displayScale: displayScale, visible: visible)
         holds.remove(.camera)
@@ -790,7 +793,7 @@ final class WindWashModel {
     }
 
     /// The window the quads are drawn for: the view, opened out.
-    nonisolated static func paddedWindow(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
+    public nonisolated static func paddedWindow(for visible: MKCoordinateRegion) -> MKCoordinateRegion {
         MKCoordinateRegion(
             center: visible.center,
             span: MKCoordinateSpan(latitudeDelta: visible.span.latitudeDelta * drawPadding,
@@ -807,7 +810,7 @@ final class WindWashModel {
 
     /// The rule itself, over nothing but its inputs — see `needsReload` for
     /// why these are worth being able to test.
-    nonisolated static func needsRecull(visible: MKCoordinateRegion,
+    public nonisolated static func needsRecull(visible: MKCoordinateRegion,
                                         window: MKCoordinateRegion) -> Bool {
         let zoom = visible.span.latitudeDelta / (window.span.latitudeDelta / drawPadding)
         if zoom > 1.35 || zoom < 0.7 { return true }
@@ -839,7 +842,7 @@ final class WindWashModel {
         }
     }
 
-    func clear() {
+    public func clear() {
         loadTask?.cancel()
         loadTask = nil
         maskTask?.cancel()
@@ -891,7 +894,7 @@ final class WindWashModel {
     /// made of four constants and a margin that changes character when the
     /// field clamp leaves the field no bigger than the view is exactly the
     /// kind of thing that regresses silently.
-    nonisolated static func needsReload(visible: MKCoordinateRegion,
+    public nonisolated static func needsReload(visible: MKCoordinateRegion,
                                         field: MKCoordinateRegion,
                                         loadedVisible: MKCoordinateRegion) -> Bool {
         let zoom = visible.span.latitudeDelta / loadedVisible.span.latitudeDelta
@@ -954,7 +957,7 @@ final class WindWashModel {
             // superseded load from clearing a newer one's flag.
             defer { if loadToken == token { isLoading = false } }
             let coords = gridCoordinates(for: target)
-            let count = FlowMapScreen.columns * FlowMapScreen.rows
+            let count = WindField.columns * WindField.rows
             // Three days deep and six hours behind, rather than one
             // hour: the map's time slider and the route panel's both
             // scrub the wash through these rows, and the depth costs the
@@ -1064,14 +1067,14 @@ final class WindWashModel {
 
     private func gridCoordinates(for region: MKCoordinateRegion) -> [Geo.Coordinate] {
         var out: [Geo.Coordinate] = []
-        for row in 0..<FlowMapScreen.rows {
-            for column in 0..<FlowMapScreen.columns {
+        for row in 0..<WindField.rows {
+            for column in 0..<WindField.columns {
                 out.append(Geo.Coordinate(
                     latitude: max(-89, min(89,
                         region.center.latitude - region.span.latitudeDelta / 2
-                        + region.span.latitudeDelta * Double(row) / Double(FlowMapScreen.rows - 1))),
+                        + region.span.latitudeDelta * Double(row) / Double(WindField.rows - 1))),
                     longitude: region.center.longitude - region.span.longitudeDelta / 2
-                        + region.span.longitudeDelta * Double(column) / Double(FlowMapScreen.columns - 1)
+                        + region.span.longitudeDelta * Double(column) / Double(WindField.columns - 1)
                 ))
             }
         }
@@ -1095,8 +1098,8 @@ final class WindWashModel {
                                                 mask: WaterMask,
                                                 insetLon: Double,
                                                 window: MKCoordinateRegion?) -> [CellLayout] {
-        let columns = FlowMapScreen.columns
-        let rows = FlowMapScreen.rows
+        let columns = WindField.columns
+        let rows = WindField.rows
         let upsample = drawUpsample(field: region, window: window)
         let cellColumns = (columns - 1) * upsample
         let cellRows = (rows - 1) * upsample
@@ -1206,8 +1209,8 @@ final class WindWashModel {
     /// `drainRebuilds` is about MapKit's diffing rather than this.
     nonisolated private static func colourCells(_ layout: [CellLayout], speeds: [Double?],
                                                 layer: WashLayer) -> [Cell] {
-        let columns = FlowMapScreen.columns
-        let rows = FlowMapScreen.rows
+        let columns = WindField.columns
+        let rows = WindField.rows
 
         /// Bilinear sample at fractional grid coordinates, with however
         /// much of the water it could actually see.
@@ -1282,16 +1285,20 @@ final class WindWashModel {
 /// map-content diffing is the one thing MapKit must never be asked for,
 /// so the canvas re-registers every particle through the proxy each frame
 /// and the flow stays glued to the world through pan, zoom and rotation.
-struct WashParticleLayer: View {
-    let field: WindWashModel.Field
-    let proxy: MapProxy
+public struct WashParticleLayer: View, Sendable {
+
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(field: WindWashModel.Field, proxy: MapProxy) { self.field = field; self.proxy = proxy }
+    public let field: WindWashModel.Field
+    public let proxy: MapProxy
 
     /// A plain reference type deliberately outside observation:
     /// TimelineView is the clock, the canvas advances the sim while
     /// drawing it, and no SwiftUI dependency graph churns per frame.
     @State private var sim = WashParticleSim()
 
-    var body: some View {
+    public var body: some View {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
                 // The viewport in grid space — all four corners, so a
@@ -1392,29 +1399,29 @@ struct WashParticleLayer: View {
 /// The particle pool, in the field's own grid coordinates so the sampler
 /// advects them directly. Spawn scatter is honest randomness — this is
 /// animation, where shimmer is the point, and no two launches match.
-final class WashParticleSim {
+public final class WashParticleSim {
 
-    struct Particle {
-        var gx: Double
-        var gy: Double
-        var tailGX: Double
-        var tailGY: Double
-        var age: Double
-        var lifetime: Double
-        var fade: Double = 0
+    public struct Particle: Sendable {
+        public var gx: Double
+        public var gy: Double
+        public var tailGX: Double
+        public var tailGY: Double
+        public var age: Double
+        public var lifetime: Double
+        public var fade: Double = 0
     }
 
     /// The viewport, in the field's grid coordinates, plus the visible
     /// latitude span that paces the animation.
-    struct Bounds {
-        let minGX: Double
-        let maxGX: Double
-        let minGY: Double
-        let maxGY: Double
-        let visibleLatSpan: Double
+    public struct Bounds: Sendable {
+        public let minGX: Double
+        public let maxGX: Double
+        public let minGY: Double
+        public let maxGY: Double
+        public let visibleLatSpan: Double
     }
 
-    private(set) var particles: [Particle] = []
+    public private(set) var particles: [Particle] = []
     private var lastTick: TimeInterval?
     private var fieldID: UUID?
     private static let count = 220
@@ -1430,7 +1437,7 @@ final class WashParticleSim {
         return 0.35 + 0.65 * t
     }
 
-    func advance(to date: Date, in field: WindWashModel.Field, bounds: Bounds) {
+    public func advance(to date: Date, in field: WindWashModel.Field, bounds: Bounds) {
         let now = date.timeIntervalSinceReferenceDate
         let dt = min(0.1, max(0, now - (lastTick ?? now)))
         lastTick = now

@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		A0A0A0A000000000000000E4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E2 /* OpenWaterCore */; };
+		B0B0B0B000000000000000A4 /* OpenWaterSpots in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B000000000000000A2 /* OpenWaterSpots */; };
+		B0B0B0B000000000000000A5 /* OpenWaterSpots in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B000000000000000A3 /* OpenWaterSpots */; };
+		C0C0C0C000000000000000B3 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0C0C0C000000000000000B1 /* OpenWaterCore */; };
+		C0C0C0C000000000000000B4 /* OpenWaterSpots in Frameworks */ = {isa = PBXBuildFile; productRef = C0C0C0C000000000000000B2 /* OpenWaterSpots */; };
 		A0A0A0A000000000000000E5 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E3 /* OpenWaterCore */; };
 		A0A0A0A000000000000000F0 /* openWater Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A0A0A0A000000000000000E7 /* openWater Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A0A0A0A000000000000000F4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000F3 /* OpenWaterCore */; };
@@ -56,6 +60,7 @@
 		7FDB7D7F301C341100F5A563 /* openWaterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = openWaterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7FDB7D89301C341100F5A563 /* openWaterUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = openWaterUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0A0A0A000000000000000E7 /* openWater Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "openWater Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0C0C0C000000000000000A2 /* openWater TV.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "openWater TV.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -79,6 +84,11 @@
 			path = "openWater Watch App";
 			sourceTree = "<group>";
 		};
+		C0C0C0C000000000000000A1 /* openWater TV */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "openWater TV";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -87,6 +97,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0A0A0A000000000000000E4 /* OpenWaterCore in Frameworks */,
+				B0B0B0B000000000000000A4 /* OpenWaterSpots in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -95,6 +106,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0A0A0A000000000000000F4 /* OpenWaterCore in Frameworks */,
+				B0B0B0B000000000000000A5 /* OpenWaterSpots in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +125,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0C0C0C000000000000000A5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0C0C0C000000000000000B3 /* OpenWaterCore in Frameworks */,
+				C0C0C0C000000000000000B4 /* OpenWaterSpots in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -123,6 +144,7 @@
 				7FDB7D82301C341100F5A563 /* openWaterTests */,
 				7FDB7D8C301C341100F5A563 /* openWaterUITests */,
 				A0A0A0A000000000000000E6 /* openWater Watch App */,
+				C0C0C0C000000000000000A1 /* openWater TV */,
 				7FDB7D71301C341000F5A563 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -134,6 +156,7 @@
 				7FDB7D7F301C341100F5A563 /* openWaterTests.xctest */,
 				7FDB7D89301C341100F5A563 /* openWaterUITests.xctest */,
 				A0A0A0A000000000000000E7 /* openWater Watch App.app */,
+				C0C0C0C000000000000000A2 /* openWater TV.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -161,6 +184,7 @@
 			name = openWater;
 			packageProductDependencies = (
 				A0A0A0A000000000000000E2 /* OpenWaterCore */,
+				B0B0B0B000000000000000A2 /* OpenWaterSpots */,
 			);
 			productName = openWater;
 			productReference = 7FDB7D70301C341000F5A563 /* openWater.app */;
@@ -185,6 +209,7 @@
 			name = openWaterTests;
 			packageProductDependencies = (
 				A0A0A0A000000000000000F3 /* OpenWaterCore */,
+				B0B0B0B000000000000000A3 /* OpenWaterSpots */,
 			);
 			productName = openWaterTests;
 			productReference = 7FDB7D7F301C341100F5A563 /* openWaterTests.xctest */;
@@ -236,6 +261,30 @@
 			productReference = A0A0A0A000000000000000E7 /* openWater Watch App.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C0C0C0C000000000000000A3 /* openWater TV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0C0C0C000000000000000A7 /* Build configuration list for PBXNativeTarget "openWater TV" */;
+			buildPhases = (
+				C0C0C0C000000000000000A4 /* Sources */,
+				C0C0C0C000000000000000A5 /* Frameworks */,
+				C0C0C0C000000000000000A6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C0C0C0C000000000000000A1 /* openWater TV */,
+			);
+			name = "openWater TV";
+			packageProductDependencies = (
+				C0C0C0C000000000000000B1 /* OpenWaterCore */,
+				C0C0C0C000000000000000B2 /* OpenWaterSpots */,
+			);
+			productName = "openWater TV";
+			productReference = C0C0C0C000000000000000A2 /* openWater TV.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -273,6 +322,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A0A0A0A000000000000000E1 /* XCLocalSwiftPackageReference "OpenWaterCore" */,
+				B0B0B0B000000000000000A1 /* XCLocalSwiftPackageReference "OpenWaterSpots" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7FDB7D71301C341000F5A563 /* Products */;
@@ -283,6 +333,7 @@
 				7FDB7D7E301C341100F5A563 /* openWaterTests */,
 				7FDB7D88301C341100F5A563 /* openWaterUITests */,
 				A0A0A0A000000000000000E8 /* openWater Watch App */,
+				C0C0C0C000000000000000A3 /* openWater TV */,
 			);
 		};
 /* End PBXProject section */
@@ -316,6 +367,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0C0C0C000000000000000A6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -341,6 +399,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A0A0A0A000000000000000E9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0C0C0C000000000000000A4 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -798,6 +863,66 @@
 			};
 			name = Release;
 		};
+		C0C0C0C000000000000000A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 34FWY7G2HB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = openWater;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.laan.labs.openWater;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Debug;
+		};
+		C0C0C0C000000000000000A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 34FWY7G2HB;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = openWater;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.laan.labs.openWater;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = appletvos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -846,6 +971,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		C0C0C0C000000000000000A7 /* Build configuration list for PBXNativeTarget "openWater TV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0C0C0C000000000000000A8 /* Debug */,
+				C0C0C0C000000000000000A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -853,12 +987,32 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = OpenWaterCore;
 		};
+		B0B0B0B000000000000000A1 /* XCLocalSwiftPackageReference "OpenWaterSpots" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = OpenWaterSpots;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		A0A0A0A000000000000000E2 /* OpenWaterCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = OpenWaterCore;
+		};
+		B0B0B0B000000000000000A2 /* OpenWaterSpots */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterSpots;
+		};
+		B0B0B0B000000000000000A3 /* OpenWaterSpots */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterSpots;
+		};
+		C0C0C0C000000000000000B1 /* OpenWaterCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterCore;
+		};
+		C0C0C0C000000000000000B2 /* OpenWaterSpots */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterSpots;
 		};
 		A0A0A0A000000000000000E3 /* OpenWaterCore */ = {
 			isa = XCSwiftPackageProductDependency;

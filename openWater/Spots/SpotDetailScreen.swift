@@ -1,5 +1,6 @@
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// One spot, in the order a rider decides: live conditions above the fold,

@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// A place a rider has chosen — a name they will recognise plus the pin.

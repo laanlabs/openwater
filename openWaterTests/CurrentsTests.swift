@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import XCTest
 @testable import openWater
 

@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import PhotosUI
 import SwiftUI
 

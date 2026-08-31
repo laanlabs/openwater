@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// A fortnight of surf at a glance, one column per day.

@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import OpenWaterCore
+import OpenWaterSpots
 
 /// Turns the ends of a run into "Viento → Hatchery".
 ///

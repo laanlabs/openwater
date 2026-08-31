@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 // MARK: - Session Call-out

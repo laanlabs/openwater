@@ -1,5 +1,6 @@
 import Foundation
 import OpenWaterCore
+import OpenWaterSpots
 
 // MARK: - What the wind normally does here this week
 

@@ -1,36 +1,8 @@
 import CoreLocation
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
-
-/// A spot that never leaves the phone.
-///
-/// The guide is public and human-reviewed, which is right for a launch
-/// everybody shares and wrong for the sandbar only you know about, or the
-/// stretch in front of a friend's house. A private spot is the other path:
-/// no submission, no review, no server — a name and a coordinate in local
-/// storage, listed with the favorites, and the conditions sheet gives it
-/// the same stations, forecasts and cams every guide spot gets.
-struct PrivateSpot: Codable, Identifiable, Hashable {
-    let id: UUID
-    var name: String
-    let latitude: Double
-    let longitude: Double
-    let createdAt: Date
-    /// Degrees true from the beach out toward open water. Optional twice
-    /// over: old saved spots decode without it, and nobody is made to
-    /// answer a question they are unsure of — the surf screens fall back
-    /// to their proxy and say so.
-    var shoreFacingDeg: Double?
-
-    var coordinate: Geo.Coordinate {
-        Geo.Coordinate(latitude: latitude, longitude: longitude)
-    }
-
-    var clCoordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-}
 
 // MARK: - Adding one
 

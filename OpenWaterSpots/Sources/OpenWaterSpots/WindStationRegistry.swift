@@ -4,13 +4,17 @@ import OpenWaterCore
 // MARK: - Wind station registry
 
 /// One provider's view of a station, from the registry.
-struct RegistryLink: Hashable, Codable {
-    let providerId: String
-    let url: URL
-    let accessTier: String?
+public struct RegistryLink: Hashable, Codable, Sendable {
+
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(providerId: String, url: URL, accessTier: String? = nil) { self.providerId = providerId; self.url = url; self.accessTier = accessTier }
+    public let providerId: String
+    public let url: URL
+    public let accessTier: String?
 
     /// "iKitesurf", not "ikitesurf" — the label a rider knows the app by.
-    var label: String {
+    public var label: String {
         switch providerId {
         case "ikitesurf": "iKitesurf"
         default: providerId.capitalized
@@ -19,20 +23,20 @@ struct RegistryLink: Hashable, Codable {
 
     /// A government view is identity, not a door: it dedupes rows but is
     /// never offered as a second place to open the station.
-    var isGovernment: Bool {
+    public var isGovernment: Bool {
         ["nws", "noaa", "ndbc", "coops"].contains(providerId)
     }
 }
 
 /// A curated station from `windStations` that is also a government sensor.
-struct RegistryStation: Codable {
-    let id: String
-    let name: String
+public struct RegistryStation: Codable, Sendable {
+    public let id: String
+    public let name: String
     /// Government ids from the `gov` block, uppercased — the join key against
     /// what `FreeStations` discovered.
-    let govIds: [String]
+    public let govIds: [String]
     /// Non-government provider views of the same instrument.
-    let links: [RegistryLink]
+    public let links: [RegistryLink]
 }
 
 /// The curated half of the station story: docs/WIND_STATIONS.md's Firestore
@@ -46,7 +50,7 @@ struct RegistryStation: Codable {
 /// when this returns nothing, every pin renders exactly as it did before.
 ///
 /// Identity only, per the house rule. No reading ever comes from here.
-enum WindStationRegistry {
+public enum WindStationRegistry: Sendable {
 
     private static var cached: [RegistryStation] = []
     private static var loading: Task<[RegistryStation], Never>?
@@ -60,7 +64,7 @@ enum WindStationRegistry {
     }
 
     /// The registry keyed by government station id, uppercased.
-    static func crossLinks() async -> [String: RegistryStation] {
+    public static func crossLinks() async -> [String: RegistryStation] {
         let rows = await load()
         var byGov: [String: RegistryStation] = [:]
         for row in rows {

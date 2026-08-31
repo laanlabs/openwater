@@ -1,4 +1,5 @@
 import MapKit
+import OpenWaterSpots
 import XCTest
 @testable import openWater
 

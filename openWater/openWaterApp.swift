@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftData
 import SwiftUI
 

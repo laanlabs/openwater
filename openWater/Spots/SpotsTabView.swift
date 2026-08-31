@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// The Spots tab: a persistent map with live wind on the pins, and one
@@ -316,7 +317,12 @@ struct SpotsTabView: View {
             }
     }
 
-    private var screen: some View {
+    /// The map, its panel, and every sheet, cover and alert they can raise.
+    ///
+    /// Split from the feeds below for the reason the chain above gives: this
+    /// is twenty-odd modifiers already, and the type-checker will not sit
+    /// through them and the tasks as one expression.
+    private var presented: some View {
         NavigationStack(path: $path) {
             GeometryReader { geometry in
                 ZStack(alignment: .bottom) {
@@ -487,6 +493,10 @@ struct SpotsTabView: View {
                 NearbyConditionsSheet(title: conditionsTitle, coordinate: here)
             }
         }
+    }
+
+    private var screen: some View {
+        presented
         .onAppear {
             isBreathing = true
             // The tab that leads with the weather where you are cannot wait
@@ -537,13 +547,13 @@ struct SpotsTabView: View {
             }
         }
         .task(id: windRefreshKey) {
-            await guide.refreshWind(for: pins + nearby.prefix(20) + guide.favorites)
+            await guide.refreshWind(for: windTargets)
         }
         // Hourly series, fetched only once the clock leaves now — a rider
         // who never scrubs never pays for this.
         .task(id: scrubbedSpotsKey) {
             guard mapScrub != nil else { return }
-            await guide.refreshWindHours(for: pins + nearby.prefix(20) + guide.favorites)
+            await guide.refreshWindHours(for: windTargets)
         }
         .task(id: scrubbedCentreKey) {
             centreHourMissing = false
@@ -634,7 +644,31 @@ struct SpotsTabView: View {
         }
         .task(id: privateWindKey) {
             for spot in guide.privateSpots where privateWind[spot.id] == nil {
-                privateWind[spot.id] = await guide.currentWind(at: spot.coordinate)
+                let coordinate: Geo.Coordinate = spot.coordinate
+                let reading: WindReading? = await guide.currentWind(at: coordinate)
+                privateWind[spot.id] = reading
+            }
+        }
+    }
+
+    /// A plus on every draft leg, for adding a point in the middle of one.
+    ///
+    /// Its own map content rather than part of the chain above: `Annotation`
+    /// inside a `ForEach` inside a builder that long is more inference than
+    /// the type-checker will do in the time it allows itself.
+    @MapContentBuilder
+    private func draftInsertPoints(_ draft: [Geo.Coordinate]) -> some MapContent {
+        if draft.count >= 2 {
+            ForEach(0..<(draft.count - 1), id: \.self) { leg in
+                let midpoint: CLLocationCoordinate2D =
+                    legMidpoint(draft[leg], draft[leg + 1])
+                Annotation("", coordinate: midpoint) {
+                    Button { insertDraftPoint(after: leg) } label: {
+                        DraftInsertPin()
+                    }
+                    .buttonStyle(.plain)
+                }
+                .annotationTitles(.hidden)
             }
         }
     }
@@ -663,6 +697,21 @@ struct SpotsTabView: View {
     private var windRefreshKey: String {
         (pins.prefix(8).map(\.spotId) + nearby.prefix(8).map(\.spotId))
             .joined(separator: ",") + "|" + forecastModelRaw
+    }
+
+    /// Every spot a live reading is wanted for: what is on the map, the head
+    /// of the list under it, and the rider's own stars wherever they are.
+    ///
+    /// Spelled out with its type rather than inlined at the two call sites.
+    /// Written as one expression it concatenates an array, an `ArraySlice`
+    /// and another array, and the type checker has to search the `+`
+    /// overloads for all three — which it eventually gives up on, taking the
+    /// whole file's compilation with it.
+    private var windTargets: [GuideSpot] {
+        var out = pins
+        out += nearby.prefix(20)
+        out += guide.favorites
+        return out
     }
 
     // MARK: - Map
@@ -803,7 +852,8 @@ struct SpotsTabView: View {
                 // opens its own page, a wind station is an outbound link —
                 // each pin does what its row in the conditions sheet does.
                 ForEach(resourcePins) { resource in
-                    Annotation("", coordinate: resource.coordinate.clCoordinate, anchor: .center) {
+                    let at: CLLocationCoordinate2D = resource.coordinate.clCoordinate
+                    Annotation("", coordinate: at, anchor: .center) {
                         Button {
                             if resource.kind == .camera { watchingCam = resource }
                             else { openStation = detail(for: resource) }
@@ -869,22 +919,7 @@ struct SpotsTabView: View {
                         }
                         .annotationTitles(.hidden)
                     }
-                    if draft.count >= 2 {
-                        ForEach(0..<(draft.count - 1), id: \.self) { leg in
-                            Annotation("", coordinate: legMidpoint(draft[leg], draft[leg + 1])) {
-                                Button { insertDraftPoint(after: leg) } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 9, weight: .heavy))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.mapInk.opacity(0.6), in: Circle())
-                                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .annotationTitles(.hidden)
-                        }
-                    }
+                    draftInsertPoints(draft)
                 } else if line.count >= 2 {
                     Annotation("", coordinate: line.first!) {
                         RouteHandle(isEnd: true).allowsHitTesting(false)
@@ -2303,6 +2338,21 @@ struct SpotsTabView: View {
 /// Deliberately unlike `WindPin`: those are places in the guide, this is a
 /// scratch mark that goes away when they are done with it.
 /// A map pin that answers "is it on?" before it answers "what is here?".
+/// The "add a point here" target on a draft leg.
+///
+/// Its own view rather than six modifiers inline: the map's content builder
+/// is long enough that the type-checker gives up when this sits inside it.
+private struct DraftInsertPin: View {
+    var body: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 9, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: 18, height: 18)
+            .background(Color.mapInk.opacity(0.6), in: Circle())
+            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+    }
+}
+
 struct WindPin: View {
     let reading: WindReading?
 

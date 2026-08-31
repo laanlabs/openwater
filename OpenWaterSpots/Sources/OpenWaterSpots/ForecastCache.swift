@@ -19,7 +19,7 @@ import Foundation
 /// live would be exactly the "stale current conditions" failure the guide
 /// warns about. The NWS, tide and buoy fetchers keep their own untouched
 /// network paths.
-enum ForecastCache {
+public enum ForecastCache: Sendable {
 
     /// How old a cached answer may be and still beat a blank screen.
     private static let staleLimit: TimeInterval = 3 * 3600
@@ -37,18 +37,18 @@ enum ForecastCache {
     }
 
     /// A response body plus the honesty about where it came from.
-    struct Served {
-        let data: Data
+    public struct Served: Sendable {
+        public let data: Data
         /// Only set on the fallback path: the network failed and this is
         /// the last good answer, this many seconds old. `nil` means fresh —
         /// straight from the network, or from disk well inside its
         /// time-to-live, which is the same thing to the rider.
-        let staleAge: TimeInterval?
+        public let staleAge: TimeInterval?
     }
 
     /// The response body: from disk while fresh, from the network when not,
     /// from disk again — older, and saying so — when the network fails.
-    static func serve(from url: URL, ttl: TimeInterval) async -> Served? {
+    public static func serve(from url: URL, ttl: TimeInterval) async -> Served? {
         let path = file(for: url)
         if let age = age(of: path), age < ttl,
            let cached = try? Data(contentsOf: path) {
@@ -68,7 +68,7 @@ enum ForecastCache {
     }
 
     /// `serve` for the callers whose cards have nowhere to put an age.
-    static func data(from url: URL, ttl: TimeInterval) async -> Data? {
+    public static func data(from url: URL, ttl: TimeInterval) async -> Data? {
         await serve(from: url, ttl: ttl)?.data
     }
 

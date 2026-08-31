@@ -1,5 +1,6 @@
 import Foundation
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 // MARK: - The sea according to several models at once

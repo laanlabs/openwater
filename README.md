@@ -1,8 +1,8 @@
 # openWater
 
 An open-source session tracker for wind-powered watersports — wingfoiling,
-parawinging, downwinding, windsurfing, kiting, SUP and sailing. iPhone and Apple
-Watch, no account, no subscription, every feature free.
+parawinging, downwinding, windsurfing, kiting, SUP and sailing. iPhone, Apple
+Watch and Apple TV, no account, no subscription, every feature free.
 
 **[openwaterapp.com](https://openwaterapp.com)** · [Spot guide](https://openwaterapp.com/spots)
 
@@ -33,8 +33,11 @@ openWater/
 ├── OpenWaterCore/            Swift package: model, analysis, ingest, IO.
 │                             Platform-free and fully tested — this is where
 │                             every number the app shows is computed.
+├── OpenWaterSpots/           Swift package: the guide, the weather clients and
+│                             the wind field. Shared by the phone and the TV.
 ├── openWater/                iOS app
 ├── openWater Watch App/      watchOS app (records standalone)
+├── openWater TV/             tvOS app (favourites, wind map, cameras)
 ├── openWaterTests/           iOS unit tests
 ├── openWaterUITests/         UI + screenshot tests
 ├── Marketing/                App Store screenshots and metadata
@@ -46,7 +49,16 @@ openWater/
 The analysis lives in `OpenWaterCore` rather than in either app on purpose: a
 session recorded on a wrist and one recorded on a phone go through identical
 filtering, identical window maths and identical detection, so personal bests are
-comparable across whichever device was to hand.
+comparable across whichever device was to hand. `OpenWaterSpots` is the same
+argument for the weather: the phone and the television ask the same clients the
+same questions and colour the answers with the same ramp, so a green afternoon
+means one thing in the house and the same thing on the beach.
+
+The Apple TV app is deliberately three screens — your starred spots with live
+wind, a wind map of the coast they sit on, and the cameras. It records nothing.
+Its camera list is much shorter than the phone's, and that is a platform limit
+rather than a choice: tvOS has no web view, so only the cameras publishing an
+HLS stream or a still image can be shown, and the rest would be dead rows.
 
 ## Building
 

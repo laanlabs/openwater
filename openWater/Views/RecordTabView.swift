@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftData
 import SwiftUI
 

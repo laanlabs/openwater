@@ -1,4 +1,5 @@
 import Foundation
+import OpenWaterSpots
 import UIKit
 
 /// Submitting spot suggestions and corrections — the same pipeline the

@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// Shared pieces for the Tools tab, so every tool shares one idea of how a

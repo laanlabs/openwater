@@ -44,7 +44,7 @@ import MapKit
 /// Inland water is deliberately *not* cut out — Lake Tahoe and the Columbia
 /// River both count as land here. That costs nothing: the layer this masks is
 /// an ocean current model, which has nothing to say about either.
-nonisolated enum Coastline {
+public nonisolated enum Coastline: Sendable {
 
     /// The packed file, mapped once and never copied.
     ///
@@ -53,23 +53,23 @@ nonisolated enum Coastline {
     /// actually reads and the app's resident size barely moves.
     private static let store = Store.bundled()
 
-    struct Store {
-        let data: Data
-        let count: Int
+    public struct Store: Sendable {
+        public let data: Data
+        public let count: Int
         /// Byte offsets of the three sections, worked out once from the header.
-        let boxes: Int
-        let offsets: Int
-        let blob: Int
+        public let boxes: Int
+        public let offsets: Int
+        public let blob: Int
 
-        static func bundled() -> Store? {
-            guard let url = Bundle.main.url(forResource: "coastline", withExtension: "bin"),
+        public static func bundled() -> Store? {
+            guard let url = Bundle.module.url(forResource: "coastline", withExtension: "bin"),
                   let data = try? Data(contentsOf: url, options: .mappedIfSafe),
                   data.count > 12
             else { return nil }
             return Store(data)
         }
 
-        init?(_ data: Data) {
+        public init?(_ data: Data) {
             guard data.count > 12,
                   data[data.startIndex] == 0x4F,      // O
                   data[data.startIndex + 1] == 0x57,  // W
@@ -88,7 +88,7 @@ nonisolated enum Coastline {
         }
 
         /// A polygon's bounds, in micro-degrees.
-        func box(_ index: Int) -> (minLat: Int32, minLon: Int32, maxLat: Int32, maxLon: Int32) {
+        public func box(_ index: Int) -> (minLat: Int32, minLon: Int32, maxLat: Int32, maxLon: Int32) {
             let at = boxes + index * 16
             return (data.value(at: at), data.value(at: at + 4),
                     data.value(at: at + 8), data.value(at: at + 12))
@@ -97,7 +97,7 @@ nonisolated enum Coastline {
         /// Walk a polygon's rings without building an array of them — this is
         /// the inner loop of rasterizing a continent, and every ring allocated
         /// here would be a ring thrown away a microsecond later.
-        func forEachRing(_ index: Int, _ body: (_ points: Int, _ at: Int) -> Void) {
+        public func forEachRing(_ index: Int, _ body: (_ points: Int, _ at: Int) -> Void) {
             var at = blob + Int(data.value(at: offsets + index * 4) as UInt32)
             let rings: UInt32 = data.value(at: at)
             at += 4
@@ -109,7 +109,7 @@ nonisolated enum Coastline {
             }
         }
 
-        func point(at offset: Int) -> (lat: Int32, lon: Int32) {
+        public func point(at offset: Int) -> (lat: Int32, lon: Int32) {
             (data.value(at: offset), data.value(at: offset + 4))
         }
     }
@@ -118,7 +118,7 @@ nonisolated enum Coastline {
     /// missing from the bundle, and every mask comes back empty — which the
     /// wash already reads as "paint it all", the same as it did before any of
     /// this existed.
-    static var isAvailable: Bool { store != nil }
+    public static var isAvailable: Bool { store != nil }
 
     /// Rasterize the land inside a region.
     ///
@@ -126,7 +126,7 @@ nonisolated enum Coastline {
     /// Graphics does in hardware-adjacent C, and the alternative — ray-casting
     /// every one of the wash's cells against every nearby ring — is the same
     /// arithmetic done slowly in Swift, once per cell instead of once per view.
-    static func mask(for region: MKCoordinateRegion, pixels: Int = 512) -> WaterMask {
+    public static func mask(for region: MKCoordinateRegion, pixels: Int = 512) -> WaterMask {
         guard let store else { return WaterMask() }
 
         let latSpan = region.span.latitudeDelta
@@ -211,7 +211,7 @@ nonisolated enum Coastline {
 /// Deliberately a value: the wash hands it to the cell builder and to the
 /// field renderer, both of which run on their own schedule, and a shared
 /// mutable mask would be a coastline changing shape under a draw.
-nonisolated struct WaterMask {
+public nonisolated struct WaterMask: Sendable {
 
     private var south = 0.0
     private var west = 0.0
@@ -223,9 +223,9 @@ nonisolated struct WaterMask {
     /// water, anything else is land.
     private var land: [UInt8] = []
 
-    init() {}
+    public init() {}
 
-    init(south: Double, west: Double, latSpan: Double, lonSpan: Double,
+    public init(south: Double, west: Double, latSpan: Double, lonSpan: Double,
          width: Int, height: Int, land: [UInt8]) {
         self.south = south
         self.west = west
@@ -236,12 +236,12 @@ nonisolated struct WaterMask {
         self.land = land
     }
 
-    var isEmpty: Bool { land.isEmpty }
+    public var isEmpty: Bool { land.isEmpty }
 
     /// Whether this point is water — nil when it falls outside the rasterized
     /// rectangle, so a caller can tell "land" from "not known" and paint
     /// rather than blink while a new region is being drawn.
-    func isWater(_ coordinate: CLLocationCoordinate2D) -> Bool? {
+    public func isWater(_ coordinate: CLLocationCoordinate2D) -> Bool? {
         guard !land.isEmpty, latSpan > 0, lonSpan > 0 else { return nil }
         let fx = (coordinate.longitude - west) / lonSpan
         let fy = (coordinate.latitude - south) / latSpan
@@ -265,7 +265,7 @@ nonisolated private extension Data {
     /// construction, but a mapped `Data` makes no promise about where its
     /// slice begins, and an aligned load from an odd address is a crash rather
     /// than a slow read.
-    func value<T>(at offset: Int) -> T {
+    public func value<T>(at offset: Int) -> T {
         withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: T.self) }
     }
 }

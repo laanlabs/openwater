@@ -1,5 +1,6 @@
 import Foundation
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// The forecast along a route: a small grid of sample points × hours,

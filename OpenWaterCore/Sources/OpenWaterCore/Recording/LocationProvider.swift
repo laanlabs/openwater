@@ -1,3 +1,9 @@
+// A recording location source: continuous fixes at navigation accuracy, in the
+// background, for as long as somebody is on the water. tvOS has none of that —
+// no GPS, no background updates, no `startUpdatingLocation` at all — and an
+// Apple TV records nothing, so the whole file is gated the way `MotionProvider`
+// is rather than sprouting a guard per call.
+#if os(iOS) || os(watchOS)
 import CoreLocation
 import Foundation
 import os
@@ -321,3 +327,5 @@ extension TrackPoint {
         )
     }
 }
+
+#endif

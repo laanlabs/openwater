@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// The Tools tab: single-purpose utilities for the logistics around a

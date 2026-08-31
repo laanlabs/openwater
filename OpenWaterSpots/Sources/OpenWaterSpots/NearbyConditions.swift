@@ -13,22 +13,26 @@ import SwiftUI
 ///
 /// Open-Meteo, same free model the wind estimate already comes from, so it
 /// costs one more field on a request the app was making anyway.
-struct SpotWeather: Codable, Hashable {
-    let temperatureC: Double
-    let apparentC: Double?
-    /// WMO present-weather code — the standard the model reports in.
-    let code: Int
-    let isDay: Bool
-    let at: Date
+public struct SpotWeather: Codable, Hashable, Sendable {
 
-    var symbol: String { Self.symbol(for: code, isDay: isDay) }
-    var label: String { Self.label(for: code) }
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(temperatureC: Double, apparentC: Double? = nil, code: Int, isDay: Bool, at: Date) { self.temperatureC = temperatureC; self.apparentC = apparentC; self.code = code; self.isDay = isDay; self.at = at }
+    public let temperatureC: Double
+    public let apparentC: Double?
+    /// WMO present-weather code — the standard the model reports in.
+    public let code: Int
+    public let isDay: Bool
+    public let at: Date
+
+    public var symbol: String { Self.symbol(for: code, isDay: isDay) }
+    public var label: String { Self.label(for: code) }
 
     /// Hierarchical rendering in one deliberate colour rather than
     /// `.multicolor`: Apple's multicolour clouds are white, which is
     /// invisible on the white cards these sit on. One colour per family also
     /// makes the icon readable at 20pt, which is the size it is usually shown.
-    var tint: Color {
+    public var tint: Color {
         switch code {
         case 0, 1: isDay ? .orange : .indigo
         case 51...67, 80...82: .blue
@@ -41,7 +45,7 @@ struct SpotWeather: Codable, Hashable {
     /// WMO 4677, collapsed to the distinctions a rider on a beach cares about.
     /// Drizzle and rain are separate; "moderate" and "dense" freezing drizzle
     /// are not.
-    static func label(for code: Int) -> String {
+    public static func label(for code: Int) -> String {
         switch code {
         case 0: "Clear"
         case 1: "Mainly clear"
@@ -63,7 +67,7 @@ struct SpotWeather: Codable, Hashable {
         }
     }
 
-    static func symbol(for code: Int, isDay: Bool) -> String {
+    public static func symbol(for code: Int, isDay: Bool) -> String {
         switch code {
         case 0: isDay ? "sun.max.fill" : "moon.stars.fill"
         case 1: isDay ? "cloud.sun.fill" : "cloud.moon.fill"
@@ -92,31 +96,35 @@ struct SpotWeather: Codable, Hashable {
 /// they say eight, fourteen, nine and nineteen, the honest answer is nobody
 /// knows yet, and a rider deciding whether to drive two hours deserves to be
 /// told which of those they are looking at.
-struct WindOutlook {
+public struct WindOutlook: Sendable {
 
-    struct Model: Identifiable, Hashable {
-        let id: String
-        let label: String
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(hours: [Date], models: [Model], timeZone: TimeZone? = nil, staleAge: TimeInterval? = nil) { self.hours = hours; self.models = models; self.timeZone = timeZone; self.staleAge = staleAge }
+
+    public struct Model: Identifiable, Hashable, Sendable {
+        public let id: String
+        public let label: String
         /// Hourly wind in knots, aligned to `hours`.
-        let speeds: [Double?]
-        var gusts: [Double?] = []
+        public let speeds: [Double?]
+        public var gusts: [Double?] = []
         /// Degrees the wind comes from, aligned to `hours`.
-        var directions: [Double?] = []
+        public var directions: [Double?] = []
         /// A model that is already a blend of the others — NOAA's NBM
         /// contains GFS and HRRR and dozens more, statistically corrected
         /// against observations. Worth showing as its own line, wrong to
         /// average into a blend alongside its own ingredients: that counts
         /// the same physics twice and calls the double vote agreement.
-        var isComposite: Bool = false
+        public var isComposite: Bool = false
     }
 
-    let hours: [Date]
-    let models: [Model]
-    var timeZone: TimeZone?
+    public let hours: [Date]
+    public let models: [Model]
+    public var timeZone: TimeZone?
     /// Set when the network failed and this outlook is the cache's last
     /// good answer, this many seconds old. The card says so — a stale
     /// forecast posing as fresh is the one dishonesty worse than a blank.
-    var staleAge: TimeInterval?
+    public var staleAge: TimeInterval?
 
     /// The mean of just the models a rider has left switched on.
     ///
@@ -124,7 +132,7 @@ struct WindOutlook {
     /// compare screen the whole point is that turning one off changes the
     /// blend, so you can see what the answer looks like without the model you
     /// distrust today.
-    func blend(of enabled: Set<String>) -> [Double?] {
+    public func blend(of enabled: Set<String>) -> [Double?] {
         let chosen = models.filter { enabled.contains($0.id) }
         guard !chosen.isEmpty else { return [] }
         return hours.indices.map { hour in
@@ -135,7 +143,7 @@ struct WindOutlook {
     }
 
     /// Gusts, blended the same way as the speeds.
-    func blendGusts(of enabled: Set<String>) -> [Double?] {
+    public func blendGusts(of enabled: Set<String>) -> [Double?] {
         let chosen = models.filter { enabled.contains($0.id) }
         guard !chosen.isEmpty else { return [] }
         return hours.indices.map { hour in
@@ -158,7 +166,7 @@ struct WindOutlook {
     /// because near calm a modelled direction is close to noise. This is the
     /// guide's rule of always working in components rather than averaging
     /// compass points as if they were all equally meant.
-    func blendDirections(of enabled: Set<String>) -> [Double?] {
+    public func blendDirections(of enabled: Set<String>) -> [Double?] {
         let chosen = models.filter { enabled.contains($0.id) }
         guard !chosen.isEmpty else { return [] }
         return hours.indices.map { hour in
@@ -180,7 +188,7 @@ struct WindOutlook {
     /// How far each model actually runs. They stop at different horizons —
     /// ICON at eight days, GEM at ten, GFS at sixteen — and a line that just
     /// ends is worth explaining rather than hiding.
-    func horizon(of model: Model) -> Date? {
+    public func horizon(of model: Model) -> Date? {
         guard let last = model.speeds.lastIndex(where: { $0 != nil }) else { return nil }
         return hours[safe: last]
     }
@@ -190,7 +198,7 @@ struct WindOutlook {
     private var independent: [Model] { models.filter { !$0.isComposite } }
 
     /// Mean across models at each hour — the consensus line.
-    var consensus: [Double?] {
+    public var consensus: [Double?] {
         hours.indices.map { hour in
             let values = independent.compactMap { $0.speeds[safe: hour] ?? nil }
             guard !values.isEmpty else { return nil }
@@ -199,7 +207,7 @@ struct WindOutlook {
     }
 
     /// Gusts, averaged over the same voters — what the Foam caps draw.
-    var consensusGusts: [Double?] {
+    public var consensusGusts: [Double?] {
         hours.indices.map { hour in
             let values = independent.compactMap { $0.gusts[safe: hour] ?? nil }
             guard !values.isEmpty else { return nil }
@@ -215,7 +223,7 @@ struct WindOutlook {
     /// rather than at the fetch keeps the untrimmed run for the nowcast,
     /// which has to reach back to the hour a station's reading was actually
     /// taken in to have anything to compare it against.
-    func nextHours(_ limit: Int, from now: Date = Date()) -> WindOutlook {
+    public func nextHours(_ limit: Int, from now: Date = Date()) -> WindOutlook {
         guard !hours.isEmpty else { return self }
         let start = hours.lastIndex { $0 <= now } ?? 0
         let end = min(start + limit, hours.count)
@@ -238,7 +246,7 @@ struct WindOutlook {
     ///
     /// Measured over the next twelve hours rather than the whole run, because
     /// models always diverge eventually and it is today's session in question.
-    var spreadKn: Double {
+    public var spreadKn: Double {
         let window = min(12, hours.count)
         return (0..<window).compactMap { hour -> Double? in
             let values = independent.compactMap { $0.speeds[safe: hour] ?? nil }
@@ -249,7 +257,7 @@ struct WindOutlook {
     }
 
     /// What the spread means, in words a rider can act on.
-    var agreement: (label: String, detail: String) {
+    public var agreement: (label: String, detail: String) {
         switch spreadKn {
         case ..<4:
             ("Models agree",
@@ -263,7 +271,7 @@ struct WindOutlook {
         }
     }
 
-    var isEmpty: Bool { models.isEmpty || hours.isEmpty }
+    public var isEmpty: Bool { models.isEmpty || hours.isEmpty }
 }
 
 extension WindOutlook {
@@ -273,7 +281,7 @@ extension WindOutlook {
     /// ingredients into whatever consumes this. Knots are this struct's
     /// display dialect; core speaks m/s, and the conversion happens here at
     /// the border rather than scattered through the consumers.
-    var blendTimeline: WindTimeline {
+    public var blendTimeline: WindTimeline {
         let ids = Set(models.filter { !$0.isComposite }.map(\.id))
         let speeds = blend(of: ids)
         let directions = blendDirections(of: ids)
@@ -300,25 +308,25 @@ extension WindOutlook {
 /// is correct the models' next few hours — not sit in its own card being
 /// merely true. `WindNowcast` in core does the arithmetic; this picks the
 /// reading, runs it, and says the result in a sentence.
-struct NowcastAdjustment {
+public struct NowcastAdjustment: Sendable {
 
     /// Who read the wind — a station name or a buoy's.
-    let sourceName: String
-    let ageMinutes: Int
+    public let sourceName: String
+    public let ageMinutes: Int
     /// Observed minus blended at the reading's moment, knots. Positive
     /// means more wind on the water than in the models.
-    let deltaKn: Double
+    public let deltaKn: Double
     /// The blend with the innovation decayed through it, m/s.
-    let corrected: WindTimeline
+    public let corrected: WindTimeline
 
     /// Corrected knots this far ahead of now.
-    func correctedKn(hoursAhead: Double, from now: Date = Date()) -> Double? {
+    public func correctedKn(hoursAhead: Double, from now: Date = Date()) -> Double? {
         corrected.wind(at: now.addingTimeInterval(hoursAhead * 3600))
             .map { $0.speed * 1.94384 }
     }
 
     /// The whole thing as one sentence a rider can act on.
-    var line: String {
+    public var line: String {
         let age = ageMinutes <= 1 ? "just now" : "\(ageMinutes) min ago"
         guard abs(deltaKn) >= 1.5 else {
             return "\(sourceName) read the wind \(age) and agrees with the models."
@@ -339,7 +347,7 @@ struct NowcastAdjustment {
     /// as full vectors; a buoy reports no wind direction, so it borrows the
     /// model's own direction and corrects the strength alone — a smaller
     /// claim, honestly limited to what was measured.
-    static func make(outlook: WindOutlook, stations: [FreeStation], buoys: [Buoy],
+    public static func make(outlook: WindOutlook, stations: [FreeStation], buoys: [Buoy],
                      at now: Date = Date()) -> NowcastAdjustment? {
         let model = outlook.blendTimeline
         guard !model.isEmpty else { return nil }
@@ -393,31 +401,35 @@ struct NowcastAdjustment {
 /// month while ECMWF has not. Both are free: Open-Meteo keeps every
 /// model's previous runs, and NDBC's realtime files carry 45 days of
 /// readings.
-struct ModelSteadiness {
+public struct ModelSteadiness: Sendable {
 
-    struct Row: Identifiable {
-        let id: String
-        let label: String
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(rows: [Row], verifiedAgainst: (name: String, metres: Double)? = nil) { self.rows = rows; self.verifiedAgainst = verifiedAgainst }
+
+    public struct Row: Identifiable, Sendable {
+        public let id: String
+        public let label: String
         /// Mean absolute error, knots, by days of lead. `[1]` is the
         /// day-ahead call, `[3]` three days out. Against the buoy when
         /// verified, against the model's own final run when not — and in
         /// the verified case `[0]` exists too: how wrong the freshest run
         /// still is at this water.
-        let revisionKn: [Int: Double]
+        public let revisionKn: [Int: Double]
 
         /// The headline number: two days out, the lead a rider actually
         /// plans a weekend around.
-        var twoDaysOutKn: Double? { revisionKn[2] }
+        public var twoDaysOutKn: Double? { revisionKn[2] }
     }
 
-    let rows: [Row]
+    public let rows: [Row]
     /// Set when the reference was a real anemometer: the buoy's name and
     /// how far it sits from the point being forecast.
-    var verifiedAgainst: (name: String, metres: Double)? = nil
-    var isEmpty: Bool { rows.isEmpty }
+    public var verifiedAgainst: (name: String, metres: Double)? = nil
+    public var isEmpty: Bool { rows.isEmpty }
 
     /// The model that has moved its story least at two days.
-    var steadiest: Row? {
+    public var steadiest: Row? {
         rows.filter { $0.twoDaysOutKn != nil }
             .min { ($0.twoDaysOutKn ?? .infinity) < ($1.twoDaysOutKn ?? .infinity) }
     }
@@ -434,15 +446,19 @@ struct ModelSteadiness {
 /// again, and the fraction of members clearing a threshold *is* a
 /// probability. "Seven in ten members say fifteen knots" is the sentence a
 /// rider deciding whether to drive two hours actually needs.
-struct EnsembleOutlook {
+public struct EnsembleOutlook: Sendable {
 
-    let hours: [Date]
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(hours: [Date], members: [[Double?]], timeZone: TimeZone? = nil) { self.hours = hours; self.members = members; self.timeZone = timeZone }
+
+    public let hours: [Date]
     /// Hourly wind in knots, one row per member, each aligned to `hours`.
-    let members: [[Double?]]
-    var timeZone: TimeZone?
+    public let members: [[Double?]]
+    public var timeZone: TimeZone?
 
-    var isEmpty: Bool { members.isEmpty || hours.isEmpty }
-    var memberCount: Int { members.count }
+    public var isEmpty: Bool { members.isEmpty || hours.isEmpty }
+    public var memberCount: Int { members.count }
 
     /// The member opinions for one hour, sorted and stripped of gaps.
     private func opinions(at hour: Int) -> [Double] {
@@ -450,7 +466,7 @@ struct EnsembleOutlook {
     }
 
     /// A percentile of what the members say at one hour, interpolated.
-    func percentile(_ p: Double, at hour: Int) -> Double? {
+    public func percentile(_ p: Double, at hour: Int) -> Double? {
         let values = opinions(at: hour)
         guard !values.isEmpty else { return nil }
         let rank = max(0, min(1, p / 100)) * Double(values.count - 1)
@@ -463,7 +479,7 @@ struct EnsembleOutlook {
     /// The chance of at least this much wind at one hour, 0–1: the fraction
     /// of members that clear the bar. Crude and honest — no fitted curve,
     /// just a show of hands.
-    func probabilityAtLeast(_ kn: Double, at hour: Int) -> Double? {
+    public func probabilityAtLeast(_ kn: Double, at hour: Int) -> Double? {
         let values = opinions(at: hour)
         guard !values.isEmpty else { return nil }
         return Double(values.filter { $0 >= kn }.count) / Double(values.count)
@@ -471,7 +487,7 @@ struct EnsembleOutlook {
 
     /// The row for a moment on some other chart's clock, since the ensemble
     /// runs a shorter horizon than the deterministic models beside it.
-    func hourIndex(of date: Date) -> Int? {
+    public func hourIndex(of date: Date) -> Int? {
         guard let index = hours.lastIndex(where: { $0 <= date }) else { return nil }
         // An hour from a 16-day outlook can be far past the ensemble's end;
         // only answer for moments the ensemble actually covers.
@@ -492,17 +508,21 @@ struct EnsembleOutlook {
 /// minutes anywhere on Earth, and a smooth curve pretending to be four
 /// times the information is exactly the false precision this app is
 /// against. No native model, no card.
-struct NearTermWind {
-    let times: [Date]
+public struct NearTermWind: Sendable {
+
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(times: [Date], speedsKn: [Double?], gustsKn: [Double?], directions: [Double?], timeZone: TimeZone? = nil) { self.times = times; self.speedsKn = speedsKn; self.gustsKn = gustsKn; self.directions = directions; self.timeZone = timeZone }
+    public let times: [Date]
     /// Knots, aligned to `times` — this is a display struct and stays in
     /// the display dialect.
-    let speedsKn: [Double?]
-    let gustsKn: [Double?]
+    public let speedsKn: [Double?]
+    public let gustsKn: [Double?]
     /// Degrees the wind comes from.
-    let directions: [Double?]
-    var timeZone: TimeZone?
+    public let directions: [Double?]
+    public var timeZone: TimeZone?
 
-    var isEmpty: Bool { times.isEmpty || !speedsKn.contains { $0 != nil } }
+    public var isEmpty: Bool { times.isEmpty || !speedsKn.contains { $0 != nil } }
 }
 
 // MARK: - The full picture
@@ -513,61 +533,69 @@ struct NearTermWind {
 /// a shape. This is what sits behind them when a rider wants the workings:
 /// humidity and dew point, pressure, cloud, UV, visibility, the hour-by-hour
 /// run and the next five days.
-struct WeatherDetail {
+public struct WeatherDetail: Sendable {
 
-    struct Now {
-        let at: Date
-        let temperatureC: Double?
-        let apparentC: Double?
-        let humidity: Double?
-        let dewPointC: Double?
-        let pressureHPa: Double?
-        let cloudCover: Double?
-        let precipitationMm: Double?
-        let visibilityM: Double?
-        let uvIndex: Double?
-        let windKn: Double?
-        let gustKn: Double?
-        let directionDeg: Double?
-        let code: Int
-        let isDay: Bool
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(now: Now? = nil, hours: [Hour] = [], days: [Day] = [], timeZone: TimeZone? = nil) { self.now = now; self.hours = hours; self.days = days; self.timeZone = timeZone }
+
+    public struct Now: Sendable {
+        public let at: Date
+        public let temperatureC: Double?
+        public let apparentC: Double?
+        public let humidity: Double?
+        public let dewPointC: Double?
+        public let pressureHPa: Double?
+        public let cloudCover: Double?
+        public let precipitationMm: Double?
+        public let visibilityM: Double?
+        public let uvIndex: Double?
+        public let windKn: Double?
+        public let gustKn: Double?
+        public let directionDeg: Double?
+        public let code: Int
+        public let isDay: Bool
     }
 
-    struct Hour: Identifiable {
-        let at: Date
-        let temperatureC: Double?
-        let dewPointC: Double?
-        let windKn: Double?
-        let gustKn: Double?
-        let directionDeg: Double?
-        let precipitationChance: Double?
+    public struct Hour: Identifiable, Sendable {
+        public let at: Date
+        public let temperatureC: Double?
+        public let dewPointC: Double?
+        public let windKn: Double?
+        public let gustKn: Double?
+        public let directionDeg: Double?
+        public let precipitationChance: Double?
         /// Millimetres this hour — the amount, where `precipitationChance`
         /// is only the odds. The rain row draws both.
-        var precipitationMm: Double? = nil
-        let visibilityM: Double?
-        let uvIndex: Double?
-        let code: Int
-        var id: Date { at }
+        public var precipitationMm: Double? = nil
+        public let visibilityM: Double?
+        public let uvIndex: Double?
+        public let code: Int
+        public var id: Date { at }
     }
 
-    struct Day: Identifiable {
-        let date: Date
-        let code: Int
-        let highC: Double?
-        let lowC: Double?
-        let sunrise: Date?
-        let sunset: Date?
-        let uvMax: Double?
-        let precipitationChance: Double?
-        let windMaxKn: Double?
-        let gustMaxKn: Double?
-        let directionDeg: Double?
-        var id: Date { date }
+    public struct Day: Identifiable, Sendable {
+
+        /// Memberwise, spelled out because the synthesised one is internal
+        /// and this type is read from the apps.
+        public init(date: Date, code: Int, highC: Double? = nil, lowC: Double? = nil, sunrise: Date? = nil, sunset: Date? = nil, uvMax: Double? = nil, precipitationChance: Double? = nil, windMaxKn: Double? = nil, gustMaxKn: Double? = nil, directionDeg: Double? = nil) { self.date = date; self.code = code; self.highC = highC; self.lowC = lowC; self.sunrise = sunrise; self.sunset = sunset; self.uvMax = uvMax; self.precipitationChance = precipitationChance; self.windMaxKn = windMaxKn; self.gustMaxKn = gustMaxKn; self.directionDeg = directionDeg }
+        public let date: Date
+        public let code: Int
+        public let highC: Double?
+        public let lowC: Double?
+        public let sunrise: Date?
+        public let sunset: Date?
+        public let uvMax: Double?
+        public let precipitationChance: Double?
+        public let windMaxKn: Double?
+        public let gustMaxKn: Double?
+        public let directionDeg: Double?
+        public var id: Date { date }
     }
 
-    var now: Now?
-    var hours: [Hour] = []
-    var days: [Day] = []
+    public var now: Now?
+    public var hours: [Hour] = []
+    public var days: [Day] = []
 
     /// The spot's own timezone, not the phone's.
     ///
@@ -575,9 +603,9 @@ struct WeatherDetail {
     /// timezone of a rider sitting in Maine it reads three hours wrong, which
     /// is exactly the kind of quiet error that gets someone off the water
     /// late. Every time on the detail screens is rendered in this.
-    var timeZone: TimeZone?
+    public var timeZone: TimeZone?
 
-    var isEmpty: Bool { now == nil && hours.isEmpty }
+    public var isEmpty: Bool { now == nil && hours.isEmpty }
 }
 
 extension OpenMeteo {
@@ -585,7 +613,7 @@ extension OpenMeteo {
     /// One request for the lot. Splitting current, hourly and daily into three
     /// calls would triple the round trips for data the API is happy to return
     /// together.
-    static func detail(at coordinate: Geo.Coordinate) async -> WeatherDetail {
+    public static func detail(at coordinate: Geo.Coordinate) async -> WeatherDetail {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -722,21 +750,21 @@ extension OpenMeteo {
 }
 
 /// One hour of the sea-state forecast.
-struct WaveHour: Identifiable, Hashable {
-    let at: Date
-    let heightM: Double?
-    let periodS: Double?
-    let swellM: Double?
+public struct WaveHour: Identifiable, Hashable, Sendable {
+    public let at: Date
+    public let heightM: Double?
+    public let periodS: Double?
+    public let swellM: Double?
     /// Mean wave direction, degrees the waves are coming *from* — the wind
     /// convention, not the currents one.
-    var directionDeg: Double? = nil
-    var swellPeriodS: Double? = nil
-    var id: Date { at }
+    public var directionDeg: Double? = nil
+    public var swellPeriodS: Double? = nil
+    public var id: Date { at }
 }
 
 /// Open-Meteo, which is the same free model behind the wind estimate — it
 /// simply has far more to give than the app was asking of it.
-enum OpenMeteo {
+public enum OpenMeteo: Sendable {
 
     /// The four global models worth comparing, each run by a different
     /// meteorological agency on different physics, so where they agree is
@@ -754,7 +782,7 @@ enum OpenMeteo {
         ("ncep_nbm_conus", "NBM", true),
     ]
 
-    static func outlook(at coordinate: Geo.Coordinate, days: Int = 1,
+    public static func outlook(at coordinate: Geo.Coordinate, days: Int = 1,
                         pastDays: Int = 0) async -> WindOutlook {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
@@ -806,7 +834,7 @@ enum OpenMeteo {
     /// which is the design. When exactly one model has data its series
     /// arrives on bare keys; where domains overlap the keys are suffixed
     /// and the finer model is preferred.
-    static func nearTerm(at coordinate: Geo.Coordinate, hoursAhead: Int = 6) async -> NearTermWind {
+    public static func nearTerm(at coordinate: Geo.Coordinate, hoursAhead: Int = 6) async -> NearTermWind {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -858,7 +886,7 @@ enum OpenMeteo {
     /// `pastHours` reaches behind now, for the Spots map's time slider: a
     /// rider sliding back to "what did it do this morning" needs rows the
     /// forecast window alone does not carry.
-    static func windAlong(_ coordinates: [Geo.Coordinate],
+    public static func windAlong(_ coordinates: [Geo.Coordinate],
                           hours: Int = 4,
                           pastHours: Int = 0) async -> [[WindForecastHour]] {
         guard !coordinates.isEmpty else { return [] }
@@ -909,7 +937,7 @@ enum OpenMeteo {
     /// Every model's recent record near a point — verified against a buoy
     /// when one is close enough to speak for the water, self-consistency
     /// otherwise. See `ModelSteadiness` for what each flavour means.
-    static func modelRecord(near coordinate: Geo.Coordinate) async -> ModelSteadiness {
+    public static func modelRecord(near coordinate: Geo.Coordinate) async -> ModelSteadiness {
         // Thirty kilometres, because past that a buoy's wind is a different
         // piece of weather, and a "verified" badge on the wrong water would
         // be worse than the humbler measure.
@@ -1017,7 +1045,7 @@ enum OpenMeteo {
     /// question: the outlook asks four agencies for their best guess, this
     /// asks one agency how sure it is. Seven days, since ensemble spread at
     /// day ten is an honest shrug not worth the bytes.
-    static func ensemble(at coordinate: Geo.Coordinate, days: Int = 7) async -> EnsembleOutlook {
+    public static func ensemble(at coordinate: Geo.Coordinate, days: Int = 7) async -> EnsembleOutlook {
         var components = URLComponents(string: "https://ensemble-api.open-meteo.com/v1/ensemble")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -1054,7 +1082,7 @@ enum OpenMeteo {
 
     /// Wave height, period and swell. Global, and empty inland — the marine
     /// grid simply has no cell for a lake in Nevada.
-    static func waves(at coordinate: Geo.Coordinate, hours: Int = 24) async -> [WaveHour] {
+    public static func waves(at coordinate: Geo.Coordinate, hours: Int = 24) async -> [WaveHour] {
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -1103,26 +1131,26 @@ enum OpenMeteo {
     /// Any of it can be missing on its own: the marine grid has no cell for
     /// a river, the archive has not caught up to yesterday. What arrived is
     /// offered; what did not stays silent.
-    struct Historical {
-        var windDirectionFrom: Double?
-        var windSpeedKn: Double?
-        var windGustKn: Double?
-        var swellMetres: Double?
-        var swellDirectionFrom: Double?
+    public struct Historical: Sendable {
+        public var windDirectionFrom: Double?
+        public var windSpeedKn: Double?
+        public var windGustKn: Double?
+        public var swellMetres: Double?
+        public var swellDirectionFrom: Double?
         /// Net drift over the session's hours, knots, and the bearing it set
         /// *toward* — the chart convention the currents screens already use.
-        var currentKn: Double?
-        var currentSettingToward: Double?
+        public var currentKn: Double?
+        public var currentSettingToward: Double?
         /// The hour-by-hour record the averages were taken from, worth
         /// keeping on the session rather than dying in a label here.
-        var windTimeline: WindTimeline?
+        public var windTimeline: WindTimeline?
 
-        var isEmpty: Bool { windDirectionFrom == nil && swellMetres == nil }
+        public var isEmpty: Bool { windDirectionFrom == nil && swellMetres == nil }
     }
 
     /// Wind, swell and current for a session that already happened, averaged
     /// over the hours it spanned.
-    static func historical(at coordinate: Geo.Coordinate,
+    public static func historical(at coordinate: Geo.Coordinate,
                            during window: DateInterval) async -> Historical {
         async let wind = historicalWind(at: coordinate, during: window)
         async let sea = historicalSea(at: coordinate, during: window)
@@ -1295,11 +1323,11 @@ enum OpenMeteo {
     }
 
     /// The sea's half of a historical lookup.
-    struct Sea {
-        var swellMetres: Double?
-        var swellDirection: Double?
-        var currentKn: Double?
-        var currentToward: Double?
+    public struct Sea: Sendable {
+        public var swellMetres: Double?
+        public var swellDirection: Double?
+        public var currentKn: Double?
+        public var currentToward: Double?
     }
 
     /// Indices of the hours inside the window, padded so a forty-minute
@@ -1346,14 +1374,14 @@ enum OpenMeteo {
 /// forecast office's list and the buoy centre's index. Both are free, keyless,
 /// and effectively United States only. Outside it this finds close to nothing,
 /// and the sheet says so rather than pretending.
-struct FreeStation: Identifiable, Hashable {
+public struct FreeStation: Identifiable, Hashable, Sendable {
     /// Which of the two free networks answers for this one.
     ///
     /// It decides where the reading is read from and which page a rider is
     /// sent to, and those differ enough to be worth carrying: the forecast
     /// office publishes JSON observations and a timeseries page, the buoy
     /// centre publishes a fixed-width text file and a station page.
-    enum Source: Hashable {
+    public enum Source: Hashable, Sendable {
         case weatherService
         case dataBuoyCenter
         /// Tides and Currents — the harbour masts.
@@ -1369,7 +1397,7 @@ struct FreeStation: Identifiable, Hashable {
         /// files this mast under. Both, because a rider checking the number
         /// against the agency's own page needs the id to find it — and the
         /// three networks name the same instrument three different ways.
-        func label(for id: String) -> String {
+        public func label(for id: String) -> String {
             switch self {
             case .weatherService: "National Weather Service · \(id)"
             case .dataBuoyCenter: "NOAA Data Buoy Center · \(id.uppercased())"
@@ -1378,12 +1406,12 @@ struct FreeStation: Identifiable, Hashable {
         }
     }
 
-    let id: String
+    public let id: String
     /// Mutable because the registry's curated name wins over the feed's.
-    var name: String
-    let coordinate: Geo.Coordinate
-    let metres: Double
-    var source: Source = .weatherService
+    public var name: String
+    public let coordinate: Geo.Coordinate
+    public let metres: Double
+    public var source: Source = .weatherService
 
     /// The same mast on another network, when it stands in two of them.
     ///
@@ -1393,9 +1421,9 @@ struct FreeStation: Identifiable, Hashable {
     /// it may be the silent one — NDBC's columns were all `MM` while NWS
     /// had five knots. Keeping the loser's address turns that from a dead
     /// pin into a second phone call.
-    struct Alternate: Hashable {
-        let source: Source
-        let id: String
+    public struct Alternate: Hashable, Sendable {
+        public let source: Source
+        public let id: String
     }
 
     /// *Every* other network carrying this mast, not just the first one to
@@ -1403,16 +1431,16 @@ struct FreeStation: Identifiable, Hashable {
     /// whichever was absorbed last — which is CO-OPS, the one publishing
     /// every six minutes and, via the buoy centre's naming, the one the
     /// surviving pin ends up named after.
-    var alternates: [Alternate] = []
+    public var alternates: [Alternate] = []
 
     /// Filled in lazily — the list arrives first, readings trickle in after.
-    var observation: StationObservation?
+    public var observation: StationObservation?
 
     /// The registry's cross-links, when this sensor is also on a commercial
     /// network — one pin, and the second door for riders who pay for it.
-    var links: [RegistryLink] = []
+    public var links: [RegistryLink] = []
 
-    var url: URL {
+    public var url: URL {
         switch source {
         case .weatherService:
             URL(string: "https://www.weather.gov/wrh/timeseries?site=\(id)")!
@@ -1428,15 +1456,15 @@ struct FreeStation: Identifiable, Hashable {
 }
 
 /// The latest reading from one of those stations.
-struct StationObservation: Hashable {
-    let windKn: Double?
-    let gustKn: Double?
-    let directionDeg: Double?
-    let temperatureC: Double?
-    let summary: String?
-    let at: Date?
+public struct StationObservation: Hashable, Sendable {
+    public let windKn: Double?
+    public let gustKn: Double?
+    public let directionDeg: Double?
+    public let temperatureC: Double?
+    public let summary: String?
+    public let at: Date?
 
-    var isStale: Bool {
+    public var isStale: Bool {
         guard let at else { return true }
         return Date().timeIntervalSince(at) > 3 * 3600
     }
@@ -1447,7 +1475,7 @@ struct StationObservation: Hashable {
     /// file's too: a mast reading zero mean and gusting four is reporting —
     /// the weather service writes that "0G4" — and the fetch used to reject
     /// exactly the reading the pin would have drawn.
-    var reports: Bool { windKn != nil || gustKn != nil }
+    public var reports: Bool { windKn != nil || gustKn != nil }
 
     /// Which network's copy of the mast actually produced these numbers.
     ///
@@ -1455,7 +1483,7 @@ struct StationObservation: Hashable {
     /// carrying one instrument and keeps the newest answer — so the pin's own
     /// filing is no longer a safe caption for the reading under it. Nil from
     /// anything that read a single address, where the asker already knows.
-    var reportedBy: FreeStation.Alternate?
+    public var reportedBy: FreeStation.Alternate?
 }
 
 /// Every free anemometer near a point, from both of the networks that have
@@ -1472,7 +1500,7 @@ struct StationObservation: Hashable {
 /// So both are asked, merged by identifier, and sorted by distance together. A
 /// station is a station; which agency happens to file it is not the rider's
 /// problem.
-enum FreeStations {
+public enum FreeStations: Sendable {
 
     /// Nearest first, capped at `limit` across both networks.
     ///
@@ -1480,7 +1508,7 @@ enum FreeStations {
     /// launch takes the slot of an airfield far from it. That is the trade
     /// this is for: the far end of a distance-sorted list is the part nobody
     /// reads.
-    static func near(_ coordinate: Geo.Coordinate, limit: Int = 8,
+    public static func near(_ coordinate: Geo.Coordinate, limit: Int = 8,
                      radius: Double = 250_000) async -> [FreeStation] {
         async let office = NationalWeatherService.stations(near: coordinate, limit: limit)
         async let marine = DataBuoyCenter.metStations(near: coordinate, limit: limit, radius: radius)
@@ -1556,7 +1584,7 @@ enum FreeStations {
     /// and they are asked at once rather than in turn — most stations stand in
     /// one network and have no alternates at all, so this is a second or third
     /// request only for the handful that are genuinely duplicated.
-    static func latest(for station: FreeStation) async -> StationObservation? {
+    public static func latest(for station: FreeStation) async -> StationObservation? {
         let addresses = [FreeStation.Alternate(source: station.source, id: station.id)]
             + station.alternates
         let readings = await withTaskGroup(of: StationObservation?.self) { group in
@@ -1596,7 +1624,7 @@ enum FreeStations {
 ///
 /// NWS asks every caller to identify itself in `User-Agent` and will refuse
 /// anonymous traffic, so that header is not optional politeness.
-enum NationalWeatherService {
+public enum NationalWeatherService: Sendable {
 
     private static let agent = "openWater/1.0 (openwaterapp.com; support@openwaterapp.com)"
 
@@ -1610,7 +1638,7 @@ enum NationalWeatherService {
     ///   data allowance — the request fails immediately rather than
     ///   downloading, and the walk simply stays incomplete until the rider
     ///   is somewhere it can finish.
-    static func get(_ url: URL, accept: String = "application/geo+json",
+    public static func get(_ url: URL, accept: String = "application/geo+json",
                     onlyWhenCheap: Bool = false) async -> Data? {
         var request = URLRequest(url: url)
         request.setValue(agent, forHTTPHeaderField: "User-Agent")
@@ -1645,7 +1673,7 @@ enum NationalWeatherService {
     /// There is no radius parameter anywhere in this API. The state index is
     /// the closest thing to one: fetched once, kept, and cut to the rider's
     /// radius here.
-    static func stations(near coordinate: Geo.Coordinate, limit: Int = 8) async -> [FreeStation] {
+    public static func stations(near coordinate: Geo.Coordinate, limit: Int = 8) async -> [FreeStation] {
         async let office = officeStations(near: coordinate)
         async let local = stateStations(near: coordinate)
 
@@ -1672,11 +1700,11 @@ enum NationalWeatherService {
     }
 
     private struct DistilledStation: Codable {
-        let id: String
-        let name: String
-        let latitude: Double
-        let longitude: Double
-        var coordinate: Geo.Coordinate {
+        public let id: String
+        public let name: String
+        public let latitude: Double
+        public let longitude: Double
+        public var coordinate: Geo.Coordinate {
             Geo.Coordinate(latitude: latitude, longitude: longitude)
         }
     }
@@ -1697,15 +1725,15 @@ enum NationalWeatherService {
     /// rest of the state is finished in the background and written back, so
     /// the first look is fast and every look after it is complete. One
     /// state, once a week, and only the states somebody actually visits.
-    static let statePageBound = 16
-    static let stateEnoughNearby = 40
-    static let stateNearbyReach: Double = 50_000
+    public static let statePageBound = 16
+    public static let stateEnoughNearby = 40
+    public static let stateNearbyReach: Double = 50_000
 
     /// A state's stations, and whether the walk that produced them reached
     /// the end. An incomplete index is usable and known to be partial.
     private struct StateIndex: Codable {
-        var complete: Bool
-        var stations: [DistilledStation]
+        public var complete: Bool
+        public var stations: [DistilledStation]
     }
 
     private static var stateCache: [String: StateIndex] = [:]
@@ -1928,7 +1956,7 @@ enum NationalWeatherService {
     /// newest record has neither a speed nor a gust, the recent history is
     /// walked for one that does — the difference between "this station has
     /// nothing to say" and "we asked at a bad moment".
-    static func latest(for stationId: String) async -> StationObservation? {
+    public static func latest(for stationId: String) async -> StationObservation? {
         if let newest = await observation(atLatestFor: stationId),
            newest.windKn != nil || newest.gustKn != nil {
             return newest
@@ -2020,7 +2048,7 @@ enum NationalWeatherService {
 }
 
 private extension ISO8601DateFormatter {
-    static let withFractionalSeconds: ISO8601DateFormatter = {
+    public static let withFractionalSeconds: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
@@ -2042,22 +2070,22 @@ private extension ISO8601DateFormatter {
 ///
 /// Small Craft Advisories and Rip Current Statements come through the same
 /// feed, and for this sport those are the ones that matter most.
-struct WeatherAlert: Identifiable, Hashable {
-    let id: String
-    let event: String
-    let headline: String?
-    let severity: String
-    let ends: Date?
+public struct WeatherAlert: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let event: String
+    public let headline: String?
+    public let severity: String
+    public let ends: Date?
 
     /// The ones that change whether you launch, floated to the top.
-    var isOnTheWater: Bool {
+    public var isOnTheWater: Bool {
         let e = event.lowercased()
         return e.contains("marine") || e.contains("small craft") || e.contains("rip current")
             || e.contains("thunderstorm") || e.contains("gale") || e.contains("storm")
             || e.contains("hurricane") || e.contains("tsunami") || e.contains("wind")
     }
 
-    var isSevere: Bool {
+    public var isSevere: Bool {
         ["Extreme", "Severe"].contains(severity) || isOnTheWater
     }
 }
@@ -2065,7 +2093,7 @@ struct WeatherAlert: Identifiable, Hashable {
 extension NationalWeatherService {
 
     /// Alerts in force at a point. Keyless, and US only like the rest of NWS.
-    static func alerts(at coordinate: Geo.Coordinate) async -> [WeatherAlert] {
+    public static func alerts(at coordinate: Geo.Coordinate) async -> [WeatherAlert] {
         let path = String(format: "https://api.weather.gov/alerts/active?point=%.4f,%.4f",
                           coordinate.latitude, coordinate.longitude)
         guard let url = URL(string: path), let data = await get(url) else { return [] }
@@ -2104,31 +2132,31 @@ extension NationalWeatherService {
 // MARK: - Tides
 
 /// A NOAA tide station and today's turns.
-struct TideStation: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let metres: Double
+public struct TideStation: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let metres: Double
     /// Where it stands — kept for the map, because "8 km away" does not
     /// say which side of the inlet, and tides differ across one.
-    let coordinate: Geo.Coordinate
-    var events: [TideEvent] = []
+    public let coordinate: Geo.Coordinate
+    public var events: [TideEvent] = []
 
-    var url: URL {
+    public var url: URL {
         URL(string: "https://tidesandcurrents.noaa.gov/noaatidepredictions.html?id=\(id)")!
     }
 
     /// The next turn from now — the one number a rider actually wants.
-    var next: TideEvent? { events.first { $0.at > Date() } }
+    public var next: TideEvent? { events.first { $0.at > Date() } }
 }
 
-struct TideEvent: Hashable {
-    let at: Date
-    let metres: Double
-    let isHigh: Bool
+public struct TideEvent: Hashable, Sendable {
+    public let at: Date
+    public let metres: Double
+    public let isHigh: Bool
 }
 
 /// NOAA CO-OPS: tide predictions for 3,499 US stations, free and keyless.
-enum TidesAndCurrents {
+public enum TidesAndCurrents: Sendable {
 
     /// The station index is a 2 MB document and changes about never, so it is
     /// fetched once, boiled down to what we use, and kept on disk.
@@ -2139,13 +2167,13 @@ enum TidesAndCurrents {
     }
 
     private struct Distilled: Codable {
-        let id: String
-        let name: String
-        let latitude: Double
-        let longitude: Double
+        public let id: String
+        public let name: String
+        public let latitude: Double
+        public let longitude: Double
     }
 
-    static func stations(near coordinate: Geo.Coordinate, limit: Int = 3) async -> [TideStation] {
+    public static func stations(near coordinate: Geo.Coordinate, limit: Int = 3) async -> [TideStation] {
         let index = await loadIndex()
         return index
             .map { (station: $0, metres: Geo.distance(coordinate, $0.coordinate)) }
@@ -2173,7 +2201,7 @@ enum TidesAndCurrents {
             // The bundle's snapshot: a first launch with no signal still
             // knows where the stations stand. Refreshed by
             // scripts/refresh-station-snapshots.sh, same distilled format.
-            if let bundled = Bundle.main.url(forResource: "noaa-tide-stations", withExtension: "json"),
+            if let bundled = Bundle.module.url(forResource: "noaa-tide-stations", withExtension: "json"),
                let data = try? Data(contentsOf: bundled),
                let rows = try? JSONDecoder().decode([Distilled].self, from: data) {
                 cached = rows.map {
@@ -2214,7 +2242,7 @@ enum TidesAndCurrents {
     /// subset that actually reports weather, three hundred-odd of them, and
     /// asking for the whole station list and filtering would download four
     /// times the bytes to throw most of them away.
-    static func metStations(near coordinate: Geo.Coordinate, limit: Int = 8,
+    public static func metStations(near coordinate: Geo.Coordinate, limit: Int = 8,
                             radius: Double = 250_000) async -> [FreeStation] {
         await loadMetIndex()
             .map { (station: $0, metres: Geo.distance(coordinate, $0.coordinate)) }
@@ -2277,7 +2305,7 @@ enum TidesAndCurrents {
     ///
     /// `units=english` is knots for wind, which is the one place in this API
     /// where the imperial switch gives the unit a sailor already thinks in.
-    static func windReading(for stationId: String) async -> StationObservation? {
+    public static func windReading(for stationId: String) async -> StationObservation? {
         var components = URLComponents(
             string: "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter")!
         components.queryItems = [
@@ -2321,7 +2349,7 @@ enum TidesAndCurrents {
     }
 
     /// Today's high and low waters for one station, in metres above MLLW.
-    static func today(for stationId: String) async -> [TideEvent] {
+    public static func today(for stationId: String) async -> [TideEvent] {
         var components = URLComponents(
             string: "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter")!
         components.queryItems = [
@@ -2366,39 +2394,39 @@ enum TidesAndCurrents {
 /// no forecast grid substitutes for them. Water temperature in particular
 /// decides what a rider wears, which is a safety question in a lot of the
 /// places this app is used.
-struct Buoy: Identifiable, Hashable {
-    let id: String
-    let name: String
-    let metres: Double
+public struct Buoy: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let metres: Double
     /// Where it is moored. Kept rather than discarded after the distance
     /// sort, so a rider can be shown which piece of water it speaks for —
     /// "12 km away" says nothing about whether it is outside the bar or
     /// inside the bay, and those are different oceans.
-    var coordinate: Geo.Coordinate
-    var reading: BuoyReading?
+    public var coordinate: Geo.Coordinate
+    public var reading: BuoyReading?
 
-    var url: URL {
+    public var url: URL {
         URL(string: "https://www.ndbc.noaa.gov/station_page.php?station=\(id)")!
     }
 }
 
-struct BuoyReading: Hashable {
-    let waveHeightM: Double?
-    let dominantPeriodS: Double?
+public struct BuoyReading: Hashable, Sendable {
+    public let waveHeightM: Double?
+    public let dominantPeriodS: Double?
     /// Mean wave direction, degrees the waves are coming *from*.
     ///
     /// The column a height leaves out. Two metres from the south-east and two
     /// metres from the south-west are different days at the same beach, and
     /// this is the one place on the screen where that is measured rather than
     /// modelled.
-    var meanDirectionDeg: Double?
-    let waterTempC: Double?
-    let windKn: Double?
-    let at: Date?
+    public var meanDirectionDeg: Double?
+    public let waterTempC: Double?
+    public let windKn: Double?
+    public let at: Date?
 }
 
 /// NOAA's National Data Buoy Center. Free, keyless, fixed-width text.
-enum DataBuoyCenter {
+public enum DataBuoyCenter: Sendable {
 
     /// One row of the index: what a station is called and where it stands.
     private typealias Station = (id: String, name: String, coordinate: Geo.Coordinate)
@@ -2417,7 +2445,7 @@ enum DataBuoyCenter {
     ///
     /// Which of the two lists one of these lands in is decided by what it
     /// reports rather than by what it is called: see `windReading(for:)`.
-    static func metStations(near coordinate: Geo.Coordinate, limit: Int,
+    public static func metStations(near coordinate: Geo.Coordinate, limit: Int,
                             radius: Double = 250_000) async -> [FreeStation] {
         let index = await loadIndex()
         return index
@@ -2443,7 +2471,7 @@ enum DataBuoyCenter {
         return String(raw[separator.upperBound...])
     }
 
-    static func buoys(near coordinate: Geo.Coordinate, limit: Int = 3,
+    public static func buoys(near coordinate: Geo.Coordinate, limit: Int = 3,
                       radius: Double = 150_000) async -> [Buoy] {
         let index = await loadIndex()
         return index
@@ -2476,10 +2504,10 @@ enum DataBuoyCenter {
     }
 
     private struct Distilled: Codable {
-        let id: String
-        let name: String
-        let latitude: Double
-        let longitude: Double
+        public let id: String
+        public let name: String
+        public let latitude: Double
+        public let longitude: Double
     }
 
     private static func loadIndex() async -> [Station] {
@@ -2497,7 +2525,7 @@ enum DataBuoyCenter {
             // The bundle's snapshot beats an empty sheet on a signal-less
             // first launch (scripts/refresh-station-snapshots.sh).
             if onDisk == nil,
-               let bundled = Bundle.main.url(forResource: "ndbc-stations", withExtension: "json"),
+               let bundled = Bundle.module.url(forResource: "ndbc-stations", withExtension: "json"),
                let data = try? Data(contentsOf: bundled),
                let rows = try? JSONDecoder().decode([Distilled].self, from: data) {
                 return rows.map { ($0.id, $0.name, Geo.Coordinate(latitude: $0.latitude,
@@ -2575,19 +2603,19 @@ enum DataBuoyCenter {
     private struct RealtimeRow {
         // YY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES ATMP WTMP
         //  0  1  2  3  4    5    6   7    8   9  10  11   12   13   14
-        let columns: [String]
+        public let columns: [String]
 
-        func value(_ index: Int) -> Double? {
+        public func value(_ index: Int) -> Double? {
             guard let raw = columns[safe: index], raw != "MM" else { return nil }
             return Double(raw)
         }
 
         /// Knots from the metres per second the file publishes.
-        func knots(_ index: Int) -> Double? {
+        public func knots(_ index: Int) -> Double? {
             value(index).map { $0 * 3600 / 1852 }
         }
 
-        var at: Date? {
+        public var at: Date? {
             var stamp = DateComponents()
             stamp.year = value(0).map(Int.init)
             stamp.month = value(1).map(Int.init)
@@ -2618,7 +2646,7 @@ enum DataBuoyCenter {
         return RealtimeRow(columns: columns)
     }
 
-    static func latest(for stationId: String) async -> BuoyReading? {
+    public static func latest(for stationId: String) async -> BuoyReading? {
         guard let row = await latestRow(for: stationId) else { return nil }
 
         let reading = BuoyReading(
@@ -2650,7 +2678,7 @@ enum DataBuoyCenter {
     /// over and appear as a station. That is the honest description of what it
     /// is reporting at the time, so it is left alone rather than pinned with a
     /// second source of truth about which kind of thing each station is.
-    static func windReading(for stationId: String) async -> StationObservation? {
+    public static func windReading(for stationId: String) async -> StationObservation? {
         guard let row = await latestRow(for: stationId),
               row.value(8) == nil, row.value(14) == nil,
               let wind = row.knots(6)
@@ -2675,7 +2703,7 @@ enum DataBuoyCenter {
     /// height stays real — `NDBCSpectral` in core owns that raggedness.
     /// Not cached: it is an observation, and its whole value is being
     /// minutes old.
-    static func spectral(for stationId: String) async -> NDBCSpectral.Reading? {
+    public static func spectral(for stationId: String) async -> NDBCSpectral.Reading? {
         guard let url = URL(string: "https://www.ndbc.noaa.gov/data/realtime2/\(stationId.uppercased()).spec"),
               let (data, response) = try? await URLSession.shared.data(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200,
@@ -2694,7 +2722,7 @@ enum DataBuoyCenter {
     /// proves that rule, because nothing here is presented as a current
     /// reading: this feeds a two-week score, where an hour of staleness
     /// changes nothing and a 300 KB re-download per screen would.
-    static func windHistory(for stationId: String) async -> [(at: Date, windKn: Double)] {
+    public static func windHistory(for stationId: String) async -> [(at: Date, windKn: Double)] {
         guard let url = URL(string: "https://www.ndbc.noaa.gov/data/realtime2/\(stationId.uppercased()).txt"),
               let data = await ForecastCache.data(from: url, ttl: 3600),
               let text = String(data: data, encoding: .utf8)
@@ -2738,54 +2766,54 @@ enum DataBuoyCenter {
 /// carries a second swell train besides — which is exactly the breakdown the
 /// surf apps show, because it is the one that decides whether it is worth
 /// paddling out.
-struct SurfConditions {
+public struct SurfConditions: Sendable {
 
-    struct Train {
-        let heightM: Double
-        let periodS: Double?
-        let directionDeg: Double?
+    public struct Train: Sendable {
+        public let heightM: Double
+        public let periodS: Double?
+        public let directionDeg: Double?
 
         /// The same train in core's dialect, for the math that lives there.
-        var core: SwellTrain {
+        public var core: SwellTrain {
             SwellTrain(heightM: heightM, periodS: periodS, directionFromDeg: directionDeg)
         }
     }
 
-    let at: Date
+    public let at: Date
     /// Combined sea: swell and wind wave together, which is the number that
     /// matches "surf height" on a report.
-    let waveHeightM: Double?
-    let wavePeriodS: Double?
-    let waveDirectionDeg: Double?
+    public let waveHeightM: Double?
+    public let wavePeriodS: Double?
+    public let waveDirectionDeg: Double?
 
-    let primarySwell: Train?
-    let secondarySwell: Train?
-    let windWave: Train?
+    public let primarySwell: Train?
+    public let secondarySwell: Train?
+    public let windWave: Train?
 
-    let seaTemperatureC: Double?
+    public let seaTemperatureC: Double?
     /// Set and drift. The one thing here that also matters to the analysis:
     /// a knot of current is the difference between speed over ground and
     /// speed through water.
-    let currentKn: Double?
-    let currentDirectionDeg: Double?
+    public let currentKn: Double?
+    public let currentDirectionDeg: Double?
     /// Set when the network failed and this is the cache's last good
     /// answer, this many seconds old — same contract as `WindOutlook`.
-    var staleAge: TimeInterval?
+    public var staleAge: TimeInterval?
 
-    var hasAnything: Bool { waveHeightM != nil || primarySwell != nil }
+    public var hasAnything: Bool { waveHeightM != nil || primarySwell != nil }
 
     /// Breaking-face height as a range in metres, the way every report
     /// states it — a single number implies a precision the ocean does not
     /// have. The conversion from offshore height is the one documented
     /// heuristic, `SwellMath.faceHeightRange`; the rider's unit is the
     /// view's business.
-    var faceRangeM: ClosedRange<Double>? {
+    public var faceRangeM: ClosedRange<Double>? {
         guard let waveHeightM, waveHeightM > 0.01 else { return nil }
         return SwellMath.faceHeightRange(offshoreHs: waveHeightM, periodS: wavePeriodS)
     }
 
     /// The body-part scale, which is how surfers actually talk about size.
-    var sizeDescription: String? {
+    public var sizeDescription: String? {
         guard let range = faceRangeM else { return nil }
         let high = max(1, Int((range.upperBound / DistanceUnit.metresPerFoot).rounded(.up)))
         return switch high {
@@ -2803,7 +2831,7 @@ struct SurfConditions {
     /// What to wear. A judgement, and stated as one — thresholds vary by
     /// person by a good few degrees, and nobody should take this over their
     /// own experience of being cold.
-    var wetsuit: String? {
+    public var wetsuit: String? {
         guard let seaTemperatureC else { return nil }
         return switch seaTemperatureC {
         case 24...: "Boardshorts weather"
@@ -2820,7 +2848,7 @@ struct SurfConditions {
 extension OpenMeteo {
 
     /// One call for the sea state, including the swell breakdown.
-    static func surf(at coordinate: Geo.Coordinate) async -> SurfConditions? {
+    public static func surf(at coordinate: Geo.Coordinate) async -> SurfConditions? {
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -2873,45 +2901,49 @@ extension OpenMeteo {
 /// therefore worse — and available at every spot in the guide, which makes it
 /// the right thing to draw. The NOAA stations stay listed underneath for
 /// anyone who wants the real numbers.
-struct TideCurve {
+public struct TideCurve: Sendable {
 
-    struct Point: Identifiable {
-        let at: Date
-        let metres: Double
-        var id: Date { at }
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(points: [Point], source: Source = .model, timeZone: TimeZone? = nil, staleAge: TimeInterval? = nil) { self.points = points; self.source = source; self.timeZone = timeZone; self.staleAge = staleAge }
+
+    public struct Point: Identifiable, Sendable {
+        public let at: Date
+        public let metres: Double
+        public var id: Date { at }
     }
 
-    struct Turn: Identifiable {
-        let at: Date
-        let metres: Double
-        let isHigh: Bool
-        var id: Date { at }
+    public struct Turn: Identifiable, Sendable {
+        public let at: Date
+        public let metres: Double
+        public let isHigh: Bool
+        public var id: Date { at }
     }
 
-    let points: [Point]
+    public let points: [Point]
 
     /// Which authority drew this curve. Never mixed — the datums alone
     /// (MSL against MLLW) make a blended curve a lie with an axis.
-    enum Source: Hashable {
+    public enum Source: Hashable, Sendable {
         /// Open-Meteo's marine model: worldwide, hourly, MSL.
         case model
         /// CO-OPS harmonic predictions at a named station: US, six-minute,
         /// MLLW — the authority where it stands.
         case station(name: String, metres: Double)
     }
-    var source: Source = .model
+    public var source: Source = .model
 
-    var timeZone: TimeZone?
+    public var timeZone: TimeZone?
     /// The offline-fallback age, seconds, when that is what this is.
-    var staleAge: TimeInterval?
+    public var staleAge: TimeInterval?
 
-    var isEmpty: Bool { points.count < 3 }
+    public var isEmpty: Bool { points.count < 3 }
 
-    var low: Double { points.map(\.metres).min() ?? 0 }
-    var high: Double { points.map(\.metres).max() ?? 1 }
+    public var low: Double { points.map(\.metres).min() ?? 0 }
+    public var high: Double { points.map(\.metres).max() ?? 1 }
 
     /// Where the water is now, interpolated between the surrounding hours.
-    var now: Point? {
+    public var now: Point? {
         let moment = Date()
         guard let after = points.firstIndex(where: { $0.at >= moment }) else { return points.last }
         guard after > 0 else { return points.first }
@@ -2925,7 +2957,7 @@ struct TideCurve {
     /// Rising or falling, which is the half of "1.1 m" that actually matters
     /// — a metre on the way up is a different beach from a metre on the way
     /// down, and it decides whether the sandbar is about to appear or go.
-    var isRising: Bool? {
+    public var isRising: Bool? {
         let moment = Date()
         guard let after = points.firstIndex(where: { $0.at >= moment }), after > 0 else { return nil }
         return points[after].metres > points[after - 1].metres
@@ -2936,7 +2968,7 @@ struct TideCurve {
     /// Derived rather than fetched because the curve is global and the
     /// harmonic tables are not — and an hourly series resolves a turn to
     /// within about half an hour, which is the precision anybody plans to.
-    var turns: [Turn] {
+    public var turns: [Turn] {
         guard points.count > 2 else { return [] }
         var found: [Turn] = []
         for index in 1..<(points.count - 1) {
@@ -2952,7 +2984,7 @@ struct TideCurve {
         return found
     }
 
-    var nextTurn: Turn? { turns.first { $0.at > Date() } }
+    public var nextTurn: Turn? { turns.first { $0.at > Date() } }
 
     /// A slice of the run, for the places that draw a shape rather than a
     /// table.
@@ -2962,7 +2994,7 @@ struct TideCurve {
     /// hairline scribble with its turn labels on top of each other. Cutting
     /// here rather than at the fetch keeps one request behind both, and the
     /// three hours of run-up keep the curve from starting at the line.
-    func window(hours: Int, from now: Date = Date()) -> TideCurve {
+    public func window(hours: Int, from now: Date = Date()) -> TideCurve {
         let start = now.addingTimeInterval(-3 * 3600)
         let end = now.addingTimeInterval(Double(hours) * 3600)
         let cut = points.filter { $0.at >= start && $0.at <= end }
@@ -2976,7 +3008,7 @@ struct TideCurve {
 extension OpenMeteo {
 
     /// Ten days of sea level, hourly. Global.
-    static func tide(at coordinate: Geo.Coordinate) async -> TideCurve {
+    public static func tide(at coordinate: Geo.Coordinate) async -> TideCurve {
         var components = URLComponents(string: "https://marine-api.open-meteo.com/v1/marine")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -3018,9 +3050,9 @@ extension OpenMeteo {
 /// close enough to speak for the water, the model everywhere else. The
 /// currents doctrine, applied to the curve the currents doctrine was
 /// copied from — SURF.md's Tier 5, closed.
-enum Tides {
+public enum Tides: Sendable {
 
-    static func curve(at coordinate: Geo.Coordinate) async -> TideCurve {
+    public static func curve(at coordinate: Geo.Coordinate) async -> TideCurve {
         if let station = await TidesAndCurrents.stations(near: coordinate, limit: 1).first,
            station.metres <= Currents.stationRadius {
             let harmonic = await TidesAndCurrents.harmonicCurve(for: station)
@@ -3038,7 +3070,7 @@ extension TidesAndCurrents {
     /// same datagetter the high/low events come from, yesterday through
     /// two days out. Predictions, not readings — computed from harmonics,
     /// and caching them wrongs nobody.
-    static func harmonicCurve(for station: TideStation) async -> TideCurve {
+    public static func harmonicCurve(for station: TideStation) async -> TideCurve {
         let stamp = DateFormatter()
         stamp.dateFormat = "yyyyMMdd"
         stamp.timeZone = .current
@@ -3078,7 +3110,7 @@ extension TidesAndCurrents {
     /// across a flat tide top, and the turn detector reads a plateau's
     /// two ends as two high waters. Half-hour samples keep every turn a
     /// rider plans by and give the plateaus back their single peak.
-    static func parseWaterLevel(_ data: Data) -> [TideCurve.Point] {
+    public static func parseWaterLevel(_ data: Data) -> [TideCurve.Point] {
         struct Payload: Decodable {
             struct Row: Decodable { let t: String; let v: String }
             let predictions: [Row]?
@@ -3108,21 +3140,25 @@ extension TidesAndCurrents {
 /// combination changes across a day. Hence bands rather than hours: nobody
 /// plans a dawn patrol to the hour, and twenty-four rows a day is a table
 /// nobody reads.
-struct SurfOutlook {
+public struct SurfOutlook: Sendable {
 
-    struct Band: Identifiable {
-        let start: Date
-        let label: String
-        let primary: SurfConditions.Train?
-        let secondary: SurfConditions.Train?
-        let windKn: Double?
-        let windFromDeg: Double?
+    /// Memberwise, spelled out because the synthesised one is internal
+    /// and this type is read from the apps.
+    public init(days: [Day] = [], timeZone: TimeZone? = nil, hours: [Date] = [], swellM: [Double?] = [], periodS: [Double?] = [], swellFromDeg: [Double?] = [], windKn: [Double?] = [], windFromDeg: [Double?] = [], tideM: [Double?] = [], totalM: [Double?] = [], staleAge: TimeInterval? = nil, shoreFacingDeg: Double? = nil, hasModel: Bool = false) { self.hasModel = hasModel; self.days = days; self.timeZone = timeZone; self.hours = hours; self.swellM = swellM; self.periodS = periodS; self.swellFromDeg = swellFromDeg; self.windKn = windKn; self.windFromDeg = windFromDeg; self.tideM = tideM; self.totalM = totalM; self.staleAge = staleAge; self.shoreFacingDeg = shoreFacingDeg }
+
+    public struct Band: Identifiable, Sendable {
+        public let start: Date
+        public let label: String
+        public let primary: SurfConditions.Train?
+        public let secondary: SurfConditions.Train?
+        public let windKn: Double?
+        public let windFromDeg: Double?
         /// The spot's shore, when the spot knows which way it faces. With
         /// it, `windEffect` means what it says; without, the swell-relative
         /// proxy below stands in.
-        var shore: ShoreGeometry?
+        public var shore: ShoreGeometry?
 
-        var id: Date { start }
+        public var id: Date { start }
 
         /// What the wind is doing to the surf.
         ///
@@ -3134,7 +3170,7 @@ struct SurfOutlook {
         /// a side-shore day offshore whenever swell and wind happen to
         /// oppose. Nil when the inputs are unknown, because a guess here
         /// would be worse than a blank.
-        var windEffect: WindEffect? {
+        public var windEffect: WindEffect? {
             guard let windFromDeg, let windKn, windKn > 3 else { return nil }
             if let shore {
                 return switch shore.windRelation(windFromDeg: windFromDeg) {
@@ -3157,33 +3193,33 @@ struct SurfOutlook {
 
         /// The app's own call for this band — the rules live in core's
         /// `SurfRating`, and every appearance is labelled as an opinion.
-        var rating: SurfRating {
+        public var rating: SurfRating {
             SurfRating.rate(
                 trains: [primary, secondary].compactMap { $0?.core },
                 shore: shore, windKn: windKn, windFromDeg: windFromDeg)
         }
     }
 
-    enum WindEffect: String {
+    public enum WindEffect: String, Sendable {
         case offshore = "offshore"
         case crossShore = "cross-shore"
         case onshore = "onshore"
 
         /// Green is not "good surf", it is "the wind is not spoiling it".
-        var isFavourable: Bool { self == .offshore }
+        public var isFavourable: Bool { self == .offshore }
     }
 
-    struct Day: Identifiable {
-        let date: Date
-        let bands: [Band]
-        var id: Date { date }
+    public struct Day: Identifiable, Sendable {
+        public let date: Date
+        public let bands: [Band]
+        public var id: Date { date }
 
-        var biggest: Double? { bands.compactMap { $0.primary?.heightM }.max() }
-        var longestPeriod: Double? { bands.compactMap { $0.primary?.periodS }.max() }
+        public var biggest: Double? { bands.compactMap { $0.primary?.heightM }.max() }
+        public var longestPeriod: Double? { bands.compactMap { $0.primary?.periodS }.max() }
     }
 
-    var days: [Day] = []
-    var timeZone: TimeZone?
+    public var days: [Day] = []
+    public var timeZone: TimeZone?
 
     /// The hourly series behind the bands.
     ///
@@ -3191,31 +3227,31 @@ struct SurfOutlook {
     /// a swell filling in over six hours is a shape, and four rows a day
     /// cannot draw it. Kept alongside rather than instead, because the two
     /// screens want different things from the same fetch.
-    var hours: [Date] = []
-    var swellM: [Double?] = []
-    var periodS: [Double?] = []
-    var swellFromDeg: [Double?] = []
-    var windKn: [Double?] = []
-    var windFromDeg: [Double?] = []
-    var tideM: [Double?] = []
+    public var hours: [Date] = []
+    public var swellM: [Double?] = []
+    public var periodS: [Double?] = []
+    public var swellFromDeg: [Double?] = []
+    public var windKn: [Double?] = []
+    public var windFromDeg: [Double?] = []
+    public var tideM: [Double?] = []
     /// Total sea — swell and wind waves together. The chart draws the
     /// swell; this is what a buoy's height reading actually corresponds
     /// to, so it is what the buoy nowcast corrects.
-    var totalM: [Double?] = []
+    public var totalM: [Double?] = []
 
     /// Set when the wave model's answer is the cache's offline fallback,
     /// this many seconds old — the screens say so rather than posing as
     /// fresh, same contract as `WindOutlook`.
-    var staleAge: TimeInterval?
+    public var staleAge: TimeInterval?
 
     /// The facing every band was judged against, kept so the screens can
     /// say which kind of "offshore" they are showing. Nil means the proxy.
-    var shoreFacingDeg: Double?
+    public var shoreFacingDeg: Double?
 
     /// The same outlook with every band judging its wind against this
     /// shore. The fetcher cannot do this itself — it knows a coordinate,
     /// not a spot — so the sheet applies what the spot knows.
-    func applyingShoreFacing(_ degrees: Double?) -> SurfOutlook {
+    public func applyingShoreFacing(_ degrees: Double?) -> SurfOutlook {
         guard let degrees else { return self }
         let shore = ShoreGeometry(waterFacingDeg: degrees)
         var out = self
@@ -3231,7 +3267,7 @@ struct SurfOutlook {
     }
 
     /// The hour nearest now, for the marker every surf chart carries.
-    var nowIndex: Int? {
+    public var nowIndex: Int? {
         let moment = Date()
         return hours.indices.min {
             abs(hours[$0].timeIntervalSince(moment)) < abs(hours[$1].timeIntervalSince(moment))
@@ -3245,9 +3281,9 @@ struct SurfOutlook {
     /// naively that is five days of confident "flat" for a lake, which is a
     /// forecast rather than an absence. Flat is a real answer at a real
     /// coast; no model is a different thing and should say so.
-    var hasModel = false
+    public var hasModel = false
 
-    var isEmpty: Bool { days.isEmpty || !hasModel }
+    public var isEmpty: Bool { days.isEmpty || !hasModel }
 
 }
 
@@ -3258,7 +3294,7 @@ extension OpenMeteo {
     /// Two calls because they are two APIs — the wave model and the weather
     /// model — and the wind matters as much as the swell for deciding whether
     /// to go. Run together so the wait is one call long, not two.
-    static func surfOutlook(at coordinate: Geo.Coordinate, days: Int = 5) async -> SurfOutlook {
+    public static func surfOutlook(at coordinate: Geo.Coordinate, days: Int = 5) async -> SurfOutlook {
         async let marine = hourlyMarine(at: coordinate, days: days)
         async let wind = hourlyWind(at: coordinate, days: days)
         let (sea, air) = await (marine, wind)
@@ -3328,12 +3364,12 @@ extension OpenMeteo {
     /// The wave model's hourly fields, kept as raw columns so a band can pull
     /// any train out of them by name.
     private struct HourlyMarine {
-        var times: [Date] = []
-        var zone: TimeZone?
-        var columns: [String: [Double?]] = [:]
-        var staleAge: TimeInterval?
+        public var times: [Date] = []
+        public var zone: TimeZone?
+        public var columns: [String: [Double?]] = [:]
+        public var staleAge: TimeInterval?
 
-        func train(at index: Int, prefix: String) -> SurfConditions.Train? {
+        public func train(at index: Int, prefix: String) -> SurfConditions.Train? {
             guard let height = columns["\(prefix)height"]?[safe: index] ?? nil,
                   height > 0.05 else { return nil }
             return SurfConditions.Train(
@@ -3345,11 +3381,11 @@ extension OpenMeteo {
     }
 
     private struct HourlyWind {
-        var times: [Date] = []
-        var speeds: [Double?] = []
-        var directions: [Double?] = []
+        public var times: [Date] = []
+        public var speeds: [Double?] = []
+        public var directions: [Double?] = []
 
-        func index(of date: Date) -> Int {
+        public func index(of date: Date) -> Int {
             times.firstIndex { abs($0.timeIntervalSince(date)) < 1800 } ?? -1
         }
     }

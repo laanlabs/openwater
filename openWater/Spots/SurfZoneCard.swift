@@ -1,5 +1,6 @@
 import Foundation
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// The forecaster's own words.

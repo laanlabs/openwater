@@ -467,6 +467,15 @@ struct RadarScreen: View {
     var title: String = "Radar"
 
     @Environment(AppSettings.self) private var settings
+
+    /// Compact height is a phone on its side. A radar sweep is a picture of
+    /// weather crossing a coastline, so sideways the map takes the screen and
+    /// the loop's controls float over it rather than pushing it up.
+    @Environment(\.verticalSizeClass) private var height
+    @Environment(\.dismiss) private var dismiss
+
+    private var landscape: Bool { height == .compact }
+
     @State private var frames: [RainViewerFrame] = []
     @State private var index: Int = 0
     @State private var isPlaying = false
@@ -561,10 +570,39 @@ struct RadarScreen: View {
     var body: some View {
         RadarMapView(centre: centre, source: source, style: settings.mapStyle,
                      onRegionChange: { visible = $0 })
-            .ignoresSafeArea(edges: Edge.Set.bottom)
-            .safeAreaInset(edge: VerticalEdge.bottom) { footer }
+            .ignoresSafeArea(edges: landscape ? Edge.Set.all : Edge.Set.bottom)
+            .safeAreaInset(edge: VerticalEdge.bottom) {
+                if !landscape { footer }
+            }
+            .overlay(alignment: Alignment.bottom) {
+                if landscape {
+                    footer
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .frame(maxWidth: 620)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                }
+            }
+            .overlay(alignment: Alignment.topLeading) {
+                // The navigation bar's back button went with the bar. This is
+                // the way out, in the corner it was in.
+                if landscape {
+                    MapChromeButton {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.top, 10)
+                    .accessibilityLabel("Back")
+                }
+            }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(NavigationBarItem.TitleDisplayMode.inline)
+            .toolbar(landscape ? Visibility.hidden : Visibility.automatic, for: ToolbarPlacement.navigationBar)
+            .statusBarHidden(landscape)
+            .allowsLandscape()
             .feedbackButton("Radar")
             .task {
                 frames = await RainViewer.frames()
@@ -609,13 +647,18 @@ struct RadarScreen: View {
             Text(source.attribution)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text(source.coverage)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            // Where the sweep reaches is worth a line in portrait and worth a
+            // third of the screen sideways. The source's own name stays
+            // either way — that one is not ours to drop.
+            if !landscape {
+                Text(source.coverage)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(landscape ? 10 : 14)
         .background(.regularMaterial)
     }
 

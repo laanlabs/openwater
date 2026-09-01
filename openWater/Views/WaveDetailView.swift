@@ -42,6 +42,10 @@ struct WaveDetailView: View {
 
     @State private var order: Order = .time
 
+    /// The map with the screen to itself — by the button on the card, or by
+    /// turning the phone on its side.
+    @State private var isMapFullScreen = false
+
     private func ordered(_ waves: WaveRideSummary) -> [WaveRide] {
         switch order {
         case .time: waves.rides
@@ -221,9 +225,54 @@ struct WaveDetailView: View {
         VStack(spacing: 0) {
             map(waves)
                 .frame(height: 260)
+                // Bottom trailing, the same corner and the same glyph as the
+                // Upwind and Glides maps: expanding a map should be the one
+                // gesture wherever a session is being read.
+                .overlay(alignment: .bottomTrailing) {
+                    Button {
+                        isMapFullScreen = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 36, height: 36)
+                            .background(.regularMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                    .accessibilityLabel("Expand map")
+                }
             replayBar
         }
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        // On this card and not on the screen, so that a session with no swell
+        // set — where there is no map at all — stays upright.
+        .fullScreenInLandscape($isMapFullScreen)
+        .fullScreenCover(isPresented: $isMapFullScreen) {
+            fullScreenMap(waves)
+        }
+    }
+
+    /// The same map, the same replay, without the page around it.
+    ///
+    /// Not a second screen: `map` and `replayBar` are the card's own, so a
+    /// wave chosen here is chosen there, and closing this lands back on a
+    /// card already showing whichever wave was being watched.
+    private func fullScreenMap(_ waves: WaveRideSummary) -> some View {
+        map(waves)
+            .ignoresSafeArea(edges: .bottom)
+            .safeAreaInset(edge: .bottom, spacing: 0) { replayBar }
+            .overlay(alignment: .topLeading) {
+                MapChromeButton {
+                    isMapFullScreen = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.headline)
+                }
+                .padding(.leading, 16)
+                .padding(.top, 8)
+            }
+            .closesInPortrait()
     }
 
     private func map(_ waves: WaveRideSummary) -> some View {

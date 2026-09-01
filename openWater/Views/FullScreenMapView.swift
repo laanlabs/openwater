@@ -19,6 +19,11 @@ struct FullScreenMapView: View {
 
     @Environment(AppSettings.self) private var settings
 
+    /// Compact height is a phone on its side. The chrome is the same; only
+    /// how far the legend has to clear the stats row changes, because in
+    /// landscape there is a third of the height to spend on it.
+    @Environment(\.verticalSizeClass) private var height
+
     /// The ramp the track is drawn with, so the legend cannot claim a
     /// different range from the colours beside it.
     private var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
@@ -94,7 +99,7 @@ struct FullScreenMapView: View {
                         onDark: settings.mapStyle.isDark
                     )
                     .padding(.leading, 16)
-                    .padding(.bottom, 150)
+                    .padding(.bottom, height == .compact ? 84 : 150)
                 }
             }
 

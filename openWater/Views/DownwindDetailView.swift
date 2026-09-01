@@ -145,6 +145,7 @@ struct DownwindDetailView: View {
                         }
                     }
             }
+            .closesInPortrait()
         }
     }
 
@@ -254,6 +255,8 @@ struct DownwindDetailView: View {
                         .padding(10)
                 }
             }
+            // Turning the phone opens the same map the button does.
+            .fullScreenInLandscape($isMapFullScreen)
     }
 
     private var map: some View {

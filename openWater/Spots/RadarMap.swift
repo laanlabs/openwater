@@ -425,38 +425,158 @@ struct RadarMapView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate {
 
+        /// One frame on the map: the overlay and the renderer whose alpha is
+        /// this class's whole business.
+        private struct Layer {
+            let overlay: MKTileOverlay
+            let renderer: MKTileOverlayRenderer
+        }
+
+        /// Enough of the sweep to read, not so much that the coastline and
+        /// the spot you are deciding about disappear under it.
+        private static let opacity: CGFloat = 0.7
+
+        /// Long enough to read as a dissolve, short enough that the loop's
+        /// own 420 ms frame does not overtake it.
+        private static let crossFade: CFTimeInterval = 0.28
+
+        /// How long to wait for a frame's tiles before showing it anyway.
+        /// They are nearly always cached — the loop is preloaded and the
+        /// crops are kept — so this is the safety net, not the path.
+        private static let patience: CFTimeInterval = 0.7
+
         private var showing: RadarSource?
-        private var overlay: MKTileOverlay?
+        private var current: Layer?
+        /// Frames on their way out. Usually one; more only if the loop
+        /// advances faster than a fade can finish.
+        private var retiring: [Layer] = []
+        private var renderers: [ObjectIdentifier: MKTileOverlayRenderer] = [:]
+
+        private weak var map: MKMapView?
+        private var clock: CADisplayLink?
+        private var began: CFTimeInterval = 0
+        private var isFading = false
+
         var onRegionChange: ((MKCoordinateRegion) -> Void)?
+
+        deinit { clock?.invalidate() }
 
         func mapView(_ map: MKMapView, regionDidChangeAnimated: Bool) {
             onRegionChange?(map.region)
         }
 
         /// Swap the layer only when the source actually changed — scrubbing
-        /// frames re-enters this on every slider tick, and removing and adding
-        /// the same overlay would flash the map white each time.
+        /// frames re-enters this on every slider tick.
+        ///
+        /// The swap used to be a removal and an addition, which is what made
+        /// the loop blink: for the beat between them there was no radar on
+        /// the map at all, and even with every tile cached
+        /// `MKTileOverlayRenderer` re-renders from scratch for an overlay it
+        /// was not just drawing. Thirteen frames a loop, thirteen blinks.
+        ///
+        /// So the new frame goes on *above* the old one at zero alpha, waits
+        /// until it can actually draw, and then the two cross-fade. The old
+        /// frame is only removed once the new one has taken over, and the map
+        /// is never bare.
         func apply(_ source: RadarSource, to map: MKMapView) {
             guard showing != source else { return }
-            if let overlay { map.removeOverlay(overlay) }
-            let fresh = RadarTileOverlay(source: source)
-            map.addOverlay(fresh, level: .aboveLabels)
-            overlay = fresh
             showing = source
+            self.map = map
+
+            // Whatever was mid-transition lands now rather than being left
+            // half-faded under the next one.
+            settle()
+
+            let overlay = RadarTileOverlay(source: source)
+            let renderer = MKTileOverlayRenderer(tileOverlay: overlay)
+            let isFirst = current == nil
+            renderer.alpha = isFirst ? Self.opacity : 0
+            renderers[ObjectIdentifier(overlay)] = renderer
+
+            if let current { retiring.append(current) }
+            current = Layer(overlay: overlay, renderer: renderer)
+            // Above labels, and above the frame it is replacing: overlays
+            // draw in the order they were added.
+            map.addOverlay(overlay, level: .aboveLabels)
+
+            guard !isFirst else { return }
+            began = CACurrentMediaTime()
+            isFading = false
+            let clock = CADisplayLink(target: self, selector: #selector(tick))
+            // A dissolve does not need sixty steps, and each one asks the
+            // renderer to redraw its tiles.
+            clock.preferredFramesPerSecond = 30
+            clock.add(to: .main, forMode: .common)
+            self.clock = clock
+        }
+
+        /// One step of the wait-then-dissolve.
+        @objc private func tick() {
+            guard let current else { return settle() }
+            let now = CACurrentMediaTime()
+
+            if !isFading {
+                // Nothing is shown of the new frame until it has tiles to
+                // show; until then the old one is still the whole picture.
+                let ready = map.map { canDraw(current.renderer, in: $0) } ?? true
+                guard ready || now - began >= Self.patience else { return }
+                isFading = true
+                began = now
+            }
+
+            let t = min(1, (now - began) / Self.crossFade)
+            // Smoothstep: a linear alpha ramp reads as a lurch at both ends.
+            let eased = CGFloat(t * t * (3 - 2 * t))
+            current.renderer.alpha = Self.opacity * eased
+            current.renderer.setNeedsDisplay()
+            for layer in retiring {
+                layer.renderer.alpha = Self.opacity * (1 - eased)
+                layer.renderer.setNeedsDisplay()
+            }
+            if t >= 1 { settle() }
+        }
+
+        /// Has this renderer got what it needs to draw what is on screen?
+        private func canDraw(_ renderer: MKTileOverlayRenderer, in map: MKMapView) -> Bool {
+            let rect = map.visibleMapRect
+            guard rect.size.width > 0, map.bounds.width > 0 else { return true }
+            let zoom = MKZoomScale(map.bounds.width / CGFloat(rect.size.width))
+            return renderer.canDraw(rect, zoomScale: zoom)
+        }
+
+        /// End the transition wherever it is: the new frame at full strength,
+        /// the old ones off the map.
+        private func settle() {
+            clock?.invalidate()
+            clock = nil
+            isFading = false
+            if let current {
+                current.renderer.alpha = Self.opacity
+                current.renderer.setNeedsDisplay()
+            }
+            for layer in retiring {
+                map?.removeOverlay(layer.overlay)
+                renderers.removeValue(forKey: ObjectIdentifier(layer.overlay))
+            }
+            retiring.removeAll()
         }
 
         func mapView(_ map: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let tiles = overlay as? MKTileOverlay else {
                 return MKOverlayRenderer(overlay: overlay)
             }
+            // The renderer is made in `apply`, because its alpha is the thing
+            // being animated and MapKit would otherwise hand back one this
+            // class has no reference to.
+            if let known = renderers[ObjectIdentifier(tiles)] { return known }
             let renderer = MKTileOverlayRenderer(tileOverlay: tiles)
-            // Enough to read the sweep, not so much that the coastline and the
-            // spot you are deciding about disappear under it.
-            renderer.alpha = 0.7
+            renderer.alpha = Self.opacity
+            renderers[ObjectIdentifier(tiles)] = renderer
             return renderer
         }
     }
 }
+
 
 // MARK: - The screen
 
@@ -568,24 +688,30 @@ struct RadarScreen: View {
     }
 
     var body: some View {
-        RadarMapView(centre: centre, source: source, style: settings.mapStyle,
-                     onRegionChange: { visible = $0 })
-            .ignoresSafeArea(edges: landscape ? Edge.Set.all : Edge.Set.bottom)
+        // The map ignores the safe area and the chrome does not. Sideways
+        // that is the whole difference between a full-bleed sweep and a
+        // segmented control sitting on the home indicator, where a tap is the
+        // system's before it is ever the app's.
+        ZStack(alignment: Alignment.bottom) {
+            RadarMapView(centre: centre, source: source, style: settings.mapStyle,
+                         onRegionChange: { visible = $0 })
+                .ignoresSafeArea(edges: landscape ? Edge.Set.all : Edge.Set.bottom)
+
+            if landscape {
+                footer
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .frame(maxWidth: 620)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 6)
+            }
+        }
             .safeAreaInset(edge: VerticalEdge.bottom) {
                 if !landscape { footer }
             }
-            .overlay(alignment: Alignment.bottom) {
-                if landscape {
-                    footer
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .frame(maxWidth: 620)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 10)
-                }
-            }
             .overlay(alignment: Alignment.topLeading) {
                 // The navigation bar's back button went with the bar. This is
-                // the way out, in the corner it was in.
+                // the way out, in the corner it was in — inside the safe area,
+                // clear of the notch a sideways phone puts on that edge.
                 if landscape {
                     MapChromeButton {
                         dismiss()
@@ -593,8 +719,8 @@ struct RadarScreen: View {
                         Image(systemName: "chevron.left")
                             .font(.headline)
                     }
-                    .padding(.leading, 16)
-                    .padding(.top, 10)
+                    .padding(.leading, 8)
+                    .padding(.top, 8)
                     .accessibilityLabel("Back")
                 }
             }

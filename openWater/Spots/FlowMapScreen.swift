@@ -60,17 +60,30 @@ struct FlowMapScreen: View {
     private var hour: Int { Int(hourIndex.rounded()) }
 
     var body: some View {
-        WindFieldMapView(
-            centre: coordinate.clCoordinate,
-            spanMetres: Self.spanMetres,
-            raster: showWash ? raster : nil,
-            arrows: arrowStates,
-            arrowsNeutral: showWash,
-            onRegionSettled: { visible in
-                if needsReload(for: visible) { reload(for: visible) }
+        // The field ignores the safe area and the scrubber does not: sideways
+        // a panel hung off the very bottom edge sits on the home indicator,
+        // where a tap belongs to the system before it belongs to the app.
+        ZStack(alignment: .bottom) {
+            WindFieldMapView(
+                centre: coordinate.clCoordinate,
+                spanMetres: Self.spanMetres,
+                raster: showWash ? raster : nil,
+                arrows: arrowStates,
+                arrowsNeutral: showWash,
+                onRegionSettled: { visible in
+                    if needsReload(for: visible) { reload(for: visible) }
+                }
+            )
+            .ignoresSafeArea(edges: landscape ? .all : [])
+
+            if landscape {
+                controls
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .frame(maxWidth: 620)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 6)
             }
-        )
-        .ignoresSafeArea(edges: landscape ? .all : [])
+        }
         .navigationTitle("Flow map")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Flow map")
@@ -79,15 +92,6 @@ struct FlowMapScreen: View {
         .allowsLandscape()
         .safeAreaInset(edge: .bottom) {
             if !landscape { controls }
-        }
-        .overlay(alignment: .bottom) {
-            if landscape {
-                controls
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .frame(maxWidth: 620)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 10)
-            }
         }
         .overlay(alignment: .topLeading) {
             // The navigation bar's back button went with the bar. This is the
@@ -99,8 +103,8 @@ struct FlowMapScreen: View {
                     Image(systemName: "chevron.left")
                         .font(.headline)
                 }
-                .padding(.leading, 16)
-                .padding(.top, 10)
+                .padding(.leading, 8)
+                .padding(.top, 8)
                 .accessibilityLabel("Back")
             }
         }

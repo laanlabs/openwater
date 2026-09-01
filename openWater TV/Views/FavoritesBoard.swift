@@ -43,7 +43,11 @@ struct FavoritesBoard: View {
             }
             .navigationDestination(for: GuideSpot.self) { SpotScreen(spot: $0) }
         }
-        .sheet(isPresented: $isEditing) { EditFavoritesScreen() }
+        // Full screen, not a sheet. tvOS sheets are a narrow centre column,
+        // and `searchable` puts a whole keyboard inside this one: in a sheet
+        // the prompt truncates mid-word, the letters crowd, and the results
+        // get about a third of a 4K display.
+        .fullScreenCover(isPresented: $isEditing) { EditFavoritesScreen() }
         .task(id: favorites.map(\.spotId).joined()) {
             // A loop rather than a timer: it dies with the view, and the first
             // pass happens the moment the list exists rather than one interval

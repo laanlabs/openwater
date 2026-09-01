@@ -18,6 +18,9 @@ struct SpotScreen: View {
     @State private var stations: [FreeStation] = []
     @State private var measured: [String: StationObservation] = [:]
 
+    /// So the page opens on the wind rather than on the camera row.
+    @Namespace private var page
+
     private var reading: WindReading? { guide.wind[spot.spotId] }
 
     private var here: Geo.Coordinate {
@@ -26,21 +29,35 @@ struct SpotScreen: View {
 
     var body: some View {
         ScrollView {
+            // Focus stops on every read-only block — see `ScrollStop`. This
+            // page had the same defect the conditions screen did: the camera
+            // row at the bottom was the only focusable thing on it, so the
+            // remote either did nothing or jumped straight past the wind.
             VStack(alignment: .leading, spacing: 48) {
-                header
-                if !ahead.isEmpty { ForecastStrip(hours: ahead) }
-                if !reportingStations.isEmpty { MeasuredStations(rows: reportingStations) }
+                ScrollStop { header }
+                    .prefersDefaultFocus(in: page)
+                if !ahead.isEmpty { ScrollStop { ForecastStrip(hours: ahead) } }
+                if !reportingStations.isEmpty {
+                    MeasuredStations(rows: reportingStations)
+                }
                 if !cams.isEmpty { SpotCams(cams: cams, spotName: spot.name) }
             }
             .padding(.horizontal, 80)
             .padding(.vertical, 40)
         }
+        .focusScope(page)
         .task {
             async let forecast = guide.forecast(for: spot)
             async let nearby = guide.nearbyResources(to: spot, radius: 60_000)
             async let free = FreeStations.near(here, limit: 8, radius: 40_000)
             ahead = await forecast
-            cams = await nearby.filter { $0.kind == .camera && $0.playback != nil }
+            // Every camera, playable first — the cams tab's rule. The ones
+            // this box cannot play still lead somewhere: a code and a phone.
+            cams = await nearby.filter { $0.kind == .camera }
+                .sorted {
+                    if ($0.playback != nil) != ($1.playback != nil) { return $0.playback != nil }
+                    return $0.metres < $1.metres
+                }
             stations = await free
 
             // Readings come after the list, the way the phone's sheet does it:
@@ -107,10 +124,15 @@ struct SpotScreen: View {
 
 /// Twelve hours as bars, coloured by the map's own ramp.
 ///
+/// Internal rather than private: the map's conditions screen shows the same
+/// twelve hours for the point under its crosshairs, and two copies of a bar
+/// chart is how the phone and the television start disagreeing about the
+/// weather.
+///
 /// No axis and no scrubber. Somebody looking at a television wants the shape —
 /// whether it builds through the morning or dies at four — and a shape needs
 /// neither.
-private struct ForecastStrip: View {
+struct ForecastStrip: View {
 
     let hours: [WindForecastHour]
 
@@ -146,8 +168,9 @@ private struct ForecastStrip: View {
 
 // MARK: - Actual instruments
 
-/// Stations that are measuring, and only those.
-private struct MeasuredStations: View {
+/// Stations that are measuring, and only those. Shared with the map's
+/// conditions screen for `ForecastStrip`'s reason.
+struct MeasuredStations: View {
 
     let rows: [(FreeStation, StationObservation)]
 
@@ -165,26 +188,33 @@ private struct MeasuredStations: View {
             Text("MEASURED NEARBY")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.secondary)
+            // A focus stop per row, not one for the whole list. Eight
+            // stations is taller than a screen, and a single focusable block
+            // taller than the viewport is the one thing a tvOS scroll view
+            // cannot help with: it scrolls to show the block, and then there
+            // is nowhere further for focus to go, so the rows past the bottom
+            // stay past the bottom. Per row, Down walks the list.
             ForEach(rows, id: \.0.id) { station, observation in
-                HStack(spacing: 24) {
-                    Text(station.name)
-                        .font(.system(size: 28))
-                        .lineLimit(1)
-                    Spacer()
-                    // A gust with no mean is still a reading — the weather
-                    // service writes that "0G4" — so the label follows what
-                    // the instrument actually said.
-                    Text(Self.wind(observation))
-                        .font(.system(size: 30, weight: .semibold))
-                        .monospacedDigit()
-                    if let at = observation.at {
-                        Text(at, style: .relative)
-                            .font(.system(size: 22))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 200, alignment: .trailing)
+                ScrollStop {
+                    HStack(spacing: 24) {
+                        Text(station.name)
+                            .font(.system(size: 28))
+                            .lineLimit(1)
+                        Spacer()
+                        // A gust with no mean is still a reading — the weather
+                        // service writes that "0G4" — so the label follows what
+                        // the instrument actually said.
+                        Text(Self.wind(observation))
+                            .font(.system(size: 30, weight: .semibold))
+                            .monospacedDigit()
+                        if let at = observation.at {
+                            Text(at, style: .relative)
+                                .font(.system(size: 22))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 200, alignment: .trailing)
+                        }
                     }
                 }
-                .padding(.vertical, 6)
             }
         }
     }

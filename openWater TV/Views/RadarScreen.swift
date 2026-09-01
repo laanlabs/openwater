@@ -39,11 +39,13 @@ struct RadarScreen: View {
     @State private var isWarming = false
     @State private var product: RadarProduct = .base
     @State private var isGlobal = true
+    /// Whether the overlay-type choices are showing in place of the main bar.
+    @State private var showingLayers = false
 
     @FocusState private var focus: Control?
     @Namespace private var bar
 
-    private enum Control: Hashable { case play, step, layer, coverage }
+    private enum Control: Hashable { case play, step, more, back, optGlobal, optProduct }
 
     /// How fast the loop runs. Slower than real time by a long way: thirteen
     /// frames covering two hours at three a second reads as weather moving,
@@ -64,6 +66,13 @@ struct RadarScreen: View {
             // ordered past → nowcast, so index 0 is two hours ago — which is
             // not what "is it raining" means.
             index = max(0, latestObservation)
+            // Warm the whole loop up front, not on the first press of Play.
+            // A dissolve holds the old frame only until the new one is drawn;
+            // an un-cached frame is not drawn for about a second, which is
+            // longer than the dissolve, so it would blank anyway. Warming
+            // here makes Step instant and the first loop pass as smooth as
+            // the rest.
+            await warm()
         }
         // The loop is a task rather than a timer: it dies with the view, so a
         // tab left behind is not animating tiles at somebody's router.
@@ -150,15 +159,18 @@ struct RadarScreen: View {
     /// blinks between a drawn frame and a half-empty one. Fetch the lot
     /// first, say so while it happens, and only then start.
     private func togglePlay() {
+        // Warmed on entry, so this just plays. Kept as a guard rather than a
+        // fetch: if the warm somehow has not finished, wait for it rather
+        // than loop over a cold cache.
         guard !isPlaying else { return isPlaying = false }
         Task {
-            await warm()
+            if loaded < 1 { await warm() }
             isPlaying = true
         }
     }
 
     private func warm() async {
-        guard frames.count > 1 else { return }
+        guard frames.count > 1, !isWarming, loaded < 1 else { return }
         isWarming = true
         loaded = 0
         defer { isWarming = false }
@@ -239,6 +251,28 @@ struct RadarScreen: View {
     }
 
     private var controls: some View {
+        Group {
+            if showingLayers { layerBar } else { mainBar }
+        }
+        .padding(.horizontal, 34)
+        .padding(.vertical, 18)
+        .background(.thinMaterial, in: Capsule())
+        .focusSection()
+        .focusScope(bar)
+        // Menu backs out of the overlay picker rather than leaving the tab —
+        // and only then, so on the main bar Menu still does whatever tvOS
+        // does with a tab. The `nil` handler is what lets it pass through.
+        .onExitCommand(perform: showingLayers ? { showingLayers = false; focus = .more } : nil)
+    }
+
+    /// Play, step, and the door to everything else.
+    ///
+    /// The bar used to carry the loop *and* the coverage toggle *and* four
+    /// NOAA products in one row — six things, most of them about which
+    /// overlay to draw rather than about playing it. Those moved behind
+    /// "More options", so the bar a rider sees first is just: is it playing,
+    /// step it, or change what it shows.
+    private var mainBar: some View {
         HStack(spacing: 22) {
             RadarButton(title: playLabel,
                         systemImage: isPlaying ? "pause.fill" : "play.fill",
@@ -248,9 +282,8 @@ struct RadarScreen: View {
                 .disabled(!isGlobal || frames.isEmpty || isWarming)
 
             if isGlobal, !frames.isEmpty {
-                // A step, for the frame somebody wants to sit on. Pausing and
-                // stepping is the whole of scrubbing on a remote — a slider
-                // would need the D-pad this screen has not got to spare.
+                // Pausing and stepping is the whole of scrubbing on a remote —
+                // a slider would need the D-pad this screen has not got.
                 RadarButton(title: "Step", systemImage: "forward.frame.fill") {
                     isPlaying = false
                     index = (index + 1) % frames.count
@@ -260,29 +293,47 @@ struct RadarScreen: View {
 
             Divider().frame(height: 44)
 
-            RadarButton(title: isGlobal ? "Global loop" : "NOAA still",
-                        systemImage: isGlobal ? "globe" : "flag.fill",
-                        isOn: true) { isGlobal.toggle() }
-                .focused($focus, equals: .coverage)
+            RadarButton(title: "More options", systemImage: "slider.horizontal.3") {
+                showingLayers = true
+                focus = .back
+            }
+            .focused($focus, equals: .more)
+        }
+    }
 
-            if !isGlobal {
-                // NOAA's four products, which is the toggle set the phone
-                // carries. Meaningless over RainViewer, so it is not there.
-                ForEach(RadarProduct.allCases, id: \.self) { option in
-                    RadarButton(title: option.label,
-                                systemImage: "square.stack.3d.down.right",
-                                isOn: option == product) { product = option }
-                        .focused($focus, equals: .layer)
+    /// The overlay picker, with the way back at its head.
+    ///
+    /// Global loop is RainViewer — the one with a past to animate — and the
+    /// four NOAA layers are single current stills of things RainViewer does
+    /// not publish: storm cores, tops, precipitation type. Back returns to
+    /// the main bar; so does Menu.
+    private var layerBar: some View {
+        HStack(spacing: 18) {
+            RadarButton(title: "Back", systemImage: "chevron.backward") {
+                showingLayers = false
+                focus = .more
+            }
+            .focused($focus, equals: .back)
+            .prefersDefaultFocus(in: bar)
+
+            Divider().frame(height: 44)
+
+            RadarButton(title: "Global loop", systemImage: "globe", isOn: isGlobal) {
+                isGlobal = true
+            }
+            .focused($focus, equals: .optGlobal)
+
+            ForEach(RadarProduct.allCases, id: \.self) { option in
+                RadarButton(title: option.label,
+                            systemImage: "square.stack.3d.down.right",
+                            isOn: !isGlobal && option == product) {
+                    isGlobal = false
+                    isPlaying = false
+                    product = option
                 }
+                .focused($focus, equals: .optProduct)
             }
         }
-        .padding(.horizontal, 34)
-        .padding(.vertical, 18)
-        .background(.thinMaterial, in: Capsule())
-        // The same pair the wind map's bar needed: one target for "down", and
-        // a declared landing spot inside it.
-        .focusSection()
-        .focusScope(bar)
     }
 }
 
@@ -329,26 +380,38 @@ private struct RadarTileMap: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
 
         var showing: MKCoordinateRegion?
-        /// One overlay, whose frame changes — see `RadarTileOverlay.show`.
-        ///
-        /// Thirteen overlays switched by `alpha` was the previous design and
-        /// it failed in a way worth recording: the first pass round the loop
-        /// played, and on the second the sweep disappeared entirely, leaving
-        /// a bare map with the clock still ticking. MapKit does not undertake
-        /// to bring a renderer's content back when its alpha returns from
-        /// zero, and it did not. Reproduced in the simulator, twenty-six
-        /// screenshots at a flat 71.3 mean brightness with no radar in any
-        /// of them.
-        /// One overlay per frame, added the moment it is first shown and
-        /// then kept. Keyed by the frame's own identity so a layer switch
-        /// (which changes the whole set) clears them.
-        private var overlays: [String: RadarTileOverlay] = [:]
-        private var layers: [RadarSource] = []
-        private var shown: String?
 
-        /// How strongly the sweep sits over the chart. Enough to read, not so
-        /// much that the coastline under it disappears.
+        /// The frame on screen, and the one fading in over it.
+        ///
+        /// A loop that removes the old overlay the instant it adds the new
+        /// one blanks for as long as the new one takes to draw — about a
+        /// second, which is the jump. So the old frame is held at full
+        /// strength while the new one fades up from nothing on top of it, and
+        /// only taken down once the new one is all the way in. There is never
+        /// a moment with nothing drawn.
+        ///
+        /// A fresh overlay per frame rather than a kept set: distinct
+        /// overlays have distinct tile identities, so MapKit never serves one
+        /// frame's tiles for another — and the crop cache makes a fresh one
+        /// cheap, which is the whole reason this is affordable.
+        private var currentOverlay: RadarTileOverlay?
+        private var currentKey: String?
+        private var renderers: [ObjectIdentifier: MKTileOverlayRenderer] = [:]
+        /// The overlay whose renderer should start transparent — set just
+        /// before it is added, read once in `rendererFor`.
+        private var pendingIncoming: ObjectIdentifier?
+        private var layers: [RadarSource] = []
+
+        private var fadeTimer: Timer?
+        private var fadeStart: CFTimeInterval = 0
+        private var fadingIn: RadarTileOverlay?
+        private var fadingOut: RadarTileOverlay?
+        private weak var mapRef: MKMapView?
+
+        /// How strongly the sweep sits over the chart, and how long a frame
+        /// takes to dissolve into the next.
         private static let strength: CGFloat = 0.75
+        private static let fadeDuration: CFTimeInterval = 0.45
 
         func matches(_ region: MKCoordinateRegion) -> Bool {
             guard let showing else { return false }
@@ -357,43 +420,76 @@ private struct RadarTileMap: UIViewRepresentable {
                 && abs(showing.span.latitudeDelta - region.span.latitudeDelta) < 0.0001
         }
 
-        /// Show `index` by swapping which overlay is on the map — not by
-        /// hiding one behind another, and not by mutating one in place.
-        ///
-        /// Both of those were tried and both failed, for the same underlying
-        /// reason: MapKit caches a tile by its z/x/y *path*. Change an
-        /// overlay's source and call `reloadData()` and the path is
-        /// unchanged, so it hands back the bitmap it already has and the
-        /// picture never moves — measured frozen, 0.000 pixel change between
-        /// frames. Alpha had the second-pass disappearance. A distinct
-        /// overlay per frame has a distinct identity, so its tiles are its
-        /// own; the earlier reason not to do this — a bare gap while the new
-        /// one downloaded — is gone now the crop cache answers `loadTile`
-        /// instantly.
         func apply(_ sources: [RadarSource], index: Int, to map: MKMapView) {
             guard sources.indices.contains(index) else { return }
+            mapRef = map
 
             if sources != layers {
-                for overlay in overlays.values { map.removeOverlay(overlay) }
-                overlays.removeAll()
-                shown = nil
+                endFade()
+                if let currentOverlay { map.removeOverlay(currentOverlay) }
+                currentOverlay = nil
+                currentKey = nil
+                renderers.removeAll()
                 layers = sources
             }
 
             let key = stamp(sources[index])
-            guard key != shown else { return }
+            guard key != currentKey else { return }
+            currentKey = key
 
-            // Bring the wanted frame up first, so there is never a moment
-            // with nothing drawn, then take the previous one down.
-            let previous = shown.flatMap { overlays[$0] }
-            let wanted = overlays[key] ?? {
-                let made = RadarTileOverlay(source: sources[index])
-                overlays[key] = made
-                return made
-            }()
-            map.addOverlay(wanted, level: .aboveLabels)
-            if let previous, previous !== wanted { map.removeOverlay(previous) }
-            shown = key
+            // A transition still mid-dissolve is snapped to its end before the
+            // next begins, so a fast loop never stacks half-faded frames.
+            endFade()
+
+            let outgoing = currentOverlay
+            let incoming = RadarTileOverlay(source: sources[index])
+            pendingIncoming = ObjectIdentifier(incoming)
+            map.addOverlay(incoming, level: .aboveLabels)
+            currentOverlay = incoming
+
+            // Nothing to dissolve from on the very first frame.
+            guard outgoing != nil else { return }
+            fadingIn = incoming
+            fadingOut = outgoing
+            fadeStart = CACurrentMediaTime()
+            fadeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                self?.tickFade()
+            }
+        }
+
+        private func tickFade() {
+            let inRenderer = fadingIn.flatMap { renderers[ObjectIdentifier($0)] }
+            // Wait for the incoming renderer to exist before starting the
+            // clock — MapKit makes it lazily, and fading a renderer that is
+            // not there yet would time the old one out over a blank.
+            guard let inRenderer else { fadeStart = CACurrentMediaTime(); return }
+            let outRenderer = fadingOut.flatMap { renderers[ObjectIdentifier($0)] }
+
+            let progress = min(1, (CACurrentMediaTime() - fadeStart) / Self.fadeDuration)
+            inRenderer.alpha = CGFloat(progress) * Self.strength
+            inRenderer.setNeedsDisplay()
+            if let outRenderer {
+                outRenderer.alpha = CGFloat(1 - progress) * Self.strength
+                outRenderer.setNeedsDisplay()
+            }
+            if progress >= 1 { endFade() }
+        }
+
+        /// Finish the current dissolve at once: the incoming frame full, the
+        /// outgoing one gone.
+        private func endFade() {
+            fadeTimer?.invalidate()
+            fadeTimer = nil
+            if let fadingIn, let r = renderers[ObjectIdentifier(fadingIn)] {
+                r.alpha = Self.strength
+                r.setNeedsDisplay()
+            }
+            if let fadingOut {
+                mapRef?.removeOverlay(fadingOut)
+                renderers[ObjectIdentifier(fadingOut)] = nil
+            }
+            fadingIn = nil
+            fadingOut = nil
         }
 
         private func stamp(_ source: RadarSource) -> String {
@@ -406,7 +502,11 @@ private struct RadarTileMap: UIViewRepresentable {
                 return MKOverlayRenderer(overlay: overlay)
             }
             let made = MKTileOverlayRenderer(tileOverlay: tiles)
-            made.alpha = Self.strength
+            // The frame being dissolved in starts invisible; everything else
+            // is drawn at full strength straight away.
+            made.alpha = ObjectIdentifier(tiles) == pendingIncoming ? 0 : Self.strength
+            pendingIncoming = nil
+            renderers[ObjectIdentifier(tiles)] = made
             return made
         }
     }

@@ -1311,3 +1311,31 @@ makes a redraw cheap enough to do thirteen times a loop.
 Verified the same way it was diagnosed: thirty screenshots across
 several cycles, brightness 87.55–87.61 throughout against the broken
 build's 71.3, and rain on screen in every one.
+
+**The jump was a synchronous remove, and the bar was a wall (2026-09-01).**
+
+Reported still jumpy on the television and the simulator both: a frame
+took about a second to appear. The cause was one line — the loop added
+the new overlay and then, on the very next statement, removed the old
+one, before the new overlay's renderer had drawn a single tile. So the
+old frame vanished and the map waited, bare, for the new one to paint.
+The pixel-diffing that "passed" this earlier had sampled settled frames
+and never caught the gap between them.
+
+Now the frames dissolve. The old overlay is held at full strength while
+the new one fades up from zero on top of it — a thirty-hertz alpha ramp
+over the two renderers — and the old one is removed only once the new is
+all the way in. There is never a moment with nothing drawn. It depends
+on the crop cache: a dissolve holds the old frame for less than half a
+second, so the new frame has to be *drawn* within that window, which
+means its tiles have to be warm. So the whole loop is warmed on entry
+now, not on the first press of Play — which also makes Step instant.
+Verified by capturing a running loop: brightness steady with no dip to
+the bare-map value, and the clock advancing frame to frame.
+
+And the control bar stopped being six things at once. Play, Step and the
+loop shared a row with a coverage toggle and four NOAA products — most
+of it about *what* to draw rather than whether it is playing. The
+overlay choices moved behind **More options**, which opens a second bar
+— ‹ Back, Global loop, and the four NOAA stills — that Menu also backs
+out of. The bar a rider meets is now three buttons.

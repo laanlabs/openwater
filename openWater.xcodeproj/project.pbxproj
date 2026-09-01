@@ -8,13 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		A0A0A0A000000000000000E4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E2 /* OpenWaterCore */; };
+		A0A0A0A000000000000000E5 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E3 /* OpenWaterCore */; };
+		A0A0A0A000000000000000F0 /* openWater Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A0A0A0A000000000000000E7 /* openWater Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A0A0A0A000000000000000F4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000F3 /* OpenWaterCore */; };
 		B0B0B0B000000000000000A4 /* OpenWaterSpots in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B000000000000000A2 /* OpenWaterSpots */; };
 		B0B0B0B000000000000000A5 /* OpenWaterSpots in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B000000000000000A3 /* OpenWaterSpots */; };
 		C0C0C0C000000000000000B3 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0C0C0C000000000000000B1 /* OpenWaterCore */; };
 		C0C0C0C000000000000000B4 /* OpenWaterSpots in Frameworks */ = {isa = PBXBuildFile; productRef = C0C0C0C000000000000000B2 /* OpenWaterSpots */; };
-		A0A0A0A000000000000000E5 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000E3 /* OpenWaterCore */; };
-		A0A0A0A000000000000000F0 /* openWater Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A0A0A0A000000000000000E7 /* openWater Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A0A0A0A000000000000000F4 /* OpenWaterCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A000000000000000F3 /* OpenWaterCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -874,11 +874,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = openWater;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater opens the wind map on the coast nearest this Apple TV. Nothing is recorded and nothing leaves the device.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.laan.labs.openWater;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
@@ -905,11 +906,12 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = openWater;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "openWater opens the wind map on the coast nearest this Apple TV. Nothing is recorded and nothing leaves the device.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.laan.labs.openWater;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
@@ -1000,6 +1002,14 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = OpenWaterCore;
 		};
+		A0A0A0A000000000000000E3 /* OpenWaterCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterCore;
+		};
+		A0A0A0A000000000000000F3 /* OpenWaterCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenWaterCore;
+		};
 		B0B0B0B000000000000000A2 /* OpenWaterSpots */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = OpenWaterSpots;
@@ -1015,14 +1025,6 @@
 		C0C0C0C000000000000000B2 /* OpenWaterSpots */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = OpenWaterSpots;
-		};
-		A0A0A0A000000000000000E3 /* OpenWaterCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = OpenWaterCore;
-		};
-		A0A0A0A000000000000000F3 /* OpenWaterCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = OpenWaterCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

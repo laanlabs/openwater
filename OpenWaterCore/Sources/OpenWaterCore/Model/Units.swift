@@ -57,6 +57,19 @@ public enum DistanceUnit: String, CaseIterable, Sendable, Codable {
         }
     }
 
+    /// A height in this unit's own numbers, with nothing printed.
+    ///
+    /// `Format.height` renders the string; a chart axis needs the bare value
+    /// and labels itself. They share this so an axis and the caption under it
+    /// can never end up in different units — which is the specific way a wave
+    /// chart lies: "1.2" against a legend reading feet, drawn from metres.
+    public func heightValue(fromMetres metres: Double) -> Double {
+        switch self {
+        case .metric, .nautical: metres
+        case .imperial: metres / Self.metresPerFoot
+        }
+    }
+
     /// Metres per display unit.
     public var metresPerUnit: Double {
         switch self {
@@ -185,11 +198,10 @@ public enum Format {
         // a bug in a column of otherwise sober numbers; the sign only earns
         // its place once it changes a digit.
         func shown(_ value: Double) -> Double { abs(value) < 0.05 ? 0 : value }
+        let value = shown(unit.heightValue(fromMetres: metres))
         switch unit {
-        case .metric, .nautical:
-            return String(format: "%.1f m", shown(metres))
-        case .imperial:
-            return String(format: "%.1f ft", shown(metres / DistanceUnit.metresPerFoot))
+        case .metric, .nautical: return String(format: "%.1f m", value)
+        case .imperial: return String(format: "%.1f ft", value)
         }
     }
 

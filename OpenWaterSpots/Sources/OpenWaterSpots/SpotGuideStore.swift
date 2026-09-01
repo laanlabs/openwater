@@ -728,6 +728,7 @@ public final class SpotGuideStore {
         /// 2. Failing that, say what it is and keep a short tail of the id, so
         ///    three stations from one provider stay tellable apart.
         public var displayName: String {
+            let name = Self.withoutBoilerplate(name)
             let head = name.components(separatedBy: " — ").first ?? name
             guard Self.isOpaque(head) else { return name }
             if let fromPath = Self.nameFromPath(url) { return fromPath }
@@ -737,6 +738,48 @@ public final class SpotGuideStore {
             if Self.isEscapedCoordinate(head) { return "\(Self.brand(providerLabel)) map" }
             let tail = head.count > 10 ? String(head.suffix(6)) : head
             return "\(Self.brand(providerLabel)) \(tail)"
+        }
+
+        /// The guide files a lot of cams as "Watch — Youtube — Main Beach —
+        /// East Hampton", which is a sentence about the link rather than a
+        /// name for the camera. On a phone row the boilerplate is merely
+        /// noise; on a television card, where a name is truncated at about
+        /// thirty characters, it is the *whole* label — three cards in a row
+        /// reading "Watch — Youtube — Main Bea…" and no way to tell them
+        /// apart.
+        ///
+        /// Only leading segments go, and only ones that say nothing: the
+        /// first real word is where the name starts. A cam genuinely called
+        /// "Live Oak Beach" keeps its name, because "Live Oak Beach" is one
+        /// segment and this only ever drops whole ones.
+        private static let boilerplate: Set<String> = [
+            "watch", "view", "live", "livecam", "live cam", "cam", "cams",
+            "camera", "webcam", "web cam", "video", "stream", "youtube",
+        ]
+
+        private static func withoutBoilerplate(_ name: String) -> String {
+            var parts = name.components(separatedBy: " — ")
+            while parts.count > 1,
+                  boilerplate.contains(parts[0].trimmingCharacters(in: .whitespaces).lowercased()) {
+                parts.removeFirst()
+            }
+            let stripped = parts.joined(separator: " — ").trimmingCharacters(in: .whitespaces)
+            return stripped.isEmpty ? name : stripped
+        }
+
+        /// A picture for a card, where the provider publishes one.
+        ///
+        /// The still if there is one. Failing that, YouTube's own public
+        /// thumbnail: `hqdefault` rather than `maxresdefault`, because the
+        /// big one is frequently missing on a live stream and the small one
+        /// never is. It arrives 4:3 with bars, and filling a 16:9 card crops
+        /// off almost exactly the bars.
+        public var previewUrl: URL? {
+            if let stillUrl { return stillUrl }
+            if let id = VideoLink.youTubeID(from: url) {
+                return URL(string: "https://img.youtube.com/vi/\(id)/hqdefault.jpg")
+            }
+            return nil
         }
 
         /// An id pretending to be a name: either all digits, a long hex run,

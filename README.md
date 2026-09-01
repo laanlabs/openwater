@@ -54,11 +54,12 @@ argument for the weather: the phone and the television ask the same clients the
 same questions and colour the answers with the same ramp, so a green afternoon
 means one thing in the house and the same thing on the beach.
 
-The Apple TV app is deliberately three screens — your starred spots with live
-wind, a wind map of the coast they sit on, and the cameras. It records nothing.
-Its camera list is much shorter than the phone's, and that is a platform limit
-rather than a choice: tvOS has no web view, so only the cameras publishing an
-HLS stream or a still image can be shown, and the rest would be dead rows.
+The Apple TV app is deliberately three screens — a wind map of the coast
+you're on, the cameras in that area, and your starred spots. It records
+nothing. The map finds the box's own coarse location or asks you to name a
+place, and the remote drives it: the D-pad pans, Select and Play/Pause zoom.
+Every camera is listed, and since tvOS has no web view, the ones it cannot
+play — mostly YouTube — show a QR code that opens the page on your phone.
 
 ## Building
 

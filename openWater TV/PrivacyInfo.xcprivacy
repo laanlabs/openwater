@@ -15,11 +15,15 @@
 	    inherited.
 	  - The only required-reason API used is UserDefaults, for the rider's own
 	    favourites and their chosen forecast model.
-	  - Nothing leaves the device. Sharing is a phone feature; an Apple TV
-	    records nothing, uploads nothing and has no account to attach anything
-	    to. So there is no NSPrivacyCollectedDataTypes section rather than an
-	    empty one — the phone declares precise location because a shared
-	    session carries a track, and this app has no such path at all.
+	  - Nothing is uploaded. Sharing is a phone feature; an Apple TV records
+	    nothing and has no account to attach anything to.
+	  - Coarse location is declared, and only coarse. tvOS has no receiver:
+	    what `requestLocation` hands over is a network-derived guess, used to
+	    decide which stretch of coast the wind map opens on, and the map's
+	    centre coordinate goes to Open-Meteo to ask what the wind is doing
+	    there. That is the whole of it — no track, no history, nothing stored
+	    off the device, and a rider who would rather type a place name than
+	    be located gets the same app.
 	  - There is no analytics, no advertising, no accounts and no tracking.
 	-->
 
@@ -47,6 +51,28 @@
 	</array>
 
 	<key>NSPrivacyCollectedDataTypes</key>
-	<array/>
+	<array>
+		<dict>
+			<!--
+			  The coordinate the map is centred on, sent to Open-Meteo for a
+			  forecast. Coarse rather than precise: tvOS cannot be more exact
+			  than a neighbourhood, and the map rounds to about a kilometre
+			  before it asks.
+
+			  Not linked to identity: there are no accounts here, and the
+			  request carries nothing but a latitude and a longitude.
+			-->
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeCoarseLocation</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

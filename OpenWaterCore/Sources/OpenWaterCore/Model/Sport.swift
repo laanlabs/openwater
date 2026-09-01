@@ -161,6 +161,51 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// fraction. Without a rise there is nothing to say the water did the work.
     public var glideMinimumGain: Double = 0.05
 
+    // MARK: What counts as a wave ride
+
+    /// Every rule below is optional, and `nil` means "keep borrowing the
+    /// glide detector's answer" — which is what the wave finder did before
+    /// any of them existed. A rider who has never opened the wave rules sees
+    /// exactly the rides they saw before, their own glide tuning included;
+    /// setting one takes that rule off the glide rail for waves alone.
+
+    /// Degrees either side of the swell's travel a ride may point. Straight
+    /// down the face is 0°, down the line is 40–60°. Inherits
+    /// `WaveRideFinder.halfAngle`.
+    public var waveConeAngle: Double?
+
+    /// The fraction of the rider's own median with-the-swell speed a ride has
+    /// to hold. Inherits `glideSpeedFraction`.
+    public var waveSpeedFraction: Double?
+
+    /// How much the wave has to add over the lull before it, as a fraction.
+    /// Inherits the firmer of `glideMinimumGain` and
+    /// `WaveRideFinder.minimumGain`.
+    public var waveMinimumGain: Double?
+
+    /// Shortest stretch worth naming a ride, seconds. Inherits
+    /// `glideMinimumDuration`.
+    public var waveMinimumDuration: TimeInterval?
+
+    /// How long a carve out of the cone a ride survives, seconds — a turn up
+    /// the face points away for a beat and comes back. Inherits eight.
+    public var waveBridgeSeconds: TimeInterval?
+
+    /// How noisy the accelerometer may be with the rider still counted as
+    /// riding, as a multiple of the session's own median. Inherits
+    /// `pumpEnergyFraction`.
+    ///
+    /// At or above `waveChopIgnored` the reading is not consulted at all.
+    /// That is a real answer and not a cop-out: on a wing in short chop the
+    /// deck is never quiet, and a bar tuned on a smooth groundswell ends a
+    /// ride the rider is visibly still on — eleven knots, twenty degrees off
+    /// the swell, and cut because the board was rattling.
+    public var waveQuietFraction: Double?
+
+    /// The value of `waveQuietFraction` at which the accelerometer stops
+    /// being consulted at all.
+    public static let waveChopIgnored: Double = 5
+
     // MARK: What counts as an upwind leg
 
     /// How far off the wind you may point and still be working upwind,
@@ -328,6 +373,16 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         public var glideSpeedFraction: Double?
         public var glideMinimumGain: Double?
 
+        /// What counts as a wave ride — see the matching fields on
+        /// `SportThresholds`. Set from the wave rules on the Wave Rides
+        /// screen, where a rider is looking at the rides these produced.
+        public var waveConeAngle: Double?
+        public var waveSpeedFraction: Double?
+        public var waveMinimumGain: Double?
+        public var waveMinimumDuration: TimeInterval?
+        public var waveBridgeSeconds: TimeInterval?
+        public var waveQuietFraction: Double?
+
         /// What counts as an upwind leg — see the matching fields on
         /// `SportThresholds`.
         public var upwindLegAngle: Double?
@@ -353,6 +408,12 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             glideDownwindAngle: Double? = nil,
             glideSpeedFraction: Double? = nil,
             glideMinimumGain: Double? = nil,
+            waveConeAngle: Double? = nil,
+            waveSpeedFraction: Double? = nil,
+            waveMinimumGain: Double? = nil,
+            waveMinimumDuration: TimeInterval? = nil,
+            waveBridgeSeconds: TimeInterval? = nil,
+            waveQuietFraction: Double? = nil,
             upwindLegAngle: Double? = nil,
             upwindLegMinimumDistance: Double? = nil,
             upwindLegMinimumDuration: TimeInterval? = nil,
@@ -370,6 +431,12 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.glideDownwindAngle = glideDownwindAngle
             self.glideSpeedFraction = glideSpeedFraction
             self.glideMinimumGain = glideMinimumGain
+            self.waveConeAngle = waveConeAngle
+            self.waveSpeedFraction = waveSpeedFraction
+            self.waveMinimumGain = waveMinimumGain
+            self.waveMinimumDuration = waveMinimumDuration
+            self.waveBridgeSeconds = waveBridgeSeconds
+            self.waveQuietFraction = waveQuietFraction
             self.upwindLegAngle = upwindLegAngle
             self.upwindLegMinimumDistance = upwindLegMinimumDistance
             self.upwindLegMinimumDuration = upwindLegMinimumDuration
@@ -385,6 +452,9 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             foilTakeoffSpeed == nil && movingSpeed == nil && maneuverHeadingChange == nil
                 && glideMinimumDuration == nil && glideDownwindAngle == nil
                 && glideSpeedFraction == nil && glideMinimumGain == nil
+                && waveConeAngle == nil && waveSpeedFraction == nil
+                && waveMinimumGain == nil && waveMinimumDuration == nil
+                && waveBridgeSeconds == nil && waveQuietFraction == nil
                 && upwindLegAngle == nil && upwindLegMinimumDistance == nil
                 && upwindLegMinimumDuration == nil
                 && jumpMinimumAirtime == nil && jumpFreeFall == nil
@@ -401,6 +471,14 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = glideDownwindAngle, v > 0 { t.glideDownwindAngle = v }
             if let v = glideSpeedFraction, v > 0 { t.glideSpeedFraction = v }
             if let v = glideMinimumGain, v >= 0 { t.glideMinimumGain = v }
+            // The wave rules pass their zeros through: a rider who says a
+            // wave has to add nothing, or that no carve is bridged, means it.
+            if let v = waveConeAngle, v > 0 { t.waveConeAngle = v }
+            if let v = waveSpeedFraction, v > 0 { t.waveSpeedFraction = v }
+            if let v = waveMinimumGain, v >= 0 { t.waveMinimumGain = v }
+            if let v = waveMinimumDuration, v > 0 { t.waveMinimumDuration = v }
+            if let v = waveBridgeSeconds, v >= 0 { t.waveBridgeSeconds = v }
+            if let v = waveQuietFraction, v > 0 { t.waveQuietFraction = v }
             if let v = upwindLegAngle, v > 0 { t.upwindLegAngle = v }
             if let v = upwindLegMinimumDistance, v > 0 { t.upwindLegMinimumDistance = v }
             if let v = upwindLegMinimumDuration, v > 0 { t.upwindLegMinimumDuration = v }

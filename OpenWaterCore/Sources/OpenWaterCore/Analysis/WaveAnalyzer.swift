@@ -88,9 +88,58 @@ public struct WaveRideFinder {
     /// glide bar plain GPS jitter on a long steady reach can read as a rise.
     public static let minimumGain: Double = 0.12
 
+    /// How long a carve out of the cone a ride survives by default. Riding a
+    /// face is not a straight line, and a turn up the wave points away for a
+    /// second or two before it comes back.
+    public static let bridgeSeconds: TimeInterval = 8
+
     /// The sibling analyzer whose judgement this borrows: the lull before a
     /// ride, and what "quiet" means on this rig.
     private let glides: DownwindAnalyzer
+
+    // MARK: The rules, as this rider has them
+
+    /// Each of these is the rider's own answer where they have given one and
+    /// the shared default where they have not. The wave rules were static
+    /// constants and glide fields until a rider watched a thirty-second ride
+    /// end five seconds early — eleven knots, twenty degrees off the swell,
+    /// cut because the deck was rattling in short chop. What a wave *is*
+    /// varies with the water and the board the way a glide does, so it is
+    /// adjustable the same way, and every one of these still defaults to
+    /// exactly what it was.
+
+    /// Degrees either side of the swell's travel a ride may point.
+    public var coneAngle: Double { thresholds.waveConeAngle ?? Self.halfAngle }
+
+    /// The fraction of the rider's own with-the-swell pace a ride must hold.
+    public var speedFraction: Double {
+        thresholds.waveSpeedFraction ?? thresholds.glideSpeedFraction
+    }
+
+    /// What the wave has to add over the lull before it.
+    public var minimumRise: Double {
+        thresholds.waveMinimumGain ?? max(thresholds.glideMinimumGain, Self.minimumGain)
+    }
+
+    /// Shortest stretch worth naming a ride.
+    public var shortestRide: TimeInterval {
+        thresholds.waveMinimumDuration ?? thresholds.glideMinimumDuration
+    }
+
+    /// How long a carve out of the cone a ride survives.
+    public var bridgeSeconds: TimeInterval {
+        thresholds.waveBridgeSeconds ?? Self.bridgeSeconds
+    }
+
+    /// How noisy the deck may be, as a multiple of the session's own median.
+    public var quietFraction: Double {
+        thresholds.waveQuietFraction ?? thresholds.pumpEnergyFraction
+    }
+
+    /// Whether the accelerometer is consulted at all.
+    public var consultsMotion: Bool {
+        quietFraction < SportThresholds.waveChopIgnored
+    }
 
     public init(thresholds: SportThresholds = SportThresholds.forSport(.wingfoil)) {
         self.thresholds = thresholds
@@ -107,7 +156,7 @@ public struct WaveRideFinder {
         guard track.count >= 10 else { return .none }
 
         let travel = Geo.normalizeDegrees(swellFrom + 180)
-        let hasMotion = track.points.contains { $0.verticalAccelSD != nil }
+        let hasMotion = consultsMotion && track.points.contains { $0.verticalAccelSD != nil }
         let flyingMask = FoilDetector(thresholds: thresholds)
             .flyingMask(flights: flights, count: track.count)
         let requiresFlight = !flights.isEmpty
@@ -124,7 +173,12 @@ public struct WaveRideFinder {
             acceleration[i] = acceleration[lo...hi].reduce(0, +) / Double(hi - lo + 1)
         }
 
-        let quietEnergy = glides.quietEnergyThreshold(in: track)
+        // The same median-relative bar the glide detector uses, on this
+        // screen's own multiple of it.
+        let energies = track.points.compactMap(\.verticalAccelSD).sorted()
+        let quietEnergy = energies.isEmpty
+            ? Double.infinity
+            : energies[energies.count / 2] * quietFraction
 
         // The rider's own pace *with the swell*, so the floor measures wave
         // riding against wave riding — the same day-relative reasoning as the
@@ -133,21 +187,21 @@ public struct WaveRideFinder {
         var all: [Double] = []
         for i in 0..<track.count where track.speed[i] >= thresholds.movingSpeed {
             all.append(track.speed[i])
-            if Geo.angleSeparation(track.course[i], travel) <= Self.halfAngle {
+            if Geo.angleSeparation(track.course[i], travel) <= coneAngle {
                 withSwell.append(track.speed[i])
             }
         }
         let sample = withSwell.count >= 60 ? withSwell : all
         guard !sample.isEmpty else { return .none }
         let typical = sample.sorted()[sample.count / 2]
-        let floor = max(3.0, thresholds.glideSpeedFraction * typical)
+        let floor = max(3.0, speedFraction * typical)
 
         var riding = [Bool](repeating: false, count: track.count)
         for i in 0..<track.count {
             guard track.speed[i] >= floor else { continue }
             guard !requiresFlight || flyingMask[i] else { continue }
             guard acceleration[i] >= -0.35 else { continue }
-            guard Geo.angleSeparation(track.course[i], travel) <= Self.halfAngle else { continue }
+            guard Geo.angleSeparation(track.course[i], travel) <= coneAngle else { continue }
             if hasMotion, let energy = track.points[i].verticalAccelSD {
                 guard energy <= quietEnergy else { continue }
             }
@@ -167,7 +221,7 @@ public struct WaveRideFinder {
             while next < track.count, !riding[next] { next += 1 }
             guard next < track.count else { break }
 
-            let bridgeable = track.elapsed[next] - track.elapsed[end] <= 8
+            let bridgeable = track.elapsed[next] - track.elapsed[end] <= bridgeSeconds
                 && ((end + 1)..<next).allSatisfy { k in
                     (!requiresFlight || flyingMask[k])
                         && Geo.angleSeparation(track.course[k], travel) <= 90
@@ -197,8 +251,7 @@ public struct WaveRideFinder {
             // The wave has to have *given* something: speed above the lull
             // before it. Cruising through the cone at one powered pace is a
             // reach that happens to point at the beach.
-            let rose = peak >= glides.troughBefore(index, in: track)
-                * (1 + max(thresholds.glideMinimumGain, Self.minimumGain))
+            let rose = peak >= glides.troughBefore(index, in: track) * (1 + minimumRise)
             guard rose else { continue }
 
             // And the ride as a whole went the way the waves were going —
@@ -209,10 +262,10 @@ public struct WaveRideFinder {
             // going; a ride that netted anywhere else was not one.
             let net = Geo.bearing(from: track.points[index].coordinate,
                                   to: track.points[j].coordinate)
-            guard Geo.angleSeparation(net, travel) <= Self.halfAngle else { continue }
+            guard Geo.angleSeparation(net, travel) <= coneAngle else { continue }
 
             timeOnWaves += duration
-            guard duration >= thresholds.glideMinimumDuration else { continue }
+            guard duration >= shortestRide else { continue }
 
             var offSum = 0.0
             for k in index...j {

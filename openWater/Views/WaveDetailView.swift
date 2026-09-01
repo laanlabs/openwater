@@ -46,6 +46,9 @@ struct WaveDetailView: View {
     /// turning the phone on its side.
     @State private var isMapFullScreen = false
 
+    /// The rules that decide what is on this screen at all.
+    @State private var isEditingRules = false
+
     private func ordered(_ waves: WaveRideSummary) -> [WaveRide] {
         switch order {
         case .time: waves.rides
@@ -58,6 +61,13 @@ struct WaveDetailView: View {
 
     private var thresholds: SportThresholds {
         settings.thresholds(for: session.sport)
+    }
+
+    /// What a re-find depends on: the arrow everything is measured from, and
+    /// the rules it is measured by.
+    private struct FindingRules: Equatable {
+        let swell: Double?
+        let thresholds: SportThresholds
     }
 
     /// The swell's colour everywhere in the app, so the arrow on the
@@ -92,8 +102,17 @@ struct WaveDetailView: View {
         .navigationTitle("Wave Rides")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Session · Waves")
+        .sheet(isPresented: $isEditingRules) {
+            if let swellFrom = session.swellDirection {
+                WaveRulesSheet(session: session, summary: summary, swellFrom: swellFrom)
+            }
+        }
         .task(id: isPlaying) { await runPlayback() }
-        .task(id: session.swellDirection) {
+        // Keyed on the rules as well as the swell. A rider who widens the
+        // cone or lets the board rattle is asking this screen a different
+        // question, and it has to be re-asked of the track — which is cheap,
+        // because rides are found on demand and never stored.
+        .task(id: FindingRules(swell: session.swellDirection, thresholds: thresholds)) {
             isPlaying = false
             elapsed = 0
             guard let swellFrom = session.swellDirection else {
@@ -176,8 +195,11 @@ struct WaveDetailView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Check the swell direction", action: onSetWind)
-                .font(.caption.weight(.semibold))
+            HStack(spacing: 14) {
+                Button("Check the swell direction", action: onSetWind)
+                Button("Loosen what counts") { isEditingRules = true }
+            }
+            .font(.caption.weight(.semibold))
         }
         .padding(14)
         .cardChrome()
@@ -186,26 +208,59 @@ struct WaveDetailView: View {
     // MARK: - Summary
 
     private func summaryCard(_ waves: WaveRideSummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(waves.count == 1 ? "1 wave" : "\(waves.count) waves")
-                    .font(.subheadline.weight(.bold))
-                Spacer(minLength: 8)
-                Text("\(Format.distance(waves.distance, unit: units.distance)) · \(Format.shortDuration(waves.timeOnWaves)) riding")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(waves.count == 1 ? "1 wave" : "\(waves.count) waves")
+                        .font(.subheadline.weight(.bold))
+                    Spacer(minLength: 8)
+                    Text("\(Format.distance(waves.distance, unit: units.distance)) · \(Format.shortDuration(waves.timeOnWaves)) riding")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                HStack(spacing: 18) {
+                    measure("Longest", Format.shortDuration(waves.longest?.duration ?? 0))
+                    measure("Fastest", Format.speed(waves.fastest?.peakSpeed ?? 0,
+                                                    unit: units.speed, decimals: 1))
+                    measure("Typical", Format.shortDuration(waves.averageDuration))
+                }
             }
 
-            HStack(spacing: 18) {
-                measure("Longest", Format.shortDuration(waves.longest?.duration ?? 0))
-                measure("Fastest", Format.speed(waves.fastest?.peakSpeed ?? 0,
-                                                unit: units.speed, decimals: 1))
-                measure("Typical", Format.shortDuration(waves.averageDuration))
-            }
+            rulesButton
         }
         .padding(14)
         .cardChrome()
+    }
+
+    /// The way into the rules, against the numbers they produced.
+    ///
+    /// It began life as a gear in the navigation bar, which is where an app
+    /// puts a setting nobody is expected to touch. These are not that: every
+    /// number on this card is the output of six adjustable rules, and a rider
+    /// whose thirty-second ride is being called twenty-five has no reason to
+    /// suspect a toolbar. Beside the count, it reads as what it is — the
+    /// count is *this* answer, and here is where you change the question.
+    private var rulesButton: some View {
+        Button {
+            isEditingRules = true
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Rules")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Self.waveColour)
+            .frame(width: 54, height: 50)
+            .background(Self.waveColour.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("What counts as a wave ride")
+        .accessibilityHint("Adjust the rules these numbers come from")
     }
 
     private func measure(_ title: String, _ value: String) -> some View {
@@ -242,6 +297,10 @@ struct WaveDetailView: View {
                     .padding(10)
                     .accessibilityLabel("Expand map")
                 }
+                .overlay(alignment: .topLeading) {
+                    conditionsDial(size: 44)
+                        .padding(8)
+                }
             replayBar
         }
         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -263,16 +322,58 @@ struct WaveDetailView: View {
             .ignoresSafeArea(edges: .bottom)
             .safeAreaInset(edge: .bottom, spacing: 0) { replayBar }
             .overlay(alignment: .topLeading) {
-                MapChromeButton {
-                    isMapFullScreen = false
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.headline)
+                HStack(alignment: .top, spacing: 10) {
+                    MapChromeButton {
+                        isMapFullScreen = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline)
+                    }
+                    // Beside the ✕ rather than under it: the dial is 64 points
+                    // and a column of the two would reach a third of the way
+                    // down a sideways phone.
+                    conditionsDial(size: 64)
                 }
                 .padding(.leading, 16)
                 .padding(.top, 8)
             }
             .closesInPortrait()
+    }
+
+    /// The day's wind, swell and current, in the corner of the map they
+    /// describe.
+    ///
+    /// The Map tab and the Runs tab both carry this dial in this corner, and
+    /// this is the screen where the swell arrow matters most: every ride
+    /// below was found by it, and a ride list that reads wrong is usually an
+    /// arrow pointing the wrong way. Correcting it should not mean leaving
+    /// the picture it produced — tapping opens the same conditions sheet the
+    /// cards below open.
+    @ViewBuilder
+    private func conditionsDial(size: CGFloat) -> some View {
+        if let wind = session.effectiveWind {
+            Button(action: onSetWind) {
+                WindDial(wind: wind,
+                         swell: session.swellHeight,
+                         swellFrom: session.swellDirection,
+                         current: session.currentSpeed,
+                         currentToward: session.currentDirectionToward,
+                         units: units,
+                         size: size)
+            }
+            .buttonStyle(.plain)
+        } else {
+            // Nothing to draw a dial from. The same capsule the Map tab
+            // offers, so the way in is the same wherever it is met.
+            Button(action: onSetWind) {
+                Label("Set wind", systemImage: "wind")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func map(_ waves: WaveRideSummary) -> some View {
@@ -685,7 +786,7 @@ struct WaveDetailView: View {
             }
             Text("A wave ride is a stretch on the foil, at or above your own "
                  + "pace for the day, where the speed *rose* while you pointed "
-                 + "within \(Int(WaveRideFinder.halfAngle))° of the way the swell "
+                 + "within \(Int(WaveRideFinder(thresholds: thresholds).coneAngle))° of the way the swell "
                  + "was travelling — and the whole ride, takeoff to kick-out, "
                  + "made ground that way. The wind is not consulted: waves keep "
                  + "their own direction. Runs and glides are unchanged by any "
@@ -696,8 +797,14 @@ struct WaveDetailView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Adjust the swell", action: onSetWind)
-                .font(.caption.weight(.semibold))
+            HStack(spacing: 14) {
+                Button("Adjust the swell", action: onSetWind)
+                // Every number above comes out of rules that are a guess
+                // about water we were not in. Said here, where a rider who
+                // has just read the rules and disagreed with them is looking.
+                Button("What counts as a ride") { isEditingRules = true }
+            }
+            .font(.caption.weight(.semibold))
         }
         .padding(.horizontal, 4)
         .padding(.top, 2)

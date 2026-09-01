@@ -18,6 +18,11 @@ struct openWaterApp: App {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Portrait is the app's shape; a map on its side is the one exception.
+    /// UIKit asks the delegate, not the Info.plist, once the plist has locked
+    /// the phone to portrait — see `OrientationGate`.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     init() {
         let container: ModelContainer
         do {

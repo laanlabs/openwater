@@ -282,6 +282,7 @@ struct SessionDetailView: View {
                     summary: summary,
                     selectedRun: $selectedRun
                 )
+                .closesInPortrait()
             }
         }
         .fullScreenCover(isPresented: $isPlayingBack) {
@@ -477,6 +478,11 @@ struct SessionDetailView: View {
             onTrim: { trim, asNew in applyTrim(trim, to: session, asNewActivity: asNew) },
             onEditConditions: { isSettingWind = true }
         )
+        // Only the map tab turns. The Summary, Runs and Analysis tabs are
+        // columns of cards and stay upright, and this modifier lives on the
+        // map's own branch of the switch so leaving the tab hands rotation
+        // back without anything having to remember to.
+        .fullScreenInLandscape($isMapFullScreen)
     }
 
     /// Upwind, Reaching and Downwind are a run's angle to the wind, so the

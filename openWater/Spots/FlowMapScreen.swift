@@ -38,6 +38,15 @@ struct FlowMapScreen: View {
     @AppStorage("spots.forecastModel") private var forecastModelRaw = ForecastModel.automatic.rawValue
     @State private var isPickingModel = false
 
+    /// Compact height is a phone turned on its side, and a wind field is a
+    /// picture of a coastline — wider than it is tall. Sideways the map takes
+    /// the screen: no navigation bar, and the scrubber floats over the water
+    /// instead of pushing it up.
+    @Environment(\.verticalSizeClass) private var height
+    @Environment(\.dismiss) private var dismiss
+
+    private var landscape: Bool { height == .compact }
+
     struct GridPoint: Identifiable {
         /// Row-major position in the grid — the raster builder needs to
         /// know which cell this is, not just where it sits.
@@ -61,10 +70,40 @@ struct FlowMapScreen: View {
                 if needsReload(for: visible) { reload(for: visible) }
             }
         )
+        .ignoresSafeArea(edges: landscape ? .all : [])
         .navigationTitle("Flow map")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Flow map")
-        .safeAreaInset(edge: .bottom) { controls }
+        .toolbar(landscape ? .hidden : .automatic, for: .navigationBar)
+        .statusBarHidden(landscape)
+        .allowsLandscape()
+        .safeAreaInset(edge: .bottom) {
+            if !landscape { controls }
+        }
+        .overlay(alignment: .bottom) {
+            if landscape {
+                controls
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .frame(maxWidth: 620)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 10)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            // The navigation bar's back button went with the bar. This is the
+            // way out, in the corner it was in.
+            if landscape {
+                MapChromeButton {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.headline)
+                }
+                .padding(.leading, 16)
+                .padding(.top, 10)
+                .accessibilityLabel("Back")
+            }
+        }
         .overlay {
             if isLoading {
                 ProgressView()
@@ -133,34 +172,39 @@ struct FlowMapScreen: View {
             if showWash { washLegend } else { legend }
 
             // Whose model this is, and the door to changing it — the
-            // reference apps put the picker exactly here, on the name.
-            Button { isPickingModel = true } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "cpu")
-                        .font(.caption2.weight(.semibold))
-                    Text(ForecastModel.selected.name)
-                        .font(.caption.weight(.semibold))
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.secondary)
+            // reference apps put the picker exactly here, on the name. Both
+            // it and the paragraph under it stay behind in portrait: sideways
+            // the map is the point, and neither is what a rider turned the
+            // phone for.
+            if !landscape {
+                Button { isPickingModel = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "cpu")
+                            .font(.caption2.weight(.semibold))
+                        Text(ForecastModel.selected.name)
+                            .font(.caption.weight(.semibold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                    .contentShape(Capsule())
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 30)
-                .background(Color(.secondarySystemGroupedBackground), in: Capsule())
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            Text("The arrows are the model's own values; the "
-                 + "colour between them is a smooth blend of those values for the "
-                 + "eye, not extra detail. Pan or zoom and the field refetches to "
-                 + "match — far out, the wash's edge marks the area it covers. "
-                 + "Scrub through the next 24 hours.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("The arrows are the model's own values; the "
+                     + "colour between them is a smooth blend of those values for the "
+                     + "eye, not extra detail. Pan or zoom and the field refetches to "
+                     + "match — far out, the wash's edge marks the area it covers. "
+                     + "Scrub through the next 24 hours.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(14)
+        .padding(landscape ? 10 : 14)
         .background(.regularMaterial)
     }
 

@@ -73,6 +73,8 @@ struct UpwindDetailView: View {
                         .padding(10)
                         .accessibilityLabel("Expand map")
                     }
+                    // Turning the phone opens the same map the button does.
+                    .fullScreenInLandscape($isMapFullScreen)
 
                 if legs.isEmpty {
                     ContentUnavailableView(
@@ -127,6 +129,7 @@ struct UpwindDetailView: View {
                     .padding(.leading, 16)
                     .padding(.top, 8)
                 }
+                .closesInPortrait()
         }
     }
 

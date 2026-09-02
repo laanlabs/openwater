@@ -2195,8 +2195,7 @@ public enum TidesAndCurrents: Sendable {
         }
 
         guard let url = URL(string: "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await Fetch.data(url)
         else {
             // The bundle's snapshot: a first launch with no signal still
             // knows where the stations stand. Refreshed by
@@ -2275,8 +2274,7 @@ public enum TidesAndCurrents: Sendable {
         }
 
         guard let url = URL(string: "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=met"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await Fetch.data(url)
         else { return [] }
 
         struct Payload: Decodable {
@@ -2563,8 +2561,7 @@ public enum DataBuoyCenter: Sendable {
     /// three 404s and an empty list that then claimed there were no buoys.
     private static func download() async -> [Station]? {
         guard let url = URL(string: "https://www.ndbc.noaa.gov/activestations.xml"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await Fetch.data(url),
               let xml = String(data: data, encoding: .utf8),
               let regex = try? NSRegularExpression(pattern: #"<station\b[^>]*>"#)
         else { return nil }
@@ -2634,8 +2631,7 @@ public enum DataBuoyCenter: Sendable {
         // ids are unaffected, which is why this only showed up once the
         // nearest station was a pier rather than a buoy.
         guard let url = URL(string: "https://www.ndbc.noaa.gov/data/realtime2/\(stationId.uppercased()).txt"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await Fetch.data(url),
               let text = String(data: data, encoding: .utf8)
         else { return nil }
 
@@ -2705,8 +2701,7 @@ public enum DataBuoyCenter: Sendable {
     /// minutes old.
     public static func spectral(for stationId: String) async -> NDBCSpectral.Reading? {
         guard let url = URL(string: "https://www.ndbc.noaa.gov/data/realtime2/\(stationId.uppercased()).spec"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await Fetch.data(url),
               let text = String(data: data, encoding: .utf8)
         else { return nil }
         return NDBCSpectral.parse(text).first

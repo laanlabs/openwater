@@ -50,7 +50,7 @@ struct RadarScreen: View {
     /// How fast the loop runs. Slower than real time by a long way: thirteen
     /// frames covering two hours at three a second reads as weather moving,
     /// where anything quicker reads as a flicker.
-    private static let frameInterval: Duration = .milliseconds(420)
+    private static let frameInterval: Duration = .milliseconds(320)
 
     var body: some View {
         Group {
@@ -381,37 +381,25 @@ private struct RadarTileMap: UIViewRepresentable {
 
         var showing: MKCoordinateRegion?
 
-        /// The frame on screen, and the one fading in over it.
+        /// The overlay on screen, and the one coming up behind it.
         ///
-        /// A loop that removes the old overlay the instant it adds the new
-        /// one blanks for as long as the new one takes to draw — about a
-        /// second, which is the jump. So the old frame is held at full
-        /// strength while the new one fades up from nothing on top of it, and
-        /// only taken down once the new one is all the way in. There is never
-        /// a moment with nothing drawn.
+        /// A hard cut, not a dissolve. Cross-fading two translucent radar
+        /// layers blends both frames at once and reads as mud — the dissolve
+        /// looked worse than the jump it was meant to cure. A radar loop is
+        /// meant to *cut* frame to frame, the way every weather app's does;
+        /// the only thing that must not happen is a bare gap between them.
         ///
-        /// A fresh overlay per frame rather than a kept set: distinct
-        /// overlays have distinct tile identities, so MapKit never serves one
-        /// frame's tiles for another — and the crop cache makes a fresh one
-        /// cheap, which is the whole reason this is affordable.
+        /// So the new frame is added on top, opaque, and the old one is taken
+        /// down a beat later — never before. By then the new frame has drawn,
+        /// because its tiles are warm (the loop is warmed on entry), so the
+        /// old one comes down onto a complete picture and the cut is clean. A
+        /// fresh overlay per frame keeps each frame's tiles its own; the crop
+        /// cache makes a fresh one cheap.
         private var currentOverlay: RadarTileOverlay?
         private var currentKey: String?
-        private var renderers: [ObjectIdentifier: MKTileOverlayRenderer] = [:]
-        /// The overlay whose renderer should start transparent — set just
-        /// before it is added, read once in `rendererFor`.
-        private var pendingIncoming: ObjectIdentifier?
         private var layers: [RadarSource] = []
 
-        private var fadeTimer: Timer?
-        private var fadeStart: CFTimeInterval = 0
-        private var fadingIn: RadarTileOverlay?
-        private var fadingOut: RadarTileOverlay?
-        private weak var mapRef: MKMapView?
-
-        /// How strongly the sweep sits over the chart, and how long a frame
-        /// takes to dissolve into the next.
         private static let strength: CGFloat = 0.75
-        private static let fadeDuration: CFTimeInterval = 0.45
 
         func matches(_ region: MKCoordinateRegion) -> Bool {
             guard let showing else { return false }
@@ -422,14 +410,11 @@ private struct RadarTileMap: UIViewRepresentable {
 
         func apply(_ sources: [RadarSource], index: Int, to map: MKMapView) {
             guard sources.indices.contains(index) else { return }
-            mapRef = map
 
             if sources != layers {
-                endFade()
                 if let currentOverlay { map.removeOverlay(currentOverlay) }
                 currentOverlay = nil
                 currentKey = nil
-                renderers.removeAll()
                 layers = sources
             }
 
@@ -437,59 +422,20 @@ private struct RadarTileMap: UIViewRepresentable {
             guard key != currentKey else { return }
             currentKey = key
 
-            // A transition still mid-dissolve is snapped to its end before the
-            // next begins, so a fast loop never stacks half-faded frames.
-            endFade()
+            let old = currentOverlay
+            let new = RadarTileOverlay(source: sources[index])
+            map.addOverlay(new, level: .aboveLabels)
+            currentOverlay = new
 
-            let outgoing = currentOverlay
-            let incoming = RadarTileOverlay(source: sources[index])
-            pendingIncoming = ObjectIdentifier(incoming)
-            map.addOverlay(incoming, level: .aboveLabels)
-            currentOverlay = incoming
-
-            // Nothing to dissolve from on the very first frame.
-            guard outgoing != nil else { return }
-            fadingIn = incoming
-            fadingOut = outgoing
-            fadeStart = CACurrentMediaTime()
-            fadeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-                self?.tickFade()
+            // Take the old frame down only after the new one is up and drawn,
+            // never in the same breath as adding it — the synchronous remove
+            // is what left the map bare for a second. A short hop covers the
+            // gap between "added" and "painted"; the warm cache keeps that
+            // gap to a couple of frames, so this stays invisible.
+            guard let old else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak map] in
+                map?.removeOverlay(old)
             }
-        }
-
-        private func tickFade() {
-            let inRenderer = fadingIn.flatMap { renderers[ObjectIdentifier($0)] }
-            // Wait for the incoming renderer to exist before starting the
-            // clock — MapKit makes it lazily, and fading a renderer that is
-            // not there yet would time the old one out over a blank.
-            guard let inRenderer else { fadeStart = CACurrentMediaTime(); return }
-            let outRenderer = fadingOut.flatMap { renderers[ObjectIdentifier($0)] }
-
-            let progress = min(1, (CACurrentMediaTime() - fadeStart) / Self.fadeDuration)
-            inRenderer.alpha = CGFloat(progress) * Self.strength
-            inRenderer.setNeedsDisplay()
-            if let outRenderer {
-                outRenderer.alpha = CGFloat(1 - progress) * Self.strength
-                outRenderer.setNeedsDisplay()
-            }
-            if progress >= 1 { endFade() }
-        }
-
-        /// Finish the current dissolve at once: the incoming frame full, the
-        /// outgoing one gone.
-        private func endFade() {
-            fadeTimer?.invalidate()
-            fadeTimer = nil
-            if let fadingIn, let r = renderers[ObjectIdentifier(fadingIn)] {
-                r.alpha = Self.strength
-                r.setNeedsDisplay()
-            }
-            if let fadingOut {
-                mapRef?.removeOverlay(fadingOut)
-                renderers[ObjectIdentifier(fadingOut)] = nil
-            }
-            fadingIn = nil
-            fadingOut = nil
         }
 
         private func stamp(_ source: RadarSource) -> String {
@@ -502,11 +448,7 @@ private struct RadarTileMap: UIViewRepresentable {
                 return MKOverlayRenderer(overlay: overlay)
             }
             let made = MKTileOverlayRenderer(tileOverlay: tiles)
-            // The frame being dissolved in starts invisible; everything else
-            // is drawn at full strength straight away.
-            made.alpha = ObjectIdentifier(tiles) == pendingIncoming ? 0 : Self.strength
-            pendingIncoming = nil
-            renderers[ObjectIdentifier(tiles)] = made
+            made.alpha = Self.strength
             return made
         }
     }

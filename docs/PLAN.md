@@ -1339,3 +1339,16 @@ of it about *what* to draw rather than whether it is playing. The
 overlay choices moved behind **More options**, which opens a second bar
 — ‹ Back, Global loop, and the four NOAA stills — that Menu also backs
 out of. The bar a rider meets is now three buttons.
+
+
+**The dissolve was wrong; a clean cut is right (2026-09-01).** Cross-
+fading two translucent radar layers blends both frames at once, which
+reads as mud — it looked worse than the jump it replaced. Reverted to a
+hard cut, which is how a radar loop is meant to move. The one rule that
+survives is no bare gap: the new frame is added opaque on top and the
+old one is removed a fifth of a second later, never in the same breath,
+so the old frame is only taken down once the new one has painted. The
+warm-on-entry cache is what keeps that paint within the window.
+Measured across fifty rapid captures of a running loop: brightness
+varied only with real frame content (79–100, the lows being genuine
+thin-rain scans), with no blank and no periodic darkening pulse.

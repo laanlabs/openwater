@@ -17,6 +17,7 @@ struct SettingsScreen: View {
     @Environment(TVLocation.self) private var location
 
     @AppStorage(TVSettings.playsYouTubeKey) private var playsYouTube = false
+    @AppStorage(TVSettings.debugHUDKey) private var showsDebugHUD = false
 
     var body: some View {
         NavigationStack {
@@ -53,6 +54,20 @@ struct SettingsScreen: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section {
+                    Toggle(isOn: $showsDebugHUD) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Show debug overlay")
+                                .font(.system(size: 32, weight: .medium))
+                            Text("A corner button with live memory and frame rate, for diagnosing a slow screen.")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Diagnostics")
+                }
+
                 Section("Location") {
                     LabeledContent {
                         Text(location.name.isEmpty ? "Not set" : location.name)
@@ -80,6 +95,7 @@ struct SettingsScreen: View {
 /// on.
 enum TVSettings {
     static let playsYouTubeKey = "tv.youtube.play"
+    static let debugHUDKey = "tv.debug.hud"
 
     /// Read from outside a view — `CamCard` needs it during a button action,
     /// not only while drawing.

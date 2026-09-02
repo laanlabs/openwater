@@ -21,10 +21,23 @@ import SwiftUI
 /// costs nothing the rest of the time.
 struct DebugHUD: View {
 
+    /// Off by default. An always-focusable button in the corner competes
+    /// with the tab bar's Down path into the control bars on the map and
+    /// radar — pressing Down could land on the bug rather than the bar — so
+    /// the overlay only exists once it is switched on in Settings, which is
+    /// when a rider is deliberately debugging and can live with it.
+    @AppStorage(TVSettings.debugHUDKey) private var enabled = false
+
     @State private var monitor = DebugMonitor()
     @State private var open = false
 
     var body: some View {
+        Group {
+            if enabled { hud }
+        }
+    }
+
+    private var hud: some View {
         VStack(alignment: .trailing, spacing: 14) {
             if open { panel }
             Button { open.toggle() } label: {

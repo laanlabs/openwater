@@ -96,6 +96,28 @@ public struct WindReading: Codable, Sendable {
     public let directionDeg: Double
     public let at: Date
 
+    /// Spelled out because the init below suppresses the memberwise one.
+    public init(speedKn: Double, gustKn: Double?, directionDeg: Double, at: Date) {
+        self.speedKn = speedKn
+        self.gustKn = gustKn
+        self.directionDeg = directionDeg
+        self.at = at
+    }
+
+    /// The same model, asked a different way.
+    ///
+    /// The current-conditions call and the hourly series are one forecast
+    /// behind two endpoints, so hour zero of the outlook is a real answer for
+    /// now — not an interpolation and not a guess. Screens use it when the
+    /// current call drops, which keeps a header from claiming there is no
+    /// wind directly above a bar chart that is drawing some.
+    public init(from hour: WindForecastHour) {
+        self.speedKn = hour.speedKn
+        self.gustKn = hour.gustKn
+        self.directionDeg = hour.directionDeg
+        self.at = hour.date
+    }
+
     public var cardinal: String { Format.cardinal(directionDeg) }
     /// The "is it on?" threshold the design leads with.
     public var isFiring: Bool { speedKn >= 15 }
@@ -385,8 +407,7 @@ public final class SpotGuideStore {
         ]
         if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await Fetch.data(url)
         else { return }
 
         struct Entry: Codable {
@@ -499,8 +520,7 @@ public final class SpotGuideStore {
             let current: Current?
         }
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await Fetch.data(url),
               let current = (try? JSONDecoder().decode(Payload.self, from: data))?.current,
               let speed = current.wind_speed_10m,
               let direction = current.wind_direction_10m
@@ -527,8 +547,7 @@ public final class SpotGuideStore {
         ]
         if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await Fetch.data(url)
         else { return [] }
 
         struct Payload: Codable {
@@ -1237,8 +1256,7 @@ public final class SpotGuideStore {
             let current: Current?
         }
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = await Fetch.data(url),
               let current = (try? JSONDecoder().decode(Payload.self, from: data))?.current,
               let temperature = current.temperature_2m
         else { return nil }

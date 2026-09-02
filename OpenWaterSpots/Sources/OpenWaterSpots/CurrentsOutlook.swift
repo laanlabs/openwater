@@ -366,8 +366,7 @@ extension TidesAndCurrents {
         }
 
         guard let url = URL(string: "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=currentpredictions"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200
+              let data = await Fetch.data(url)
         else {
             // The bundle's snapshot: same distilled rows, refreshed by
             // scripts/refresh-station-snapshots.sh, so a signal-less first

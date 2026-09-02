@@ -67,6 +67,15 @@ struct ConditionsScreen: View {
     /// behind it fetches its own, in full.
     @State private var current: CurrentsOutlook?
     @State private var isLoading = true
+
+    /// The fetch finished and came back empty-handed.
+    ///
+    /// Kept apart from `wind == nil` because the two mean opposite things to
+    /// a rider. Open-Meteo covers every coordinate this app can show, ocean
+    /// included, so "no model wind for this point" was almost never true —
+    /// it was a dropped request wearing a confident sentence. A failure is
+    /// now said as a failure, with a way to try again.
+    @State private var didFail = false
     @State private var cams: [SpotGuideStore.GuideResource] = []
 
     /// So the page opens on its own headline rather than wherever the focus
@@ -91,8 +100,17 @@ struct ConditionsScreen: View {
         return metres < 10_000 ? (spot, metres) : nil
     }
 
+    /// What the caller called this place beats what happens to be near it.
+    ///
+    /// This was the other way round, and it renamed things. A pin a rider
+    /// dropped and called "Montauk, NY" came up under the name of whatever
+    /// downwind run sat within ten kilometres of it — so pressing your own
+    /// pin opened somebody else's spot, as far as the screen was concerned.
+    /// The nearest launch is still the answer when nobody supplied a name,
+    /// which is the map's crosshair sitting on an unnamed patch of water.
     private var title: String {
-        nearest?.spot.name ?? (placeName.isEmpty ? "This point" : placeName)
+        if !placeName.isEmpty { return placeName }
+        return nearest?.spot.name ?? "This point"
     }
 
     /// Degrees to three places with hemispheres spelled out, which is what a
@@ -173,6 +191,7 @@ struct ConditionsScreen: View {
 
     private func load() async {
         isLoading = true
+        didFail = false
         defer { isLoading = false }
         async let air = guide.weather(at: here)
         async let blowing = guide.currentWind(at: here)
@@ -186,8 +205,20 @@ struct ConditionsScreen: View {
         async let running = Currents.outlook(at: here)
         weather = await air
         wind = await blowing
+        // The hourly series is the same model asked a different way, so when
+        // the current call drops and the outlook lands, hour zero is a real
+        // answer rather than a guess — and it keeps the header honest with
+        // the bars directly beneath it, which would otherwise be showing
+        // wind on a screen that claims there is none.
         ahead = await outlook
         stations = await free
+        if wind == nil, let first = ahead.first {
+            wind = WindReading(from: first)
+        }
+        // Only a genuine, uncancelled empty answer is worth reporting. A
+        // cancelled task means the rider left, and drawing an error on the
+        // way out is noise.
+        didFail = wind == nil && !Task.isCancelled
         surf = await sea
         tide = await water
         forecast = await sky
@@ -294,11 +325,22 @@ struct ConditionsScreen: View {
                 ProgressView()
                     .controlSize(.large)
                     .padding(.vertical, 40)
+            } else if didFail {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Couldn't reach the forecast")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("The model covers this point — the request didn't land.")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Button("Try again") { Task { await load() } }
+                        .font(.system(size: 26))
+                }
+                .padding(.vertical, 24)
             } else {
-                Text("No model wind for this point")
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 30)
+                ProgressView()
+                    .controlSize(.large)
+                    .padding(.vertical, 40)
             }
         }
     }

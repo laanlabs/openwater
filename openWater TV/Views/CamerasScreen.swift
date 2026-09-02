@@ -89,7 +89,6 @@ struct CamerasScreen: View {
             // by construction, so it lays its own ground rather than trusting
             // the one underneath.
             .background(Color.black.ignoresSafeArea())
-            .safeAreaInset(edge: .top) { viewSwitch }
         }
         .fullScreenCover(isPresented: $showsMap) {
             CamsMapScreen(cams: cams)
@@ -135,40 +134,39 @@ struct CamerasScreen: View {
         return guide.favorites.map(\.spotId).joined()
     }
 
-    /// Two icons: where you are, and where you can go.
-    ///
-    /// The grid one is lit and inert — it says which of the two this is, which
-    /// a lone map button would not. Pressing the map opens it over the top.
-    private var viewSwitch: some View {
-        HStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: 26, weight: .semibold))
-                .frame(width: 76, height: 56)
-                .background(Color.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
-                .foregroundStyle(.white)
-            Button { showsMap = true } label: {
-                Image(systemName: "map")
-                    .font(.system(size: 26, weight: .semibold))
-                    .frame(width: 76, height: 56)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 80)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
-    }
-
     private var grid: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 40) {
-                ForEach(cams) { CamCard(cam: $0) }
+            VStack(alignment: .leading, spacing: 32) {
+                mapButton
+                LazyVGrid(columns: columns, spacing: 40) {
+                    ForEach(cams) { CamCard(cam: $0) }
+                }
             }
             .padding(.horizontal, 80)
             .padding(.vertical, 40)
         }
+    }
+
+    /// The way to the map, said in words.
+    ///
+    /// It was a pair of icons pinned above the grid in a top safe-area inset,
+    /// and it was unreachable: on tvOS the tab bar owns Up, so Up from the
+    /// first row of cards travelled straight past an inset into the tab bar,
+    /// and nothing a rider pressed ever landed on it. Inside the scroll
+    /// content it is simply the row above the cards, which Up finds because
+    /// that is what Up does.
+    ///
+    /// One labelled button rather than two glyphs. A grid icon beside a map
+    /// icon asked a rider to work out which of them was the state they were
+    /// already in; the map is a place you go now, so the control says so.
+    private var mapButton: some View {
+        Button { showsMap = true } label: {
+            Label("View on map", systemImage: "map")
+                .font(.system(size: 26, weight: .medium))
+                .padding(.horizontal, 30)
+                .padding(.vertical, 14)
+        }
+        .buttonStyle(.bordered)
     }
 }
 

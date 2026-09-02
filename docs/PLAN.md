@@ -1413,3 +1413,13 @@ the build task is cancelled on `deinit`; no timers are left running.
 What a device-side Instruments pass would still be worth checking: the
 wash's 60-hertz particle canvas is real GPU work on the map tab, gated
 to when it is active but not otherwise throttled for the television.
+
+**A window into the box (2026-09-01).** A television has no console in
+the room, so a hang leaves nothing to read. `DebugHUD` is a bug button
+in the corner that opens three live figures: the app's memory footprint
+(what jetsam measures), the available memory before the system starts
+reclaiming (the early warning for a pressure hang, device-only — the
+simulator reports nothing), and the frame rate (which separates "out of
+room" from "working too hard"). The display-link meter runs only while
+the panel is open, so it costs nothing the rest of the time. It is the
+instrument for turning "it went slow" into a number.

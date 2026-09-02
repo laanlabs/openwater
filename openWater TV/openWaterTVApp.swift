@@ -82,6 +82,10 @@ struct RootView: View {
                 .tag(Tab.settings)
         }
         .environment(location)
+        // A live memory-and-FPS readout, behind a bug button in the corner —
+        // the only window into a television that has no console in the room.
+        // See `DebugHUD`.
+        .overlay { DebugHUD() }
         // Dark, always, whatever the television is set to.
         //
         // Reported from a real Apple TV in Light appearance: half the app was

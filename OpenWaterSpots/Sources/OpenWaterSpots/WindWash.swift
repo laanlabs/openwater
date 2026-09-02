@@ -204,6 +204,19 @@ public final class WindWashModel {
     public private(set) var field: Field?
     public private(set) var fieldRegion: MKCoordinateRegion?
     public private(set) var isLoading = false
+
+    /// The last load finished and brought nothing back.
+    ///
+    /// Only ever true for the wind layer. Open-Meteo answers for every
+    /// coordinate a map can show, so an empty wind field means the request
+    /// did not land — where an empty *current* field is a real answer about
+    /// an inland window, and saying "failed" there would be a lie about the
+    /// ocean model's coverage.
+    ///
+    /// Published because a wash that silently is not there looks like a wash
+    /// somebody switched off, and a rider has no way to tell the difference
+    /// from the sofa.
+    public private(set) var loadFailed = false
     private var loadTask: Task<Void, Never>?
     /// Bumped whenever a load is superseded, so only the newest one may say
     /// the fetching is over.
@@ -966,6 +979,7 @@ public final class WindWashModel {
         loadToken += 1
         let token = loadToken
         isLoading = true
+        loadFailed = false
         loadTask = Task {
             // Every exit below is a `return` that used to skip the reset at
             // the bottom and strand the hud spinning. The token keeps a
@@ -1060,7 +1074,11 @@ public final class WindWashModel {
                 // or the wash keeps painting water that isn't there.
                 cells = []
                 field = nil
+                // For the wind layer this is not a fact about the place; see
+                // `loadFailed`.
+                loadFailed = layer == .wind
             } else {
+                loadFailed = false
                 apply()
             }
         }

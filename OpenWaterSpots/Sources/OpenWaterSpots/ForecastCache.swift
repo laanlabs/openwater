@@ -51,20 +51,44 @@ public enum ForecastCache: Sendable {
     public static func serve(from url: URL, ttl: TimeInterval) async -> Served? {
         let path = file(for: url)
         if let age = age(of: path), age < ttl,
-           let cached = try? Data(contentsOf: path) {
+           let cached = try? Data(contentsOf: path), isAnswer(cached) {
             return Served(data: cached, staleAge: nil)
         }
-        if let (data, response) = try? await URLSession.shared.data(from: url),
-           (response as? HTTPURLResponse)?.statusCode == 200 {
+        // Retried, like every other forecast call — see `Fetch`. This is the
+        // wash's own request, and a wash that quietly is not there is the
+        // most expensive thing on the map to lose to one dropped packet.
+        if let data = await Fetch.data(url) {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try? data.write(to: path)
             return Served(data: data, staleAge: nil)
         }
         if let age = age(of: path), age < staleLimit,
-           let cached = try? Data(contentsOf: path) {
+           let cached = try? Data(contentsOf: path), isAnswer(cached) {
             return Served(data: cached, staleAge: age)
         }
         return nil
+    }
+
+    /// Whether a 200 body is actually an answer.
+    ///
+    /// Not every 200 carries a forecast. Open-Meteo replies to a request it
+    /// could not finish with a line of prose — "Unexpected error while
+    /// streaming data: timeoutReached" — and NOAA answers a station it has
+    /// nothing for with a JSON `error` object. Both arrive as 200, and both
+    /// used to be written to disk as though they were data.
+    ///
+    /// That is worse than a failed request, because it *sticks*: one unlucky
+    /// moment took the wind wash off the map for the whole thirty-minute TTL,
+    /// and nothing in that window would ask again. Found exactly that way —
+    /// a 53-byte `timeoutReached` sitting in the cache while the same URL
+    /// answered perfectly from a terminal.
+    ///
+    /// Checked on the way out of the cache as well as into it, so a poisoned
+    /// file already on disk is stepped over rather than waiting out its TTL.
+    private static func isAnswer(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) else { return false }
+        if let object = root as? [String: Any], object["error"] != nil { return false }
+        return true
     }
 
     /// `serve` for the callers whose cards have nowhere to put an age.

@@ -1,4 +1,5 @@
 import AVKit
+import MapKit
 import OpenWaterCore
 import UIKit
 import OpenWaterSpots
@@ -57,6 +58,14 @@ struct CamerasScreen: View {
 
     private let columns = [GridItem(.adaptive(minimum: 420), spacing: 40)]
 
+    /// Grid or map. Remembered, because it is a preference about how somebody
+    /// likes to choose a camera rather than a thing they are doing right now.
+    @AppStorage("tv.cams.map") private var showsMap = false
+
+    /// What the map is looking at. Seeded from wherever the rest of the app
+    /// thinks it is, so the cameras tab opens on the same water as the map.
+    @State private var camera: MapCameraPosition = .automatic
+
     var body: some View {
         NavigationStack {
             Group {
@@ -68,10 +77,20 @@ struct CamerasScreen: View {
                     // into "none near Nearby".
                     EmptyCams(place: location.isChosen ? location.name : "",
                               hasSomewhere: location.here != nil || !guide.favorites.isEmpty)
+                } else if showsMap {
+                    camMap
                 } else {
                     grid
                 }
             }
+            // Painted, not inherited. A tvOS window follows the box's own
+            // Light/Dark setting, and on a Light Apple TV this screen came up
+            // pale under white captions — reported from a real television and
+            // invisible on a simulator, which is set to Dark. The app is dark
+            // by construction, so it lays its own ground rather than trusting
+            // the one underneath.
+            .background(Color.black.ignoresSafeArea())
+            .safeAreaInset(edge: .top) { viewSwitch }
         }
         .task(id: areaKey) {
             isSearching = true
@@ -114,6 +133,74 @@ struct CamerasScreen: View {
         return guide.favorites.map(\.spotId).joined()
     }
 
+    /// Two icons, one lit. Not a segmented control: on a television this is
+    /// one press from the tab bar, and it has to read as a control from the
+    /// sofa rather than as a caption.
+    private var viewSwitch: some View {
+        HStack(spacing: 16) {
+            Spacer()
+            ForEach([false, true], id: \.self) { wantsMap in
+                Button {
+                    showsMap = wantsMap
+                } label: {
+                    Image(systemName: wantsMap ? "map" : "square.grid.2x2")
+                        .font(.system(size: 26, weight: .semibold))
+                        .frame(width: 76, height: 56)
+                        .background(showsMap == wantsMap
+                                    ? Color.white.opacity(0.22) : Color.white.opacity(0.06),
+                                    in: RoundedRectangle(cornerRadius: 14))
+                        .foregroundStyle(showsMap == wantsMap ? .white : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 80)
+        .padding(.top, 8)
+        .padding(.bottom, 16)
+    }
+
+    /// The same cameras, where they actually are.
+    ///
+    /// A list answers "which of these can I watch"; a map answers "what is
+    /// there at the end of the beach I am thinking about", which is the
+    /// question a rider staring at a coastline is usually asking.
+    private var camMap: some View {
+        Map(position: $camera, interactionModes: []) {
+            ForEach(cams) { cam in
+                Annotation(cam.displayName, coordinate: CLLocationCoordinate2D(latitude: cam.coordinate.latitude, longitude: cam.coordinate.longitude)) {
+                    CamCard(cam: cam, style: .pin)
+                }
+                .annotationTitles(.hidden)
+            }
+        }
+        .mapStyle(.standard(elevation: .flat, emphasis: .muted,
+                            pointsOfInterest: .excludingAll))
+        .onAppear(perform: frameCams)
+        .onChange(of: cams.count) { _, _ in frameCams() }
+    }
+
+    /// Open on the cameras themselves rather than on a fixed radius: the
+    /// nearest six may all be in one bay, and a box drawn round the search
+    /// radius would put them in a huddle in the middle of the screen.
+    private func frameCams() {
+        let points = cams.map(\.coordinate)
+        guard let first = points.first else { return }
+        var minLat = first.latitude, maxLat = first.latitude
+        var minLon = first.longitude, maxLon = first.longitude
+        for point in points {
+            minLat = min(minLat, point.latitude); maxLat = max(maxLat, point.latitude)
+            minLon = min(minLon, point.longitude); maxLon = max(maxLon, point.longitude)
+        }
+        let centre = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
+                                            longitude: (minLon + maxLon) / 2)
+        // A floor on the span, or a single camera zooms to the building it is
+        // bolted to; the margin keeps the outermost pins off the edge, where
+        // a capsule would be half a name.
+        let span = MKCoordinateSpan(latitudeDelta: max((maxLat - minLat) * 1.6, 0.15),
+                                    longitudeDelta: max((maxLon - minLon) * 1.6, 0.15))
+        camera = .region(MKCoordinateRegion(center: centre, span: span))
+    }
+
     private var grid: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 40) {
@@ -138,6 +225,13 @@ struct CamCard: View {
 
     let cam: SpotGuideStore.GuideResource
 
+    /// How this draws. The resolving, the routes and the covers below are
+    /// identical either way and deliberately stay in one place: a map pin that
+    /// opened cameras through its own copy of `open()` would drift out of step
+    /// with the grid the first time either of them changed.
+    enum Style { case card, pin }
+    var style: Style = .card
+
     @AppStorage(TVSettings.playsYouTubeKey) private var playsYouTube = false
 
     /// Where pressing this card went. One optional rather than three Bools:
@@ -145,6 +239,9 @@ struct CamCard: View {
     /// and three flags would let it be two things at once.
     @State private var route: Route?
     @State private var isResolving = false
+
+    /// Only meaningful for `.pin`: a map pin wears its name while focused.
+    @FocusState private var isPinFocused: Bool
 
     private enum Route: Identifiable {
         /// Something `AVPlayer` can open — the guide's own stream or still,
@@ -175,6 +272,66 @@ struct CamCard: View {
     }
 
     var body: some View {
+        Group {
+            switch style {
+            case .card: card
+            case .pin: pin
+            }
+        }
+        .fullScreenCover(item: $route) { route in
+            switch route {
+            case .play(let url, let isStill):
+                CamPlayer(url: url, isStill: isStill, name: cam.displayName)
+            case .angles(let streams):
+                CamAnglePlayer(streams: streams, name: cam.displayName)
+            case .handoff(let whyNoStream):
+                CamHandoff(cam: cam, whyNoStream: whyNoStream)
+            }
+        }
+    }
+
+    /// A camera on the map: a glyph, and its name only while it is focused.
+    ///
+    /// The name was on every pin to begin with and the map was unreadable —
+    /// thirty capsules on one stretch of coast overlap into a wall of text,
+    /// and the cams pile up densest exactly where the good water is. A dot is
+    /// legible at any density, and the remote already says which one is meant.
+    private var pin: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                if isResolving {
+                    ProgressView()
+                } else {
+                    Image(systemName: isPlayable ? "video.fill" : "qrcode")
+                        .font(.system(size: 20))
+                }
+                if isPinFocused {
+                    Text(cam.displayName)
+                        .font(.system(size: 20, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, isPinFocused ? 16 : 10)
+            .padding(.vertical, 10)
+            // Playable cams carry the tint. On a map the question is which of
+            // these the television can actually show, and that has to survive
+            // being read at three metres.
+            .background(isPlayable ? Color.accentColor : Color.black.opacity(0.85),
+                        in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(isPinFocused ? 1 : 0.6),
+                                      lineWidth: isPinFocused ? 3 : 2))
+            .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .focused($isPinFocused)
+        .scaleEffect(isPinFocused ? 1.15 : 1)
+        // The focused pin reads over its neighbours rather than under them,
+        // which is the whole reason it is allowed to grow a name at all.
+        .zIndex(isPinFocused ? 1 : 0)
+        .animation(.easeOut(duration: 0.15), value: isPinFocused)
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Only the picture goes inside the card button. tvOS's card style
             // lifts and clips what it is given, and a caption inside it gets
@@ -220,16 +377,6 @@ struct CamCard: View {
                 }
             }
             .frame(width: 420, alignment: .leading)
-        }
-        .fullScreenCover(item: $route) { route in
-            switch route {
-            case .play(let url, let isStill):
-                CamPlayer(url: url, isStill: isStill, name: cam.displayName)
-            case .angles(let streams):
-                CamAnglePlayer(streams: streams, name: cam.displayName)
-            case .handoff(let whyNoStream):
-                CamHandoff(cam: cam, whyNoStream: whyNoStream)
-            }
         }
     }
 

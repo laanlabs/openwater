@@ -71,7 +71,15 @@ struct PlaceSearchScreen: View {
                 }
             }
         }
-        .foregroundStyle(.white)
+        // Deliberately no blanket `foregroundStyle(.white)` here.
+        //
+        // A tvOS `List` row inverts when it takes focus — white pill, black
+        // text — and it works that out from `.primary`. Forcing white
+        // overrode that inversion and left the focused row white-on-white:
+        // an invisible row exactly where the rider is looking, which is how
+        // it was reported. The dark palette is guaranteed once, at the root,
+        // by `preferredColorScheme(.dark)`; these rows only have to leave
+        // their colour alone and let focus do its job.
         // Menu, answered explicitly. A `NavigationStack` inside a
         // `fullScreenCover` takes the button and — with nothing to pop —
         // does nothing with it, which strands a rider on this screen. Flat

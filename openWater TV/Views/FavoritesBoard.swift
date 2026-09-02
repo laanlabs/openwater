@@ -26,6 +26,48 @@ struct FavoritesBoard: View {
 
     private var favorites: [GuideSpot] { guide.favorites }
 
+    /// Live wind for the rider's own pins, which the guide's bulk refresh
+    /// cannot fetch because it works in `GuideSpot`s and a pin is not one.
+    @State private var pinWind: [UUID: WindReading] = [:]
+
+    /// Everything on the board: the starred guide spots and the pins a rider
+    /// dropped themselves.
+    ///
+    /// Private pins used to be saved and then never seen again — `favorites`
+    /// resolves ids against the guide, so a pin, which is not in the guide,
+    /// silently vanished from the one screen it was made for. They are their
+    /// own kind of row now rather than being forced to look like a listed
+    /// spot.
+    private enum Entry: Identifiable {
+        case spot(GuideSpot)
+        case pin(PrivateSpot)
+
+        var id: String {
+            switch self {
+            case .spot(let spot): "spot:" + spot.spotId
+            case .pin(let pin): "pin:" + pin.id.uuidString
+            }
+        }
+
+        var name: String {
+            switch self {
+            case .spot(let spot): spot.name
+            case .pin(let pin): pin.name
+            }
+        }
+    }
+
+    private var entries: [Entry] {
+        favorites.map(Entry.spot) + guide.privateSpots.map(Entry.pin)
+    }
+
+    private func reading(for entry: Entry) -> WindReading? {
+        switch entry {
+        case .spot(let spot): guide.wind[spot.spotId]
+        case .pin(let pin): pinWind[pin.id]
+        }
+    }
+
     private var firing: [GuideSpot] {
         favorites.filter { guide.wind[$0.spotId]?.isFiring == true }
     }
@@ -35,19 +77,33 @@ struct FavoritesBoard: View {
             Group {
                 if guide.spots.isEmpty && guide.isLoading {
                     LoadingBoard()
-                } else if favorites.isEmpty {
+                } else if entries.isEmpty {
                     EmptyBoard { isEditing = true }
                 } else {
                     board
                 }
             }
             .navigationDestination(for: GuideSpot.self) { SpotScreen(spot: $0) }
+            // A pin gets the same report a listed spot does — it has a
+            // coordinate, which is all the conditions screen ever needed.
+            .navigationDestination(for: PrivateSpot.self) { pin in
+                ConditionsScreen(here: pin.coordinate, placeName: pin.name)
+            }
         }
         // Full screen, not a sheet. tvOS sheets are a narrow centre column,
         // and `searchable` puts a whole keyboard inside this one: in a sheet
         // the prompt truncates mid-word, the letters crowd, and the results
         // get about a third of a 4K display.
         .fullScreenCover(isPresented: $isEditing) { EditFavoritesScreen() }
+        .task(id: guide.privateSpots.map(\.id.uuidString).joined()) {
+            // One request each, and only for the pins — there are a handful
+            // at most, and the guide's bulk call cannot speak for them.
+            for pin in guide.privateSpots {
+                if let reading = await guide.currentWind(at: pin.coordinate) {
+                    pinWind[pin.id] = reading
+                }
+            }
+        }
         .task(id: favorites.map(\.spotId).joined()) {
             // A loop rather than a timer: it dies with the view, and the first
             // pass happens the moment the list exists rather than one interval
@@ -63,14 +119,24 @@ struct FavoritesBoard: View {
     private var board: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                FiringBanner(firing: firing, total: favorites.count)
+                FiringBanner(firing: firing, total: entries.count)
                     .padding(.bottom, 8)
 
-                ForEach(favorites) { spot in
-                    NavigationLink(value: spot) {
-                        FavoriteRow(spot: spot, reading: guide.wind[spot.spotId])
+                ForEach(entries) { entry in
+                    switch entry {
+                    case .spot(let spot):
+                        NavigationLink(value: spot) {
+                            FavoriteRow(name: spot.name, isPin: false,
+                                        reading: reading(for: entry))
+                        }
+                        .buttonStyle(.plain)
+                    case .pin(let pin):
+                        NavigationLink(value: pin) {
+                            FavoriteRow(name: pin.name, isPin: true,
+                                        reading: reading(for: entry))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
 
                 Button("Edit spots") { isEditing = true }
@@ -125,14 +191,22 @@ private struct FiringBanner: View {
 /// twitch sideways when 9 becomes 10.
 private struct FavoriteRow: View {
 
-    let spot: GuideSpot
+    let name: String
+    /// A pin of the rider's own rather than a listed launch — marked, because
+    /// the two came from different places and one of them is not in the guide.
+    let isPin: Bool
     let reading: WindReading?
 
     @Environment(\.isFocused) private var isFocused
 
     var body: some View {
         HStack(spacing: 32) {
-            Text(spot.name)
+            if isPin {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.secondary)
+            }
+            Text(name)
                 .font(.system(size: 40, weight: .medium))
                 // A literal colour, not `.primary`: inside a focusable button
                 // tvOS resolves `.primary` to the app's accent, so a board

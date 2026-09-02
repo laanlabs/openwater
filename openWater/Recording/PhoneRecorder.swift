@@ -113,9 +113,11 @@ final class PhoneRecorder {
 
     // MARK: - Setup
 
-    func prepare() {
+    /// - Parameter isAlreadySaved: whether the library holds this session, so
+    ///   a log left behind by a save that landed is cleaned up, not offered.
+    func prepare(isAlreadySaved: (UUID) -> Bool = { _ in false }) {
         location.requestAuthorization()
-        engine.checkForRecoverableSession()
+        engine.checkForRecoverableSession(isAlreadySaved: isAlreadySaved)
     }
 
     /// Warm the receiver so the first fixes are not the worst ones.

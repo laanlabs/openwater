@@ -96,7 +96,11 @@ final class WatchSyncClient: NSObject {
     /// whenever the phone becomes reachable again.
     func retryQueued() {
         refreshQueue()
-        for url in queuedSessions {
+        // Anything the system is still carrying is left to it. Queuing the
+        // same file twice — easy, since this runs on every reconnect and on
+        // the phone's sync button — delivers the session twice.
+        let inFlight = Set(session?.outstandingFileTransfers.map(\.file.fileURL.standardizedFileURL) ?? [])
+        for url in queuedSessions where !inFlight.contains(url.standardizedFileURL) {
             let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) ?? UUID()
             transfer(url, sessionID: id)
         }

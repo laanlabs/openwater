@@ -16,6 +16,15 @@ final class SessionLibrary {
 
     private let context: ModelContext
 
+    /// True when the real store would not open and the app is running on an
+    /// in-memory stand-in.
+    ///
+    /// Everything works for the length of this launch and none of it survives
+    /// the next one. The library says so rather than pretending, and `save`
+    /// answers "not persisted" so the recorder keeps its crash log — which is
+    /// the copy that will still be there when the store opens again.
+    let isEphemeral: Bool
+
     /// All-time bests by category, recomputed on every change and pushed to the
     /// watch so a live personal-best alert means something real.
     private(set) var records: [SpeedCategory: RecordHolder] = [:]
@@ -28,8 +37,9 @@ final class SessionLibrary {
         let date: Date
     }
 
-    init(context: ModelContext) {
+    init(context: ModelContext, isEphemeral: Bool = false) {
         self.context = context
+        self.isEphemeral = isEphemeral
         refreshRecords()
     }
 
@@ -44,21 +54,31 @@ final class SessionLibrary {
     /// `persisted` is what the stop path needs: the recorder holds the crash
     /// log until the session is durably somewhere, and the model alone cannot
     /// say — SwiftData hands one back whether or not the context saved.
+    ///
+    /// `stored` is nil only when the session could not be encoded at all, in
+    /// which case nothing was written and `persisted` is false.
+    ///
+    /// - Parameter policy: what an existing row keeps of the rider's own text.
+    ///   `.replace` for an edit made here; `.keepRiderEdits` for a copy
+    ///   arriving from the watch.
     @discardableResult
-    func save(_ session: Session) -> (stored: StoredSession, persisted: Bool) {
+    func save(
+        _ session: Session,
+        policy: StoredSession.MergePolicy = .replace
+    ) -> (stored: StoredSession?, persisted: Bool) {
         let id = session.id
         let existing = try? context.fetch(
             FetchDescriptor<StoredSession>(predicate: #Predicate { $0.id == id })
         ).first
 
         if let existing {
-            existing.update(with: session)
-            return (existing, persist())
+            guard existing.update(with: session, policy: policy) else { return (existing, false) }
+            return (existing, persist() && !isEphemeral)
         }
 
-        let stored = StoredSession(session: session)
+        guard let stored = StoredSession(session: session) else { return (nil, false) }
         context.insert(stored)
-        return (stored, persist())
+        return (stored, persist() && !isEphemeral)
     }
 
     /// The encoded archive for a session, fetched fresh from the store.
@@ -175,8 +195,8 @@ final class SessionLibrary {
         var updated = 0
         for stored in stale {
             let sportOverrides = overrides[stored.sport].flatMap { $0.isEmpty ? nil : $0 }
-            guard let session = stored.currentSession(overrides: sportOverrides) else { continue }
-            stored.update(with: session)
+            guard let session = stored.currentSession(overrides: sportOverrides),
+                  stored.update(with: session) else { continue }
             updated += 1
         }
         if updated > 0 { persist() }

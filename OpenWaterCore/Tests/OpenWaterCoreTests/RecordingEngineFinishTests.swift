@@ -137,4 +137,59 @@ struct RecordingEngineFinishTests {
         #expect(second == nil, "the second press should find nothing left to end")
         #expect(saves == 1, "the session was handed to the shell \(saves) times")
     }
+
+    @Test("A log whose session the shell already holds is cleaned up, not offered")
+    func alreadySavedLogIsDropped() {
+        let before = Set(TrackLog.unfinishedLogs())
+
+        let engine = engine()
+        engine.start(sport: .wingfoil)
+        for point in SyntheticTrack.constantSpeed(9, duration: 120) {
+            engine.ingest(point)
+        }
+        // The write landed but the shell answered no — a save that reported
+        // failure after committing, say. The library has the session; the
+        // log is a leftover.
+        var savedID: UUID?
+        engine.finish { session in savedID = session.id; return false }
+        defer {
+            Set(TrackLog.unfinishedLogs()).subtracting(before).forEach(TrackLog.delete)
+        }
+
+        engine.checkForRecoverableSession(isAlreadySaved: { $0 == savedID })
+        #expect(engine.recoverable == nil,
+                "a session already in the library was offered back as unfinished")
+        #expect(Set(TrackLog.unfinishedLogs()).subtracting(before).isEmpty,
+                "the leftover log should have been deleted, not kept forever")
+    }
+
+    @Test("Dealing with one interrupted session brings up the next")
+    func recoveryOffersEveryOrphan() {
+        let before = Set(TrackLog.unfinishedLogs())
+
+        for _ in 0..<2 {
+            let engine = engine()
+            engine.start(sport: .wingfoil)
+            for point in SyntheticTrack.constantSpeed(9, duration: 120) {
+                engine.ingest(point)
+            }
+            engine.finish { _ in false }
+        }
+        defer {
+            Set(TrackLog.unfinishedLogs()).subtracting(before).forEach(TrackLog.delete)
+        }
+
+        let engine = engine()
+        engine.checkForRecoverableSession()
+        let first = engine.recoverable
+        #expect(first != nil)
+
+        engine.dismissRecovery()
+        let second = engine.recoverable
+        #expect(second != nil, "the second orphan was never offered")
+        #expect(second?.url != first?.url)
+
+        #expect(engine.recover(second!, save: { _ in true }) != nil)
+        #expect(engine.recoverable == nil, "nothing should be left once both are dealt with")
+    }
 }

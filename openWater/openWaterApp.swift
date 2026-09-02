@@ -2,9 +2,12 @@ import OpenWaterCore
 import OpenWaterSpots
 import SwiftData
 import SwiftUI
+import os
 
 @main
 struct openWaterApp: App {
+
+    private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "App")
 
     private let container: ModelContainer
     @State private var library: SessionLibrary
@@ -12,7 +15,7 @@ struct openWaterApp: App {
     @State private var settings = AppSettings()
     @State private var recorder = PhoneRecorder()
     @State private var countdown = RaceCountdown()
-    @State private var spotGuide = SpotGuideStore()
+    @State private var spotGuide: SpotGuideStore
     @State private var routeNamer: RouteNamer
     @State private var plannedRoutes: RouteStore
 
@@ -25,12 +28,19 @@ struct openWaterApp: App {
 
     init() {
         let container: ModelContainer
+        var ephemeral = false
         do {
             container = try ModelContainer(for: StoredSession.self)
         } catch {
-            // A store that will not open is almost always a schema mismatch
-            // during development. Falling back to memory keeps the app usable
-            // and makes the problem visible instead of crashing on launch.
+            // A store that will not open is a schema mismatch during
+            // development, or — on a rider's phone — a full disk or a damaged
+            // file. Falling back to memory keeps the app usable instead of
+            // crashing on launch, but it must not be silent: every session
+            // looks deleted, and anything recorded now would vanish at the
+            // next launch. The library carries the flag so the list can say
+            // so and the recorder can keep its crash logs.
+            Self.logger.error("session store would not open: \(error.localizedDescription)")
+            ephemeral = true
             container = try! ModelContainer(
                 for: StoredSession.self,
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -38,9 +48,15 @@ struct openWaterApp: App {
         }
         self.container = container
 
-        let library = SessionLibrary(context: container.mainContext)
+        let library = SessionLibrary(context: container.mainContext, isEphemeral: ephemeral)
         _library = State(initialValue: library)
-        _sync = State(initialValue: PhoneSyncClient(library: library))
+        let sync = PhoneSyncClient(library: library)
+        _sync = State(initialValue: sync)
+        // Activated here, at launch, not from the scene. iOS relaunches the
+        // app in the background to hand it a file the watch sent while the
+        // phone was asleep, and a scene that never becomes active is not a
+        // reliable place to have set the delegate by then.
+        sync.activate()
 
         // Shares the one guide store rather than opening a second copy of the
         // spot database purely to name two coordinates.
@@ -70,7 +86,6 @@ struct openWaterApp: App {
                     // and absent entirely from a release build.
                     DevSeed.loadIfNeeded(into: library)
                     #endif
-                    sync.activate()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // Leaving the foreground: push buffered fixes to disk, and

@@ -238,7 +238,10 @@ extension PhoneSyncClient: WCSessionDelegate {
             }
             do {
                 let archive = try SessionArchive.decode(data)
-                self.library.save(archive.upToDateSession())
+                // The watch re-sends anything still in its outbox on every
+                // reconnect, so this can be a session the rider has already
+                // titled and written up here. Their words stay.
+                self.library.save(archive.upToDateSession(), policy: .keepRiderEdits)
                 self.receivedCount += 1
                 self.lastReceived = Date()
                 self.lastError = nil

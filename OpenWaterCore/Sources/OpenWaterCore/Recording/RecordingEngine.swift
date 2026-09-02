@@ -256,10 +256,24 @@ public final class RecordingEngine {
     // MARK: - Recovery
 
     /// Look for a session that was interrupted before it could be saved.
-    public func checkForRecoverableSession() {
+    ///
+    /// Offers the newest one; the rest wait their turn, and `recover` and
+    /// `dismissRecovery` look again once it has been dealt with, so a phone
+    /// that was killed on three separate days gets three prompts rather than
+    /// one prompt and two orphans left on disk forever.
+    ///
+    /// - Parameter isAlreadySaved: whether the shell already holds a session
+    ///   with this id. A log whose session made it into the library — the
+    ///   save landed and the delete did not, say — is finished business, not
+    ///   an unfinished session, and is dropped rather than offered.
+    public func checkForRecoverableSession(isAlreadySaved: (UUID) -> Bool = { _ in false }) {
         guard state == .idle else { return }
         for url in TrackLog.unfinishedLogs() {
             guard let (header, points) = try? TrackLog.read(url) else {
+                TrackLog.delete(url)
+                continue
+            }
+            guard !isAlreadySaved(header.sessionID) else {
                 TrackLog.delete(url)
                 continue
             }
@@ -309,12 +323,14 @@ public final class RecordingEngine {
 
         TrackLog.delete(candidate.url)
         recoverable = nil
+        checkForRecoverableSession()
         return session
     }
 
     public func dismissRecovery() {
         if let recoverable { TrackLog.delete(recoverable.url) }
         recoverable = nil
+        checkForRecoverableSession()
     }
 
     // MARK: - Building

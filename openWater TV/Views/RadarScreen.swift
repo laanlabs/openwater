@@ -22,6 +22,11 @@ import SwiftUI
 /// big screen across a room is good at and a phone is not.
 struct RadarScreen: View {
 
+    /// Whether the radar tab is the one on screen. The frame images are tens
+    /// of megabytes, and a `TabView` keeps every tab alive — so this frees
+    /// them the moment the tab is left, the way the wind map sleeps its wash.
+    let isActive: Bool
+
     @Environment(TVLocation.self) private var location
 
     @State private var frames: [RainViewerFrame] = []
@@ -70,8 +75,14 @@ struct RadarScreen: View {
         }
         // The loop is a task rather than a timer: it dies with the view, so a
         // tab left behind is not animating tiles at somebody's router.
+        .onChange(of: isActive) { _, active in
+            // Leaving the tab stops the clock — the loop is a task that would
+            // otherwise keep advancing frames at somebody's router — and the
+            // map view frees its images.
+            if !active { isPlaying = false }
+        }
         .task(id: isPlaying) {
-            guard isPlaying else { return }
+            guard isPlaying, isActive else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.frameInterval)
                 guard !frames.isEmpty else { continue }
@@ -83,7 +94,7 @@ struct RadarScreen: View {
     private var radar: some View {
         ZStack(alignment: .bottom) {
             RadarImageMap(region: region, sources: sources,
-                          index: shownIndex, loaded: $loaded)
+                          index: shownIndex, isActive: isActive, loaded: $loaded)
                 .ignoresSafeArea()
             controls
                 .padding(.bottom, 40)
@@ -306,6 +317,7 @@ private struct RadarImageMap: UIViewRepresentable {
     let region: MKCoordinateRegion
     let sources: [RadarSource]
     let index: Int
+    let isActive: Bool
     @Binding var loaded: Double
 
     func makeUIView(context: Context) -> MKMapView {
@@ -315,13 +327,15 @@ private struct RadarImageMap: UIViewRepresentable {
         map.setRegion(region, animated: false)
         context.coordinator.loaded = $loaded
         context.coordinator.attach(to: map)
-        context.coordinator.update(sources: sources, index: index, region: region, to: map)
+        context.coordinator.update(sources: sources, index: index, region: region,
+                                   active: isActive, to: map)
         return map
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
         context.coordinator.loaded = $loaded
-        context.coordinator.update(sources: sources, index: index, region: region, to: map)
+        context.coordinator.update(sources: sources, index: index, region: region,
+                                   active: isActive, to: map)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -350,13 +364,30 @@ private struct RadarImageMap: UIViewRepresentable {
             map.addSubview(radarView)
         }
 
-        func update(sources: [RadarSource], index: Int, region: MKCoordinateRegion, to map: MKMapView) {
+        deinit { buildTask?.cancel() }
+
+        func update(sources: [RadarSource], index: Int, region: MKCoordinateRegion,
+                    active: Bool, to map: MKMapView) {
+            guard active else { return free() }
             let sig = Self.signature(of: sources, region: region)
             if sig != signature {
                 signature = sig
                 rebuild(sources: sources, region: region, map: map)
             }
             show(sources: sources, index: index)
+        }
+
+        /// Drop everything the tab was holding. The signature is cleared too,
+        /// so returning to the tab rebuilds from scratch rather than showing
+        /// nothing.
+        private func free() {
+            guard !images.isEmpty || buildTask != nil else { return }
+            buildTask?.cancel()
+            buildTask = nil
+            images = [:]
+            radarView.image = nil
+            signature = ""
+            loaded?.wrappedValue = 0
         }
 
         /// Instant: a rendered frame is already an image.
@@ -418,8 +449,12 @@ private struct RadarImageMap: UIViewRepresentable {
         }
 
         /// Compose one frame's tiles into a single map-sized image.
-        @MainActor
-        private static func render(source: RadarSource,
+        ///
+        /// `nonisolated`, so the tile decode and the drawing run off the main
+        /// thread — thirteen full-screen composites on the main actor was a
+        /// visible hitch on entry. Only the finished image and the progress
+        /// go back to the main thread, in the build loop.
+        nonisolated private static func render(source: RadarSource,
                                    placements: [(x: Int, y: Int, rect: CGRect)],
                                    zoom: Int, size: CGSize) async -> UIImage {
             let overlay = RadarTileOverlay(source: source)
@@ -438,7 +473,12 @@ private struct RadarImageMap: UIViewRepresentable {
             // Point resolution, not the screen's — radar is coarse, and a
             // 4K-scaled bitmap per frame is a great deal of memory for no
             // visible gain.
-            format.scale = 1
+            // Half resolution. Radar is coarse and the image is stretched
+            // over the whole map anyway, so full resolution buys nothing and
+            // costs four times the memory — thirteen frames at full 1080p is
+            // over a hundred megabytes, which is what pushes an Apple TV into
+            // memory pressure.
+            format.scale = 0.5
             format.opaque = false
             return UIGraphicsImageRenderer(size: size, format: format).image { _ in
                 for (rect, image) in pieces { image.draw(in: rect) }

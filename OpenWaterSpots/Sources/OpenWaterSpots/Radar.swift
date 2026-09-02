@@ -283,8 +283,10 @@ public enum RadarTiles {
         let configuration = URLSessionConfiguration.default
         // Radar frames are small and there are at most a few hundred of them
         // in a session; this is comfortably enough to hold a whole loop.
-        configuration.urlCache = URLCache(memoryCapacity: 32 << 20,
-                                          diskCapacity: 256 << 20,
+        // Kept modest for the television, which has far less memory headroom
+        // than a phone and shares this process with a live map and the wash.
+        configuration.urlCache = URLCache(memoryCapacity: 16 << 20,
+                                          diskCapacity: 128 << 20,
                                           diskPath: "radar-tiles")
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         return URLSession(configuration: configuration)
@@ -382,8 +384,11 @@ public final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
     /// session panning around cannot grow without end.
     nonisolated(unsafe) private static let crops: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
-        cache.countLimit = 900
-        cache.totalCostLimit = 96 << 20
+        cache.countLimit = 400
+        // Compressed PNG tile data, so a whole loop is a few megabytes; the
+        // ceiling is a backstop, not a working size, and 40 MB is plenty on a
+        // television without crowding out the map and the radar images.
+        cache.totalCostLimit = 40 << 20
         return cache
     }()
 

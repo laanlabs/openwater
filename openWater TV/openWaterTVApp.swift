@@ -71,7 +71,7 @@ struct RootView: View {
             // because it answers the same kind of question they do — what is
             // actually happening out there right now — where the map is about
             // what the models think will.
-            RadarScreen()
+            RadarScreen(isActive: tab == .radar)
                 .tabItem { Label("Radar", systemImage: "cloud.rain") }
                 .tag(Tab.radar)
             FavoritesBoard()

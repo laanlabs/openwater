@@ -1377,3 +1377,39 @@ The bar's dead "Play loop" is gone too. On a NOAA still there is no loop
 to play, so the main bar names the layer — "NOAA · Rain" — beside More
 options rather than offering a greyed-out Play, which is the state a
 rider hit by choosing a product and pressing Back.
+
+## 16. Memory and performance on the device (2026-09-01)
+
+Hangs reported on real Apple TV hardware, which has far less memory
+headroom than the simulator forgives. An audit of the television target
+found the radar the culprit and fixed it, and confirmed the rest.
+
+**The radar held tens of megabytes for the life of the app.** A
+`TabView` keeps every tab alive, and the radar's coordinator kept a
+rendered image per frame — thirteen full-1080p bitmaps, over a hundred
+megabytes — whether or not the tab was on screen. Now the tab carries an
+`isActive`, like the wind map's wash: leaving it cancels the build,
+drops the images and stops the loop; returning rebuilds. The frames also
+render at half resolution now — radar is coarse and stretched over the
+whole map, so full resolution bought nothing and cost four times the
+memory — which brings the working set from ~108 MB to ~27 MB.
+
+**The frame compositing moved off the main thread.** Thirteen
+full-screen draws on the main actor was a visible hitch on entry; the
+render is `nonisolated` now, so the tile decode and drawing happen off
+the main thread and only the finished image returns to it.
+
+**The shared caches were sized for a phone.** The crop cache dropped
+from 96 to 40 MB and the tile URL cache from 32 to 16 MB in memory — a
+whole radar loop is only a few megabytes of compressed tile data, so
+these were ceilings far above the working size, crowding the map and the
+images for no gain.
+
+Confirmed already sound: the wind map sleeps its wash and stops its
+particle animation when the tab is left; every camera player pauses and
+releases its `AVPlayer` on disappear; the loop is a cancellable task and
+the build task is cancelled on `deinit`; no timers are left running.
+
+What a device-side Instruments pass would still be worth checking: the
+wash's 60-hertz particle canvas is real GPU work on the map tab, gated
+to when it is active but not otherwise throttled for the television.

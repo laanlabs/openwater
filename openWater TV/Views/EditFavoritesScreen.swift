@@ -1,3 +1,4 @@
+import MapKit
 import OpenWaterCore
 import OpenWaterSpots
 import SwiftUI
@@ -35,6 +36,10 @@ struct EditFavoritesScreen: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
+    /// Apple's geocoder, for water the guide has never heard of. See the
+    /// "Places" section below.
+    @State private var places = PlaceSearchModel()
+    @State private var isPinning = false
     /// Bound so Menu can be answered a level at a time — see the exit handler
     /// below, and `ConditionsScreen` for why the stack cannot be left to do
     /// this itself inside a modal.
@@ -50,14 +55,35 @@ struct EditFavoritesScreen: View {
             Color.black.ignoresSafeArea()
             NavigationStack(path: $path) {
                 List {
-                if !matches.isEmpty {
-                    Section("Matches") {
-                        ForEach(matches) { SpotRow(spot: $0) }
+                if searching {
+                    if !matches.isEmpty {
+                        Section("Matches") {
+                            ForEach(matches) { SpotRow(spot: $0) }
+                        }
                     }
-                } else if searching {
-                    Text("Nothing by that name")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.secondary)
+                    // Anywhere at all, not only what the guide lists.
+                    //
+                    // The guide is a thousand curated launches, and a rider's
+                    // own water is often not one of them — a sandbar, a
+                    // stretch in front of a friend's house, a lake nobody
+                    // wrote up. Picking a place here drops a private pin at
+                    // its coordinate and stars it, and from then on it gets
+                    // the same wind, stations and forecasts a listed spot
+                    // does.
+                    if !places.completions.isEmpty {
+                        Section("Places") {
+                            ForEach(places.completions) { completion in
+                                Button { pin(completion) } label: {
+                                    PlaceRow(completion: completion)
+                                }
+                            }
+                        }
+                    }
+                    if matches.isEmpty && places.completions.isEmpty {
+                        Text("Nothing by that name")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     if !nearby.isEmpty {
                         Section(nearbyTitle) {
@@ -67,6 +93,20 @@ struct EditFavoritesScreen: View {
                     if !starred.isEmpty {
                         Section("Saved") {
                             ForEach(starred) { SpotRow(spot: $0) }
+                        }
+                    }
+                    if !guide.privateSpots.isEmpty {
+                        Section("Your own pins") {
+                            ForEach(guide.privateSpots) { pin in
+                                HStack(spacing: 24) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(Color.accentColor)
+                                        .frame(width: 44)
+                                    Text(pin.name).font(.system(size: 30))
+                                    Spacer()
+                                }
+                            }
                         }
                     }
                     Section("Browse by country") {
@@ -107,6 +147,25 @@ struct EditFavoritesScreen: View {
         // Menu sensibly with the modal, so nothing here relies on it trying.
         .onExitCommand {
             if path.isEmpty { dismiss() } else { path.removeLast() }
+        }
+        .onChange(of: query) { _, new in places.query = new }
+        .overlay {
+            if isPinning { ProgressView().controlSize(.large) }
+        }
+    }
+
+    /// Resolve a typed place and keep it as a pin of the rider's own.
+    private func pin(_ completion: PlaceSearchModel.Completion) {
+        isPinning = true
+        Task {
+            defer { isPinning = false }
+            guard let place = await places.resolve(completion) else { return }
+            guide.addPrivateSpot(PrivateSpot(id: UUID(),
+                                             name: place.name,
+                                             latitude: place.latitude,
+                                             longitude: place.longitude,
+                                             createdAt: Date()))
+            query = ""
         }
     }
 
@@ -209,5 +268,32 @@ private struct SpotPicker: View {
             ForEach(spots.sorted { $0.name < $1.name }) { SpotRow(spot: $0) }
         }
         .navigationTitle(title)
+    }
+}
+
+
+/// A place from the geocoder, offered as a pin to keep.
+private struct PlaceRow: View {
+
+    let completion: PlaceSearchModel.Completion
+
+    var body: some View {
+        HStack(spacing: 24) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+                .frame(width: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(completion.title)
+                    .font(.system(size: 30))
+                    .lineLimit(1)
+                Text(completion.subtitle.isEmpty ? "Keep as your own pin" : completion.subtitle)
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 }

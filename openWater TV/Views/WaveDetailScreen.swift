@@ -22,6 +22,8 @@ struct WaveDetailScreen: View {
 
     @State private var outlook = SurfOutlook()
     @State private var isLoading = true
+    /// Real buoys, because everything above them is a model.
+    @State private var buoys: [Buoy] = []
 
     @Namespace private var page
 
@@ -53,6 +55,16 @@ struct WaveDetailScreen: View {
                     ForEach(outlook.days) { day in
                         ScrollStop { DayRow(day: day, unit: unit) }
                     }
+                    if !reportingBuoys.isEmpty {
+                        ScrollStop {
+                            Text("MEASURED AT SEA")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(reportingBuoys) { buoy in
+                            ScrollStop { BuoyRow(buoy: buoy, unit: unit) }
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 90)
@@ -70,9 +82,22 @@ struct WaveDetailScreen: View {
         .menuBackHint()
         .task {
             isLoading = true
-            outlook = await OpenMeteo.surfOutlook(at: here, days: Self.days)
+            async let modelled = OpenMeteo.surfOutlook(at: here, days: Self.days)
+            async let moored = DataBuoyCenter.buoys(near: here, limit: 3, radius: 150_000)
+            outlook = await modelled
             isLoading = false
+            // After the charts, like the conditions screen loads its
+            // stations: the model is the page, and the buoys confirm it.
+            buoys = await moored
         }
+    }
+
+    /// Only buoys with a wave reading. A moored station that answered with
+    /// nothing is a fact about its telemetry, not about the sea, and the map
+    /// rules' first rule applies at sea as much as it does on a beach: a
+    /// number here is a measurement or there is no row.
+    private var reportingBuoys: [Buoy] {
+        buoys.filter { $0.reading?.waveHeightM != nil }
     }
 
     private var header: some View {
@@ -255,5 +280,57 @@ private struct BandCell: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+
+/// One buoy, and what it is actually measuring.
+///
+/// The charts above are a model's opinion of the sea; this is a hull in the
+/// water reporting what reached it. Height and period lead, because they are
+/// the two numbers the model can be wrong about in ways that matter, and the
+/// age is shown because a six-hour-old buoy reading is a different claim from
+/// a fresh one.
+private struct BuoyRow: View {
+
+    let buoy: Buoy
+    let unit: DistanceUnit
+
+    var body: some View {
+        HStack(spacing: 24) {
+            Image(systemName: "dot.radiowaves.up.forward")
+                .font(.system(size: 26))
+                .foregroundStyle(.secondary)
+                .frame(width: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(buoy.name)
+                    .font(.system(size: 28))
+                    .lineLimit(1)
+                Text(Format.distance(buoy.metres, unit: unit) + " away")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 24)
+            if let reading = buoy.reading {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if let height = reading.waveHeightM {
+                        Text(Format.height(height, unit: unit))
+                            .font(.system(size: 32, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                    }
+                    if let period = reading.dominantPeriodS {
+                        Text("at \(Int(period.rounded())) s")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let at = reading.at {
+                    Text(at, style: .relative)
+                        .font(.system(size: 20))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 190, alignment: .trailing)
+                }
+            }
+        }
     }
 }

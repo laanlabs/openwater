@@ -27,6 +27,28 @@ struct TideDetailScreen: View {
 
     private var unit: DistanceUnit { UnitPreferences.forThisDevice.distance }
 
+    /// How much of the curve is drawn.
+    ///
+    /// The sources hand over a week or more, and drawing all of it put
+    /// fifteen tide cycles on one axis — the labels collided into a grey
+    /// smear and the shape a rider actually reads, today's rise and fall,
+    /// was a few pixels wide. Four days is the horizon somebody plans a
+    /// weekend on, and half a day behind keeps the current cycle whole
+    /// rather than starting the chart mid-fall.
+    private static let daysAhead: TimeInterval = 4 * 24 * 3600
+    private static let hoursBehind: TimeInterval = 12 * 3600
+
+    private var windowStart: Date { Date().addingTimeInterval(-Self.hoursBehind) }
+    private var windowEnd: Date { Date().addingTimeInterval(Self.daysAhead) }
+
+    private var visiblePoints: [TideCurve.Point] {
+        curve.points.filter { $0.at >= windowStart && $0.at <= windowEnd }
+    }
+
+    private var visibleTurns: [TideCurve.Turn] {
+        curve.turns.filter { $0.at >= windowStart && $0.at <= windowEnd }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
@@ -109,7 +131,7 @@ struct TideDetailScreen: View {
     /// and a filled shape says "how much" in a way a line does not.
     private var chart: some View {
         Chart {
-            ForEach(curve.points) { point in
+            ForEach(visiblePoints) { point in
                 AreaMark(
                     x: .value("Time", point.at),
                     y: .value("Height", unit.heightValue(fromMetres: point.metres))
@@ -118,7 +140,7 @@ struct TideDetailScreen: View {
                     colors: [Color.accentColor.opacity(0.55), Color.accentColor.opacity(0.05)],
                     startPoint: .top, endPoint: .bottom))
             }
-            ForEach(curve.points) { point in
+            ForEach(visiblePoints) { point in
                 LineMark(
                     x: .value("Time", point.at),
                     y: .value("Height", unit.heightValue(fromMetres: point.metres))
@@ -126,7 +148,7 @@ struct TideDetailScreen: View {
                 .foregroundStyle(.white)
                 .lineStyle(StrokeStyle(lineWidth: 4))
             }
-            ForEach(curve.turns) { turn in
+            ForEach(visibleTurns) { turn in
                 PointMark(
                     x: .value("Time", turn.at),
                     y: .value("Height", unit.heightValue(fromMetres: turn.metres))
@@ -156,17 +178,26 @@ struct TideDetailScreen: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 6)) { value in
-                AxisGridLine().foregroundStyle(.white.opacity(0.15))
+            // A label a day, and a plain gridline at noon between them.
+            // Labelling every sixth hour over four days is thirty-two labels
+            // on one axis, which is what turned the bottom of this chart into
+            // a smear — and the hour of a tide is read off the rows below,
+            // not squinted at off an axis.
+            AxisMarks(values: .stride(by: .day)) { value in
+                AxisGridLine().foregroundStyle(.white.opacity(0.28))
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
-                        Text(date, format: .dateTime.hour())
-                            .font(.system(size: 20))
+                        Text(date, format: .dateTime.weekday(.abbreviated))
+                            .font(.system(size: 22, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+            AxisMarks(values: .stride(by: .hour, count: 12)) { _ in
+                AxisGridLine().foregroundStyle(.white.opacity(0.10))
+            }
         }
+        .chartXScale(domain: windowStart ... windowEnd)
         .frame(height: 420)
     }
 
@@ -174,7 +205,7 @@ struct TideDetailScreen: View {
     /// tomorrow morning instead", which is the question a television gets
     /// asked far more often than a phone on a beach does.
     private var upcoming: [TideCurve.Turn] {
-        Array(curve.turns.filter { $0.at > Date() }.prefix(4))
+        Array(curve.turns.filter { $0.at > Date() }.prefix(6))
     }
 
     private var datum: some View {

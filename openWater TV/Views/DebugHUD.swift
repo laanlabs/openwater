@@ -48,12 +48,18 @@ struct DebugHUD: View {
                     .background(.thinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
+            .allowsHitTesting(true)
             .onExitCommand(perform: open ? { open = false } : nil)
         }
         .padding(.trailing, 48)
         .padding(.bottom, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .focusSection()
+        // The frame above is the whole screen, so without this the overlay
+        // is a sheet of glass over the map — and the wind wash went missing
+        // whenever the overlay was switched on, which is how it was
+        // reported. Only the button itself should take a press; the rest of
+        // that rectangle must not exist as far as the map is concerned.
+        .allowsHitTesting(false)
         .onChange(of: open, initial: true) { _, isOpen in
             if isOpen { monitor.start() } else { monitor.stop() }
         }
@@ -125,7 +131,9 @@ final class DebugMonitor {
         frames += 1
         // Twice a second: often enough to catch a stall, rare enough that the
         // meter is not itself a cost worth measuring.
-        guard elapsed >= 0.5 else { return }
+        // Once a second rather than twice: the meter should not be a
+        // meaningful share of what it is measuring.
+        guard elapsed >= 1.0 else { return }
         fps = Double(frames) / elapsed
         frames = 0
         elapsed = 0

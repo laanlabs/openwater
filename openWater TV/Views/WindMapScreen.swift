@@ -196,6 +196,14 @@ struct WindMapScreen: View {
             }
         }
         .overlay(alignment: .topTrailing) { statusChip }
+        // The tab bar goes away while the map has the D-pad.
+        //
+        // `onMoveCommand` hears an Up press, but hearing it does not stop
+        // tvOS acting on it: the tab bar is a focusable thing directly above,
+        // so Up moved focus there instead of panning north — reported exactly
+        // that way. Nothing can out-argue the focus engine about a target
+        // that exists, so while driving the target does not exist.
+        .toolbar(isDriving ? .hidden : .visible, for: .tabBar)
         .task(id: centreKey) { await refreshCentre() }
         // The instruments around the view. One list request and a reading
         // each, on every settle — the readings are cached per station by

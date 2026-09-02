@@ -28,6 +28,15 @@ struct ConditionsScreen: View {
     let here: Geo.Coordinate
     /// What the map's own control bar calls this place.
     let placeName: String
+    /// The starred spot this is a report *for*, when it is one.
+    ///
+    /// The favourites board used to push a thinner screen of its own — the
+    /// same wind and stations, but none of the long-range charts, the rain
+    /// chance or the model picker. There is no reason a saved spot deserves
+    /// less than a point on the map, so the board pushes this instead and
+    /// passes its spot, which adds the one thing a spot has that a bare
+    /// coordinate does not: its cameras.
+    var spot: GuideSpot?
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(\.dismiss) private var dismiss
@@ -55,6 +64,7 @@ struct ConditionsScreen: View {
     @State private var forecast = WeatherDetail()
     @State private var tide: TideCurve?
     @State private var isLoading = true
+    @State private var cams: [SpotGuideStore.GuideResource] = []
 
     /// So the page opens on its own headline rather than wherever the focus
     /// engine happens to find something pressable.
@@ -109,6 +119,9 @@ struct ConditionsScreen: View {
                     // rather than jumped over.
                     if !reportingStations.isEmpty {
                         MeasuredStations(rows: reportingStations)
+                    }
+                    if !cams.isEmpty {
+                        SpotCams(cams: cams, spotName: title)
                     }
                     modelPicker
                 }
@@ -173,6 +186,14 @@ struct ConditionsScreen: View {
         surf = await sea
         tide = await water
         forecast = await sky
+        if let spot {
+            cams = await guide.nearbyResources(to: spot, radius: 60_000)
+                .filter { $0.kind == .camera }
+                .sorted {
+                    if ($0.playback != nil) != ($1.playback != nil) { return $0.playback != nil }
+                    return $0.metres < $1.metres
+                }
+        }
 
         // Readings come after the list, the way the phone's sheet does it:
         // each one is its own request, and the names are useful before the

@@ -896,7 +896,11 @@ private struct CentreReadout: View {
 /// A button that draws its label and nothing else — no focus background, no
 /// lift, no press state. For the driving surface, which is a full-screen
 /// invisible target and must stay invisible while it holds the focus.
-private struct NoStyle: ButtonStyle {
+///
+/// Internal rather than private: the cameras map drives the same way, and two
+/// copies of "the style that draws nothing" is how one of them quietly starts
+/// drawing something.
+struct NoStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 

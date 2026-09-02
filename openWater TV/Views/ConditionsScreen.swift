@@ -63,6 +63,9 @@ struct ConditionsScreen: View {
     /// anybody asks after "is it windy" — too important to be a press away.
     @State private var forecast = WeatherDetail()
     @State private var tide: TideCurve?
+    /// Only to decide whether the current row is worth offering — the screen
+    /// behind it fetches its own, in full.
+    @State private var current: CurrentsOutlook?
     @State private var isLoading = true
     @State private var cams: [SpotGuideStore.GuideResource] = []
 
@@ -71,7 +74,7 @@ struct ConditionsScreen: View {
     @Namespace private var page
 
     /// The three subjects that earn a screen of their own.
-    private enum Detail: Hashable { case wind, waves, tide, weather }
+    private enum Detail: Hashable { case wind, waves, tide, weather, current }
 
     private var model: ForecastModel {
         ForecastModel(rawValue: modelRaw) ?? .automatic
@@ -144,6 +147,7 @@ struct ConditionsScreen: View {
                 case .waves: WaveDetailScreen(here: here, placeName: title)
                 case .tide:  TideDetailScreen(here: here, placeName: title)
                 case .weather: WeatherDetailScreen(here: here, placeName: title)
+                case .current: CurrentFlowScreen(here: here, placeName: title)
                 }
             }
         }
@@ -179,6 +183,7 @@ struct ConditionsScreen: View {
         async let sea = OpenMeteo.surf(at: here)
         async let water = Tides.curve(at: here)
         async let sky = OpenMeteo.detail(at: here)
+        async let running = Currents.outlook(at: here)
         weather = await air
         wind = await blowing
         ahead = await outlook
@@ -186,6 +191,7 @@ struct ConditionsScreen: View {
         surf = await sea
         tide = await water
         forecast = await sky
+        current = await running
         if let spot {
             cams = await guide.nearbyResources(to: spot, radius: 60_000)
                 .filter { $0.kind == .camera }
@@ -331,6 +337,19 @@ struct ConditionsScreen: View {
             .buttonStyle(.plain)
             .disabled(tide?.isEmpty ?? true)
 
+            // Only where there is water that runs. Inland and on a coast the
+            // ocean model has no cell for, an empty current screen would be a
+            // row that promises something and shows nothing.
+            if let current, !current.isEmpty {
+                NavigationLink(value: Detail.current) {
+                    DetailRow(symbol: "water.waves.and.arrow.trianglehead.up",
+                              title: "Current",
+                              value: currentSummary,
+                              detail: "Which way the water runs, and when it turns")
+                }
+                .buttonStyle(.plain)
+            }
+
             NavigationLink(value: Detail.weather) {
                 DetailRow(symbol: "cloud.sun", title: "Weather",
                           value: weatherSummary,
@@ -338,6 +357,13 @@ struct ConditionsScreen: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// Set and rate, in the arrows' own convention — *toward*.
+    private var currentSummary: String {
+        guard let hour = current?.hour(at: nil), let speed = hour.speedKn else { return "—" }
+        guard let set = hour.directionDeg else { return String(format: "%.1f kn", speed) }
+        return String(format: "%.1f kn %@", speed, Format.cardinal(set))
     }
 
     /// The rain chance leads, because it is the one thing on the weather row

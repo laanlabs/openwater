@@ -1456,3 +1456,30 @@ decimals. Setting it does not re-frame the map: the point is already on
 screen, and re-centring would throw away the zoom the rider just chose —
 every *other* way the place changes still moves the camera, because
 those are somewhere new.
+
+**The current gets a screen (2026-09-02).** Wind is the question this app
+opens with, but on a tidal coast the current decides whether a crossing
+is a glide or an afternoon of going nowhere — and unlike wind it is
+invisible from the beach, so a picture of it earns its place on a
+television more than almost anything.
+
+`CurrentFlowScreen` is the phone's flow map on the television's terms:
+the same `WindWashModel` asked for `.currents` instead of `.wind`, so it
+is the same field, the same quads and the same comets — and for water
+the comets are not decoration, because a still arrow states a direction
+while a moving one states a rate. It sits on the conditions report as a
+fifth row, and only where there is water that runs: an empty current
+screen on an inland point would be a row promising something it cannot
+show.
+
+Two honesties carried over from the phone. The arrows do not flip: a
+current states *toward*, and the wind habit of adding 180° would reverse
+every river. And the source is named rather than blended — a NOAA
+station replaces the model wholesale, because they are different physics
+with different answers.
+
+One thing the phone did not have to solve: a *subordinate* NOAA station
+publishes only the turns and no hourly curve at all, so `now` is nil and
+the headline came up blank. It now leads with the next turn instead —
+"Next: Max flood 1.4 kn" — and says plainly that this station predicts
+turns rather than a rate.

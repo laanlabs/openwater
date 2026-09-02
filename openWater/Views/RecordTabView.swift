@@ -53,6 +53,10 @@ struct RecordTabView: View {
     /// The session just saved, awaiting its debrief.
     @State private var reviewing: StoredSession?
 
+    /// Up when End was tapped and the library would not take the session.
+    /// The recording is still on disk as a crash log, and the alert says so.
+    @State private var saveFailed = false
+
     /// The model wind at the launch, as fetched. `recorder.wind` may hold the
     /// rider's correction on top of it; this keeps what the forecast said, so
     /// the wind setter can start from it when there is nothing else.
@@ -100,7 +104,7 @@ struct RecordTabView: View {
             }
             .onAppear {
                 if recorder.state == .idle { sport = settings.lastSport }
-                recorder.prepare()
+                recorder.prepare(isAlreadySaved: { library.session(id: $0) != nil })
                 recorder.allTimeBests = library.records.mapValues(\.speed)
                 if isActive { recorder.warmUpSensors() }
             }
@@ -125,7 +129,28 @@ struct RecordTabView: View {
             .sheet(item: $reviewing) { stored in
                 SessionReviewView(stored: stored)
             }
+            // An interrupted session, offered back. A sheet over whatever is
+            // showing, so it cannot be missed and cannot be lost to a scroll.
+            // The watch has had this since the beginning; the phone found its
+            // logs at every launch and never told anyone.
+            .sheet(item: recoveryBinding) { candidate in
+                RecoverySheet(candidate: candidate, onRecovered: open)
+            }
+            .alert("Couldn't save that session", isPresented: $saveFailed) {
+                Button("OK") {}
+            } message: {
+                Text("The recording is still on this iPhone. It will be offered back the next time you open Record.")
+            }
         }
+    }
+
+    /// The prompt shows only while nothing is being recorded — a log from
+    /// last time has no business interrupting this time.
+    private var recoveryBinding: Binding<RecordingEngine.RecoverableSession?> {
+        Binding(
+            get: { recorder.state == .idle ? recorder.recoverable : nil },
+            set: { _ in }
+        )
     }
 
     // MARK: - Before starting
@@ -408,14 +433,22 @@ struct RecordTabView: View {
         // wrong answer to "what did I just do?" — the session opens instead,
         // with the debrief over it while the conditions are still fresh.
         var stored: StoredSession?
+        var persisted = false
         recorder.finish { session in
             let result = library.save(session)
             stored = result.stored
-            return result.persisted
+            persisted = result.persisted
+            return persisted
         }
-        if let stored {
-            path = [stored.id]
-            reviewing = stored
+        if let stored, persisted {
+            open(stored)
+        } else if stored != nil || recorder.recoverable != nil {
+            // The engine kept the log because the save said no. Say so, rather
+            // than opening a debrief on a session that is not there — and
+            // look again now, so the recovery prompt follows the alert
+            // instead of waiting for the next launch.
+            saveFailed = true
+            recorder.prepare(isAlreadySaved: { library.session(id: $0) != nil })
         }
         title = ""
         spot = ""
@@ -426,5 +459,92 @@ struct RecordTabView: View {
         recorder.swellHeight = nil
         recorder.swellDirection = nil
         launchWind = nil
+    }
+
+    /// Land on a session just saved — by End, or by recovery.
+    private func open(_ stored: StoredSession) {
+        path = [stored.id]
+        reviewing = stored
+    }
+}
+
+/// Offered when a previous session was cut short before it was saved.
+private struct RecoverySheet: View {
+
+    let candidate: RecordingEngine.RecoverableSession
+    var onRecovered: (StoredSession) -> Void
+
+    @Environment(PhoneRecorder.self) private var recorder
+    @Environment(SessionLibrary.self) private var library
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var failedToSave = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Unfinished session", systemImage: "arrow.clockwise.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.orange)
+
+                Text("openWater stopped before this session was saved. The track is still on this iPhone.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent("Sport", value: candidate.sport.displayName)
+                    LabeledContent("Started", value: candidate.startDate.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent("Duration", value: Format.duration(candidate.duration))
+                    LabeledContent("Distance", value: Format.distance(candidate.distance, unit: settings.units.distance))
+                }
+                .font(.subheadline)
+
+                if failedToSave {
+                    Text("Couldn't save that just now — the recording is untouched. Try again.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+
+                Spacer()
+
+                Button {
+                    // Dismissed only once the session is genuinely in the
+                    // library. A failed write leaves the log alone and the
+                    // prompt up, so the rider can try again rather than watch
+                    // their one copy disappear into a tap.
+                    var stored: StoredSession?
+                    let session = recorder.recover(candidate) { session in
+                        let result = library.save(session)
+                        stored = result.stored
+                        return result.persisted
+                    }
+                    if session != nil, let stored {
+                        dismiss()
+                        onRecovered(stored)
+                    } else {
+                        failedToSave = true
+                    }
+                } label: {
+                    Text("Recover")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Discard", role: .destructive) {
+                    recorder.dismissRecovery()
+                    dismiss()
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(24)
+            .navigationTitle("Recover session")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled()
     }
 }

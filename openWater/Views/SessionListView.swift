@@ -204,6 +204,26 @@ struct SessionListView: View {
         searchFocused = false
     }
 
+    /// The store would not open. Said plainly, once, at the top of the tab.
+    private var ephemeralBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Your session library couldn't be opened")
+                    .font(.subheadline.weight(.semibold))
+                Text("Nothing has been deleted. Sessions recorded now are kept as recovery files and offered back once it opens again — restarting the app, or freeing up storage, usually fixes it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial)
+        .accessibilityElement(children: .combine)
+    }
+
     /// Sports actually present in the library, so the filter never offers a
     /// discipline with nothing behind it.
     private var availableSports: [Sport] {
@@ -218,6 +238,12 @@ struct SessionListView: View {
                 } else {
                     list
                 }
+            }
+            // Above both the list and the empty state, because a store that
+            // would not open shows as an empty library — and "no sessions yet"
+            // is the wrong thing to tell a rider with three years of them.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if library.isEphemeral { ephemeralBanner }
             }
             .navigationDestination(for: UUID.self) { id in
                 if let stored = library.session(id: id), !stored.isDeleted {

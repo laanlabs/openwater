@@ -115,6 +115,14 @@ final class RaceCountdown {
             cue(.gun)
             Self.logger.info("countdown reached zero")
             onStart?()
+            // The sequence is over. Left running, the ticker kept writing
+            // `remaining` ten times a second for the rest of the app's life —
+            // through the whole recording it had just started — and the sheet,
+            // reopened, showed a start that had long gone instead of the
+            // picker for the next one.
+            ticker?.cancel()
+            ticker = nil
+            target = nil
             return
         }
 

@@ -47,7 +47,7 @@ final class RecentlyDeletedTests: XCTestCase {
     }
 
     func testDeleteIsRecoverable() throws {
-        let stored = library.save(makeSession()).stored
+        let stored = try XCTUnwrap(library.save(makeSession()).stored)
         XCTAssertFalse(stored.isTrashed)
 
         library.delete(stored)
@@ -62,7 +62,7 @@ final class RecentlyDeletedTests: XCTestCase {
     }
 
     func testTrashedSessionsDoNotHoldRecords() throws {
-        let fast = library.save(makeSession(maxSpeed: 20)).stored
+        let fast = try XCTUnwrap(library.save(makeSession(maxSpeed: 20)).stored)
         XCTAssertFalse(library.records.isEmpty, "a saved session should set records")
 
         library.delete(fast)
@@ -74,7 +74,7 @@ final class RecentlyDeletedTests: XCTestCase {
     }
 
     func testPurgeKeepsAnythingInsideTheWindow() throws {
-        let stored = library.save(makeSession()).stored
+        let stored = try XCTUnwrap(library.save(makeSession()).stored)
         library.delete(stored)
         // One day short of the deadline. It stays.
         stored.deletedAt = Date.now
@@ -86,7 +86,7 @@ final class RecentlyDeletedTests: XCTestCase {
     }
 
     func testPurgeRemovesAnythingPastTheWindow() throws {
-        let stored = library.save(makeSession()).stored
+        let stored = try XCTUnwrap(library.save(makeSession()).stored)
         library.delete(stored)
         stored.deletedAt = Date.now
             .addingTimeInterval(-StoredSession.trashRetention - 60)
@@ -97,8 +97,8 @@ final class RecentlyDeletedTests: XCTestCase {
     }
 
     func testBackupsLeaveDeletedSessionsOut() throws {
-        let kept = library.save(makeSession()).stored
-        let removed = library.save(makeSession(maxSpeed: 12)).stored
+        let kept = try XCTUnwrap(library.save(makeSession()).stored)
+        let removed = try XCTUnwrap(library.save(makeSession(maxSpeed: 12)).stored)
         library.delete(removed)
 
         let data = try library.exportAll()

@@ -1,6 +1,7 @@
 import Foundation
 import OpenWaterCore
 import SwiftData
+import os
 
 /// A session as it lives in the database.
 ///
@@ -19,6 +20,8 @@ import SwiftData
 /// can never silently drift from what was stored.
 @Model
 final class StoredSession {
+
+    private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "StoredSession")
 
     #Index<StoredSession>([\.startDate], [\.sportRaw], [\.maxSpeed])
 
@@ -151,7 +154,25 @@ final class StoredSession {
 
     // MARK: Init
 
-    init(session: Session) {
+    /// `nil` when the session cannot be encoded.
+    ///
+    /// Failable on purpose. This used to swallow the encoder's error and
+    /// store an empty blob, and the library then reported the save as a
+    /// success — so the recorder released its crash log, and the rider was
+    /// left with a row that had every headline number and no track behind
+    /// it: unopenable, unexportable, and the only other copy already gone.
+    /// A NaN anywhere in the summary is enough to get there. Refusing to
+    /// build the row is what lets `SessionLibrary.save` say "not persisted",
+    /// which is what keeps the log on disk.
+    init?(session: Session) {
+        let archive: Data
+        do {
+            archive = try SessionArchive(session: session).encoded()
+        } catch {
+            Self.logger.error("session \(session.id) would not encode: \(error.localizedDescription)")
+            return nil
+        }
+
         self.id = session.id
         self.startDate = session.startDate
         self.endDate = session.endDate
@@ -195,7 +216,7 @@ final class StoredSession {
         self.previewTrack = StoredSession.previewTrack(for: session.track)
         self.deviceModel = session.deviceModel
 
-        self.archiveData = (try? SessionArchive(session: session).encoded()) ?? Data()
+        self.archiveData = archive
     }
 
     // MARK: Access
@@ -240,9 +261,26 @@ final class StoredSession {
     /// Whether the cached numbers came from the engine that is running now.
     var isAnalysisCurrent: Bool { analysisVersion == SessionSummary.currentVersion }
 
+    /// How an incoming copy of a session treats what the rider typed.
+    enum MergePolicy {
+        /// The incoming session is the truth, text and all. Right for an edit
+        /// the rider just made here — including clearing a note.
+        case replace
+        /// Keep this row's title, notes, gear and photos wherever the incoming
+        /// copy has none. Right for a session arriving from the watch: the
+        /// wrist records no notes, and the outbox re-sends the same file on
+        /// every reconnect, so the arrival must not blank a debrief written on
+        /// the phone in the meantime.
+        case keepRiderEdits
+    }
+
     /// Replace the stored session, refreshing every denormalised field.
-    func update(with session: Session) {
-        let replacement = StoredSession(session: session)
+    ///
+    /// Returns false — and changes nothing — when the session cannot be
+    /// encoded, for the reason `init?(session:)` gives.
+    @discardableResult
+    func update(with session: Session, policy: MergePolicy = .replace) -> Bool {
+        guard let replacement = StoredSession(session: session) else { return false }
         startDate = replacement.startDate
         endDate = replacement.endDate
         sportRaw = replacement.sportRaw
@@ -269,15 +307,25 @@ final class StoredSession {
         windDirection = replacement.windDirection
         windConfidence = replacement.windConfidence
         qualityScore = replacement.qualityScore
-        title = replacement.title
-        spotName = replacement.spotName
-        notes = replacement.notes
-        gearIDs = replacement.gearIDs
-        photoNames = replacement.photoNames
+        switch policy {
+        case .replace:
+            title = replacement.title
+            spotName = replacement.spotName
+            notes = replacement.notes
+            gearIDs = replacement.gearIDs
+            photoNames = replacement.photoNames
+        case .keepRiderEdits:
+            if let incoming = replacement.title, !incoming.isEmpty { title = incoming }
+            if let incoming = replacement.spotName, !incoming.isEmpty { spotName = incoming }
+            if !replacement.notes.isEmpty { notes = replacement.notes }
+            if !replacement.gearIDs.isEmpty { gearIDs = replacement.gearIDs }
+            if !replacement.photoNames.isEmpty { photoNames = replacement.photoNames }
+        }
         analysisVersion = replacement.analysisVersion
         archiveData = replacement.archiveData
         previewTrack = replacement.previewTrack
         deviceModel = replacement.deviceModel
+        return true
     }
 
     /// Where the session came from, for the badge on its card.

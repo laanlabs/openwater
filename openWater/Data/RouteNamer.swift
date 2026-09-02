@@ -2,6 +2,7 @@ import CoreLocation
 import Foundation
 import OpenWaterCore
 import OpenWaterSpots
+import SwiftData
 
 /// Turns the ends of a run into "Viento → Hatchery".
 ///
@@ -52,10 +53,16 @@ final class RouteNamer {
 
         let name = await route(for: session)
 
+        // The geocoder can take seconds, and the rider may have deleted the
+        // session for good in the meantime. Writing to a model SwiftData has
+        // invalidated is a trap, not an error — see `backfillPreviewTrack`.
+        guard !stored.isDeleted, stored.modelContext != nil else { return }
+
         // Stamped whatever the outcome, so "no route here" is remembered as an
         // answer rather than as a question still to ask.
         stored.routeName = name
         stored.routeResolvedAt = .now
+        try? stored.modelContext?.save()
     }
 
     /// The route line for a session, or nil when it does not have one.

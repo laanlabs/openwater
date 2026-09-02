@@ -1,4 +1,6 @@
+import AVKit
 import OpenWaterCore
+import OpenWaterSpots
 import SafariServices
 import SwiftUI
 import WebKit
@@ -32,10 +34,132 @@ struct CamViewerSheet: View {
                     }
             }
         } else {
-            // The in-app browser brings its own chrome and Done button.
-            SafariView(url: url)
-                .ignoresSafeArea()
+            CamResolver(name: name, url: url)
         }
+    }
+}
+
+/// Read the page for a playable stream; play it if there is one, otherwise
+/// hand off to the in-app browser.
+///
+/// The read is a single page fetch, so a brief spinner covers it — and for
+/// the many cams that turn out to be plain web pages, that is one second
+/// before Safari opens, which is a fair price for the ones that turn out to
+/// be watchable in place.
+private struct CamResolver: View {
+
+    let name: String
+    let url: URL
+
+    /// Nil while reading; then the streams found, empty if none.
+    @State private var streams: [WebcamStream.Stream]?
+
+    var body: some View {
+        Group {
+            switch streams {
+            case .none:
+                ZStack { Color.black; ProgressView().tint(.white) }
+                    .ignoresSafeArea()
+                    .task { streams = await WebcamStream.find(at: url) }
+            case .some(let found) where found.isEmpty:
+                SafariView(url: url).ignoresSafeArea()
+            case .some(let found):
+                CamStreamPlayer(streams: found, name: name)
+            }
+        }
+    }
+}
+
+/// A cam with one or more streams, and arrows to move between them.
+///
+/// A site like EarthCam lists every camera at a place and Montauk Point
+/// Lighthouse publishes five angles; playing only the first throws the rest
+/// away. So the chevrons — and a horizontal swipe — step through them, the
+/// way the television does it with the remote's arrows.
+private struct CamStreamPlayer: View {
+
+    let streams: [WebcamStream.Stream]
+    let name: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var index = 0
+    @State private var player: AVPlayer?
+    /// Held so a looping clip's looper is not deallocated mid-play.
+    @State private var looper: AVPlayerLooper?
+
+    private var current: WebcamStream.Stream { streams[min(index, streams.count - 1)] }
+
+    var body: some View {
+        NavigationStack {
+            VideoPlayer(player: player)
+                .ignoresSafeArea(edges: .bottom)
+                .background(Color.black)
+                .overlay(alignment: .bottom) { pager }
+                .navigationTitle(current.label.isEmpty ? name : current.label)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 40)
+                        .onEnded { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            step(value.translation.width < 0 ? 1 : -1)
+                        }
+                )
+        }
+        .task(id: index) { load() }
+        .onDisappear {
+            player?.pause()
+            player = nil
+            looper = nil
+        }
+    }
+
+    /// The camera picker, shown only when a site has more than one.
+    @ViewBuilder private var pager: some View {
+        if streams.count > 1 {
+            HStack(spacing: 24) {
+                Button { step(-1) } label: {
+                    Image(systemName: "chevron.left.circle.fill").font(.system(size: 34))
+                }
+                Text("\(index + 1) of \(streams.count)")
+                    .font(.system(size: 17, weight: .semibold))
+                    .monospacedDigit()
+                Button { step(1) } label: {
+                    Image(systemName: "chevron.right.circle.fill").font(.system(size: 34))
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.bottom, 30)
+            .shadow(radius: 6)
+        }
+    }
+
+    private func step(_ delta: Int) {
+        guard streams.count > 1 else { return }
+        index = (index + delta + streams.count) % streams.count
+    }
+
+    private func load() {
+        player?.pause()
+        let item = AVPlayerItem(url: current.url)
+        if current.isClip {
+            // A recorded clip loops seamlessly, so an angle keeps playing
+            // rather than stopping after its half a minute.
+            let queue = AVQueuePlayer()
+            looper = AVPlayerLooper(player: queue, templateItem: item)
+            player = queue
+        } else {
+            looper = nil
+            player = AVPlayer(playerItem: item)
+        }
+        player?.play()
     }
 }
 

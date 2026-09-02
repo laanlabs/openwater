@@ -1423,3 +1423,22 @@ simulator reports nothing), and the frame rate (which separates "out of
 room" from "working too hard"). The display-link meter runs only while
 the panel is open, so it costs nothing the rest of the time. It is the
 instrument for turning "it went slow" into a number.
+
+
+## 17. The phone reads the page for a stream too (2026-09-02)
+
+The stream finder was the television's, because the television had no
+browser to fall back on. The phone does — it opened every non-YouTube
+cam in an in-app Safari — but a site like EarthCam or Montauk Point
+Lighthouse carries several cameras a viewer would want to flick between,
+and a web page gives no way to do that. So `WebcamStream` moved into
+`OpenWaterSpots` and the phone now reads the same page for the same
+streams.
+
+`CamViewerSheet` keeps its two ends unchanged — YouTube in the embedded
+IFrame player, an unharvestable page in Safari — and puts the finder
+between them: a brief read, then a native `AVPlayer` with chevrons and a
+swipe to step through a site's cameras, or Safari if nothing playable
+turned up. Verified on the phone against EarthCam's Times Square page:
+seventeen live feeds resolved and cycling. The multi-camera experience
+the television grew is now the phone's as well, off one shared reader.

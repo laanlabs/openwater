@@ -9,7 +9,8 @@ import os
 /// an Apple TV can play those. All that is missing is the browser that would
 /// normally do the reading, so this does the reading.
 ///
-/// **Not the YouTube case.** Nothing here presents itself as somebody else's
+/// Shared by the phone and the television: both read the same page for
+/// the same stream. **Not the YouTube case.** Nothing here presents itself as somebody else's
 /// client or reaches a private endpoint. It fetches the same public page a
 /// viewer would and takes the media URLs that page publishes to its own
 /// player — the same thing the guide already does when it harvests a camera's
@@ -28,22 +29,22 @@ import os
 /// next operator doing the same thing under a different name is covered
 /// without another reader.
 @MainActor
-enum WebcamStream {
+public enum WebcamStream {
 
     private static let logger = Logger(subsystem: "com.laan.labs.openWater",
                                        category: "Webcam")
 
     /// One thing to play, and what to call it.
-    struct Stream: Identifiable, Hashable {
-        let url: URL
+    public struct Stream: Identifiable, Hashable, Sendable {
+        public let url: URL
         /// Derived from the URL — "northside.mp4" is Northside. Operators name
         /// these after what they point at far more often than not, and a real
         /// name beats "Camera 2" every time.
-        let label: String
+        public let label: String
         /// A finite recording rather than a live stream. It has to be looped
         /// or the picture stops and reads as a broken camera.
-        let isClip: Bool
-        var id: String { url.absoluteString }
+        public let isClip: Bool
+        public var id: String { url.absoluteString }
     }
 
     private struct Cached {
@@ -68,7 +69,7 @@ enum WebcamStream {
     /// button press to a handful of small requests.
     private static let probeLimit = 8
 
-    static func find(at page: URL) async -> [Stream] {
+    public static func find(at page: URL) async -> [Stream] {
         if let hit = cache[page], Date().timeIntervalSince(hit.at) < ttl { return hit.streams }
         let found = await harvest(page, depth: 0)
         cache[page] = Cached(streams: found, at: Date())

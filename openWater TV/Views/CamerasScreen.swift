@@ -58,13 +58,14 @@ struct CamerasScreen: View {
 
     private let columns = [GridItem(.adaptive(minimum: 420), spacing: 40)]
 
-    /// Grid or map. Remembered, because it is a preference about how somebody
-    /// likes to choose a camera rather than a thing they are doing right now.
-    @AppStorage("tv.cams.map") private var showsMap = false
-
-    /// What the map is looking at. Seeded from wherever the rest of the app
-    /// thinks it is, so the cameras tab opens on the same water as the map.
-    @State private var camera: MapCameraPosition = .automatic
+    /// The map, over the grid.
+    ///
+    /// The grid is the tab and the map is a detail of it, rather than the two
+    /// being equal halves of a switch. That way Menu means what it means
+    /// everywhere else on this box — back to where I was — instead of leaving
+    /// the tab entirely from a view a rider had switched into and would then
+    /// have to switch out of.
+    @State private var showsMap = false
 
     var body: some View {
         NavigationStack {
@@ -77,8 +78,6 @@ struct CamerasScreen: View {
                     // into "none near Nearby".
                     EmptyCams(place: location.isChosen ? location.name : "",
                               hasSomewhere: location.here != nil || !guide.favorites.isEmpty)
-                } else if showsMap {
-                    camMap
                 } else {
                     grid
                 }
@@ -91,6 +90,9 @@ struct CamerasScreen: View {
             // the one underneath.
             .background(Color.black.ignoresSafeArea())
             .safeAreaInset(edge: .top) { viewSwitch }
+        }
+        .fullScreenCover(isPresented: $showsMap) {
+            CamsMapScreen(cams: cams)
         }
         .task(id: areaKey) {
             isSearching = true
@@ -133,72 +135,30 @@ struct CamerasScreen: View {
         return guide.favorites.map(\.spotId).joined()
     }
 
-    /// Two icons, one lit. Not a segmented control: on a television this is
-    /// one press from the tab bar, and it has to read as a control from the
-    /// sofa rather than as a caption.
+    /// Two icons: where you are, and where you can go.
+    ///
+    /// The grid one is lit and inert — it says which of the two this is, which
+    /// a lone map button would not. Pressing the map opens it over the top.
     private var viewSwitch: some View {
         HStack(spacing: 16) {
             Spacer()
-            ForEach([false, true], id: \.self) { wantsMap in
-                Button {
-                    showsMap = wantsMap
-                } label: {
-                    Image(systemName: wantsMap ? "map" : "square.grid.2x2")
-                        .font(.system(size: 26, weight: .semibold))
-                        .frame(width: 76, height: 56)
-                        .background(showsMap == wantsMap
-                                    ? Color.white.opacity(0.22) : Color.white.opacity(0.06),
-                                    in: RoundedRectangle(cornerRadius: 14))
-                        .foregroundStyle(showsMap == wantsMap ? .white : .secondary)
-                }
-                .buttonStyle(.plain)
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 26, weight: .semibold))
+                .frame(width: 76, height: 56)
+                .background(Color.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+                .foregroundStyle(.white)
+            Button { showsMap = true } label: {
+                Image(systemName: "map")
+                    .font(.system(size: 26, weight: .semibold))
+                    .frame(width: 76, height: 56)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 80)
         .padding(.top, 8)
         .padding(.bottom, 16)
-    }
-
-    /// The same cameras, where they actually are.
-    ///
-    /// A list answers "which of these can I watch"; a map answers "what is
-    /// there at the end of the beach I am thinking about", which is the
-    /// question a rider staring at a coastline is usually asking.
-    private var camMap: some View {
-        Map(position: $camera, interactionModes: []) {
-            ForEach(cams) { cam in
-                Annotation(cam.displayName, coordinate: CLLocationCoordinate2D(latitude: cam.coordinate.latitude, longitude: cam.coordinate.longitude)) {
-                    CamCard(cam: cam, style: .pin)
-                }
-                .annotationTitles(.hidden)
-            }
-        }
-        .mapStyle(.standard(elevation: .flat, emphasis: .muted,
-                            pointsOfInterest: .excludingAll))
-        .onAppear(perform: frameCams)
-        .onChange(of: cams.count) { _, _ in frameCams() }
-    }
-
-    /// Open on the cameras themselves rather than on a fixed radius: the
-    /// nearest six may all be in one bay, and a box drawn round the search
-    /// radius would put them in a huddle in the middle of the screen.
-    private func frameCams() {
-        let points = cams.map(\.coordinate)
-        guard let first = points.first else { return }
-        var minLat = first.latitude, maxLat = first.latitude
-        var minLon = first.longitude, maxLon = first.longitude
-        for point in points {
-            minLat = min(minLat, point.latitude); maxLat = max(maxLat, point.latitude)
-            minLon = min(minLon, point.longitude); maxLon = max(maxLon, point.longitude)
-        }
-        let centre = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
-                                            longitude: (minLon + maxLon) / 2)
-        // A floor on the span, or a single camera zooms to the building it is
-        // bolted to; the margin keeps the outermost pins off the edge, where
-        // a capsule would be half a name.
-        let span = MKCoordinateSpan(latitudeDelta: max((maxLat - minLat) * 1.6, 0.15),
-                                    longitudeDelta: max((maxLon - minLon) * 1.6, 0.15))
-        camera = .region(MKCoordinateRegion(center: centre, span: span))
     }
 
     private var grid: some View {
@@ -229,8 +189,13 @@ struct CamCard: View {
     /// identical either way and deliberately stay in one place: a map pin that
     /// opened cameras through its own copy of `open()` would drift out of step
     /// with the grid the first time either of them changed.
-    enum Style { case card, pin }
+    enum Style { case card, pin, bar }
     var style: Style = .card
+
+    /// The pin the map's arrows are currently on. It wears its name and sits
+    /// above its neighbours whether or not the remote is on it, because on
+    /// this map the arrows do the choosing and focus is elsewhere — on the bar.
+    var isStepped = false
 
     @AppStorage(TVSettings.playsYouTubeKey) private var playsYouTube = false
 
@@ -276,6 +241,7 @@ struct CamCard: View {
             switch style {
             case .card: card
             case .pin: pin
+            case .bar: barLabel
             }
         }
         .fullScreenCover(item: $route) { route in
@@ -296,6 +262,26 @@ struct CamCard: View {
     /// thirty capsules on one stretch of coast overlap into a wall of text,
     /// and the cams pile up densest exactly where the good water is. A dot is
     /// legible at any density, and the remote already says which one is meant.
+    /// The stepped camera, named across the map's bottom bar, and pressable.
+    /// Going through `CamCard` rather than a button of its own means watching
+    /// from the map takes exactly the same route as watching from the grid.
+    private var barLabel: some View {
+        Button(action: open) {
+            HStack(spacing: 12) {
+                if isResolving {
+                    ProgressView()
+                } else {
+                    Image(systemName: isPlayable ? "video.fill" : "qrcode")
+                        .font(.system(size: 24))
+                }
+                Text(cam.displayName)
+                    .font(.system(size: 26, weight: .medium))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
     private var pin: some View {
         Button(action: open) {
             HStack(spacing: 8) {
@@ -305,30 +291,31 @@ struct CamCard: View {
                     Image(systemName: isPlayable ? "video.fill" : "qrcode")
                         .font(.system(size: 20))
                 }
-                if isPinFocused {
+                if isPinFocused || isStepped {
                     Text(cam.displayName)
                         .font(.system(size: 20, weight: .medium))
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, isPinFocused ? 16 : 10)
+            .padding(.horizontal, isPinFocused || isStepped ? 16 : 10)
             .padding(.vertical, 10)
             // Playable cams carry the tint. On a map the question is which of
             // these the television can actually show, and that has to survive
             // being read at three metres.
             .background(isPlayable ? Color.accentColor : Color.black.opacity(0.85),
                         in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(isPinFocused ? 1 : 0.6),
-                                      lineWidth: isPinFocused ? 3 : 2))
+            .overlay(Capsule().stroke(.white.opacity(isPinFocused || isStepped ? 1 : 0.6),
+                                      lineWidth: isPinFocused || isStepped ? 3 : 2))
             .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
         .focused($isPinFocused)
-        .scaleEffect(isPinFocused ? 1.15 : 1)
+        .scaleEffect(isPinFocused || isStepped ? 1.15 : 1)
         // The focused pin reads over its neighbours rather than under them,
         // which is the whole reason it is allowed to grow a name at all.
-        .zIndex(isPinFocused ? 1 : 0)
+        .zIndex(isPinFocused || isStepped ? 1 : 0)
         .animation(.easeOut(duration: 0.15), value: isPinFocused)
+        .animation(.easeOut(duration: 0.15), value: isStepped)
     }
 
     private var card: some View {

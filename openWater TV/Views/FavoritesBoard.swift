@@ -66,6 +66,13 @@ struct FavoritesBoard: View {
         favorites.map(Entry.spot) + guide.privateSpots.map(Entry.pin)
     }
 
+    private func remove(_ entry: Entry) {
+        switch entry {
+        case .spot(let spot): guide.removeFavorite(spot.spotId)
+        case .pin(let pin): guide.removePrivateSpot(pin.id)
+        }
+    }
+
     private func reading(for entry: Entry) -> WindReading? {
         switch entry {
         case .spot(let spot): guide.wind[spot.spotId]
@@ -79,6 +86,19 @@ struct FavoritesBoard: View {
 
     /// The row a rider pressed, presented as a cover.
     @State private var route: Entry?
+
+    /// Whether pressing a row removes it instead of opening it.
+    ///
+    /// A mode rather than a control on every row. There is no swipe on a
+    /// television and no room beside a row for a delete button that would sit
+    /// there unread for the ninety-nine per cent of presses that mean "open
+    /// this" — so the board has one state where a press opens and another
+    /// where a press removes, and says loudly which one it is in.
+    @State private var isDeleting = false
+
+    /// The row awaiting a yes. Deleting is the one thing on this screen that
+    /// cannot be undone, and the remote is a surface people press by accident.
+    @State private var pendingDelete: Entry?
 
     var body: some View {
         Group {
@@ -116,6 +136,20 @@ struct FavoritesBoard: View {
         // the prompt truncates mid-word, the letters crowd, and the results
         // get about a third of a 4K display.
         .fullScreenCover(isPresented: $isEditing) { EditFavoritesScreen() }
+        .alert("Remove \(pendingDelete?.name ?? "")?",
+               isPresented: Binding(get: { pendingDelete != nil },
+                                    set: { if !$0 { pendingDelete = nil } })) {
+            Button("Remove", role: .destructive) {
+                if let entry = pendingDelete { remove(entry) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("It comes off this board. Nothing else about it changes.")
+        }
+        // Coming back to a board still armed for deletion is how somebody
+        // loses a spot they meant to open.
+        .onChange(of: entries.isEmpty) { _, empty in if empty { isDeleting = false } }
         .task(id: guide.privateSpots.map(\.id.uuidString).joined()) {
             // One request each, and only for the pins — there are a handful
             // at most, and the guide's bulk call cannot speak for them.
@@ -140,20 +174,38 @@ struct FavoritesBoard: View {
     private var board: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                FiringBanner(firing: firing, total: entries.count)
-                    .padding(.bottom, 8)
+                if isDeleting {
+                    DeleteBanner()
+                        .padding(.bottom, 8)
+                } else {
+                    FiringBanner(firing: firing, total: entries.count)
+                        .padding(.bottom, 8)
+                }
 
                 ForEach(entries) { entry in
-                    Button { route = entry } label: {
+                    Button {
+                        if isDeleting { pendingDelete = entry } else { route = entry }
+                    } label: {
                         FavoriteRow(name: entry.name,
                                     isPin: entry.isPin,
+                                    isDeleting: isDeleting,
                                     reading: reading(for: entry))
                     }
                     .buttonStyle(.plain)
                 }
 
-                Button("Edit spots") { isEditing = true }
-                    .padding(.top, 24)
+                HStack(spacing: 28) {
+                    // "Add a spot", not "Edit spots". The screen behind it has
+                    // only ever been three ways to find somewhere new — type
+                    // it, take one nearby, browse by country — and calling
+                    // that editing sent riders into it looking for the delete
+                    // that was not there.
+                    Button("Add a spot") { isEditing = true }
+                    Button(isDeleting ? "Done" : "Delete spots") {
+                        isDeleting.toggle()
+                    }
+                }
+                .padding(.top, 24)
             }
             .padding(.horizontal, 80)
             .padding(.vertical, 40)
@@ -202,18 +254,57 @@ private struct FiringBanner: View {
 /// The number is `monospacedDigit` for the reason the watch's speed page is:
 /// these refresh under the reader, and proportional digits make the whole row
 /// twitch sideways when 9 becomes 10.
+/// What the board is doing, while it is doing something unusual.
+///
+/// It replaces the firing banner rather than sitting under it. The headline
+/// is the one line a rider reads from the sofa, and while the board is armed
+/// the thing they need to know is not which spots are windy.
+private struct DeleteBanner: View {
+
+    var body: some View {
+        HStack(spacing: 20) {
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 36))
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Choose a spot to remove")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text("It will ask before it removes anything. Press Done when you have finished.")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 private struct FavoriteRow: View {
 
     let name: String
     /// A pin of the rider's own rather than a listed launch — marked, because
     /// the two came from different places and one of them is not in the guide.
     let isPin: Bool
+    /// The board is in delete mode, so this row is a thing that goes away.
+    var isDeleting = false
     let reading: WindReading?
 
     @Environment(\.isFocused) private var isFocused
 
+    /// Focused-while-deleting is its own colour. tvOS inverts a focused row
+    /// to something pale and friendly, which is the wrong promise to make
+    /// about the press that removes it.
+    private var rowFill: Color {
+        if isDeleting && isFocused { return Color.red.opacity(0.35) }
+        return isFocused ? Color.primary.opacity(0.14) : Color.primary.opacity(0.05)
+    }
+
     var body: some View {
         HStack(spacing: 32) {
+            if isDeleting {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.red)
+            }
             if isPin {
                 Image(systemName: "mappin.circle.fill")
                     .font(.system(size: 30))
@@ -265,8 +356,7 @@ private struct FavoriteRow: View {
         }
         .padding(.horizontal, 36)
         .padding(.vertical, 24)
-        .background(isFocused ? Color.primary.opacity(0.14) : Color.primary.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 20))
+        .background(rowFill, in: RoundedRectangle(cornerRadius: 20))
         .scaleEffect(isFocused ? 1.02 : 1)
         .animation(.easeOut(duration: 0.15), value: isFocused)
     }

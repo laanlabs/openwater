@@ -245,7 +245,21 @@ public final class SpotGuideStore {
         favoritesOrder = keys
     }
 
+    /// Roughly 100 m. Two pins closer together than this are the same place
+    /// picked twice — a rider tapping a search result again because the first
+    /// press appeared to do nothing, which is exactly how this app behaved
+    /// until pins were shown on the favourites board.
+    private static let samePlace = 0.001
+
     public func addPrivateSpot(_ spot: PrivateSpot) {
+        // Keep the existing one rather than the newcomer: it may have been
+        // renamed, and a pin that silently reverts its name is worse than a
+        // press that appears to do nothing.
+        let already = privateSpots.contains {
+            abs($0.latitude - spot.latitude) < Self.samePlace
+                && abs($0.longitude - spot.longitude) < Self.samePlace
+        }
+        guard !already else { return }
         privateSpots.append(spot)
         savePrivateSpots()
     }

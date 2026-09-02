@@ -97,14 +97,24 @@ struct EditFavoritesScreen: View {
                     }
                     if !guide.privateSpots.isEmpty {
                         Section("Your own pins") {
+                            // Pressing a pin removes it. A television has no
+                            // swipe and no edit mode worth building for three
+                            // rows, so the row is the control and the trailing
+                            // word says which way it goes — without it, a rider
+                            // presses a pin expecting to open it.
                             ForEach(guide.privateSpots) { pin in
-                                HStack(spacing: 24) {
-                                    Image(systemName: "mappin.circle.fill")
-                                        .font(.system(size: 28))
-                                        .foregroundStyle(Color.accentColor)
-                                        .frame(width: 44)
-                                    Text(pin.name).font(.system(size: 30))
-                                    Spacer()
+                                Button { guide.removePrivateSpot(pin.id) } label: {
+                                    HStack(spacing: 24) {
+                                        Image(systemName: "mappin.circle.fill")
+                                            .font(.system(size: 28))
+                                            .foregroundStyle(Color.accentColor)
+                                            .frame(width: 44)
+                                        Text(pin.name).font(.system(size: 30))
+                                        Spacer()
+                                        Text("Remove")
+                                            .font(.system(size: 24))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -141,7 +151,15 @@ struct EditFavoritesScreen: View {
                 }
             }
         }
-        .foregroundStyle(.white)
+        // Deliberately no blanket `foregroundStyle(.white)` here.
+        //
+        // A tvOS `List` row inverts when it takes focus — white pill, black
+        // text — and it works that out from `.primary`. Forcing white
+        // overrode that inversion and left the focused row white-on-white:
+        // an invisible row exactly where the rider is looking, which is how
+        // it was reported. The dark palette is guaranteed once, at the root,
+        // by `preferredColorScheme(.dark)`; these rows only have to leave
+        // their colour alone and let focus do its job.
         // One press, one level — the same rule as the conditions screen, and
         // needed for the same reason: a stack inside a modal does not divide
         // Menu sensibly with the modal, so nothing here relies on it trying.

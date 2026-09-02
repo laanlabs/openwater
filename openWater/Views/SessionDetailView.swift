@@ -28,6 +28,13 @@ struct SessionDetailView: View {
     @Environment(RouteNamer.self) private var routeNamer
 
     @State private var session: Session?
+    /// Bumped every time `session` is re-read from the store.
+    ///
+    /// Handed to the tabs and the screens pushed from them, which keep local
+    /// copies so they can re-analyse in place. A change here is their cue to
+    /// adopt the parent's copy — without it a screen opened before the wind
+    /// was set kept showing angles measured from the old direction.
+    @State private var revision = 0
     @State private var view: Mode = .map
     @State private var selectedRun: Int?
     @State private var isExporting = false
@@ -70,9 +77,22 @@ struct SessionDetailView: View {
             session = nil
             return
         }
-        session = await Task.detached {
-            try? SessionArchive.decode(data).upToDateSession()
+        // The rider's own thresholds, as every other path passes them. Without
+        // them a stale session was re-read against the sport defaults and
+        // showed a different time on foil than it did after any edit.
+        let overrides = settings.overrides(for: stored.sport)
+        let loaded: (session: Session, wasStale: Bool)? = await Task.detached {
+            guard let archive = try? SessionArchive.decode(data) else { return nil }
+            let wasStale = archive.session.summary?.isCurrent != true
+            return (archive.upToDateSession(overrides: overrides), wasStale)
         }.value
+        session = loaded?.session
+        revision += 1
+        // A recompute that stayed on this screen left the list card showing
+        // the old numbers and cost the same work again on the next open. Now
+        // it is written back once, so the card, the record book and this
+        // screen read from one analysis.
+        if let loaded, loaded.wasStale { library.save(loaded.session) }
         applyScreenshotRouteIfNeeded()
     }
 
@@ -128,8 +148,10 @@ struct SessionDetailView: View {
         .task { await loadSession() }
         // Re-read on every return to this screen: the Upwind page can change
         // the session's wind and save it, and stale angles here would
-        // contradict the screen the rider just left.
-        .onAppear { Task { await loadSession() } }
+        // contradict the screen the rider just left. Not on the first
+        // appearance, though — the task above has that, and running both
+        // decoded and re-analysed the archive twice on every open.
+        .onAppear { if session != nil { reloadSession() } }
         .toolbar {
             // Beside the menu rather than inside it. "This says I did twelve
             // runs and I did six" is the most useful thing a rider can tell
@@ -461,6 +483,7 @@ struct SessionDetailView: View {
                     stored: stored,
                     session: session,
                     summary: summary,
+                    revision: revision,
                     onSetWind: { isSettingWind = true },
                     onEdit: { isEditing = true }
                 )
@@ -529,7 +552,8 @@ struct SessionDetailView: View {
             track: session.track,
             mapStyle: settings.mapStyle,
             flights: summary.flights,
-            selectedLane: $selectedRun
+            selectedLane: $selectedRun,
+            revision: revision
         )
     }
 

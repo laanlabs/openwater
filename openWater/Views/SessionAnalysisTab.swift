@@ -21,6 +21,9 @@ struct SessionAnalysisTab: View {
     var stored: StoredSession?
     let session: Session
     let summary: SessionSummary
+    /// See `SessionDetailView.revision`. Passed through to every screen that
+    /// keeps its own copy of the session.
+    var revision: Int = 0
 
     var onSetWind: () -> Void = {}
     var onEdit: () -> Void = {}
@@ -140,7 +143,7 @@ struct SessionAnalysisTab: View {
             AnalysisRow(symbol: "arrow.up.right", title: "Upwind",
                         value: upwindValue, warning: windWarning) {
                 if let polar = upwindPolar {
-                    UpwindDetailView(session: session, summary: summary, polar: polar)
+                    UpwindDetailView(session: session, summary: summary, polar: polar, revision: revision)
                 } else {
                     NothingFoundScreen(
                         title: "Upwind",
@@ -159,6 +162,7 @@ struct SessionAnalysisTab: View {
                     session: session,
                     summary: summary,
                     units: settings.units,
+                    revision: revision,
                     onSetWind: onSetWind
                 )
             }
@@ -299,7 +303,7 @@ struct SessionAnalysisTab: View {
     private var techniqueSection: some View {
         Section("Technique") {
             AnalysisRow(symbol: "arrow.triangle.2.circlepath", title: "Turns", value: turnValue) {
-                TurnsScreen(session: session, summary: summary, onSetWind: onSetWind)
+                TurnsScreen(session: session, summary: summary, revision: revision, onSetWind: onSetWind)
             }
             if session.sport.isFoiling {
                 AnalysisRow(symbol: "airplane", title: "Foiling", value: foilValue) {
@@ -307,17 +311,18 @@ struct SessionAnalysisTab: View {
                         session: session,
                         summary: summary,
                         units: settings.units,
+                        revision: revision,
                         onEdit: onEdit
                     )
                 }
                 AnalysisRow(symbol: "arrow.up.forward", title: "Airtime", value: airtimeValue) {
-                    AirtimeScreen(session: session, summary: summary, units: settings.units)
+                    AirtimeScreen(session: session, summary: summary, units: settings.units, revision: revision)
                 }
             }
             if showsDownwind {
                 AnalysisRow(symbol: "water.waves", title: "Downwind",
                             value: glideValue, warning: windWarning) {
-                    DownwindDetailView(session: session, summary: summary, onSetWind: onSetWind)
+                    DownwindDetailView(session: session, summary: summary, revision: revision, onSetWind: onSetWind)
                 }
             }
         }
@@ -533,11 +538,19 @@ struct PolarAnglesScreen: View {
     let units: UnitPreferences
     var onSetWind: () -> Void = {}
 
+    /// The parent's copy and its revision — see `SessionDetailView.revision`.
+    /// Local state above lets this screen re-analyse in place; a new revision
+    /// means the parent re-read the session, and the local copy yields to it.
+    private let incoming: (session: Session, summary: SessionSummary)
+    var revision: Int = 0
+
     init(session: Session, summary: SessionSummary, units: UnitPreferences,
-         onSetWind: @escaping () -> Void = {}) {
+         revision: Int = 0, onSetWind: @escaping () -> Void = {}) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
+        incoming = (session, summary)
         self.units = units
+        self.revision = revision
         self.onSetWind = onSetWind
     }
 
@@ -546,6 +559,14 @@ struct PolarAnglesScreen: View {
     @State private var isRecomputing = false
 
     var body: some View {
+        polarAndAngles
+            .onChange(of: revision) { _, _ in
+                session = incoming.session
+                summary = incoming.summary
+            }
+    }
+
+    private var polarAndAngles: some View {
         AnalysisDetail(title: "Polar & Angles") {
             if let polar = summary.polar {
                 PolarChart(polar: polar, units: units)
@@ -592,9 +613,18 @@ struct TurnsScreen: View {
     @State private var summary: SessionSummary
     var onSetWind: () -> Void = {}
 
-    init(session: Session, summary: SessionSummary, onSetWind: @escaping () -> Void = {}) {
+    /// The parent's copy and its revision — see `SessionDetailView.revision`.
+    /// Local state above lets this screen re-analyse in place; a new revision
+    /// means the parent re-read the session, and the local copy yields to it.
+    private let incoming: (session: Session, summary: SessionSummary)
+    var revision: Int = 0
+
+    init(session: Session, summary: SessionSummary, revision: Int = 0,
+         onSetWind: @escaping () -> Void = {}) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
+        incoming = (session, summary)
+        self.revision = revision
         self.onSetWind = onSetWind
     }
 
@@ -603,6 +633,14 @@ struct TurnsScreen: View {
     @State private var isRecomputing = false
 
     var body: some View {
+        turns
+            .onChange(of: revision) { _, _ in
+                session = incoming.session
+                summary = incoming.summary
+            }
+    }
+
+    private var turns: some View {
         AnalysisDetail(title: "Turns") {
             TacksAndGybesCard(summary: summary.maneuverSummary,
                               maneuvers: summary.maneuvers,

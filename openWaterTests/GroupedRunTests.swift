@@ -23,7 +23,7 @@ final class GroupedRunTests: XCTestCase {
     /// would be the tail wagging the dog.
     private func lane(
         _ id: Int, _ point: PointOfSail, metres: Double, from start: TimeInterval,
-        heading: Double = 0
+        heading: Double = 0, trueWindAngle: Double? = nil
     ) throws -> SessionRibbon.Lane {
         let json: [String: Any] = [
             "id": id,
@@ -35,7 +35,7 @@ final class GroupedRunTests: XCTestCase {
             "maxSpeed": 6,
             "heading": heading,
             "pointOfSail": point.rawValue,
-            "trueWindAngle": point == .running ? 180 : (point == .closeHauled ? 45 : 90),
+            "trueWindAngle": trueWindAngle ?? (point == .running ? 180 : (point == .closeHauled ? 45 : 90)),
             "foilingFraction": 1,
             "cells": [],
         ]
@@ -341,5 +341,36 @@ final class GroupedRunTests: XCTestCase {
 
         // True wind angle 180 is dead downwind, so zero degrees off it.
         XCTAssertEqual(runs.first?.alignment ?? .nan, 0, accuracy: 0.001)
+    }
+
+    // MARK: One word for one stretch
+
+    /// A wing working 70° off the wind is upwind by the rule the runs use
+    /// (`UpwindLegFinder.upwindLimit`, 90°) and "reaching" by `PointOfSail`'s
+    /// 55° sailboat boundary. The filter chips over the stretch list have to
+    /// read the angle the way the run rows do, or the "Upwind" chip hides
+    /// stretches the rows beneath it call upwind. (The *leg* row keeps the
+    /// point-of-sail majority rule on purpose — see `SessionLeg.kind(in:)`.)
+    func testTheUpwindChipAgreesWithTheRunRule() throws {
+        let stretch = try lane(0, .reaching, metres: 800, from: 0, trueWindAngle: 70)
+
+        let runs = GroupedRun.group([stretch])
+        XCTAssertEqual(runs.first?.kind, .upwind, "the run rule calls 70° upwind")
+        XCTAssertTrue(RibbonView.Leg.upwind.matches(stretch),
+                      "the stretch filter must call the same lane upwind")
+        XCTAssertFalse(RibbonView.Leg.reaching.matches(stretch))
+    }
+
+    func testWithoutAnAngleTheFilterFallsBackToThePointOfSail() throws {
+        var json: [String: Any] = [
+            "id": 0, "runIndex": 0, "startElapsed": 0, "endElapsed": 100,
+            "distance": 500, "averageSpeed": 5, "maxSpeed": 6, "heading": 0,
+            "pointOfSail": PointOfSail.closeHauled.rawValue, "foilingFraction": 1, "cells": [],
+        ]
+        json["trueWindAngle"] = nil
+        let stretch = try JSONDecoder().decode(
+            SessionRibbon.Lane.self, from: JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertTrue(RibbonView.Leg.upwind.matches(stretch))
     }
 }

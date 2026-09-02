@@ -54,9 +54,9 @@ struct SettingsView: View {
                 } header: {
                     Text("Units")
                 } footer: {
-                    Text("Set from your phone the first time the app runs. Speed stays in "
-                         + "knots whatever you pick — it is what the sport is measured in "
-                         + "everywhere, and a figure in mph is not comparable with anyone else's.")
+                    Text("Set from your phone the first time the app runs. Knots are what "
+                         + "the sport is measured in everywhere, so a speed in mph or km/h is "
+                         + "yours to read, not one to compare with anyone else's.")
                 }
 
                 Section {

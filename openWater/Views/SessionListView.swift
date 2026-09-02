@@ -817,9 +817,14 @@ struct LibraryStatsCard: View {
 
     /// Distance over moving time, not the mean of the per-session averages —
     /// a five-minute session should not weigh as much as a three-hour one.
+    ///
+    /// Each row's own moving average, weighted by its moving time. The
+    /// previous form scaled distance by the moving fraction and then divided
+    /// by moving time, which for a single session collapses to distance over
+    /// *total* time — half the "Avg moving" on the card directly below it.
     private var averageSpeed: Double {
         let moving = sessions.reduce(0) { $0 + $1.movingTime }
-        let covered = sessions.reduce(0.0) { $0 + $1.distance * ($1.movingTime / max($1.duration, 1)) }
+        let covered = sessions.reduce(0.0) { $0 + $1.averageMovingSpeed * $1.movingTime }
         return moving > 0 ? covered / moving : 0
     }
 

@@ -21,10 +21,18 @@ struct AirtimeScreen: View {
     @State private var summary: SessionSummary
     let units: UnitPreferences
 
-    init(session: Session, summary: SessionSummary, units: UnitPreferences) {
+    /// The parent's copy and its revision — see `SessionDetailView.revision`.
+    /// Local state above lets this screen re-analyse in place; a new revision
+    /// means the parent re-read the session, and the local copy yields to it.
+    private let incoming: (session: Session, summary: SessionSummary)
+    var revision: Int = 0
+
+    init(session: Session, summary: SessionSummary, units: UnitPreferences, revision: Int = 0) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
+        incoming = (session, summary)
         self.units = units
+        self.revision = revision
     }
 
     @Environment(AppSettings.self) private var settings
@@ -48,6 +56,14 @@ struct AirtimeScreen: View {
     }
 
     var body: some View {
+        airtime
+            .onChange(of: revision) { _, _ in
+                session = incoming.session
+                summary = incoming.summary
+            }
+    }
+
+    private var airtime: some View {
         AnalysisDetail(title: "Airtime") {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader("Jumps")
@@ -183,11 +199,19 @@ struct FoilingScreen: View {
     let units: UnitPreferences
     var onEdit: () -> Void = {}
 
+    /// The parent's copy and its revision — see `SessionDetailView.revision`.
+    /// Local state above lets this screen re-analyse in place; a new revision
+    /// means the parent re-read the session, and the local copy yields to it.
+    private let incoming: (session: Session, summary: SessionSummary)
+    var revision: Int = 0
+
     init(session: Session, summary: SessionSummary, units: UnitPreferences,
-         onEdit: @escaping () -> Void = {}) {
+         revision: Int = 0, onEdit: @escaping () -> Void = {}) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
+        incoming = (session, summary)
         self.units = units
+        self.revision = revision
         self.onEdit = onEdit
     }
 
@@ -212,6 +236,14 @@ struct FoilingScreen: View {
     }
 
     var body: some View {
+        foiling
+            .onChange(of: revision) { _, _ in
+                session = incoming.session
+                summary = incoming.summary
+            }
+    }
+
+    private var foiling: some View {
         AnalysisDetail(title: "Foiling") {
             FoilSummaryCard(
                 foil: summary.foil,

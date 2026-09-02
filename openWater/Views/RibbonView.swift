@@ -88,6 +88,9 @@ struct RibbonView: View {
     /// The lane the rider has tapped, driving the map's run isolation.
     @Binding var selectedLane: Int?
 
+    /// See `SessionDetailView.revision`. Any change re-groups the runs.
+    var revision: Int = 0
+
     /// The grouped run singled out on this tab's own map.
     /// The runs singled out on this tab's map.
     ///
@@ -173,13 +176,16 @@ struct RibbonView: View {
             }
         }
 
-        func matches(_ point: PointOfSail?) -> Bool {
-            switch self {
-            case .all: true
-            case .upwind: point == .noGo || point == .closeHauled
-            case .reaching: point == .reaching
-            case .downwind: point == .broadReach || point == .running
-            }
+        /// The filter, applied to one stretch.
+        ///
+        /// Classified exactly as a run is — from the true wind angle, with
+        /// the 90° upwind boundary `UpwindLegFinder` uses — so a leg row, its
+        /// chip and the runs inside it never call the same water two things.
+        /// This used to read `PointOfSail`, whose 55° close-hauled limit is a
+        /// sailboat number: a wing working 50°–80° off the wind was "reaching"
+        /// in the leg row and "upwind" in every run under it.
+        func matches(_ lane: SessionRibbon.Lane) -> Bool {
+            matchesKind(GroupedRun.Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail))
         }
 
         /// Legs take their colour from the run kind they are, so a downwind
@@ -224,7 +230,7 @@ struct RibbonView: View {
     }
 
     private var lanes: [SessionRibbon.Lane] {
-        let matching = ribbon.lanes.filter { filter.matches($0.pointOfSail) }
+        let matching = ribbon.lanes.filter { filter.matches($0) }
         switch order {
         case .time, .grouped: return matching
         case .fastest: return matching.sorted { $0.averageSpeed > $1.averageSpeed }
@@ -237,7 +243,7 @@ struct RibbonView: View {
     /// offering none.
     private var availableFilters: [Leg] {
         let present = Leg.allCases.filter { leg in
-            leg == .all || ribbon.lanes.contains { leg.matches($0.pointOfSail) }
+            leg == .all || ribbon.lanes.contains { leg.matches($0) }
         }
         return present.count > 1 ? present : []
     }
@@ -300,8 +306,18 @@ struct RibbonView: View {
 
     @State private var heat: [HeatBand] = []
 
+    /// The session's own speed scale, so the cells and the map are painted on
+    /// the same ramp as the Map tab and the list thumbnails.
+    @State private var speedScale: SpeedScale = .fallback
+
+    private struct RegroupKey: Equatable {
+        let revision: Int
+        let lanes: Int
+    }
+
     private func regroup() {
         groupedRuns = GroupedRun.group(ribbon.lanes, flights: flights)
+        speedScale = track.map { SpeedScale(speeds: $0.speed) } ?? .fallback
         heat = buildHeat()
     }
 
@@ -312,7 +328,7 @@ struct RibbonView: View {
     /// hundred polylines rather than ten thousand.
     private func buildHeat() -> [HeatBand] {
         guard let track, track.points.count > 1 else { return [] }
-        let scale = SpeedScale(speeds: track.speed)
+        let scale = speedScale
         let step = max(6, track.points.count / 400)
 
         var out: [HeatBand] = []
@@ -623,6 +639,7 @@ struct RibbonView: View {
                                 ? lane.distance / ribbon.maxLaneDistance
                                 : 1,
                             maxSpeed: maxSpeed,
+                            speedScale: speedScale,
                             units: units,
                             isSelected: selectedLane == lane.runIndex,
                             isBest: bestRunIndex == lane.runIndex
@@ -652,7 +669,12 @@ struct RibbonView: View {
                 }
                 .background(.bar)
             }
-            .task(id: ribbon.lanes.count) { regroup() }
+            // Keyed on the parent's revision as well as the lane count: setting
+            // the wind re-reads every lane's angle without necessarily changing
+            // how many there are, and a count-only key left the old grouping —
+            // summary line, chips, colours, map — on screen until the tab was
+            // left and re-entered.
+            .task(id: RegroupKey(revision: revision, lanes: ribbon.lanes.count)) { regroup() }
             .onChange(of: flights.count) { _, _ in regroup() }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
             .readableContentColumn()
@@ -825,7 +847,7 @@ struct RibbonView: View {
                 ? groupedRuns.count
                 : groupedRuns.filter { leg.matchesKind($0.kind) }.count
         }
-        return ribbon.lanes.filter { leg.matches($0.pointOfSail) }.count
+        return ribbon.lanes.filter { leg.matches($0) }.count
     }
 
     private var mappedRuns: [GroupedRun] {
@@ -1398,6 +1420,7 @@ struct RibbonView: View {
             lane: lane,
             widthFraction: ribbon.maxLaneDistance > 0 ? lane.distance / ribbon.maxLaneDistance : 1,
             maxSpeed: maxSpeed,
+            speedScale: speedScale,
             units: units,
             isSelected: selectedLane == lane.runIndex,
             isBest: bestRunIndex == lane.runIndex
@@ -1539,8 +1562,7 @@ struct RibbonKeySheet: View {
                     HStack(spacing: 10) {
                         LinearGradient(
                             colors: (0...6).map { i in
-                                Color(hue: 0.58 - 0.58 * (Double(i) / 6),
-                                      saturation: 0.85, brightness: 0.95)
+                                Color(speedRampColour(position: Double(i) / 6, midpoint: 0.5))
                             },
                             startPoint: .leading,
                             endPoint: .trailing
@@ -1554,7 +1576,7 @@ struct RibbonKeySheet: View {
                 } header: {
                     Text("Colour is speed")
                 } footer: {
-                    Text("Pale is on the water, solid is flying. A slow flight is still blue and a fast one still red — the colour never means the state.")
+                    Text("Pale is on the water, solid is flying. A slow flight is still red and a fast one still green — the colour never means the state.")
                 }
 
                 Section {
@@ -1598,6 +1620,8 @@ struct LaneRow: View {
     let lane: SessionRibbon.Lane
     let widthFraction: Double
     let maxSpeed: Double
+    /// The session's ramp, shared with the map above the list.
+    var speedScale: SpeedScale = .fallback
     let units: UnitPreferences
     let isSelected: Bool
     var isBest: Bool = false
@@ -1728,11 +1752,12 @@ struct LaneRow: View {
         }
     }
 
+    /// The app's one speed ramp — red at a standstill, green at speed — the
+    /// same one the Map tab, the thumbnails and the share image use. This
+    /// tab ran its own, blue-to-red, so red meant "fast" here and "stopped"
+    /// one tab over.
     private func speedColour(_ speed: Double) -> Color {
-        let top = max(maxSpeed, 1)
-        let bottom = top * 0.35
-        let t = max(0, min(1, (speed - bottom) / max(0.1, top - bottom)))
-        return Color(hue: 0.58 - 0.58 * t, saturation: 0.85, brightness: 0.95)
+        Color(speedRampColour(speed, scale: speedScale))
     }
 }
 

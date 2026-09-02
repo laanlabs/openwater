@@ -1352,3 +1352,28 @@ warm-on-entry cache is what keeps that paint within the window.
 Measured across fifty rapid captures of a running loop: brightness
 varied only with real frame content (79–100, the lows being genuine
 thin-rain scans), with no blank and no periodic darkening pulse.
+
+**Radar is a flat image now, not a tile overlay (2026-09-01).** Every
+attempt to animate `MKTileOverlay`s — swap, cross-fade, mutate,
+delayed-remove — flickered, because MapKit re-composites a tile
+overlay's whole geometry whenever it changes and does it on its own
+clock. A loop cannot be smooth on top of that.
+
+So each frame is rendered *once* into a single map-sized `UIImage`,
+geo-registered by asking the map where each tile's corner coordinates
+land, and the loop is a `UIImageView` swapping its `image` — a pointer
+assignment the GPU draws in one frame. No tiling, no re-composite, no
+flicker. The map is fixed while looping, so one alignment holds for
+every frame; a change of place or zoom rebuilds the set, off a signature
+of the frames and the exact rectangle. Two details earned their
+comments: the tiles are computed from the map's *actual* region, which
+MapKit widens to fit 16:9 — the requested region left the ocean side of
+the map bare — and the frames render at point scale rather than the
+screen's, because a 4K bitmap per frame is a lot of memory for a coarse
+picture. Measured across forty captures of a running loop: brightness a
+flat 75–79 with no dip, frames advancing with content, no blank.
+
+The bar's dead "Play loop" is gone too. On a NOAA still there is no loop
+to play, so the main bar names the layer — "NOAA · Rain" — beside More
+options rather than offering a greyed-out Play, which is the state a
+rider hit by choosing a product and pressing Back.

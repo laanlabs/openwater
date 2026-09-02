@@ -35,8 +35,9 @@ struct RadarScreen: View {
     /// question — is it coming here — and that is worth pressing for.
     @State private var isPlaying = false
     /// Fraction of the loop's tiles already in the cache, 0–1.
+    /// How much of the loop has been rendered to images, 0–1. The map view
+    /// reports it; the Play button reads it.
     @State private var loaded: Double = 0
-    @State private var isWarming = false
     @State private var product: RadarProduct = .base
     @State private var isGlobal = true
     /// Whether the overlay-type choices are showing in place of the main bar.
@@ -66,13 +67,6 @@ struct RadarScreen: View {
             // ordered past → nowcast, so index 0 is two hours ago — which is
             // not what "is it raining" means.
             index = max(0, latestObservation)
-            // Warm the whole loop up front, not on the first press of Play.
-            // A dissolve holds the old frame only until the new one is drawn;
-            // an un-cached frame is not drawn for about a second, which is
-            // longer than the dissolve, so it would blank anyway. Warming
-            // here makes Step instant and the first loop pass as smooth as
-            // the rest.
-            await warm()
         }
         // The loop is a task rather than a timer: it dies with the view, so a
         // tab left behind is not animating tiles at somebody's router.
@@ -88,7 +82,8 @@ struct RadarScreen: View {
 
     private var radar: some View {
         ZStack(alignment: .bottom) {
-            RadarTileMap(region: region, sources: sources, showing: shownIndex)
+            RadarImageMap(region: region, sources: sources,
+                          index: shownIndex, loaded: $loaded)
                 .ignoresSafeArea()
             controls
                 .padding(.bottom, 40)
@@ -145,80 +140,17 @@ struct RadarScreen: View {
         frames.lastIndex { !$0.isForecast } ?? max(0, frames.count - 1)
     }
 
+    private var building: Bool { isGlobal && loaded < 1 }
+
     private var playLabel: String {
-        if isWarming { return "Loading \(Int(loaded * 100))%" }
+        if building { return "Loading \(Int(loaded * 100))%" }
         return isPlaying ? "Pause" : "Play loop"
     }
 
-    /// Warm every frame's tiles before the loop may run.
-    ///
-    /// This is the whole fix for the flashing, and it is the phone's own
-    /// answer to the same complaint. Playing straight away means each frame
-    /// starts downloading as it is shown, and four hundred milliseconds is
-    /// nowhere near long enough to fetch a screenful of tiles — so the map
-    /// blinks between a drawn frame and a half-empty one. Fetch the lot
-    /// first, say so while it happens, and only then start.
     private func togglePlay() {
-        // Warmed on entry, so this just plays. Kept as a guard rather than a
-        // fetch: if the warm somehow has not finished, wait for it rather
-        // than loop over a cold cache.
-        guard !isPlaying else { return isPlaying = false }
-        Task {
-            if loaded < 1 { await warm() }
-            isPlaying = true
-        }
-    }
-
-    private func warm() async {
-        guard frames.count > 1, !isWarming, loaded < 1 else { return }
-        isWarming = true
-        loaded = 0
-        defer { isWarming = false }
-
-        // The zoom MapKit is really asking for, not the one arithmetic
-        // suggests — see `RadarTileOverlay.lastRequestedZoom`. Warming the
-        // wrong zoom warms nothing.
-        let zoom = RadarTileOverlay.lastRequestedZoom ?? zoomForView
-        let tiles = RadarTiles.tiles(covering: region, zoom: zoom)
-        guard !tiles.isEmpty else { loaded = 1; return }
-
-        // Through the overlay's own `loadTile`, not through the URL session.
-        //
-        // Fetching the raw tiles was the first attempt and it did not cure
-        // the stutter, because the network was never the slow part: above
-        // RainViewer's zoom every tile is cropped out of a coarser one and
-        // re-encoded as a PNG, and that is what the loop was repeating on
-        // every pass. Going through `loadTile` performs exactly the work the
-        // renderer will ask for and leaves the finished tile in the crop
-        // cache, so playing is a lookup.
-        let total = frames.count * tiles.count
-        var done = 0
-        for frame in frames {
-            let overlay = RadarTileOverlay(source: .rainViewer(frame: frame))
-            await withTaskGroup(of: Void.self) { group in
-                for tile in tiles {
-                    group.addTask {
-                        await withCheckedContinuation { continuation in
-                            overlay.loadTile(at: MKTileOverlayPath(
-                                x: tile.x, y: tile.y, z: zoom, contentScaleFactor: 1
-                            )) { _, _ in continuation.resume() }
-                        }
-                    }
-                }
-                for await _ in group { }
-            }
-            done += tiles.count
-            loaded = Double(done) / Double(total)
-            if Task.isCancelled { return }
-        }
-        loaded = 1
-    }
-
-    /// Roughly the zoom MapKit is drawing this region at — the world is 360°
-    /// across at zoom 0 and halves each level.
-    private var zoomForView: Int {
-        let span = max(region.span.longitudeDelta, 0.0001)
-        return min(max(Int((log2(360 / span)).rounded()), 3), 10)
+        // The frames are rendered to images by the map view as they arrive;
+        // this only starts and stops the clock. Disabled until they are in.
+        isPlaying.toggle()
     }
 
     private var caption: some View {
@@ -274,21 +206,36 @@ struct RadarScreen: View {
     /// step it, or change what it shows.
     private var mainBar: some View {
         HStack(spacing: 22) {
-            RadarButton(title: playLabel,
-                        systemImage: isPlaying ? "pause.fill" : "play.fill",
-                        isOn: isPlaying) { togglePlay() }
-                .focused($focus, equals: .play)
-                .prefersDefaultFocus(in: bar)
-                .disabled(!isGlobal || frames.isEmpty || isWarming)
+            // Play and Step belong to the loop, so they only appear when the
+            // loop is what is showing. On a NOAA still there is nothing to
+            // play — the bar named the current layer with a dead "Play loop"
+            // beside it, which is the confusing state that was reported — so
+            // a still just names itself and leaves the loop's controls out.
+            if isGlobal {
+                RadarButton(title: playLabel,
+                            systemImage: isPlaying ? "pause.fill" : "play.fill",
+                            isOn: isPlaying) { togglePlay() }
+                    .focused($focus, equals: .play)
+                    .prefersDefaultFocus(isGlobal, in: bar)
+                    .disabled(frames.isEmpty || building)
 
-            if isGlobal, !frames.isEmpty {
-                // Pausing and stepping is the whole of scrubbing on a remote —
-                // a slider would need the D-pad this screen has not got.
-                RadarButton(title: "Step", systemImage: "forward.frame.fill") {
-                    isPlaying = false
-                    index = (index + 1) % frames.count
+                if !frames.isEmpty {
+                    // Pausing and stepping is the whole of scrubbing on a
+                    // remote — a slider would need the D-pad this has not got.
+                    RadarButton(title: "Step", systemImage: "forward.frame.fill") {
+                        isPlaying = false
+                        index = (index + 1) % frames.count
+                    }
+                    .focused($focus, equals: .step)
                 }
-                .focused($focus, equals: .step)
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: "flag.fill")
+                    Text("NOAA · \(product.label)")
+                }
+                .font(.system(size: 26, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
             }
 
             Divider().frame(height: 44)
@@ -298,6 +245,7 @@ struct RadarScreen: View {
                 focus = .back
             }
             .focused($focus, equals: .more)
+            .prefersDefaultFocus(!isGlobal, in: bar)
         }
     }
 
@@ -339,117 +287,203 @@ struct RadarScreen: View {
 
 // MARK: - The map underneath
 
-/// `MKMapView` in a wrapper, because SwiftUI's `Map` has no tile-overlay API.
+/// A muted base map with the radar painted over it as a flat image.
 ///
-/// The television's own, separate from the phone's: that one carries a
-/// `MapStyleOption` from its settings screen, and this has no such setting to
-/// carry. Everything under it — the providers, the tile maths, the overlay
-/// that crops a deep tile out of a shallow one — is the shared code in
-/// `OpenWaterSpots`.
-private struct RadarTileMap: UIViewRepresentable {
+/// Not a tile overlay. Every earlier attempt animated `MKTileOverlay`s —
+/// swapping them, cross-fading them, mutating them — and every one flickered,
+/// because MapKit re-composites a tile overlay's whole geometry each time it
+/// changes and does it on its own schedule. A radar loop cannot be smooth on
+/// top of that.
+///
+/// So each frame is rendered *once* into a single `UIImage` the size of the
+/// map, geo-registered by asking the map where each tile's rectangle lands,
+/// and the loop is a `UIImageView` swapping its `image`. That is a pointer
+/// assignment the GPU draws in one frame — no tiling, no re-composite, no
+/// flicker. The map does not pan while looping, so one alignment holds for
+/// every frame; a change of place or zoom rebuilds the set.
+private struct RadarImageMap: UIViewRepresentable {
 
     let region: MKCoordinateRegion
-    /// Every frame, laid on the map at once.
     let sources: [RadarSource]
-    let showing: Int
+    let index: Int
+    @Binding var loaded: Double
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
-        map.delegate = context.coordinator
         map.preferredConfiguration = MKStandardMapConfiguration(elevationStyle: .flat)
         map.isUserInteractionEnabled = false
         map.setRegion(region, animated: false)
-        context.coordinator.showing = region
-        context.coordinator.apply(sources, index: showing, to: map)
+        context.coordinator.loaded = $loaded
+        context.coordinator.attach(to: map)
+        context.coordinator.update(sources: sources, index: index, region: region, to: map)
         return map
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        // Only when it actually moved. The loop re-enters this on every frame,
-        // and re-setting the region each time fights any animation MapKit has
-        // in flight.
-        if !context.coordinator.matches(region) {
-            context.coordinator.showing = region
-            map.setRegion(region, animated: false)
-        }
-        context.coordinator.apply(sources, index: showing, to: map)
+        context.coordinator.loaded = $loaded
+        context.coordinator.update(sources: sources, index: index, region: region, to: map)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, MKMapViewDelegate {
+    final class Coordinator {
 
-        var showing: MKCoordinateRegion?
+        /// The radar, as one flat picture over the base map.
+        private let radarView = UIImageView()
+        /// One rendered image per frame, keyed by the frame's own stamp.
+        private var images: [String: UIImage] = [:]
+        /// What the current image set was built for — frames plus the exact
+        /// rectangle. A new signature means a rebuild.
+        private var signature = ""
+        private var buildTask: Task<Void, Never>?
+        var loaded: Binding<Double>?
 
-        /// The overlay on screen, and the one coming up behind it.
-        ///
-        /// A hard cut, not a dissolve. Cross-fading two translucent radar
-        /// layers blends both frames at once and reads as mud — the dissolve
-        /// looked worse than the jump it was meant to cure. A radar loop is
-        /// meant to *cut* frame to frame, the way every weather app's does;
-        /// the only thing that must not happen is a bare gap between them.
-        ///
-        /// So the new frame is added on top, opaque, and the old one is taken
-        /// down a beat later — never before. By then the new frame has drawn,
-        /// because its tiles are warm (the loop is warmed on entry), so the
-        /// old one comes down onto a complete picture and the cut is clean. A
-        /// fresh overlay per frame keeps each frame's tiles its own; the crop
-        /// cache makes a fresh one cheap.
-        private var currentOverlay: RadarTileOverlay?
-        private var currentKey: String?
-        private var layers: [RadarSource] = []
+        /// How strongly the sweep sits over the chart.
+        private static let strength: CGFloat = 0.78
 
-        private static let strength: CGFloat = 0.75
-
-        func matches(_ region: MKCoordinateRegion) -> Bool {
-            guard let showing else { return false }
-            return abs(showing.center.latitude - region.center.latitude) < 0.0001
-                && abs(showing.center.longitude - region.center.longitude) < 0.0001
-                && abs(showing.span.latitudeDelta - region.span.latitudeDelta) < 0.0001
+        func attach(to map: MKMapView) {
+            radarView.contentMode = .scaleToFill
+            radarView.isUserInteractionEnabled = false
+            radarView.alpha = Self.strength
+            radarView.frame = map.bounds
+            radarView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            map.addSubview(radarView)
         }
 
-        func apply(_ sources: [RadarSource], index: Int, to map: MKMapView) {
+        func update(sources: [RadarSource], index: Int, region: MKCoordinateRegion, to map: MKMapView) {
+            let sig = Self.signature(of: sources, region: region)
+            if sig != signature {
+                signature = sig
+                rebuild(sources: sources, region: region, map: map)
+            }
+            show(sources: sources, index: index)
+        }
+
+        /// Instant: a rendered frame is already an image.
+        private func show(sources: [RadarSource], index: Int) {
             guard sources.indices.contains(index) else { return }
-
-            if sources != layers {
-                if let currentOverlay { map.removeOverlay(currentOverlay) }
-                currentOverlay = nil
-                currentKey = nil
-                layers = sources
-            }
-
-            let key = stamp(sources[index])
-            guard key != currentKey else { return }
-            currentKey = key
-
-            let old = currentOverlay
-            let new = RadarTileOverlay(source: sources[index])
-            map.addOverlay(new, level: .aboveLabels)
-            currentOverlay = new
-
-            // Take the old frame down only after the new one is up and drawn,
-            // never in the same breath as adding it — the synchronous remove
-            // is what left the map bare for a second. A short hop covers the
-            // gap between "added" and "painted"; the warm cache keeps that
-            // gap to a couple of frames, so this stays invisible.
-            guard let old else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak map] in
-                map?.removeOverlay(old)
+            if let image = images[Self.stamp(sources[index])] {
+                radarView.image = image
             }
         }
 
-        private func stamp(_ source: RadarSource) -> String {
+        private func rebuild(sources: [RadarSource], region: MKCoordinateRegion, map: MKMapView) {
+            buildTask?.cancel()
+            images = [:]
+            loaded?.wrappedValue = 0
+
+            map.setRegion(region, animated: false)
+            map.layoutIfNeeded()
+            let size = map.bounds.size
+            guard size.width > 0, !sources.isEmpty else { loaded?.wrappedValue = 1; return }
+
+            // The region the map *actually* shows, not the one it was asked
+            // for. MapKit fits the requested region into a 16:9 view, which
+            // makes the shown area wider in longitude — and tiles computed
+            // from the narrower request left the ocean side of the map bare,
+            // with a hard edge where the tiles stopped.
+            let visible = map.region
+            let zoom = Self.renderZoom(for: visible)
+            let tiles = RadarTiles.tiles(covering: visible, zoom: zoom)
+            // Where each tile's square lands on the glass — computed once,
+            // on the main thread, because it is the same for every frame.
+            let placements: [(x: Int, y: Int, rect: CGRect)] = tiles.map { tile in
+                // The tile's north-west and south-east corners as screen
+                // points. On a Mercator map a tile's square projects to an
+                // axis-aligned rectangle, so two corners define it exactly.
+                let nw = Self.corner(x: tile.x, y: tile.y, z: zoom)
+                let se = Self.corner(x: tile.x + 1, y: tile.y + 1, z: zoom)
+                let p1 = map.convert(nw, toPointTo: map)
+                let p2 = map.convert(se, toPointTo: map)
+                let rect = CGRect(x: min(p1.x, p2.x), y: min(p1.y, p2.y),
+                                  width: abs(p2.x - p1.x), height: abs(p2.y - p1.y))
+                return (tile.x, tile.y, rect)
+            }
+            guard !placements.isEmpty else { loaded?.wrappedValue = 1; return }
+
+            let frames = sources
+            buildTask = Task { @MainActor [weak self] in
+                for (i, source) in frames.enumerated() {
+                    if Task.isCancelled { return }
+                    let image = await Self.render(source: source, placements: placements,
+                                                  zoom: zoom, size: size)
+                    if Task.isCancelled { return }
+                    self?.images[Self.stamp(source)] = image
+                    // Setting loaded re-runs the SwiftUI body, which calls
+                    // `update` → `show`, so the newest frame appears as soon
+                    // as it is ready rather than only when the set is whole.
+                    self?.loaded?.wrappedValue = Double(i + 1) / Double(frames.count)
+                }
+            }
+        }
+
+        /// Compose one frame's tiles into a single map-sized image.
+        @MainActor
+        private static func render(source: RadarSource,
+                                   placements: [(x: Int, y: Int, rect: CGRect)],
+                                   zoom: Int, size: CGSize) async -> UIImage {
+            let overlay = RadarTileOverlay(source: source)
+            var pieces: [(CGRect, UIImage)] = []
+            await withTaskGroup(of: (CGRect, UIImage?).self) { group in
+                for place in placements {
+                    group.addTask {
+                        (place.rect, await tileImage(overlay, place.x, place.y, zoom))
+                    }
+                }
+                for await (rect, image) in group where image != nil {
+                    pieces.append((rect, image!))
+                }
+            }
+            let format = UIGraphicsImageRendererFormat.default()
+            // Point resolution, not the screen's — radar is coarse, and a
+            // 4K-scaled bitmap per frame is a great deal of memory for no
+            // visible gain.
+            format.scale = 1
+            format.opaque = false
+            return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                for (rect, image) in pieces { image.draw(in: rect) }
+            }
+        }
+
+        private static func tileImage(_ overlay: RadarTileOverlay,
+                                      _ x: Int, _ y: Int, _ z: Int) async -> UIImage? {
+            let data: Data? = await withCheckedContinuation { continuation in
+                overlay.loadTile(at: MKTileOverlayPath(x: x, y: y, z: z, contentScaleFactor: 1)) { data, _ in
+                    continuation.resume(returning: data)
+                }
+            }
+            return data.flatMap { UIImage(data: $0) }
+        }
+
+        private static func stamp(_ source: RadarSource) -> String {
             if case .rainViewer(let frame) = source { return frame.id }
+            if case .noaa(let region, let product) = source {
+                return "noaa-\(region.rawValue)-\(product.rawValue)"
+            }
             return "noaa"
         }
 
-        func mapView(_ map: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-            guard let tiles = overlay as? MKTileOverlay else {
-                return MKOverlayRenderer(overlay: overlay)
-            }
-            let made = MKTileOverlayRenderer(tileOverlay: tiles)
-            made.alpha = Self.strength
-            return made
+        private static func signature(of sources: [RadarSource], region: MKCoordinateRegion) -> String {
+            let box = String(format: "%.3f,%.3f,%.3f",
+                             region.center.latitude, region.center.longitude,
+                             region.span.latitudeDelta)
+            return sources.map(stamp).joined(separator: ",") + "|" + box
+        }
+
+        /// The tile zoom to render at — roughly what fills the view, capped so
+        /// the grid is a handful of tiles rather than a thousand.
+        private static func renderZoom(for region: MKCoordinateRegion) -> Int {
+            let span = max(region.span.longitudeDelta, 0.0001)
+            return min(max(Int((log2(360 / span)).rounded()), 3), 9)
+        }
+
+        /// The north-west corner of a slippy tile, in latitude and longitude
+        /// — the standard tile scheme, `y` counting down from the top.
+        private static func corner(x: Int, y: Int, z: Int) -> CLLocationCoordinate2D {
+            let n = pow(2.0, Double(z))
+            let lon = Double(x) / n * 360 - 180
+            let lat = atan(sinh(Double.pi * (1 - 2 * Double(y) / n))) * 180 / .pi
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
     }
 }

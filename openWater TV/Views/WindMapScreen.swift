@@ -81,6 +81,9 @@ struct WindMapScreen: View {
     /// answers, and only one of them is a pulse.
     @State private var centreLoaded = false
 
+    /// The in-flight centre request, so a settle can retire the one before it.
+    @State private var centreTask: Task<Void, Never>?
+
     /// The anemometers around the view, and what they last said.
     ///
     /// These replaced the guide's own spots on this map. A starred launch
@@ -254,6 +257,23 @@ struct WindMapScreen: View {
 
     /// The centre moved far enough to be a different place: re-ask for its
     /// wind and its weather.
+    /// Re-ask for the point under the crosshairs.
+    ///
+    /// The answer is checked against the crosshairs *again* on the way in.
+    /// A map opens on MapKit's own default rectangle — the middle of the
+    /// United States — and moves to the coast a moment later, so the first
+    /// request is always for a field in Kansas and it is always still in the
+    /// air when the real place arrives. Its answer used to land anyway, and
+    /// the badge sat there reading 99°F and sunny over Block Island Sound
+    /// while the report one press away said 70°F and cloud. Both were true;
+    /// they were about different places.
+    ///
+    /// The freshness check is the fix rather than the trigger, because the
+    /// trigger is the part that cannot be relied on: `.task(id:)` was
+    /// observed on the device *not* restarting when the key changed under it
+    /// — the map settled on Montauk, the key changed, and the Kansas task ran
+    /// on to completion. So the settle now asks directly, and anything that
+    /// comes back for somewhere the map has left is dropped.
     private func refreshCentre() async {
         guard let here = centreCoordinate else { return }
         centreLoaded = false
@@ -261,8 +281,19 @@ struct WindMapScreen: View {
         centreWeather = nil
         async let air = guide.weather(at: here)
         async let blowing = guide.currentWind(at: here)
-        (centreWeather, centreWind) = await (air, blowing)
+        let (weather, wind) = await (air, blowing)
+        guard isStillCentre(here) else { return }
+        centreWeather = weather
+        centreWind = wind
         centreLoaded = true
+    }
+
+    /// Whether the map is still looking at the point a request was made for,
+    /// to the resolution `centreKey` asks questions at.
+    private func isStillCentre(_ asked: Geo.Coordinate) -> Bool {
+        guard let now = centreCoordinate else { return false }
+        return abs(now.latitude - asked.latitude) < 0.01
+            && abs(now.longitude - asked.longitude) < 0.01
     }
 
     private var mapWithWash: some View {
@@ -315,6 +346,7 @@ struct WindMapScreen: View {
                 wash.cameraMoving()
             }
             .onMapCameraChange(frequency: .onEnd) { context in
+                let before = centreKey
                 visible = context.region
                 // Carried across for the Radar tab, which opens on whatever
                 // this map is showing rather than making a rider find the
@@ -324,6 +356,14 @@ struct WindMapScreen: View {
                 // has worked out whether the drawn window moved.
                 wash.viewSettled(on: context.region, layer: layer,
                                  widthPoints: mapWidth, displayScale: displayScale)
+                // Asked here rather than left to `.task(id: centreKey)`,
+                // which was observed not to restart when the key changed —
+                // see `refreshCentre`. One in flight at a time; a settle
+                // supersedes whatever the last one was asking about.
+                if centreKey != before {
+                    centreTask?.cancel()
+                    centreTask = Task { await refreshCentre() }
+                }
             }
             // The living streaks over the wash: the phone's particle
             // animation, streaming with the field. An overlay rather than map
@@ -660,12 +700,20 @@ struct WindMapScreen: View {
                     ProgressView()
                         .controlSize(.small)
                     Text(layer.loadingLabel)
+                } else if wash.loadFailed {
+                    // Said where the model's name would be, because that is
+                    // the line a rider already reads to find out what the
+                    // colours are. A missing wash otherwise looks exactly
+                    // like a wash somebody switched off.
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("Wind overlay didn't load")
                 } else if let caption = layer.caption {
                     Text(caption)
                 }
             }
             .font(.system(size: 20, weight: .medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(wash.loadFailed && !wash.isBusy ? AnyShapeStyle(.orange)
+                                                            : AnyShapeStyle(.secondary))
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
             .background(.thinMaterial, in: Capsule())
@@ -820,6 +868,22 @@ private struct CentreReadout: View {
                     .background(Color.black.opacity(0.72), in: Capsule())
                     .overlay(Capsule().stroke(.white.opacity(0.9), lineWidth: 2))
                     .foregroundStyle(.white)
+                } else if !isWaiting {
+                    // The capsule used to simply not be drawn, which says
+                    // nothing at all — and the temperature is the second
+                    // question anybody asks of this screen.
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.orange)
+                        Text("Temp didn't load")
+                            .font(.system(size: 24, weight: .semibold))
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.72), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.9), lineWidth: 2))
+                    .foregroundStyle(.white)
                 }
             }
             Rectangle()
@@ -872,10 +936,16 @@ private struct CentreReadout: View {
                                value: isPulsing)
                     .onAppear { isPulsing = true }
             } else {
-                Image(systemName: "wind")
+                // A dash on its own was the whole message, and a dash reads
+                // as "nothing here" — which about the wind is never true.
+                // The request did not land, and saying so is the difference
+                // between a rider waiting for a number and a rider knowing
+                // there is nothing to wait for.
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("Wind didn't load")
                     .font(.system(size: 24, weight: .semibold))
-                Text("—")
-                    .font(.system(size: 40, weight: .heavy, design: .rounded))
             }
         }
         .padding(.horizontal, 24)

@@ -25,6 +25,8 @@ struct SessionPlaybackView: View {
 
     @State private var elapsed: TimeInterval = 0
     @State private var isPlaying = false
+    /// The session's own speed ramp, computed once on appearance.
+    @State private var speedScale: SpeedScale = .fallback
     @State private var speedMultiplier: Double = 30
     @State private var camera: MapCameraPosition = .automatic
     @State private var followsPlayhead = true
@@ -64,7 +66,10 @@ struct SessionPlaybackView: View {
         .onTapGesture { withAnimation(.snappy) { showChrome.toggle() } }
         .statusBarHidden(!showChrome)
         .task(id: isPlaying) { await runPlayback() }
-        .onAppear { frameWholeTrack() }
+        .onAppear {
+            speedScale = SpeedScale(speeds: session.track.speed)
+            frameWholeTrack()
+        }
         .sheet(isPresented: $isReportingProblem) {
             FeedbackSheet(session: session, summary: summary)
         }
@@ -108,7 +113,7 @@ struct SessionPlaybackView: View {
 
             if let position = session.track.coordinate(atElapsed: elapsed) {
                 Annotation("", coordinate: position.clCoordinate, anchor: .center) {
-                    Playhead(speed: currentSpeed, maxSpeed: summary.maxSpeed)
+                    Playhead(colour: speedColour(currentSpeed))
                 }
                 .annotationTitles(.hidden)
             }
@@ -155,13 +160,11 @@ struct SessionPlaybackView: View {
         }
     }
 
-    /// Scaled to this session's own spread, so a light-wind day is not rendered
-    /// entirely blue and a windy one entirely red.
+    /// Scaled to this session's own spread, on the ramp every other map in the
+    /// app uses — red at a standstill, green at speed. The replay had its own
+    /// blue-to-red one, so red meant "fast" here and "stopped" on the Map tab.
     private func speedColour(_ speed: Double) -> Color {
-        let top = max(summary.maxSpeed, 1)
-        let bottom = top * 0.35
-        let t = max(0, min(1, (speed - bottom) / max(0.1, top - bottom)))
-        return Color(hue: 0.58 - 0.58 * t, saturation: 0.85, brightness: 0.95)
+        Color(speedRampColour(speed, scale: speedScale))
     }
 
     private var currentSpeed: Double {
@@ -462,13 +465,19 @@ struct SessionPlaybackView: View {
 /// The moving marker. Sized and coloured by speed so the replay reads at a
 /// glance even when the map is zoomed out.
 struct Playhead: View {
-    let speed: Double
-    let maxSpeed: Double
+    /// Painted by the caller, on the session's speed ramp.
+    let colour: Color
 
-    private var colour: Color {
-        let top = max(maxSpeed, 1)
-        let t = max(0, min(1, (speed - top * 0.35) / max(0.1, top * 0.65)))
-        return Color(hue: 0.58 - 0.58 * t, saturation: 0.9, brightness: 0.95)
+    init(colour: Color) {
+        self.colour = colour
+    }
+
+    /// For a caller with only the session's top speed to hand: the same
+    /// ramp, spread from a standstill to that top with the mean assumed
+    /// halfway.
+    init(speed: Double, maxSpeed: Double) {
+        let scale = SpeedScale(lower: 0, upper: max(maxSpeed, 1), midpoint: 0.5)
+        colour = Color(speedRampColour(speed, scale: scale))
     }
 
     var body: some View {

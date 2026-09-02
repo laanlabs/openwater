@@ -95,6 +95,15 @@ is the whole point and is still open.
    should move. **Speed records must not:** every speed-sailing site is
    ground-referenced and changing it would make our numbers incomparable.
 
+Two smaller changes belong with the same bump, because each moves a number
+on sessions nobody has edited: `Track.duration` should skip gaps over thirty
+seconds — the rule `movingTime` already uses — so a removed segment or a GPS
+dropout stops inflating the average (2 September 2026: the trim preview was
+made honest about the current behaviour instead). And the leg row's kind
+should be re-derived from one rule shared with the runs, once a rule is
+found that keeps test-5's seven downwind legs downwind — the 90° majority
+does not (see `SessionLeg.kind(in:)`).
+
 Part 2 bumps `analysisVersion`. Worth doing with the test bed watching all
 ten recordings, because it will move numbers on every one of them, and test-8
 is the session that proves it worked — and now that part 1 is stored, test-8

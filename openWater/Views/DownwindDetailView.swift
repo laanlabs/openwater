@@ -23,9 +23,18 @@ struct DownwindDetailView: View {
 
     var onSetWind: () -> Void = {}
 
-    init(session: Session, summary: SessionSummary, onSetWind: @escaping () -> Void = {}) {
+    /// The parent's copy and its revision — see `SessionDetailView.revision`.
+    /// Local state above lets this screen re-analyse in place; a new revision
+    /// means the parent re-read the session, and the local copy yields to it.
+    private let incoming: (session: Session, summary: SessionSummary)
+    var revision: Int = 0
+
+    init(session: Session, summary: SessionSummary, revision: Int = 0,
+         onSetWind: @escaping () -> Void = {}) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
+        incoming = (session, summary)
+        self.revision = revision
         self.onSetWind = onSetWind
     }
 
@@ -125,6 +134,11 @@ struct DownwindDetailView: View {
         .navigationTitle("Downwind")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Session · Downwind")
+        .onChange(of: revision) { _, _ in
+            session = incoming.session
+            summary = incoming.summary
+            selectedRun = nil
+        }
         .overlay {
             if isRecomputing {
                 ProgressView("Re-reading the session…")

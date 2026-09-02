@@ -382,6 +382,13 @@ extension SessionLeg {
     /// What kind of run this leg is, from the point of sail its stretches
     /// were mostly sailed on.
     func kind(in ribbon: SessionRibbon) -> GroupedRun.Kind {
+        // Deliberately `PointOfSail`'s buckets, not the 90° rule the runs
+        // use. A leg is the whole descent, and on a lapping downwinder most
+        // of its stretches are worked back up at 60°–90° — by the run rule
+        // that majority reads "upwind" and every leg of test-5 flipped from
+        // downwind to upwind when this was tried. The rider's sign-off on the
+        // leg counts in openWaterTests/Expectations is the record; the
+        // stretch filter chips follow the run rule instead.
         let inside = lanes(in: ribbon)
         let upwind = inside.filter { GroupedRun.Kind($0.pointOfSail) == .upwind }.count
         let downwind = inside.filter { GroupedRun.Kind($0.pointOfSail) == .downwind }.count

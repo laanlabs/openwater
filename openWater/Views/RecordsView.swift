@@ -10,7 +10,12 @@ struct RecordsView: View {
     @Environment(AppSettings.self) private var settings
 
     @Query(sort: \StoredSession.startDate, order: .reverse)
-    private var sessions: [StoredSession]
+    private var allRows: [StoredSession]
+
+    /// Everything except Recently Deleted. The record book already leaves
+    /// those out; the totals under it did not, so deleting a bad import
+    /// dropped the list's count and left this one where it was.
+    private var sessions: [StoredSession] { allRows.filter { !$0.isTrashed } }
 
     /// Pushed when a record is tapped.
     @State private var path: [UUID] = []
@@ -146,7 +151,10 @@ struct TrendsView: View {
     @Environment(AppSettings.self) private var settings
 
     @Query(sort: \StoredSession.startDate)
-    private var sessions: [StoredSession]
+    private var allRows: [StoredSession]
+
+    /// Recently Deleted stays off the chart, as it stays off the list.
+    private var sessions: [StoredSession] { allRows.filter { !$0.isTrashed } }
 
     @State private var sport: Sport?
     @State private var metric: Metric = .maxSpeed
@@ -302,7 +310,7 @@ struct TrendsView: View {
         case .foilTime: session.timeOnFoil / 60
         case .dryGybes: session.dryGybeRate * 100
         case .cleanRun: session.longestCleanStreak / 60
-        case .distance: session.distance / 1000
+        case .distance: session.distance / settings.units.distance.metresPerUnit
         }
     }
 
@@ -311,7 +319,7 @@ struct TrendsView: View {
         case .maxSpeed, .best500: settings.units.speed.symbol
         case .foilTime, .cleanRun: "minutes"
         case .dryGybes: "%"
-        case .distance: "km"
+        case .distance: settings.units.distance.symbol
         }
     }
 

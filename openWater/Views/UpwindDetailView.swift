@@ -30,10 +30,18 @@ struct UpwindDetailView: View {
     @State private var isRecomputing = false
     @State private var isMapFullScreen = false
 
-    init(session: Session, summary: SessionSummary, polar: PolarAnalysis) {
+    /// The parent's copy and its revision — see `SessionDetailView.revision`.
+    /// Local state above lets this screen re-analyse in place; a new revision
+    /// means the parent re-read the session, and the local copy yields to it.
+    private let incoming: (session: Session, summary: SessionSummary, polar: PolarAnalysis)
+    var revision: Int = 0
+
+    init(session: Session, summary: SessionSummary, polar: PolarAnalysis, revision: Int = 0) {
         _session = State(initialValue: session)
         _summary = State(initialValue: summary)
         _polar = State(initialValue: polar)
+        incoming = (session, summary, polar)
+        self.revision = revision
     }
 
     private var wind: Wind { polar.wind }
@@ -105,6 +113,14 @@ struct UpwindDetailView: View {
             guard legs.isEmpty else { return }
             legs = upwindLegs(track: session.track, wind: wind)
             samples = computeVMGSamples()
+        }
+        .onChange(of: revision) { _, _ in
+            session = incoming.session
+            summary = incoming.summary
+            polar = incoming.polar
+            legs = upwindLegs(track: session.track, wind: polar.wind)
+            samples = computeVMGSamples()
+            selectedLeg = nil
         }
         .sheet(isPresented: $isSettingWind) {
             WindSetterView(session: session) { applied in

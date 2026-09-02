@@ -172,7 +172,15 @@ struct SessionEditView: View {
                 }.value
                 session = loaded
                 if let loaded {
-                    edits = Session.Edits(session: loaded)
+                    // The form was seeded from the row and is live before the
+                    // archive lands. Whatever the rider has typed into the
+                    // three text fields in the meantime wins over the copy in
+                    // the archive — which, untouched, says the same thing.
+                    var fresh = Session.Edits(session: loaded)
+                    fresh.title = edits.title
+                    fresh.spotName = edits.spotName
+                    fresh.notes = edits.notes
+                    edits = fresh
                     if let direction = edits.windDirection {
                         windDirectionText = String(Int(direction.rounded()))
                     }

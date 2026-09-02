@@ -1077,13 +1077,23 @@ struct TrimPreview {
             : [lower...upper]
 
         var metres = 0.0
-        var seconds = 0.0
         var peak = 0.0
         for piece in kept {
             metres += track.cumulativeDistance[piece.upperBound] - track.cumulativeDistance[piece.lowerBound]
-            seconds += track.elapsed[piece.upperBound] - track.elapsed[piece.lowerBound]
             peak = max(peak, index?.maximum(in: piece, speeds: track.speed)
                             ?? track.speed[piece.lowerBound...piece.upperBound].max() ?? 0)
+        }
+        // The clock the saved session will have: first kept fix to last kept
+        // fix. A removed segment leaves a hole in the track, not in the time —
+        // `Track.duration` is the elapsed span of what is left, and the
+        // analysis divides distance by that. This preview used to sum only the
+        // kept pieces, promising an average the saved session then failed to
+        // show.
+        let seconds: TimeInterval
+        if let first = kept.first, let last = kept.last {
+            seconds = track.elapsed[last.upperBound] - track.elapsed[first.lowerBound]
+        } else {
+            seconds = 0
         }
 
         distance = metres

@@ -55,6 +55,11 @@ struct FavoritesBoard: View {
             case .pin(let pin): pin.name
             }
         }
+
+        var isPin: Bool {
+            if case .pin = self { return true }
+            return false
+        }
     }
 
     private var entries: [Entry] {
@@ -72,22 +77,38 @@ struct FavoritesBoard: View {
         favorites.filter { guide.wind[$0.spotId]?.isFiring == true }
     }
 
+    /// The row a rider pressed, presented as a cover.
+    @State private var route: Entry?
+
     var body: some View {
-        NavigationStack {
-            Group {
-                if guide.spots.isEmpty && guide.isLoading {
-                    LoadingBoard()
-                } else if entries.isEmpty {
-                    EmptyBoard { isEditing = true }
-                } else {
-                    board
-                }
+        Group {
+            if guide.spots.isEmpty && guide.isLoading {
+                LoadingBoard()
+            } else if entries.isEmpty {
+                EmptyBoard { isEditing = true }
+            } else {
+                board
             }
-            .navigationDestination(for: GuideSpot.self) { SpotScreen(spot: $0) }
-            // A pin gets the same report a listed spot does — it has a
-            // coordinate, which is all the conditions screen ever needed.
-            .navigationDestination(for: PrivateSpot.self) { pin in
-                ConditionsScreen(here: pin.coordinate, placeName: pin.name)
+        }
+        // The report, over the board, rather than pushed onto it.
+        //
+        // This screen used to use `NavigationLink(value:)` and a matching
+        // `navigationDestination`, and pressing a spot did nothing at all. The
+        // path grew and the destination closure ran — both were verified on
+        // the simulator — but a `NavigationStack` living inside a tvOS
+        // `TabView` tab never presented what it had built. Every other detail
+        // in this app is a cover for the same reason: the cameras list, the
+        // map's search, the map's own conditions report.
+        .fullScreenCover(item: $route) { entry in
+            // Its own stack, so the report's sub-screens — the wind outlook,
+            // the tide, the buoys — still push the way they do from the map.
+            NavigationStack {
+                switch entry {
+                case .spot(let spot):
+                    SpotScreen(spot: spot)
+                case .pin(let pin):
+                    ConditionsScreen(here: pin.coordinate, placeName: pin.name)
+                }
             }
         }
         // Full screen, not a sheet. tvOS sheets are a narrow centre column,
@@ -123,20 +144,12 @@ struct FavoritesBoard: View {
                     .padding(.bottom, 8)
 
                 ForEach(entries) { entry in
-                    switch entry {
-                    case .spot(let spot):
-                        NavigationLink(value: spot) {
-                            FavoriteRow(name: spot.name, isPin: false,
-                                        reading: reading(for: entry))
-                        }
-                        .buttonStyle(.plain)
-                    case .pin(let pin):
-                        NavigationLink(value: pin) {
-                            FavoriteRow(name: pin.name, isPin: true,
-                                        reading: reading(for: entry))
-                        }
-                        .buttonStyle(.plain)
+                    Button { route = entry } label: {
+                        FavoriteRow(name: entry.name,
+                                    isPin: entry.isPin,
+                                    reading: reading(for: entry))
                     }
+                    .buttonStyle(.plain)
                 }
 
                 Button("Edit spots") { isEditing = true }

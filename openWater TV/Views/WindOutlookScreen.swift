@@ -27,6 +27,15 @@ struct WindOutlookScreen: View {
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var isLoading = true
 
+    /// The models a rider has left switched on, by id.
+    ///
+    /// Empty until the outlook lands, then everything that is not a blend —
+    /// the phone's compare screen makes the same choice for the same reason.
+    /// NBM already contains GFS and HRRR, so averaging it in alongside them
+    /// counts the same physics twice and then calls the double vote
+    /// agreement. It is one press away for anyone who wants it drawn.
+    @State private var enabled: Set<String> = []
+
     @Namespace private var page
 
     /// Five days. The models carry more, but their skill does not: past about
@@ -71,6 +80,11 @@ struct WindOutlookScreen: View {
         .task {
             isLoading = true
             outlook = await OpenMeteo.outlook(at: here, days: Self.days)
+            // Seeded once the models are known, and only if a rider has not
+            // already been in here changing them.
+            if enabled.isEmpty {
+                enabled = Set(outlook.models.filter { !$0.isComposite }.map(\.id))
+            }
             isLoading = false
         }
     }
@@ -100,7 +114,7 @@ struct WindOutlookScreen: View {
         Chart {
             ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                 ForEach(Array(model.speeds.enumerated()), id: \.offset) { hour, speed in
-                    if let speed, hour < outlook.hours.count {
+                    if let speed, hour < outlook.hours.count, enabled.contains(model.id) {
                         LineMark(
                             x: .value("Hour", outlook.hours[hour]),
                             y: .value("Knots", speed),
@@ -114,7 +128,13 @@ struct WindOutlookScreen: View {
             }
             // The blend, drawn last so it sits on top and heaviest. It is not
             // the answer — the spread is — but it is the line an eye follows.
-            ForEach(Array(outlook.consensus.enumerated()), id: \.offset) { hour, speed in
+            //
+            // `blend(of:)` rather than `consensus`: the whole point of a
+            // switch is that turning a model off changes the average, so you
+            // can see what the answer looks like without the one you distrust
+            // today. `consensus` always averages everything and would sit
+            // there unmoved while the lines under it came and went.
+            ForEach(Array(average.enumerated()), id: \.offset) { hour, speed in
                 if let speed, hour < outlook.hours.count {
                     LineMark(
                         x: .value("Hour", outlook.hours[hour]),
@@ -163,6 +183,19 @@ struct WindOutlookScreen: View {
         .frame(height: 460)
     }
 
+    /// The heavy white line: the mean of whatever is switched on.
+    private var average: [Double?] { outlook.blend(of: enabled) }
+
+    /// Off is allowed; nothing is not. An empty chart is not a view anybody
+    /// wanted, and there would be no line left to press to get back.
+    private func toggle(_ model: WindOutlook.Model) {
+        if enabled.contains(model.id) {
+            if enabled.count > 1 { enabled.remove(model.id) }
+        } else {
+            enabled.insert(model.id)
+        }
+    }
+
     private var legend: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("MODELS")
@@ -177,20 +210,10 @@ struct WindOutlookScreen: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                 HStack(spacing: 40) {
                     ForEach(Array(row.enumerated()), id: \.element.id) { column, model in
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Self.colour(rowIndex * 3 + column))
-                                .frame(width: 44, height: 6)
-                            Text(model.label)
-                                .font(.system(size: 24))
-                            if model.isComposite {
-                                // Worth saying: NBM already contains GFS and
-                                // HRRR, so a rider counting it as a separate
-                                // vote is counting the same physics twice.
-                                Text("blend")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
+                        ModelSwitch(model: model,
+                                    colour: Self.colour(rowIndex * 3 + column),
+                                    isOn: enabled.contains(model.id)) {
+                            toggle(model)
                         }
                     }
                     Spacer()
@@ -200,7 +223,9 @@ struct WindOutlookScreen: View {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(.white)
                     .frame(width: 44, height: 8)
-                Text("Average of all of them")
+                Text(enabled.count == outlook.models.count
+                     ? "Average of all of them"
+                     : "Average of the \(enabled.count) switched on")
                     .font(.system(size: 24))
             }
         }
@@ -231,5 +256,51 @@ struct WindOutlookScreen: View {
     static func colour(_ index: Int) -> Color {
         let wheel: [Color] = [.cyan, .orange, .green, .pink, .yellow, .purple, .mint, .red]
         return wheel[index % wheel.count]
+    }
+}
+
+/// One model, and whether it is drawn.
+///
+/// A chip that was a label and is now a switch. The colour swatch stays the
+/// same size either way — it is the thing an eye matches against a line on
+/// the chart, and a swatch that changed shape when pressed would break the
+/// match at the moment somebody is making it.
+private struct ModelSwitch: View {
+
+    let model: WindOutlook.Model
+    let colour: Color
+    let isOn: Bool
+    let toggle: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(colour)
+                    .frame(width: 44, height: 6)
+                    .opacity(isOn ? 1 : 0.25)
+                Text(model.label)
+                    .font(.system(size: 24))
+                    .foregroundStyle(isOn ? .white : .secondary)
+                    .strikethrough(!isOn, color: .secondary)
+                if model.isComposite {
+                    // Worth saying: NBM already contains GFS and HRRR, so a
+                    // rider counting it as a separate vote is counting the
+                    // same physics twice. It is why this one starts off.
+                    Text("blend")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(isFocused ? Color.white.opacity(0.16) : Color.clear,
+                        in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .animation(.easeOut(duration: 0.15), value: isOn)
     }
 }

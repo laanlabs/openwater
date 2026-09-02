@@ -1442,3 +1442,17 @@ swipe to step through a site's cameras, or Safari if nothing playable
 turned up. Verified on the phone against EarthCam's Times Square page:
 seventeen live feeds resolved and cycling. The multi-camera experience
 the television grew is now the phone's as well, off one shared reader.
+
+**The pin is a place now, not a readout (2026-09-02).** The crosshairs
+told you the wind under them and forgot the moment you panned away,
+while the cameras tab went on listing whatever coast the box had guessed
+at. A pin button on the bar keeps the point instead: it writes through
+`TVLocation.choose`, which is the same store a typed place uses — so it
+survives a relaunch, the search button wears its name, and the cameras
+re-find themselves around it, because that tab already keys on
+`location.here`. Named after the guide's nearest launch when one is
+within ten kilometres, so it reads "Napeague" rather than a pair of
+decimals. Setting it does not re-frame the map: the point is already on
+screen, and re-centring would throw away the zoom the rider just chose —
+every *other* way the place changes still moves the camera, because
+those are somewhere new.

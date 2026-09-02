@@ -67,6 +67,9 @@ struct WindMapScreen: View {
     @State private var isSearching = false
     @State private var isShowingConditions = false
     @State private var isShowingOptions = false
+    /// Set when the pin was just dropped from this map, so the camera move
+    /// that follows does not also re-frame the map — see `placeKey`.
+    @State private var justPinned = false
 
     /// The wind and the weather under the crosshairs. Held here rather than
     /// read from the store so the old point's answer cannot flash on the new
@@ -103,7 +106,7 @@ struct WindMapScreen: View {
     /// list because driving it is a focus state like any other — that is what
     /// keeps the D-pad out of the tab bar's hands while a rider is panning.
     private enum Control: Hashable {
-        case map, hourBack, hourForward, conditions, move, options, optWind, optNames, reset, locate, place
+        case map, hourBack, hourForward, conditions, move, options, optWind, optNames, setPin, reset, locate, place
     }
 
     /// How far the clock will travel. The field carries seventy-two hours,
@@ -161,7 +164,13 @@ struct WindMapScreen: View {
         }
         // A place arriving — the first fix, or one typed in — is the only
         // thing that moves the camera without somebody pressing a key.
-        .onChange(of: placeKey, initial: true) { _, _ in recentre() }
+        .onChange(of: placeKey, initial: true) { _, _ in
+            // A pin dropped from this map is already in frame; re-centring
+            // would snap the zoom back and throw away the view the rider
+            // just chose. Anything else — a fix arriving, a typed place — is
+            // somewhere new and does move the camera.
+            if justPinned { justPinned = false } else { recentre() }
+        }
     }
 
     // MARK: - The screen
@@ -416,6 +425,37 @@ struct WindMapScreen: View {
         }
     }
 
+    /// Whether the kept pin is already where the crosshairs are, within a
+    /// couple of hundred metres — so the button can show it is set rather
+    /// than inviting the same press twice.
+    private var isPinnedHere: Bool {
+        guard location.isChosen, let pin = location.here, let centre = centreCoordinate
+        else { return false }
+        return Geo.distance(pin, centre) < 200
+    }
+
+    /// Keep this point. Named after the guide's nearest launch when there is
+    /// one close enough to be what somebody means by here, so the cameras tab
+    /// and the search button read "Napeague" rather than a pair of decimals.
+    private func setPin() {
+        guard let centre = centreCoordinate else { return }
+        let nearest = guide.nearestSpot(to: centre)
+        let name: String = {
+            if let nearest,
+               Geo.distance(centre, .init(latitude: nearest.latitude,
+                                          longitude: nearest.longitude)) < 10_000 {
+                return nearest.name
+            }
+            return String(format: "%.2f°%@ %.2f°%@",
+                          abs(centre.latitude), centre.latitude >= 0 ? "N" : "S",
+                          abs(centre.longitude), centre.longitude >= 0 ? "E" : "W")
+        }()
+        // The map is already looking at this point, so it must not be
+        // re-framed underneath the rider — only the *place* changes.
+        justPinned = true
+        location.choose(name: name, at: centre)
+    }
+
     /// Back to the opening span, without moving the centre.
     ///
     /// Separate from `goHome` on purpose. Zooming in four times to look at a
@@ -542,6 +582,18 @@ struct WindMapScreen: View {
             // Icons rather than labels: the bar is already carrying three
             // words and a clock, and these are the sort of thing a rider
             // does often enough to learn the glyph for.
+            // Drop the pin where the crosshairs are, and keep it.
+            //
+            // The crosshairs used to be a readout and nothing more: they told
+            // you the wind under them and forgot the moment you panned away,
+            // and the cameras tab went on listing whatever coast the box had
+            // guessed at. Setting the pin makes this the place the app is
+            // about — remembered across launches, and the cameras re-found
+            // around it — until it is set somewhere else.
+            ControlIcon(systemImage: isPinnedHere ? "mappin.circle.fill" : "mappin.and.ellipse",
+                        label: "Set the pin here",
+                        isOn: isPinnedHere, action: setPin)
+                .focused($focus, equals: .setPin)
             ControlIcon(systemImage: "arrow.up.left.and.arrow.down.right",
                         label: "Reset the zoom", action: resetZoom)
                 .focused($focus, equals: .reset)

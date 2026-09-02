@@ -701,7 +701,22 @@ public final class WindWashModel {
     /// by a few counts — so what is left is under a tenth of the field's own
     /// brightness either way, against the half the stroke was adding. The
     /// unit is device pixels precisely so this holds at every zoom.
-    nonisolated private static let seamPixels = 0.6
+    ///
+    /// tvOS needs a different number, measured the same way. At 0.6 the
+    /// television still drew a bright grid — +14 luma against the field, two
+    /// device pixels wide, one per cell — because MapKit rasterizes the
+    /// overlay at its own scale there and the overshoot being cancelled is
+    /// simply bigger. Swept on a simulator against the seam's own amplitude:
+    /// 0.0 → +29, 0.6 → +14, 0.8 → −3, and 0.9 → −27, where the edge snaps to
+    /// the next pixel and opens a real gap. 0.8 sits in the flat part below
+    /// that cliff and repeated to within 0.03 across runs.
+    nonisolated private static let seamPixels = {
+        #if os(tvOS)
+        0.8
+        #else
+        0.6
+        #endif
+    }()
 
     // MARK: The gradient
 

@@ -97,24 +97,21 @@ struct EditFavoritesScreen: View {
                     }
                     if !guide.privateSpots.isEmpty {
                         Section("Your own pins") {
-                            // Pressing a pin removes it. A television has no
-                            // swipe and no edit mode worth building for three
-                            // rows, so the row is the control and the trailing
-                            // word says which way it goes — without it, a rider
-                            // presses a pin expecting to open it.
+                            // Shown, not editable. This screen is the one
+                            // way in and the board's own delete mode is the
+                            // one way out; a Remove here as well meant two
+                            // places to look for the same thing and a screen
+                            // called "Add a spot" that quietly also deleted.
+                            // They are here so nobody pins the same beach a
+                            // second time for want of seeing the first.
                             ForEach(guide.privateSpots) { pin in
-                                Button { guide.removePrivateSpot(pin.id) } label: {
-                                    HStack(spacing: 24) {
-                                        Image(systemName: "mappin.circle.fill")
-                                            .font(.system(size: 28))
-                                            .foregroundStyle(Color.accentColor)
-                                            .frame(width: 44)
-                                        Text(pin.name).font(.system(size: 30))
-                                        Spacer()
-                                        Text("Remove")
-                                            .font(.system(size: 24))
-                                            .foregroundStyle(.secondary)
-                                    }
+                                HStack(spacing: 24) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundStyle(Color.accentColor)
+                                        .frame(width: 44)
+                                    Text(pin.name).font(.system(size: 30))
+                                    Spacer()
                                 }
                             }
                         }

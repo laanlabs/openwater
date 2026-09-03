@@ -188,16 +188,36 @@ final class SessionLibrary {
     ///
     /// Explicit rather than automatic: a rider's numbers should not change under
     /// them without being told, so the app offers this and reports what moved.
+    ///
+    /// Each session is decoded and re-analysed off the main actor and the
+    /// row updated back on it, with a progress call between — this used to
+    /// be a straight main-actor loop, which after an engine bump was a
+    /// frozen app for as long as a library takes. Saved every ten, so a
+    /// rider who kills the app mid-way keeps what was done.
+    ///
+    /// - Parameter progress: how many are done, of how many, before each one.
     func recomputeStaleSessions(
-        overrides: [Sport: SportThresholds.Overrides] = [:]
+        overrides: [Sport: SportThresholds.Overrides] = [:],
+        progress: (Int, Int) -> Void = { _, _ in }
     ) async -> Int {
         let stale = staleSessions()
         var updated = 0
-        for stored in stale {
+        for (done, stored) in stale.enumerated() {
+            if Task.isCancelled { break }
+            progress(done, stale.count)
+            guard !stored.isDeleted, stored.modelContext != nil else { continue }
             let sportOverrides = overrides[stored.sport].flatMap { $0.isEmpty ? nil : $0 }
-            guard let session = stored.currentSession(overrides: sportOverrides),
+            let data = stored.archiveData
+            guard !data.isEmpty else { continue }
+            let session: Session? = await Task.detached(priority: .userInitiated) {
+                try? SessionArchive.decode(data).upToDateSession(overrides: sportOverrides)
+            }.value
+            // The row may have gone while the analysis ran — see
+            // `backfillPreviewTrack` for why touching it then is a trap.
+            guard let session, !stored.isDeleted, stored.modelContext != nil,
                   stored.update(with: session) else { continue }
             updated += 1
+            if updated.isMultiple(of: 10) { persist() }
         }
         if updated > 0 { persist() }
         return updated
@@ -287,6 +307,45 @@ final class SessionLibrary {
     ///
     /// Complete by construction — it re-encodes the same archives that were
     /// stored, so an export can never quietly omit a channel.
+    ///
+    /// Written straight to a file, one session at a time. Holding every
+    /// decoded session in memory at once — which the `Data` form below does
+    /// — is gigabytes for a long library, and the backup that mattered most
+    /// was the one that got the app killed for it. The envelope is the
+    /// bundle's own, so the file decodes exactly as the in-memory form does.
+    func exportAll(to url: URL, privacy: PrivacySettings = .init()) async throws {
+        let ids = allSessions().filter { !$0.isTrashed }.map(\.id)
+
+        // The bundle's envelope with its list empty, split around the list,
+        // so the header and footer are whatever the encoder writes today.
+        let envelope = try SessionArchiveBundle(sessions: []).encoded()
+        guard let text = String(data: envelope, encoding: .utf8),
+              let list = text.range(of: "\"sessions\":[]")
+        else { throw ExportError.sessionUnreadable }
+        let head = text[..<list.lowerBound] + "\"sessions\":["
+        let tail = "]" + text[list.upperBound...]
+
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.write(contentsOf: Data(head.utf8))
+
+        var first = true
+        for id in ids {
+            try Task.checkCancellation()
+            guard let data = archiveData(id: id) else { continue }
+            let encoded: Data? = await Task.detached(priority: .userInitiated) {
+                guard let session = try? SessionArchive.decode(data).session else { return nil }
+                return try? SessionArchive.encoder().encode(privacy.apply(to: session))
+            }.value
+            guard let encoded else { continue }
+            if !first { try handle.write(contentsOf: Data(",".utf8)) }
+            first = false
+            try handle.write(contentsOf: encoded)
+        }
+        try handle.write(contentsOf: Data(tail.utf8))
+    }
+
     func exportAll(privacy: PrivacySettings = .init()) throws -> Data {
         // Deleted sessions stay out. They are still on disk for their thirty
         // days, but a backup is what the rider keeps, and they said they did

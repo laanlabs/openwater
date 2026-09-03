@@ -170,8 +170,16 @@ public final class RecordingEngine {
     /// failed write loses the session outright; never released and every clean
     /// session is offered back as unfinished, which teaches riders to dismiss
     /// the one prompt that ever matters.
+    ///
+    /// Async because the analysis is real work — a three-hour session is ten
+    /// thousand fixes through every detector — and it used to run on the
+    /// main actor from the End button, freezing the screen for the duration
+    /// and, on a cold phone, risking the watchdog exactly between the log
+    /// being closed and the session being written. The state is `.finishing`
+    /// throughout, so a second press finds nothing to end and the live screen
+    /// stays up; the log is untouched until `save` says yes.
     @discardableResult
-    public func finish(at date: Date = Date(), save: (Session) -> Bool) -> Session? {
+    public func finish(at date: Date = Date(), save: (Session) -> Bool) async -> Session? {
         guard state == .recording || state == .paused else { return nil }
         state = .finishing
 
@@ -186,20 +194,25 @@ public final class RecordingEngine {
             return nil
         }
 
-        let session = Self.buildSession(
-            id: sessionID,
-            sport: sport,
-            startDate: startDate,
-            endDate: date,
-            points: points,
-            wind: wind,
-            deviceModel: deviceModel,
-            appVersion: appVersion,
-            title: title,
-            spotName: spotName,
-            swellHeight: swellHeight,
-            swellDirection: swellDirection
-        )
+        let (id, sport, points, wind) = (sessionID, sport, points, wind)
+        let (deviceModel, appVersion) = (deviceModel, appVersion)
+        let (title, spotName, swellHeight, swellDirection) = (title, spotName, swellHeight, swellDirection)
+        let session = await Task.detached(priority: .userInitiated) {
+            Self.buildSession(
+                id: id,
+                sport: sport,
+                startDate: startDate,
+                endDate: date,
+                points: points,
+                wind: wind,
+                deviceModel: deviceModel,
+                appVersion: appVersion,
+                title: title,
+                spotName: spotName,
+                swellHeight: swellHeight,
+                swellDirection: swellDirection
+            )
+        }.value
 
         if save(session), let logURL { TrackLog.delete(logURL) }
 
@@ -266,30 +279,40 @@ public final class RecordingEngine {
     ///   with this id. A log whose session made it into the library — the
     ///   save landed and the delete did not, say — is finished business, not
     ///   an unfinished session, and is dropped rather than offered.
-    public func checkForRecoverableSession(isAlreadySaved: (UUID) -> Bool = { _ in false }) {
+    public func checkForRecoverableSession(isAlreadySaved: (UUID) -> Bool = { _ in false }) async {
         guard state == .idle else { return }
         for url in TrackLog.unfinishedLogs() {
-            guard let (header, points) = try? TrackLog.read(url) else {
+            // Read and rebuilt off the main actor: an interrupted three-hour
+            // session is a multi-megabyte log, and this runs on the way
+            // into the Record tab.
+            let parsed: (header: TrackLog.Header, count: Int, duration: TimeInterval, distance: Double)?
+            parsed = await Task.detached(priority: .userInitiated) {
+                guard let (header, points) = try? TrackLog.read(url) else { return nil }
+                let track = TrackBuilder(options: .forSport(header.sport)).build(from: points)
+                return (header, points.count, track.duration, track.totalDistance)
+            }.value
+            // A recording may have started while the log was being read.
+            guard state == .idle else { return }
+            guard let parsed else {
                 TrackLog.delete(url)
                 continue
             }
-            guard !isAlreadySaved(header.sessionID) else {
+            guard !isAlreadySaved(parsed.header.sessionID) else {
                 TrackLog.delete(url)
                 continue
             }
             // A log with almost nothing in it is not worth offering back.
-            guard points.count >= 30 else {
+            guard parsed.count >= 30 else {
                 TrackLog.delete(url)
                 continue
             }
-            let track = TrackBuilder(options: .forSport(header.sport)).build(from: points)
             recoverable = RecoverableSession(
                 url: url,
-                sport: header.sport,
-                startDate: header.startDate,
-                pointCount: points.count,
-                duration: track.duration,
-                distance: track.totalDistance
+                sport: parsed.header.sport,
+                startDate: parsed.header.startDate,
+                pointCount: parsed.count,
+                duration: parsed.duration,
+                distance: parsed.distance
             )
             return
         }
@@ -303,34 +326,38 @@ public final class RecordingEngine {
     /// shell has the session written down would lose outright the thing this
     /// whole path exists to rescue. A recovery that cannot be saved stays on
     /// offer rather than being spent.
-    public func recover(_ candidate: RecoverableSession, save: (Session) -> Bool) -> Session? {
-        guard let (header, points) = try? TrackLog.read(candidate.url), points.count >= 2 else {
+    public func recover(_ candidate: RecoverableSession, save: (Session) -> Bool) async -> Session? {
+        let url = candidate.url
+        let built: Session? = await Task.detached(priority: .userInitiated) {
+            guard let (header, points) = try? TrackLog.read(url), points.count >= 2 else { return nil }
+            return Self.buildSession(
+                id: header.sessionID,
+                sport: header.sport,
+                startDate: header.startDate,
+                endDate: points.last?.timestamp ?? header.startDate,
+                points: points,
+                wind: nil,
+                deviceModel: header.deviceModel,
+                appVersion: header.appVersion
+            )
+        }.value
+        guard let session = built else {
             TrackLog.delete(candidate.url)
             recoverable = nil
             return nil
         }
-        let session = Self.buildSession(
-            id: header.sessionID,
-            sport: header.sport,
-            startDate: header.startDate,
-            endDate: points.last?.timestamp ?? header.startDate,
-            points: points,
-            wind: nil,
-            deviceModel: header.deviceModel,
-            appVersion: header.appVersion
-        )
         guard save(session) else { return nil }
 
         TrackLog.delete(candidate.url)
         recoverable = nil
-        checkForRecoverableSession()
+        await checkForRecoverableSession()
         return session
     }
 
-    public func dismissRecovery() {
+    public func dismissRecovery() async {
         if let recoverable { TrackLog.delete(recoverable.url) }
         recoverable = nil
-        checkForRecoverableSession()
+        await checkForRecoverableSession()
     }
 
     // MARK: - Building

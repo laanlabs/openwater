@@ -66,9 +66,18 @@ struct SessionPlaybackView: View {
         .onTapGesture { withAnimation(.snappy) { showChrome.toggle() } }
         .statusBarHidden(!showChrome)
         .task(id: isPlaying) { await runPlayback() }
-        .onAppear {
-            speedScale = SpeedScale(speeds: session.track.speed)
-            frameWholeTrack()
+        .onAppear { frameWholeTrack() }
+        .task {
+            let track = session.track
+            let segments = summary.segments
+            let built = await Task.detached(priority: .userInitiated) {
+                (SpeedScale(speeds: track.speed),
+                 Self.makeSegmentLines(track: track, segments: segments),
+                 Self.makeStripSpeeds(track: track))
+            }.value
+            speedScale = built.0
+            segmentLines = built.1
+            stripSpeeds = built.2
         }
         .sheet(isPresented: $isReportingProblem) {
             FeedbackSheet(session: session, summary: summary)
@@ -126,15 +135,42 @@ struct SessionPlaybackView: View {
         summary.segments.filter { $0.startElapsed <= elapsed }
     }
 
+    /// Every segment's line, built once on appearance.
+    ///
+    /// The playback loop moves `elapsed` twenty times a second and `body`
+    /// runs with it; rebuilding a coordinate array per segment per frame —
+    /// hundreds of segments over thousands of fixes — was most of what a
+    /// frame cost.
+    @State private var segmentLines: [Int: [CLLocationCoordinate2D]] = [:]
+
+    /// The session's speed sampled evenly, for the strip under the scrubber.
+    @State private var stripSpeeds: [Double] = []
+
     private func coordinates(for segment: StateSegment) -> [CLLocationCoordinate2D] {
-        guard segment.startIndex >= 0, segment.endIndex < session.track.count else { return [] }
+        guard let line = segmentLines[segment.id] else { return [] }
         // Clip the segment the playhead is inside, so the trail ends exactly at
         // the playhead rather than snapping forward a whole segment.
-        let end = trailOnly && segment.endElapsed > elapsed
-            ? (session.track.index(atElapsed: elapsed) ?? segment.startIndex)
-            : segment.endIndex
-        guard end > segment.startIndex else { return [] }
-        return session.track.points[segment.startIndex...end].map(\.clCoordinate)
+        guard trailOnly, segment.endElapsed > elapsed else { return line }
+        let end = session.track.index(atElapsed: elapsed) ?? segment.startIndex
+        let keep = end - segment.startIndex
+        guard keep > 0 else { return [] }
+        return Array(line.prefix(keep + 1))
+    }
+
+    private static func makeSegmentLines(track: Track, segments: [StateSegment]) -> [Int: [CLLocationCoordinate2D]] {
+        var out: [Int: [CLLocationCoordinate2D]] = [:]
+        for segment in segments {
+            guard segment.startIndex >= 0, segment.endIndex < track.count,
+                  segment.endIndex > segment.startIndex else { continue }
+            out[segment.id] = track.points[segment.startIndex...segment.endIndex].map(\.clCoordinate)
+        }
+        return out
+    }
+
+    private static func makeStripSpeeds(track: Track, count: Int = 240) -> [Double] {
+        let duration = track.duration
+        guard duration > 0 else { return [] }
+        return (0..<count).map { track.speed(atElapsed: duration * Double($0) / Double(count)) }
     }
 
     private func trailColour(for segment: StateSegment) -> Color {
@@ -401,10 +437,13 @@ struct SessionPlaybackView: View {
             let width = geometry.size.width
             let buckets = max(1, Int(width / 2))
             HStack(spacing: 0) {
+                // From the pre-sampled speeds, not a binary search per cell
+                // per frame — the strip redraws with the playhead.
                 ForEach(0..<buckets, id: \.self) { i in
-                    let t = duration * Double(i) / Double(buckets)
+                    let sample = stripSpeeds.isEmpty ? 0
+                        : stripSpeeds[min(stripSpeeds.count - 1, i * stripSpeeds.count / buckets)]
                     Rectangle()
-                        .fill(speedColour(session.track.speed(atElapsed: t)))
+                        .fill(speedColour(sample))
                         .frame(width: width / Double(buckets))
                 }
             }

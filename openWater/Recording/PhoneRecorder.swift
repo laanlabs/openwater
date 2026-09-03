@@ -115,9 +115,9 @@ final class PhoneRecorder {
 
     /// - Parameter isAlreadySaved: whether the library holds this session, so
     ///   a log left behind by a save that landed is cleaned up, not offered.
-    func prepare(isAlreadySaved: (UUID) -> Bool = { _ in false }) {
+    func prepare(isAlreadySaved: (UUID) -> Bool = { _ in false }) async {
         location.requestAuthorization()
-        engine.checkForRecoverableSession(isAlreadySaved: isAlreadySaved)
+        await engine.checkForRecoverableSession(isAlreadySaved: isAlreadySaved)
     }
 
     /// Warm the receiver so the first fixes are not the worst ones.
@@ -178,12 +178,12 @@ final class PhoneRecorder {
     /// the engine keeps the log until it does, so a failed write leaves the
     /// session recoverable rather than gone.
     @discardableResult
-    func finish(save: (Session) -> Bool) -> Session? {
+    func finish(save: (Session) -> Bool) async -> Session? {
         location.stop()
         motion.stop()
         UIApplication.shared.isIdleTimerDisabled = false
 
-        let session = engine.finish(save: save)
+        let session = await engine.finish(save: save)
         if session != nil { notificationHaptics.notificationOccurred(.success) }
         return session
     }
@@ -196,12 +196,12 @@ final class PhoneRecorder {
     }
 
     func recover(_ candidate: RecordingEngine.RecoverableSession,
-                 save: (Session) -> Bool) -> Session? {
-        engine.recover(candidate, save: save)
+                 save: (Session) -> Bool) async -> Session? {
+        await engine.recover(candidate, save: save)
     }
 
-    func dismissRecovery() {
-        engine.dismissRecovery()
+    func dismissRecovery() async {
+        await engine.dismissRecovery()
     }
 
     /// Push everything to disk. Called when the app is backgrounded, so a

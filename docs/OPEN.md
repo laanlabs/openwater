@@ -247,6 +247,58 @@ lands on top of the shot.
 
 ---
 
+## 6. The phone's wind wash still draws as quads
+
+**The television stopped, and it looks markedly better for it.**
+
+The wash is a grid of translucent `MapPolygon`s. A grid of translucent quads
+always shows its own grid: MapKit rasterizes each with antialiased edges, so
+the pixels two of them share are painted either twice or not quite once, and
+neither is the field's colour. `WindWashModel.seamPixels` pulls each quad in
+to cancel that, and it cannot win — the correction quantises to whole pixels,
+so it steps from overlap to gap without passing through nothing. Measured on
+a television against the field's own brightness:
+
+| | seam vs field |
+| --- | --- |
+| no correction | +28.7 luma |
+| 0.6, the phone's value | +14.4 |
+| 0.8, the best available | −2.9 |
+| **one image instead** | **+0.2** |
+
+tvOS draws the field as a single picture now — `WashRaster` renders it to a
+512-wide bitmap, bilinear at every pixel with a 256-step palette table, and
+`WashRasterLayer` places it over the map through `MapProxy`. Beyond removing
+the lattice it is a better picture: quads draw flat tiles, a raster draws the
+smooth surface the model actually describes.
+
+**You do not lose Apple Maps by doing this.** The image is drawn *over* the
+same MapKit view; the basemap, its labels, its gestures and the muted style
+are all untouched.
+
+**What makes the phone harder than the television.** An overlay covers a
+map's own annotations. On tvOS that cost one thing — the meter badges moved
+out and are positioned through the projection, and they are read-only. The
+phone's map carries far more, and most of it is interactive: spot pins that
+open a spot, private pins, buoys, stations, route polylines, endpoint
+handles, draggable midpoint markers, and `UserAnnotation`. Moving those above
+an overlay means re-implementing their hit testing against the projection,
+and the drag handles are where that would get genuinely difficult.
+
+**Try this first.** `MapPolygon.foregroundStyle` takes any `ShapeStyle`, and
+`ImagePaint` is one. A single polygon covering the field region, filled with
+the raster, stays *map content* — under every annotation, nothing moved, and
+still one quad so still no seams. The open question is whether `ImagePaint`'s
+tiling can be pinned to the projected quad exactly; if it cannot, fall back
+to moving the annotations.
+
+**Done looks like** the phone's wash measuring under a luma against its own
+field, with every pin, route handle and buoy still tappable and draggable
+exactly as now. `raster` is already published beside `cells` on the shared
+model, so nothing new has to be computed — only drawn.
+
+---
+
 ## Where the other open lists live
 
 Nine days of Spots, surf and station work landed after this page was

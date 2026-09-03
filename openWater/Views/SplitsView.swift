@@ -46,9 +46,10 @@ struct SplitsView: View {
         }
     }
 
-    private var splits: [Split] {
-        session.splits(every: interval.metres(unit))
-    }
+    /// Computed once per interval and unit, off the main actor. As a
+    /// computed property this walked the track on every read, and the table
+    /// read it once per row.
+    @State private var splits: [Split] = []
 
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
@@ -71,6 +72,13 @@ struct SplitsView: View {
         .navigationTitle("Split")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Session · Splits")
+        .task(id: interval.metres(unit)) {
+            let session = session
+            let metres = interval.metres(unit)
+            splits = await Task.detached(priority: .userInitiated) {
+                session.splits(every: metres)
+            }.value
+        }
     }
 
     // MARK: - Chart

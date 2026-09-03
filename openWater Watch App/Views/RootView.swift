@@ -70,21 +70,26 @@ struct RecoveryView: View {
                 .font(.caption2)
 
                 Button("Recover") {
-                    // Only dismissed once the session is genuinely somewhere.
-                    // If the write fails the log is untouched and the prompt
-                    // stays up, so the rider can try again rather than watch
-                    // their one copy disappear into a tap.
-                    if recorder.recover(candidate, save: { sync.send($0) }) != nil {
-                        dismiss()
-                    } else {
-                        failedToSave = true
+                    Task {
+                        // Only dismissed once the session is genuinely
+                        // somewhere. If the write fails the log is untouched
+                        // and the prompt stays up, so the rider can try again
+                        // rather than watch their one copy disappear into a
+                        // tap.
+                        if await recorder.recover(candidate, save: { sync.send($0) }) != nil {
+                            dismiss()
+                        } else {
+                            failedToSave = true
+                        }
                     }
                 }
                 .tint(.green)
 
                 Button("Discard", role: .destructive) {
-                    recorder.dismissRecovery()
-                    dismiss()
+                    Task {
+                        await recorder.dismissRecovery()
+                        dismiss()
+                    }
                 }
             }
             .padding(.horizontal, 4)

@@ -75,7 +75,7 @@ final class SessionRecorder {
     func prepare() async {
         location.requestAuthorization()
         await workout.requestAuthorization()
-        engine.checkForRecoverableSession()
+        await engine.checkForRecoverableSession()
     }
 
     /// Warm the receiver up before recording, so the first fixes of a session
@@ -155,7 +155,7 @@ final class SessionRecorder {
         motion.stop()
 
         let end = Date()
-        let session = engine.finish(at: end, save: save)
+        let session = await engine.finish(at: end, save: save)
 
         await workout.finish(endDate: end, route: routeLocations)
 
@@ -172,12 +172,12 @@ final class SessionRecorder {
     }
 
     func recover(_ candidate: RecordingEngine.RecoverableSession,
-                 save: (Session) -> Bool) -> Session? {
-        engine.recover(candidate, save: save)
+                 save: (Session) -> Bool) async -> Session? {
+        await engine.recover(candidate, save: save)
     }
 
-    func dismissRecovery() {
-        engine.dismissRecovery()
+    func dismissRecovery() async {
+        await engine.dismissRecovery()
     }
 
     // MARK: - Ingest

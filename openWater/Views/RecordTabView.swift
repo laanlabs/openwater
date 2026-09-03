@@ -104,9 +104,9 @@ struct RecordTabView: View {
             }
             .onAppear {
                 if recorder.state == .idle { sport = settings.lastSport }
-                recorder.prepare(isAlreadySaved: { library.session(id: $0) != nil })
                 recorder.allTimeBests = library.records.mapValues(\.speed)
                 if isActive { recorder.warmUpSensors() }
+                Task { await recorder.prepare(isAlreadySaved: { library.session(id: $0) != nil }) }
             }
             // The tab stays in the hierarchy when the rider looks at something
             // else, so `onDisappear` never fires — and the receiver stayed on.
@@ -429,12 +429,18 @@ struct RecordTabView: View {
     }
 
     private func end() {
+        Task { await finishAndOpen() }
+    }
+
+    /// The analysis runs off the main actor; the live screen stays up,
+    /// showing `.finishing`, until the session is built and saved.
+    private func finishAndOpen() async {
         // Landing back on an empty Record tab after an hour on the water is the
         // wrong answer to "what did I just do?" — the session opens instead,
         // with the debrief over it while the conditions are still fresh.
         var stored: StoredSession?
         var persisted = false
-        recorder.finish { session in
+        await recorder.finish { session in
             let result = library.save(session)
             stored = result.stored
             persisted = result.persisted
@@ -448,7 +454,7 @@ struct RecordTabView: View {
             // look again now, so the recovery prompt follows the alert
             // instead of waiting for the next launch.
             saveFailed = true
-            recorder.prepare(isAlreadySaved: { library.session(id: $0) != nil })
+            await recorder.prepare(isAlreadySaved: { library.session(id: $0) != nil })
         }
         title = ""
         spot = ""
@@ -480,6 +486,7 @@ private struct RecoverySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var failedToSave = false
+    @State private var isRecovering = false
 
     var body: some View {
         NavigationStack {
@@ -510,35 +517,51 @@ private struct RecoverySheet: View {
                 Spacer()
 
                 Button {
-                    // Dismissed only once the session is genuinely in the
-                    // library. A failed write leaves the log alone and the
-                    // prompt up, so the rider can try again rather than watch
-                    // their one copy disappear into a tap.
-                    var stored: StoredSession?
-                    let session = recorder.recover(candidate) { session in
-                        let result = library.save(session)
-                        stored = result.stored
-                        return result.persisted
-                    }
-                    if session != nil, let stored {
-                        dismiss()
-                        onRecovered(stored)
-                    } else {
-                        failedToSave = true
+                    isRecovering = true
+                    Task {
+                        // Dismissed only once the session is genuinely in
+                        // the library. A failed write leaves the log alone
+                        // and the prompt up, so the rider can try again
+                        // rather than watch their one copy disappear into a
+                        // tap.
+                        var stored: StoredSession?
+                        let session = await recorder.recover(candidate) { session in
+                            let result = library.save(session)
+                            stored = result.stored
+                            return result.persisted
+                        }
+                        isRecovering = false
+                        if session != nil, let stored {
+                            dismiss()
+                            onRecovered(stored)
+                        } else {
+                            failedToSave = true
+                        }
                     }
                 } label: {
-                    Text("Recover")
-                        .font(.title3.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                    Group {
+                        if isRecovering {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text("Recover")
+                        }
+                    }
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
 
+                .disabled(isRecovering)
+
                 Button("Discard", role: .destructive) {
-                    recorder.dismissRecovery()
-                    dismiss()
+                    Task {
+                        await recorder.dismissRecovery()
+                        dismiss()
+                    }
                 }
                 .frame(maxWidth: .infinity)
+                .disabled(isRecovering)
             }
             .padding(24)
             .navigationTitle("Recover session")

@@ -37,8 +37,10 @@ struct SessionMapTab: View {
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
     /// The ramp the track is drawn with, so the legend cannot claim a
-    /// different range from the colours beside it.
-    private var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
+    /// different range from the colours beside it. Built once per track in
+    /// the task below: as a computed property it sorted every speed in the
+    /// session on every body pass, which is every frame of a scrub.
+    @State private var speedScale: SpeedScale = .fallback
 
     @State private var elapsed: TimeInterval = 0
     @State private var isScrubbing = false
@@ -179,9 +181,11 @@ struct SessionMapTab: View {
         .task(id: TrackFingerprint(session: session)) {
             let track = session.track
             let derived = await Task.detached(priority: .userInitiated) {
-                (samples: Self.makeChartSamples(track), index: TrimPreview.Index(track: track))
+                (samples: Self.makeChartSamples(track), index: TrimPreview.Index(track: track),
+                 scale: SpeedScale(speeds: track.speed))
             }.value
             guard !Task.isCancelled else { return }
+            speedScale = derived.scale
             withAnimation(.easeInOut(duration: 0.3)) {
                 chartSamples = derived.samples
                 // The playhead was somewhere in a recording that is now

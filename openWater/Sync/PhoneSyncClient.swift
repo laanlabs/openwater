@@ -231,24 +231,34 @@ extension PhoneSyncClient: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
         let data = try? Data(contentsOf: file.fileURL)
 
-        Task { @MainActor in
+        // Decoded and, if the watch ran an older engine, re-analysed off the
+        // main actor: `upToDateSession` rebuilds the track, and a three-hour
+        // session arriving while the rider is looking at the map used to
+        // freeze it for the duration.
+        Task.detached(priority: .userInitiated) {
             guard let data else {
-                self.lastError = "A session arrived from the watch but could not be read."
+                await MainActor.run {
+                    self.lastError = "A session arrived from the watch but could not be read."
+                }
                 return
             }
             do {
-                let archive = try SessionArchive.decode(data)
-                // The watch re-sends anything still in its outbox on every
-                // reconnect, so this can be a session the rider has already
-                // titled and written up here. Their words stay.
-                self.library.save(archive.upToDateSession(), policy: .keepRiderEdits)
-                self.receivedCount += 1
-                self.lastReceived = Date()
-                self.lastError = nil
-                Self.logger.info("received session from watch")
+                let session = try SessionArchive.decode(data).upToDateSession()
+                await MainActor.run {
+                    // The watch re-sends anything still in its outbox on
+                    // every reconnect, so this can be a session the rider has
+                    // already titled and written up here. Their words stay.
+                    self.library.save(session, policy: .keepRiderEdits)
+                    self.receivedCount += 1
+                    self.lastReceived = Date()
+                    self.lastError = nil
+                    Self.logger.info("received session from watch")
+                }
             } catch {
-                self.lastError = error.localizedDescription
-                Self.logger.error("could not decode session: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.lastError = error.localizedDescription
+                    Self.logger.error("could not decode session: \(error.localizedDescription)")
+                }
             }
         }
     }

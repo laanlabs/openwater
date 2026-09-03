@@ -128,8 +128,13 @@ struct TrackMapView: View {
     }
 
     /// The ramp this session is coloured across, built from its own speeds so
-    /// the whole sweep of colour lands on the range actually ridden.
-    var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
+    /// the whole sweep of colour lands on the range actually ridden. Built
+    /// inside the band task, off the main actor, never from `body`.
+    @State private var speedScale: SpeedScale = .fallback
+
+    /// The sample the session's max speed happened at, found once per track
+    /// rather than by scanning every speed on every body pass.
+    @State private var peakIndex: Int?
 
     private var bandKey: BandKey {
         BandKey(
@@ -333,17 +338,21 @@ struct TrackMapView: View {
             // ever got near a trim.
             let track = session.track
             let segments = visibleSegments
-            let ramp = speedScale
             let dark = style.isDark
             let lastIndex = partialUpTo.flatMap { track.index(atElapsed: $0) }
             let computed = await Task.detached(priority: .userInitiated) {
-                Self.makeBands(
+                let ramp = SpeedScale(speeds: track.speed)
+                let speeds = track.speed
+                let peak = speeds.count > 1 ? speeds.indices.max(by: { speeds[$0] < speeds[$1] }) : nil
+                return (bands: Self.makeBands(
                     track: track, segments: segments,
                     scale: ramp, onDark: dark, upTo: lastIndex
-                )
+                ), scale: ramp, peak: peak)
             }.value
             guard !Task.isCancelled else { return }
-            bands = computed
+            speedScale = computed.scale
+            peakIndex = computed.peak
+            bands = computed.bands
             if fullTrack.isEmpty { fullTrack = track.points.map(\.clCoordinate) }
             withAnimation(.easeOut(duration: 0.2)) { isDrawing = false }
         }
@@ -694,9 +703,7 @@ struct TrackMapView: View {
 
     /// Where the session's fastest sample happened.
     private var maxSpeedCoordinate: CLLocationCoordinate2D? {
-        let speeds = session.track.speed
-        guard speeds.count > 1,
-              let index = speeds.indices.max(by: { speeds[$0] < speeds[$1] }),
+        guard let index = peakIndex,
               let point = session.track.points[safe: index],
               point.hasValidPosition else { return nil }
         // Hidden while the track is filtered down to something else, or while a

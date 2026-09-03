@@ -22,6 +22,8 @@ struct SettingsView: View {
 
     @State private var exportedArchive: ExportedArchive?
     @State private var exportProblem: String?
+    @State private var isExporting = false
+    @State private var recomputeProgress: (Int, Int)?
     @State private var recomputeMessage: String?
     /// Read here as well as inside the page, so the row can carry a warning
     /// before anybody opens it.
@@ -129,14 +131,45 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Button("Export all sessions") { exportAll() }
-                    if !library.staleSessions().isEmpty {
-                        Button("Recompute \(library.staleSessions().count) session(s)") {
-                            Task {
-                                let count = await library.recomputeStaleSessions(overrides: settings.sportOverrides)
-                                recomputeMessage = "Recomputed \(count) session\(count == 1 ? "" : "s")."
+                    Button {
+                        Task { await exportAll() }
+                    } label: {
+                        HStack {
+                            Text("Export all sessions")
+                            if isExporting {
+                                Spacer()
+                                ProgressView()
                             }
                         }
+                    }
+                    .disabled(isExporting)
+                    // One fetch, not two: this used to run the predicate once
+                    // for the `isEmpty` and again for the count, on every
+                    // evaluation of a form that re-evaluates per keystroke.
+                    let stale = library.staleSessions().count
+                    if stale > 0 {
+                        Button {
+                            Task {
+                                let count = await library.recomputeStaleSessions(
+                                    overrides: settings.sportOverrides
+                                ) { done, total in
+                                    recomputeProgress = (done, total)
+                                }
+                                recomputeProgress = nil
+                                recomputeMessage = "Recomputed \(count) session\(count == 1 ? "" : "s")."
+                            }
+                        } label: {
+                            if let (done, total) = recomputeProgress {
+                                HStack {
+                                    Text("Recomputing \(done + 1) of \(total)…")
+                                    Spacer()
+                                    ProgressView()
+                                }
+                            } else {
+                                Text("Recompute \(stale) session\(stale == 1 ? "" : "s")")
+                            }
+                        }
+                        .disabled(recomputeProgress != nil)
                     }
                 } header: {
                     Text("Your data")
@@ -347,14 +380,16 @@ struct SettingsView: View {
         withAnimation { justAdded = rounded }
     }
 
-    private func exportAll() {
+    private func exportAll() async {
+        isExporting = true
+        defer { isExporting = false }
         do {
             // A backup of your own data keeps everything; the privacy trimming
-            // is for what you send to other people.
-            let data = try library.exportAll(privacy: .none)
+            // is for what you send to other people. Streamed to the file a
+            // session at a time — see `SessionLibrary.exportAll(to:)`.
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("openWater-backup.openwater")
-            try data.write(to: url, options: .atomic)
+            try await library.exportAll(to: url, privacy: .none)
             exportedArchive = ExportedArchive(url: url)
         } catch {
             // A backup that fails silently is worse than one that fails

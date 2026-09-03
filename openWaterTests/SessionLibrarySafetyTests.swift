@@ -117,4 +117,30 @@ final class SessionLibrarySafetyTests: XCTestCase {
         library.save(session)
         XCTAssertEqual(stored.notes, "", "an edit made on the phone is the truth, blanks included")
     }
+
+    // MARK: A backup written a session at a time
+
+    func testStreamedBackupDecodesAsABundle() async throws {
+        let library = try makeLibrary()
+        let kept = try XCTUnwrap(library.save(makeSession()).stored)
+        var second = makeSession()
+        second.title = "Second"
+        library.save(second)
+        let removed = try XCTUnwrap(library.save(makeSession()).stored)
+        library.delete(removed)
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("streamed-\(UUID().uuidString).openwater")
+        try await library.exportAll(to: url, privacy: .none)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let bundle = try SessionArchiveBundle.decode(Data(contentsOf: url))
+        XCTAssertEqual(bundle.sessions.count, 2, "two live sessions, and the deleted one left out")
+        XCTAssertTrue(bundle.sessions.contains { $0.id == kept.id })
+        XCTAssertTrue(bundle.sessions.contains { $0.title == "Second" })
+        XCTAssertFalse(bundle.sessions.contains { $0.id == removed.id })
+        // Same envelope as the in-memory form, so an old importer reads it.
+        let inMemory = try SessionArchiveBundle.decode(library.exportAll(privacy: .none))
+        XCTAssertEqual(Set(bundle.sessions.map(\.id)), Set(inMemory.sessions.map(\.id)))
+    }
 }

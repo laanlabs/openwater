@@ -25,8 +25,12 @@ struct FullScreenMapView: View {
     @Environment(\.verticalSizeClass) private var height
 
     /// The ramp the track is drawn with, so the legend cannot claim a
-    /// different range from the colours beside it.
-    private var speedScale: SpeedScale { SpeedScale(speeds: session.track.speed) }
+    /// different range from the colours beside it. Both this and `runs`
+    /// are built once, off the main actor, when the cover appears: as
+    /// computed properties they re-sorted every speed and re-grouped every
+    /// lane on each body pass, which is every frame of playback.
+    @State private var speedScale: SpeedScale = .fallback
+    @State private var runs: [GroupedRun] = []
     @Environment(\.dismiss) private var dismiss
 
     /// The same three-way filter the Map tab has. A binary "Flying only"
@@ -43,10 +47,6 @@ struct FullScreenMapView: View {
     /// The same grouping every other screen uses. The full-screen map was
     /// offering `summary.runs` — sixty-seven stretches where the Runs tab
     /// showed thirty runs — so the two disagreed about what a run even was.
-    private var runs: [GroupedRun] {
-        GroupedRun.group(summary.ribbon.lanes, flights: summary.flights)
-    }
-
     /// The run the selection falls inside.
     ///
     /// `selectedRun` stays a stretch index, because it is shared with the
@@ -72,6 +72,20 @@ struct FullScreenMapView: View {
     }
 
     var body: some View {
+        cover
+            .task {
+                let track = session.track
+                let lanes = summary.ribbon.lanes
+                let flights = summary.flights
+                let built = await Task.detached(priority: .userInitiated) {
+                    (SpeedScale(speeds: track.speed), GroupedRun.group(lanes, flights: flights))
+                }.value
+                speedScale = built.0
+                runs = built.1
+            }
+    }
+
+    private var cover: some View {
         ZStack {
             TrackMapView(
                 session: session,

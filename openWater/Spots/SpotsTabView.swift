@@ -646,11 +646,14 @@ struct SpotsTabView: View {
             await refreshStationWind()
         }
         .task(id: privateWindKey) {
+            // Same shape as the station readings: gathered, then one write.
+            var readings: [UUID: WindReading] = [:]
             for spot in guide.privateSpots where privateWind[spot.id] == nil {
                 let coordinate: Geo.Coordinate = spot.coordinate
-                let reading: WindReading? = await guide.currentWind(at: coordinate)
-                privateWind[spot.id] = reading
+                if let reading = await guide.currentWind(at: coordinate) { readings[spot.id] = reading }
             }
+            guard !Task.isCancelled, !readings.isEmpty else { return }
+            privateWind.merge(readings) { _, new in new }
         }
     }
 
@@ -1235,14 +1238,23 @@ struct SpotsTabView: View {
         let wanted = freeStationPins.prefix(Self.measuredPins)
             .filter { stationWind[$0.id]?.isFresh != true }
         guard !wanted.isEmpty else { return }
-        await withTaskGroup(of: (String, StationObservation?).self) { group in
+        // Collected, then written once. Each write is a `@State` change the
+        // map's whole body runs for — and this file measures that body at
+        // about 130 ms while a wash is up. Thirty stations landing one at a
+        // time was four seconds of blocked main thread after every pan that
+        // qualified.
+        let readings = await withTaskGroup(of: (String, StationObservation?).self) { group in
             for station in wanted {
                 group.addTask { (station.id, await FreeStations.latest(for: station)) }
             }
+            var out: [String: StationReading] = [:]
             for await (id, observation) in group {
-                stationWind[id] = StationReading(observation: observation, at: .now)
+                out[id] = StationReading(observation: observation, at: .now)
             }
+            return out
         }
+        guard !Task.isCancelled else { return }
+        stationWind.merge(readings) { _, new in new }
     }
 
     /// A point becomes the spot it nearly is: a waypoint that lands within

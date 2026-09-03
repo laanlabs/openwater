@@ -152,7 +152,21 @@ struct SessionListView: View {
         return tokens.allSatisfy { haystack.contains($0) }
     }
 
+    /// The words of a session, remembered per row.
+    ///
+    /// Four `Date.formatted` calls per session per keystroke — times three
+    /// evaluations of `filtered` — is what made the search field lag on a
+    /// full library. A reference type held in `@State` so the body can fill
+    /// it without triggering itself; the signature is what the text was
+    /// built from, so an edited title or note is picked up.
+    private final class HaystackCache {
+        var entries: [UUID: (signature: String, text: String)] = [:]
+    }
+    @State private var haystacks = HaystackCache()
+
     private func searchHaystack(_ session: StoredSession) -> String {
+        let signature = "\(session.title ?? "")|\(session.spotName ?? "")|\(session.routeName ?? "")|\(session.notes.count)|\(session.startDate.timeIntervalSince1970)"
+        if let hit = haystacks.entries[session.id], hit.signature == signature { return hit.text }
         var parts = [session.displayTitle, session.sport.displayName]
         if let title = session.title { parts.append(title) }
         if let spot = session.spotName { parts.append(spot) }
@@ -163,7 +177,9 @@ struct SessionListView: View {
         parts.append(date.formatted(date: .long, time: .omitted))
         parts.append(date.formatted(date: .numeric, time: .omitted))
         parts.append(date.formatted(.dateTime.weekday(.wide)))
-        return parts.joined(separator: " ").lowercased()
+        let text = parts.joined(separator: " ").lowercased()
+        haystacks.entries[session.id] = (signature, text)
+        return text
     }
 
     /// The location filter matches only the places — spot and route — so
@@ -236,7 +252,9 @@ struct SessionListView: View {
                 if sessions.isEmpty {
                     EmptyLibraryView(isImporting: $isImporting)
                 } else {
-                    list
+                    // Filtered once per body pass and handed down, not read
+                    // three times as a computed property.
+                    list(filtered)
                 }
             }
             // Above both the list and the empty state, because a store that
@@ -369,7 +387,7 @@ struct SessionListView: View {
     /// accessibility actions that come with none of the hand-built version.
     /// The rows are then stripped back to look exactly like the stack did —
     /// no separators, no row background, no inset.
-    private var list: some View {
+    private func list(_ filtered: [StoredSession]) -> some View {
         List {
             Section {
                 if isSearching {

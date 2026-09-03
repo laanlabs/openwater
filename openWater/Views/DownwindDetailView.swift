@@ -81,19 +81,27 @@ struct DownwindDetailView: View {
     }
 
     /// The track between a run's first and last stretch.
+    ///
+    /// By binary search, as the Runs tab does: `elapsed` is sorted, and
+    /// filtering the whole track once per run — which this did — is
+    /// O(runs × samples) on every body pass, the exact shape that once made
+    /// the Runs tab hang before it drew.
     private func coordinates(of run: GroupedRun) -> [CLLocationCoordinate2D] {
-        let points = session.track.points
-        let inside = points.indices.filter {
-            session.track.elapsed[$0] >= run.startElapsed
-                && session.track.elapsed[$0] <= run.endElapsed
-        }
-        return inside.map { points[$0].clCoordinate }
+        let track = session.track
+        guard track.count > 0 else { return [] }
+        let first = track.elapsed.firstIndex(atOrAfter: run.startElapsed) ?? 0
+        let last = track.elapsed.lastIndex(atOrBefore: run.endElapsed) ?? (track.count - 1)
+        guard first <= last else { return [] }
+        return track.points[first...last].map(\.clCoordinate)
     }
 
     private func midpoint(of run: GroupedRun) -> CLLocationCoordinate2D? {
-        let line = coordinates(of: run)
-        guard !line.isEmpty else { return nil }
-        return line[line.count / 2]
+        let track = session.track
+        guard track.count > 0 else { return nil }
+        let first = track.elapsed.firstIndex(atOrAfter: run.startElapsed) ?? 0
+        let last = track.elapsed.lastIndex(atOrBefore: run.endElapsed) ?? (track.count - 1)
+        guard first <= last else { return nil }
+        return track.points[(first + last) / 2].clCoordinate
     }
 
     private func maxSpeed(from start: Int, to end: Int) -> Double {

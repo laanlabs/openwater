@@ -315,10 +315,19 @@ struct RibbonView: View {
         let lanes: Int
     }
 
-    private func regroup() {
-        groupedRuns = GroupedRun.group(ribbon.lanes, flights: flights)
-        speedScale = track.map { SpeedScale(speeds: $0.speed) } ?? .fallback
-        heat = buildHeat()
+    /// Grouping and the heat map, off the main actor. Both walk the whole
+    /// track, and both used to run inline on the way into the tab.
+    private func regroup() async {
+        let lanes = ribbon.lanes
+        let flights = flights
+        let track = track
+        let built = await Task.detached(priority: .userInitiated) { () -> ([GroupedRun], SpeedScale, [HeatBand]) in
+            let scale = track.map { SpeedScale(speeds: $0.speed) } ?? .fallback
+            return (GroupedRun.group(lanes, flights: flights), scale, Self.buildHeat(track: track, scale: scale))
+        }.value
+        groupedRuns = built.0
+        speedScale = built.1
+        heat = built.2
     }
 
     /// Chunks of track, each coloured by the speed through it.
@@ -326,9 +335,8 @@ struct RibbonView: View {
     /// Coarse on purpose — a chunk every twelve samples is far more detail
     /// than a map this size can show, and it keeps the whole thing to a few
     /// hundred polylines rather than ten thousand.
-    private func buildHeat() -> [HeatBand] {
+    private static func buildHeat(track: Track?, scale: SpeedScale) -> [HeatBand] {
         guard let track, track.points.count > 1 else { return [] }
-        let scale = speedScale
         let step = max(6, track.points.count / 400)
 
         var out: [HeatBand] = []
@@ -414,7 +422,41 @@ struct RibbonView: View {
     /// Every stretch that was not a run, keyed by the row it sits above —
     /// `base + i` precedes span `i`, and `base + count` is the one after the
     /// last row.
-    private var offFoilStretches: [OffFoilStretch] {
+    private var offFoilStretches: [OffFoilStretch] { cachedOffFoil }
+
+    /// What `offFoilStretches`, `drawn` and `selection` read. See `drawKey`.
+    @State private var cachedOffFoil: [OffFoilStretch] = []
+    @State private var cachedDrawn: [Drawn] = []
+    @State private var drawnIDs: Set<Int> = []
+
+    /// Everything the draw list depends on. `groupedRuns` is covered by the
+    /// regroup key's revision and lane count, since that is what rebuilds it.
+    private struct DrawKey: Equatable {
+        let revision: Int
+        let lanes: Int
+        let grouped: Int
+        let legs: Int
+        let showsLegs: Bool
+        let showsGrouped: Bool
+        let order: Order
+        let filter: Leg
+        let duration: TimeInterval
+    }
+
+    private var drawKey: DrawKey {
+        DrawKey(revision: revision, lanes: ribbon.lanes.count, grouped: groupedRuns.count,
+                legs: legs.count, showsLegs: showsLegs, showsGrouped: showsGrouped,
+                order: order, filter: filter,
+                duration: track?.duration ?? ribbon.lanes.last?.endElapsed ?? 0)
+    }
+
+    private func rebuildDrawn() {
+        cachedOffFoil = computeOffFoilStretches()
+        cachedDrawn = computeDrawn()
+        drawnIDs = Set(cachedDrawn.map(\.id))
+    }
+
+    private func computeOffFoilStretches() -> [OffFoilStretch] {
         let spans = shownSpans
         guard let first = spans.first, let last = spans.last else { return [] }
         let duration = track?.duration ?? ribbon.lanes.last?.endElapsed ?? 0
@@ -674,8 +716,13 @@ struct RibbonView: View {
             // how many there are, and a count-only key left the old grouping —
             // summary line, chips, colours, map — on screen until the tab was
             // left and re-entered.
-            .task(id: RegroupKey(revision: revision, lanes: ribbon.lanes.count)) { regroup() }
-            .onChange(of: flights.count) { _, _ in regroup() }
+            .task(id: RegroupKey(revision: revision, lanes: ribbon.lanes.count)) { await regroup() }
+            .onChange(of: flights.count) { _, _ in Task { await regroup() } }
+            // The draw list and the off-foil stretches, rebuilt only when
+            // one of their inputs changes rather than on every body pass —
+            // and read per row through `selection`, where they used to be
+            // recomputed for every badge and every map element.
+            .task(id: drawKey) { rebuildDrawn() }
             .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
             .readableContentColumn()
             .sheet(isPresented: $showingKey) {
@@ -904,7 +951,9 @@ struct RibbonView: View {
     }
 
     /// What the map draws, taken from whichever unit the list is showing.
-    private var drawn: [Drawn] {
+    private var drawn: [Drawn] { cachedDrawn }
+
+    private func computeDrawn() -> [Drawn] {
         guard showsLegs else {
             return mappedRuns.map {
                 Drawn(id: $0.id, title: $0.kind.title, number: $0.number,
@@ -959,7 +1008,7 @@ struct RibbonView: View {
 
     /// The selection, but only the parts of it still drawn.
     private var selection: Set<Int> {
-        selectedRun.intersection(drawn.map(\.id))
+        selectedRun.intersection(drawnIDs)
     }
 
     /// The track between a run's ends.

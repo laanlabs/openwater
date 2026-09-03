@@ -12,20 +12,23 @@ one command regenerates the whole set rather than leaving stale art behind.
 Marketing/
 ├── AppStore-Metadata.txt      Everything App Store Connect asks for
 ├── capture-screenshots.sh     Drives a simulator, captures raw screens
+├── capture-tv-screenshots.sh  The same, for Apple TV
 ├── build-appstore-assets.sh   Raw captures → every required size
 ├── Compose.swift              Composes raw screens into marketing panels
 └── screenshots/
     ├── raw/                   Straight device captures, no styling
     │   ├── iphone/            1320 x 2868
     │   ├── ipad/              2064 x 2752
-    │   └── watch/              422 x  514
+    │   ├── watch/              422 x  514
+    │   └── appletv/           3840 x 2160
     └── appstore/              ← upload these
         ├── iphone-6.9/        1320 x 2868
         ├── iphone-6.7/        1284 x 2778
         ├── iphone-6.5/        1242 x 2688
         ├── ipad-13/           2064 x 2752
         ├── watch-410x502/      410 x  502
-        └── watch-416x496/      416 x  496
+        ├── watch-416x496/      416 x  496
+        └── appletv/           3840 x 2160
 ```
 
 All three iPhone sizes are produced because App Store Connect's required size

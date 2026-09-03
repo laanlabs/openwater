@@ -52,7 +52,7 @@ struct RootView: View {
     /// Montauk and presses across should not have to find Montauk twice.
     @State private var location = TVLocation()
 
-    @State private var tab = Tab.map
+    @State private var tab = TVScreenshotRoute.requested?.tab ?? Tab.map
 
     enum Tab: Hashable { case map, cameras, radar, favorites, settings }
 

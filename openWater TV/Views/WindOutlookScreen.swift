@@ -201,24 +201,24 @@ struct WindOutlookScreen: View {
             Text("MODELS")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.secondary)
-            // Wrapped by hand into rows of three: a television is wide, and
-            // eight legend chips in one line come out too small to match
-            // against a line on the chart.
-            let rows = stride(from: 0, to: outlook.models.count, by: 3).map {
-                Array(outlook.models[$0 ..< min($0 + 3, outlook.models.count)])
-            }
-            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
-                HStack(spacing: 40) {
-                    ForEach(Array(row.enumerated()), id: \.element.id) { column, model in
-                        ModelSwitch(model: model,
-                                    colour: Self.colour(rowIndex * 3 + column),
-                                    isOn: enabled.contains(model.id)) {
-                            toggle(model)
-                        }
+            // A list, one model per line.
+            //
+            // These were chips wrapped by hand into rows of three, and the
+            // wrapping was the whole problem: tvOS grows a focused chip and
+            // the grown one overlapped its neighbours, so the row a rider was
+            // on sat on top of the row below it. A column cannot collide with
+            // itself, and up and down through a list is the one movement a
+            // remote is unambiguously good at.
+            VStack(spacing: 0) {
+                ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                    ModelSwitch(model: model,
+                                colour: Self.colour(index),
+                                isOn: enabled.contains(model.id)) {
+                        toggle(model)
                     }
-                    Spacer()
                 }
             }
+            .frame(maxWidth: 900, alignment: .leading)
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(.white)
@@ -261,10 +261,15 @@ struct WindOutlookScreen: View {
 
 /// One model, and whether it is drawn.
 ///
-/// A chip that was a label and is now a switch. The colour swatch stays the
-/// same size either way — it is the thing an eye matches against a line on
-/// the chart, and a swatch that changed shape when pressed would break the
-/// match at the moment somebody is making it.
+/// A row with a box, not a chip. The chips it replaces had two faults at once:
+/// tvOS grows the focused one, so a wrapped grid of them overlapped, and the
+/// system's focused fill is near-white, so the white label on the focused chip
+/// was white on white — the one line a rider was reading was the one line they
+/// could not.
+///
+/// The colour swatch keeps its size and place in both states. It is the thing
+/// an eye matches against a line on the chart, and a swatch that moved under
+/// the press would break the match at the moment somebody is making it.
 private struct ModelSwitch: View {
 
     let model: WindOutlook.Model
@@ -274,33 +279,48 @@ private struct ModelSwitch: View {
 
     @FocusState private var isFocused: Bool
 
+    /// Dark on the focused row's light ground, white on the dark page.
+    private var ink: Color { isFocused ? .black : .white }
+    private var quietInk: Color {
+        isFocused ? Color.black.opacity(0.55) : Color.white.opacity(0.55)
+    }
+
     var body: some View {
         Button(action: toggle) {
-            HStack(spacing: 12) {
+            HStack(spacing: 20) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 30, weight: .medium))
+                    // The tick carries the model's own colour when it is on,
+                    // so the box and the line on the chart are the same fact.
+                    .foregroundStyle(isOn ? colour : quietInk)
                 RoundedRectangle(cornerRadius: 3)
                     .fill(colour)
                     .frame(width: 44, height: 6)
-                    .opacity(isOn ? 1 : 0.25)
+                    .opacity(isOn ? 1 : 0.3)
                 Text(model.label)
-                    .font(.system(size: 24))
-                    .foregroundStyle(isOn ? .white : .secondary)
-                    .strikethrough(!isOn, color: .secondary)
+                    .font(.system(size: 26))
+                    .foregroundStyle(isOn ? ink : quietInk)
                 if model.isComposite {
                     // Worth saying: NBM already contains GFS and HRRR, so a
                     // rider counting it as a separate vote is counting the
                     // same physics twice. It is why this one starts off.
                     Text("blend")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(quietInk)
                 }
+                Spacer()
+                Text(isOn ? "On" : "Off")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(quietInk)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background(isFocused ? Color.white.opacity(0.16) : Color.clear,
-                        in: Capsule())
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(isFocused ? Color.white : Color.white.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
         .focused($isFocused)
-        .animation(.easeOut(duration: 0.15), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }

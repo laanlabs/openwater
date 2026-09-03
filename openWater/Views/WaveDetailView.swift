@@ -121,8 +121,17 @@ struct WaveDetailView: View {
                 timeline = RideTimeline(rides: [])
                 return
             }
-            let found = WaveRideFinder(thresholds: thresholds)
-                .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
+            // Off the main actor, like the rules sheet's own recount: a
+            // handful of linear passes is nothing on a twenty-minute session
+            // and is not nothing on a three-hour one.
+            let track = session.track
+            let flights = summary.flights
+            let sport = session.sport
+            let rules = thresholds
+            let found = await Task.detached(priority: .userInitiated) {
+                WaveRideFinder.forSport(sport, thresholds: rules)
+                    .rides(in: track, flights: flights, swellFrom: swellFrom)
+            }.value
             waves = found
             timeline = RideTimeline(rides: found.rides)
         }
@@ -754,10 +763,16 @@ struct WaveDetailView: View {
 
                         // How square to the swell it was ridden: small is
                         // straight down the face, forty is down the line.
+                        // Deliberately not coloured. Green under thirty
+                        // degrees rewarded pointing straight at the beach,
+                        // while this screen's own footer — and the rules
+                        // sheet — say down the line at forty to sixty is what
+                        // a surfer is trying to do. The number is a fact
+                        // about the ride, not a mark out of ten.
                         Text("\(Int(ride.offSwell.rounded()))° off")
                             .font(.caption)
                             .monospacedDigit()
-                            .foregroundStyle(ride.offSwell <= 30 ? .green : .secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
@@ -785,7 +800,7 @@ struct WaveDetailView: View {
                      + ", as you set it.")
                     .font(.caption.weight(.medium))
             }
-            Text("A wave ride is a stretch on the foil, at or above your own "
+            Text("A wave ride is a stretch \(summary.flights.isEmpty ? "" : "on the foil, ")at or above your own "
                  + "pace for the day, where the speed *rose* while you pointed "
                  + "within \(Int(WaveRideFinder(thresholds: thresholds).coneAngle))° of the way the swell "
                  + "was travelling — and the whole ride, takeoff to kick-out, "
@@ -798,6 +813,17 @@ struct WaveDetailView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // Said once, where the rides are explained. A reading with no
+            // accelerometer behind it is weaker, and a screen that presents
+            // both cases identically is claiming more than it knows.
+            if let waves, !waves.usedMotionData {
+                Text("Found from position alone — this recording carries no "
+                     + "accelerometer, or you have turned the quiet-board rule "
+                     + "off, so speed and direction decided every ride here.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 14) {
                 Button("Adjust the swell", action: onSetWind)
                 // Every number above comes out of rules that are a guess

@@ -34,7 +34,7 @@ struct WaveRulesSheet: View {
     private var units: UnitPreferences { settings.units }
 
     private var thresholds: SportThresholds { settings.thresholds(for: sport) }
-    private var finder: WaveRideFinder { WaveRideFinder(thresholds: thresholds) }
+    private var finder: WaveRideFinder { WaveRideFinder.forSport(sport, thresholds: thresholds) }
 
     private var overrides: SportThresholds.Overrides {
         settings.sportOverrides[sport] ?? .init()
@@ -151,7 +151,12 @@ struct WaveRulesSheet: View {
                 "Pace to hold",
                 rule(\.waveSpeedFraction, inherited: thresholds.glideSpeedFraction),
                 range: 0.4...1.0, step: 0.05,
+                // The speed the percentage works out to, beside it. There is
+                // a floor under this rule — a fraction of a slow day is still
+                // slow — and without the number the slider simply stops
+                // biting at some point with nothing on screen to say why.
                 reading: "\(Int((finder.speedFraction * 100).rounded()))%"
+                    + (preview.map { " · \(Format.speed($0.speedFloor, unit: units.speed, decimals: 1))" } ?? "")
             )
             slider(
                 "The wave has to add",
@@ -260,9 +265,10 @@ struct WaveRulesSheet: View {
         let flights = summary.flights
         let rules = thresholds
         let swell = swellFrom
+        let sport = sport
         Task {
             let found = await Task.detached(priority: .userInitiated) {
-                WaveRideFinder(thresholds: rules)
+                WaveRideFinder.forSport(sport, thresholds: rules)
                     .rides(in: track, flights: flights, swellFrom: swell)
             }.value
             withAnimation(.snappy) { preview = found }

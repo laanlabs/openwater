@@ -31,6 +31,13 @@ struct SessionAnalysisTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
 
+    /// What a re-find depends on: the arrow the rides are measured from, and
+    /// the rules they are measured by.
+    private struct WaveKey: Equatable {
+        let swell: Double?
+        let thresholds: SportThresholds
+    }
+
     /// The waves ridden, worked out once for the row's headline. Not stored
     /// on the summary: wave rides are a reading of the track against the
     /// swell the rider set, and re-reading here means the row updates the
@@ -49,13 +56,26 @@ struct SessionAnalysisTab: View {
         .listStyle(.insetGrouped)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .readableContentColumn()
-        .task(id: session.swellDirection) {
+        // Keyed on the rules as well as the swell, exactly as the Wave Rides
+        // screen is. On the swell alone, a rider who changed a rule in the
+        // wave sheet came back to a row still showing the old count while the
+        // screen behind it showed the new one.
+        .task(id: WaveKey(swell: session.swellDirection,
+                          thresholds: settings.thresholds(for: session.sport))) {
             guard let swellFrom = session.swellDirection else {
                 waves = nil
                 return
             }
-            waves = WaveRideFinder(thresholds: settings.thresholds(for: session.sport))
-                .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
+            // Off the main actor: several linear passes over the whole track,
+            // and this one runs on the way into the tab.
+            let track = session.track
+            let flights = summary.flights
+            let sport = session.sport
+            let rules = settings.thresholds(for: sport)
+            waves = await Task.detached(priority: .userInitiated) {
+                WaveRideFinder.forSport(sport, thresholds: rules)
+                    .rides(in: track, flights: flights, swellFrom: swellFrom)
+            }.value
         }
     }
 

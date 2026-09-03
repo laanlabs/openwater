@@ -34,7 +34,19 @@ struct WindOutlookScreen: View {
     /// NBM already contains GFS and HRRR, so averaging it in alongside them
     /// counts the same physics twice and then calls the double vote
     /// agreement. It is one press away for anyone who wants it drawn.
-    @State private var enabled: Set<String> = []
+    /// Which model the chart is showing, or nil for all of them together.
+    ///
+    /// One value stepped through, rather than a set of switches. The switches
+    /// were a row of checkboxes and every one of them drew as focused at once
+    /// — five white capsules stacked over each other, so a rider could not
+    /// tell what the remote was on or what Select would do. A single control
+    /// cannot have that problem: there is one focus target, and pressing left
+    /// or right moves along a list whose current value is written in the
+    /// middle of it.
+    ///
+    /// The comparison is still the point of the screen, so "All models" is
+    /// where it starts and where the cycle returns to.
+    @State private var shown: String?
 
     @Namespace private var page
 
@@ -82,9 +94,7 @@ struct WindOutlookScreen: View {
             outlook = await OpenMeteo.outlook(at: here, days: Self.days)
             // Seeded once the models are known, and only if a rider has not
             // already been in here changing them.
-            if enabled.isEmpty {
-                enabled = Set(outlook.models.filter { !$0.isComposite }.map(\.id))
-            }
+
             isLoading = false
         }
     }
@@ -114,7 +124,7 @@ struct WindOutlookScreen: View {
         Chart {
             ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                 ForEach(Array(model.speeds.enumerated()), id: \.offset) { hour, speed in
-                    if let speed, hour < outlook.hours.count, enabled.contains(model.id) {
+                    if let speed, hour < outlook.hours.count, isDrawn(model) {
                         LineMark(
                             x: .value("Hour", outlook.hours[hour]),
                             y: .value("Knots", speed),
@@ -184,51 +194,117 @@ struct WindOutlookScreen: View {
     }
 
     /// The heavy white line: the mean of whatever is switched on.
-    private var average: [Double?] { outlook.blend(of: enabled) }
+    /// Everything that is not a blend, which is what "all models" means here.
+    ///
+    /// NBM already contains GFS and HRRR, so averaging it in beside them
+    /// counts the same physics twice and reads the double vote as agreement.
+    /// It is one press away on the cycle for anyone who wants to see it.
+    private var comparable: [WindOutlook.Model] {
+        outlook.models.filter { !$0.isComposite }
+    }
 
-    /// Off is allowed; nothing is not. An empty chart is not a view anybody
-    /// wanted, and there would be no line left to press to get back.
-    private func toggle(_ model: WindOutlook.Model) {
-        if enabled.contains(model.id) {
-            if enabled.count > 1 { enabled.remove(model.id) }
-        } else {
-            enabled.insert(model.id)
-        }
+    private func isDrawn(_ model: WindOutlook.Model) -> Bool {
+        guard let shown else { return !model.isComposite }
+        return model.id == shown
+    }
+
+    /// The heavy white line: the mean of the models being compared. It is not
+    /// drawn at all while a single model is up, because the average of one
+    /// thing is that thing, drawn twice.
+    private var average: [Double?] {
+        shown == nil ? outlook.blend(of: Set(comparable.map(\.id))) : []
+    }
+
+    /// The order the control steps through: all of them, then each in turn,
+    /// then back to all.
+    private var cycle: [String?] { [nil] + outlook.models.map(\.id) }
+
+    private func step(by delta: Int) {
+        guard !outlook.models.isEmpty else { return }
+        let order = cycle
+        let at = order.firstIndex(of: shown) ?? 0
+        shown = order[(at + delta + order.count) % order.count]
+    }
+
+    /// What the control says it is showing.
+    private var shownLabel: String {
+        guard let shown else { return "All models" }
+        return outlook.models.first { $0.id == shown }?.label ?? "All models"
     }
 
     private var legend: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             Text("MODELS")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.secondary)
-            // A list, one model per line.
-            //
-            // These were chips wrapped by hand into rows of three, and the
-            // wrapping was the whole problem: tvOS grows a focused chip and
-            // the grown one overlapped its neighbours, so the row a rider was
-            // on sat on top of the row below it. A column cannot collide with
-            // itself, and up and down through a list is the one movement a
-            // remote is unambiguously good at.
-            VStack(spacing: 0) {
+
+            // One control, stepped. See `shown` for what the checkboxes it
+            // replaces got wrong.
+            HStack(spacing: 24) {
+                Button { step(by: -1) } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 26, weight: .semibold))
+                }
+                HStack(spacing: 16) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(shownColour)
+                        .frame(width: 52, height: 8)
+                    Text(shownLabel)
+                        .font(.system(size: 30, weight: .medium))
+                        .lineLimit(1)
+                    if outlook.models.first(where: { $0.id == shown })?.isComposite == true {
+                        // NBM already contains GFS and HRRR, so a rider
+                        // counting it as a separate vote is counting the same
+                        // physics twice. Said here because this is the one
+                        // moment it is on screen alone.
+                        Text("blend")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 420)
+                Button { step(by: 1) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 26, weight: .semibold))
+                }
+            }
+
+            // The key, which is now a reading aid rather than a set of
+            // controls: nothing here is pressable, so nothing here can steal
+            // the focus from the one thing that is.
+            HStack(spacing: 28) {
                 ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
-                    ModelSwitch(model: model,
-                                colour: Self.colour(index),
-                                isOn: enabled.contains(model.id)) {
-                        toggle(model)
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Self.colour(index))
+                            .frame(width: 34, height: 6)
+                            .opacity(isDrawn(model) ? 1 : 0.25)
+                        Text(model.label)
+                            .font(.system(size: 22))
+                            .foregroundStyle(isDrawn(model) ? .white : .secondary)
                     }
                 }
             }
-            .frame(maxWidth: 900, alignment: .leading)
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(.white)
-                    .frame(width: 44, height: 8)
-                Text(enabled.count == outlook.models.count
-                     ? "Average of all of them"
-                     : "Average of the \(enabled.count) switched on")
-                    .font(.system(size: 24))
+
+            if shown == nil {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.white)
+                        .frame(width: 44, height: 8)
+                    Text("Average of all of them")
+                        .font(.system(size: 24))
+                }
             }
         }
+    }
+
+    /// The swatch beside the control: the model's own colour when one is up,
+    /// white when the average is.
+    private var shownColour: Color {
+        guard let shown,
+              let index = outlook.models.firstIndex(where: { $0.id == shown })
+        else { return .white }
+        return Self.colour(index)
     }
 
     /// What the spread means, in words.
@@ -256,71 +332,5 @@ struct WindOutlookScreen: View {
     static func colour(_ index: Int) -> Color {
         let wheel: [Color] = [.cyan, .orange, .green, .pink, .yellow, .purple, .mint, .red]
         return wheel[index % wheel.count]
-    }
-}
-
-/// One model, and whether it is drawn.
-///
-/// A row with a box, not a chip. The chips it replaces had two faults at once:
-/// tvOS grows the focused one, so a wrapped grid of them overlapped, and the
-/// system's focused fill is near-white, so the white label on the focused chip
-/// was white on white — the one line a rider was reading was the one line they
-/// could not.
-///
-/// The colour swatch keeps its size and place in both states. It is the thing
-/// an eye matches against a line on the chart, and a swatch that moved under
-/// the press would break the match at the moment somebody is making it.
-private struct ModelSwitch: View {
-
-    let model: WindOutlook.Model
-    let colour: Color
-    let isOn: Bool
-    let toggle: () -> Void
-
-    @FocusState private var isFocused: Bool
-
-    /// Dark on the focused row's light ground, white on the dark page.
-    private var ink: Color { isFocused ? .black : .white }
-    private var quietInk: Color {
-        isFocused ? Color.black.opacity(0.55) : Color.white.opacity(0.55)
-    }
-
-    var body: some View {
-        Button(action: toggle) {
-            HStack(spacing: 20) {
-                Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 30, weight: .medium))
-                    // The tick carries the model's own colour when it is on,
-                    // so the box and the line on the chart are the same fact.
-                    .foregroundStyle(isOn ? colour : quietInk)
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(colour)
-                    .frame(width: 44, height: 6)
-                    .opacity(isOn ? 1 : 0.3)
-                Text(model.label)
-                    .font(.system(size: 26))
-                    .foregroundStyle(isOn ? ink : quietInk)
-                if model.isComposite {
-                    // Worth saying: NBM already contains GFS and HRRR, so a
-                    // rider counting it as a separate vote is counting the
-                    // same physics twice. It is why this one starts off.
-                    Text("blend")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(quietInk)
-                }
-                Spacer()
-                Text(isOn ? "On" : "Off")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(quietInk)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
-            .background(isFocused ? Color.white : Color.white.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
-        .focused($isFocused)
-        .animation(.easeOut(duration: 0.12), value: isOn)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }

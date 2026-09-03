@@ -18,6 +18,9 @@ import SwiftUI
 struct CurrentFlowView: View {
 
     let coordinate: Geo.Coordinate
+    /// The spot's clock, for the station's timeline and the scrubber. A
+    /// station's predictions are instants with no zone of their own.
+    var timeZone: TimeZone? = nil
 
     @State private var hours: [Date] = []
     @State private var grid: [FlowMapScreen.GridPoint] = []
@@ -122,7 +125,7 @@ struct CurrentFlowView: View {
                 }
                 .frame(height: 56, alignment: .bottom)
                 ValueTicksRow(values: series.map(\.speedKn))
-                HourScrubber(hours: series.map(\.at), timeZone: .current, selection: $scrub)
+                HourScrubber(hours: series.map(\.at), timeZone: timeZone ?? .current, selection: $scrub)
             } else if !isLoading {
                 Text("No current model on this water — the ocean model has no cell here.")
                     .font(.subheadline)
@@ -154,7 +157,7 @@ struct CurrentFlowView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .task {
-            station = await Currents.station(at: coordinate)
+            station = await Currents.station(at: coordinate, timeZone: timeZone)
         }
         .task {
             // The map's first settle triggers the first fetch; this is the

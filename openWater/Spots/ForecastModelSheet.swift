@@ -5,9 +5,9 @@ import SwiftUI
 
 /// The model sheet: automatic on top and set apart, because it is the
 /// recommendation rather than one of the options, then the models by name
-/// with what each is actually good for. Picking one changes every wind
-/// number in the app — pins, wash, flow map, routes — so the note at the
-/// bottom says so plainly.
+/// with what each is actually good for. Picking one changes every model
+/// wind number in the app — pins, wash, flow map, routes, and the
+/// conditions detail — so the note at the bottom says so plainly.
 struct ForecastModelSheet: View {
 
     @Binding var selection: String

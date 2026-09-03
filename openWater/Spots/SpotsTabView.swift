@@ -549,6 +549,9 @@ struct SpotsTabView: View {
         .task(id: windRefreshKey) {
             await guide.refreshWind(for: windTargets)
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { foregroundings += 1 }
+        }
         // Hourly series, fetched only once the clock leaves now — a rider
         // who never scrubs never pays for this.
         .task(id: scrubbedSpotsKey) {
@@ -696,8 +699,17 @@ struct SpotsTabView: View {
     /// `refreshWind` drops every spot still inside its TTL.
     private var windRefreshKey: String {
         (pins.prefix(8).map(\.spotId) + nearby.prefix(8).map(\.spotId))
-            .joined(separator: ",") + "|" + forecastModelRaw
+            .joined(separator: ",") + "|" + forecastModelRaw + "|" + String(foregroundings)
     }
+
+    /// Bumped each time the app comes back to the foreground, so the pins'
+    /// readings are re-asked. Nothing else ever re-fired that task while
+    /// the map sat still: a rider who left the phone on Spots, or came back
+    /// to it an hour later, was reading the wind from whenever they arrived,
+    /// with no age on the pin to say so. `refreshWind` keeps its ten-minute
+    /// TTL, so a quick trip to another app costs nothing.
+    @State private var foregroundings = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Every spot a live reading is wanted for: what is on the map, the head
     /// of the list under it, and the rider's own stars wherever they are.
@@ -3630,7 +3642,7 @@ private struct WashCaptionChip: View {
 /// a rider who stops on Thursday afternoon is asking about Thursday
 /// afternoon; one who sweeps past it is not, and the sixty hours in between
 /// were never worth a redraw.
-private struct MapClock: View {
+struct MapClock: View {
 
     /// The instant the map is holding, straight from the tab; nil is "now".
     ///
@@ -3670,7 +3682,11 @@ private struct MapClock: View {
     static func instant(hoursFromNow hours: Int) -> Date? {
         guard hours != 0 else { return nil }
         let target = Date().addingTimeInterval(Double(hours) * 3600)
-        return Calendar.current.date(bySetting: .minute, value: 0, of: target) ?? target
+        // The start of the hour `target` is in. `date(bySetting: .minute,
+        // value: 0)` searches *forward* for the next minute-zero, so at 14:35
+        // "+1h" answered 16:00 — every offset an hour late, and 15:00
+        // unreachable at any thumb position.
+        return Calendar.current.dateInterval(of: .hour, for: target)?.start ?? target
     }
 
     /// The full day and hour, or "Now".

@@ -161,8 +161,11 @@ final class RouteWeatherModel {
             scrub = departure
         }
         // Same line, same fetch — the grid survives panel round-trips and
-        // ForecastCache already deduplicates identical URLs on disk.
-        guard loadedKey != key || grid == nil else { return }
+        // ForecastCache already deduplicates identical URLs on disk. A grid
+        // with no hours is a fetch that failed, not an answer, and does not
+        // count: it used to, and a route opened in a tunnel stayed "no
+        // forecast" for the life of the app.
+        guard loadedKey != key || grid == nil || grid?.hours.isEmpty == true else { return }
         loadedKey = key
         isLoading = true
         let samples = route.path.sampled(every: Self.sampleSpacing, maxPoints: Self.maxSamples)

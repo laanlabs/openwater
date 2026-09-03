@@ -1,6 +1,7 @@
 import Foundation
 import OpenWaterCore
 import SwiftUI
+import os
 
 // MARK: - The sky, not just the wind
 
@@ -628,6 +629,7 @@ extension OpenMeteo {
             // sees yesterday's date on today's row.
             .init(name: "timezone", value: "auto"),
         ]
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
               let data = await ForecastCache.data(from: url, ttl: 1800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -635,10 +637,14 @@ extension OpenMeteo {
 
         var detail = WeatherDetail()
 
-        // Open-Meteo's own caveat: with `unixtime`, hourly stamps are true
-        // instants but *daily* ones are local midnight written as though it
-        // were GMT. Subtracting the offset turns them back into the instant
-        // they mean, which is what makes "Today" say Today.
+        // Measured 2 September 2026, against Open-Meteo's own caveat that
+        // daily `unixtime` stamps are "local midnight written as GMT": they
+        // are not. Maui's day came back as 10:00 UTC and Tarifa's as 22:00
+        // UTC the evening before — each the true instant of local midnight,
+        // exactly like the hourly and sunrise stamps. Subtracting the offset,
+        // which this used to do, was invisible west of Greenwich (still the
+        // same local day) and put every European spot's "Today" on
+        // yesterday.
         let offset = (root["utc_offset_seconds"] as? Double) ?? 0
         detail.timeZone = (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
             ?? TimeZone(secondsFromGMT: Int(offset))
@@ -730,7 +736,7 @@ extension OpenMeteo {
 
             detail.days = times.indices.map { index in
                 WeatherDetail.Day(
-                    date: Date(timeIntervalSince1970: times[index] - offset),
+                    date: Date(timeIntervalSince1970: times[index]),
                     code: Int((codes[safe: index] ?? nil) ?? 0),
                     highC: high[safe: index] ?? nil,
                     lowC: low[safe: index] ?? nil,
@@ -1736,10 +1742,22 @@ public enum NationalWeatherService: Sendable {
         public var stations: [DistilledStation]
     }
 
-    private static var stateCache: [String: StateIndex] = [:]
-    /// States whose completion is already running, so a second pan does not
-    /// start a second walk.
-    private static var completing: Set<String> = []
+    /// Everything the state walk remembers between calls, behind one lock.
+    ///
+    /// Two searches routinely ask about the same state at once — the map's
+    /// hardware task and the conditions sheet — and the background finish
+    /// writes from a third. Dictionaries torn between them are a
+    /// use-after-free, not a stale read.
+    private struct StateMemory {
+        var cache: [String: StateIndex] = [:]
+        /// States whose completion is already running, so a second pan does
+        /// not start a second walk.
+        var completing: Set<String> = []
+        /// When a deferred completion may be attempted again, per state.
+        var retryAfter: [String: Date] = [:]
+        var stateAt: [String: String] = [:]
+    }
+    private static let memory = OSAllocatedUnfairLock(initialState: StateMemory())
 
     private static func stateCacheURL(_ state: String) -> URL {
         // Versioned. The first cut of this stopped after one page of five
@@ -1763,7 +1781,7 @@ public enum NationalWeatherService: Sendable {
                     >= stateEnoughNearby / 4
         }
 
-        if let held = stateCache[state], usable(held) {
+        if let held = memory.withLock({ $0.cache[state] }), usable(held) {
             if !held.complete { finish(state) }
             return held.stations
         }
@@ -1773,7 +1791,7 @@ public enum NationalWeatherService: Sendable {
            let age = (try? stateCacheURL(state).resourceValues(forKeys: [.contentModificationDateKey]))?
                .contentModificationDate,
            Date().timeIntervalSince(age) < 7 * 86_400 {
-            stateCache[state] = index
+            memory.withLock { $0.cache[state] = index }
             if !index.complete { finish(state) }
             return index.stations
         }
@@ -1843,9 +1861,6 @@ public enum NationalWeatherService: Sendable {
         return StateIndex(complete: false, stations: rows)
     }
 
-    /// When a deferred completion may be attempted again, per state.
-    private static var retryAfter: [String: Date] = [:]
-
     /// Finish a state in the background and write it back.
     ///
     /// The first map is drawn from whatever the early stop found; this is
@@ -1855,37 +1870,39 @@ public enum NationalWeatherService: Sendable {
     /// cellular, hotspots and Low Data Mode outright, comes back
     /// incomplete, and tries again later. The map is never waiting on it.
     private static func finish(_ state: String) {
-        guard !completing.contains(state) else { return }
-        if let after = retryAfter[state], after > Date() { return }
-        completing.insert(state)
+        let started = memory.withLock { memory -> Bool in
+            guard !memory.completing.contains(state) else { return false }
+            if let after = memory.retryAfter[state], after > Date() { return false }
+            memory.completing.insert(state)
+            return true
+        }
+        guard started else { return }
         Task {
-            defer { completing.remove(state) }
+            defer { memory.withLock { _ = $0.completing.remove(state) } }
             let index = await walk(state, stopping: nil, onlyWhenCheap: true)
             guard index.complete, !index.stations.isEmpty else {
                 // Refused, or the network gave out part way. Either way it
                 // is not worth asking again on the next pan.
-                retryAfter[state] = Date().addingTimeInterval(600)
+                memory.withLock { $0.retryAfter[state] = Date().addingTimeInterval(600) }
                 return
             }
-            retryAfter[state] = nil
+            memory.withLock { $0.retryAfter[state] = nil }
             store(index, for: state)
         }
     }
 
     private static func store(_ index: StateIndex, for state: String) {
-        stateCache[state] = index
+        memory.withLock { $0.cache[state] = index }
         if let encoded = try? JSONEncoder().encode(index) {
             try? encoded.write(to: stateCacheURL(state), options: .atomic)
         }
     }
 
-    private static var stateAt: [String: String] = [:]
-
     /// Which state a point is in, according to the same endpoint that
     /// answers everything else about it.
     private static func state(at coordinate: Geo.Coordinate) async -> String? {
         let key = String(format: "%.1f,%.1f", coordinate.latitude, coordinate.longitude)
-        if let held = stateAt[key] { return held }
+        if let held = memory.withLock({ $0.stateAt[key] }) { return held }
         let path = String(format: "https://api.weather.gov/points/%.4f,%.4f",
                           coordinate.latitude, coordinate.longitude)
         guard let url = URL(string: path), let data = await get(url) else { return nil }
@@ -1903,7 +1920,7 @@ public enum NationalWeatherService: Sendable {
         guard let state = (try? JSONDecoder().decode(Payload.self, from: data))?
             .properties?.relativeLocation?.properties?.state, state.count == 2
         else { return nil }
-        stateAt[key] = state
+        memory.withLock { $0.stateAt[key] = state }
         return state
     }
 
@@ -2160,7 +2177,12 @@ public enum TidesAndCurrents: Sendable {
 
     /// The station index is a 2 MB document and changes about never, so it is
     /// fetched once, boiled down to what we use, and kept on disk.
-    private static var cached: [(id: String, name: String, coordinate: Geo.Coordinate)] = []
+    private static let cachedLock =
+        OSAllocatedUnfairLock<[(id: String, name: String, coordinate: Geo.Coordinate)]>(initialState: [])
+    private static var cached: [(id: String, name: String, coordinate: Geo.Coordinate)] {
+        get { cachedLock.withLock { $0 } }
+        set { cachedLock.withLock { $0 = newValue } }
+    }
 
     private static var cacheURL: URL {
         URL.cachesDirectory.appending(path: "noaa-tide-stations.json")
@@ -2253,7 +2275,12 @@ public enum TidesAndCurrents: Sendable {
                                source: .tidesAndCurrents) }
     }
 
-    private static var cachedMet: [(id: String, name: String, coordinate: Geo.Coordinate)] = []
+    private static let cachedMetLock =
+        OSAllocatedUnfairLock<[(id: String, name: String, coordinate: Geo.Coordinate)]>(initialState: [])
+    private static var cachedMet: [(id: String, name: String, coordinate: Geo.Coordinate)] {
+        get { cachedMetLock.withLock { $0 } }
+        set { cachedMetLock.withLock { $0 = newValue } }
+    }
 
     private static var metCacheURL: URL {
         URL.cachesDirectory.appending(path: "noaa-met-stations.json")
@@ -2347,17 +2374,31 @@ public enum TidesAndCurrents: Sendable {
     }
 
     /// Today's high and low waters for one station, in metres above MLLW.
-    public static func today(for stationId: String) async -> [TideEvent] {
+    ///
+    /// - Parameter timeZone: whose "today". The spot's zone, so the day is
+    ///   the one the rider is looking at; the phone's when nothing better is
+    ///   known. The request itself is in GMT — `date=today` under `lst_ldt`
+    ///   was the station's day, parsed as the phone's clock, and every event
+    ///   drifted by the difference between the two.
+    public static func today(for stationId: String, timeZone: TimeZone? = nil) async -> [TideEvent] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone ?? .current
+        let dayStart = calendar.startOfDay(for: Date())
+        let stamp = DateFormatter()
+        stamp.dateFormat = "yyyyMMdd HH:mm"
+        stamp.timeZone = .gmt
+
         var components = URLComponents(
             string: "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter")!
         components.queryItems = [
             .init(name: "product", value: "predictions"),
             .init(name: "interval", value: "hilo"),
             .init(name: "station", value: stationId),
-            .init(name: "date", value: "today"),
+            .init(name: "begin_date", value: stamp.string(from: dayStart)),
+            .init(name: "range", value: "24"),
             .init(name: "datum", value: "MLLW"),
             .init(name: "units", value: "metric"),
-            .init(name: "time_zone", value: "lst_ldt"),
+            .init(name: "time_zone", value: "gmt"),
             .init(name: "format", value: "json"),
         ]
         // Predictions, not readings — the tide table was computed from the
@@ -2370,11 +2411,9 @@ public enum TidesAndCurrents: Sendable {
             struct Prediction: Decodable { let t: String; let v: String; let type: String }
             let predictions: [Prediction]?
         }
-        // The station's own local time, which is what the reading means and
-        // also — usefully — the timezone the rider is standing in.
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd HH:mm"
-        parser.timeZone = .current
+        parser.timeZone = .gmt
 
         return ((try? JSONDecoder().decode(Payload.self, from: data))?.predictions ?? [])
             .compactMap { row in
@@ -2429,8 +2468,11 @@ public enum DataBuoyCenter: Sendable {
     /// One row of the index: what a station is called and where it stands.
     private typealias Station = (id: String, name: String, coordinate: Geo.Coordinate)
 
-    private static var cached: [Station] = []
-    private static var loading: Task<[Station], Never>?
+    private struct IndexMemory {
+        var cached: [Station] = []
+        var loading: Task<[Station], Never>?
+    }
+    private static let indexMemory = OSAllocatedUnfairLock(initialState: IndexMemory())
 
     /// The same index, read as anemometers rather than as buoys.
     ///
@@ -2509,12 +2551,21 @@ public enum DataBuoyCenter: Sendable {
     }
 
     private static func loadIndex() async -> [Station] {
-        if !cached.isEmpty { return cached }
-
         // Both lists ask for this at the same moment on every search, and on a
         // cold cache that used to be two downloads of the same file. Whoever
-        // asks first starts the work; everyone else waits on it.
-        if let loading { return await loading.value }
+        // asks first starts the work; everyone else waits on it. Decided
+        // under the lock, so two first askers cannot both start it.
+        enum Answer { case ready([Station]), wait(Task<[Station], Never>), start }
+        let answer: Answer = indexMemory.withLock { memory in
+            if !memory.cached.isEmpty { return .ready(memory.cached) }
+            if let loading = memory.loading { return .wait(loading) }
+            return .start
+        }
+        switch answer {
+        case .ready(let stations): return stations
+        case .wait(let loading): return await loading.value
+        case .start: break
+        }
 
         let task = Task { () -> [Station] in
             let onDisk = fromDisk()
@@ -2533,10 +2584,10 @@ public enum DataBuoyCenter: Sendable {
             // far better one than a sheet claiming there is nothing out here.
             return onDisk?.stations ?? []
         }
-        loading = task
-        cached = await task.value
-        loading = nil
-        return cached
+        indexMemory.withLock { $0.loading = task }
+        let stations = await task.value
+        indexMemory.withLock { $0.cached = stations; $0.loading = nil }
+        return stations
     }
 
     private static func fromDisk() -> (stations: [Station], age: TimeInterval)? {
@@ -3047,10 +3098,15 @@ extension OpenMeteo {
 /// copied from — SURF.md's Tier 5, closed.
 public enum Tides: Sendable {
 
-    public static func curve(at coordinate: Geo.Coordinate) async -> TideCurve {
+    /// - Parameter timeZone: the spot's clock, for a station curve — its
+    ///   points are instants and the screen needs to know which wall clock
+    ///   to draw them on. The model path brings its own from the response.
+    public static func curve(at coordinate: Geo.Coordinate,
+                             timeZone: TimeZone? = nil) async -> TideCurve {
         if let station = await TidesAndCurrents.stations(near: coordinate, limit: 1).first,
            station.metres <= Currents.stationRadius {
-            let harmonic = await TidesAndCurrents.harmonicCurve(for: station)
+            var harmonic = await TidesAndCurrents.harmonicCurve(for: station)
+            harmonic.timeZone = timeZone
             // A station that answered with nothing is a failed fetch, not
             // an authority — the model curve beats a blank chart.
             if !harmonic.isEmpty { return harmonic }
@@ -3066,9 +3122,12 @@ extension TidesAndCurrents {
     /// two days out. Predictions, not readings — computed from harmonics,
     /// and caching them wrongs nobody.
     public static func harmonicCurve(for station: TideStation) async -> TideCurve {
+        // Asked for and parsed in GMT, so every point is a true instant
+        // wherever the phone is. The curve carries no zone of its own — the
+        // caller that knows the spot's fills it in; see `Tides.curve`.
         let stamp = DateFormatter()
         stamp.dateFormat = "yyyyMMdd"
-        stamp.timeZone = .current
+        stamp.timeZone = .gmt
         let begin = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
 
         var components = URLComponents(
@@ -3084,7 +3143,7 @@ extension TidesAndCurrents {
             .init(name: "range", value: "264"),
             .init(name: "datum", value: "MLLW"),
             .init(name: "units", value: "metric"),
-            .init(name: "time_zone", value: "lst_ldt"),
+            .init(name: "time_zone", value: "gmt"),
             .init(name: "format", value: "json"),
         ]
         guard let url = components.url,
@@ -3094,7 +3153,7 @@ extension TidesAndCurrents {
         var curve = TideCurve(
             points: parseWaterLevel(served.data),
             source: .station(name: station.name, metres: station.metres),
-            timeZone: .current
+            timeZone: nil
         )
         curve.staleAge = served.staleAge
         return curve
@@ -3112,7 +3171,7 @@ extension TidesAndCurrents {
         }
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd HH:mm"
-        parser.timeZone = .current
+        parser.timeZone = .gmt
 
         let rows = (try? JSONDecoder().decode(Payload.self, from: data))?.predictions ?? []
         return rows.enumerated().compactMap { index, row in
@@ -3434,6 +3493,7 @@ extension OpenMeteo {
             .init(name: "timeformat", value: "unixtime"),
             .init(name: "timezone", value: "auto"),
         ]
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
         guard let url = components.url,
               let data = await ForecastCache.data(from: url, ttl: 10_800),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

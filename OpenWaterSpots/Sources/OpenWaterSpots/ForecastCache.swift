@@ -96,6 +96,50 @@ public enum ForecastCache: Sendable {
         await serve(from: url, ttl: ttl)?.data
     }
 
+    /// The most the cache directory is allowed to hold before the oldest
+    /// answers go. Fifty megabytes is a long afternoon of panning; the
+    /// wash's field responses run to a few hundred kilobytes apiece.
+    public static let sizeLimit: Int = 50 * 1024 * 1024
+
+    /// Throw away what can never be served again, and then the oldest of
+    /// the rest until the directory fits.
+    ///
+    /// Nothing else ever deleted a file here. Every distinct field
+    /// rectangle, every day boundary in a tide request and every panned
+    /// centre wrote a new one, and the directory only grew. Anything past
+    /// `staleLimit` is dead weight by definition — the fallback path will
+    /// not touch it — so it goes first, and the cap handles a rider who
+    /// pans a coast for a week.
+    ///
+    /// Called from a background task at launch; the work is one directory
+    /// listing and some unlinks, and none of it is on the way to a screen.
+    public static func sweep(now: Date = Date()) {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: Array(keys)
+        ) else { return }
+
+        var kept: [(url: URL, modified: Date, size: Int)] = []
+        for file in files {
+            let values = try? file.resourceValues(forKeys: keys)
+            let modified = values?.contentModificationDate ?? .distantPast
+            let size = values?.fileSize ?? 0
+            if now.timeIntervalSince(modified) > staleLimit {
+                try? FileManager.default.removeItem(at: file)
+            } else {
+                kept.append((file, modified, size))
+            }
+        }
+
+        var total = kept.reduce(0) { $0 + $1.size }
+        guard total > sizeLimit else { return }
+        for entry in kept.sorted(by: { $0.modified < $1.modified }) {
+            try? FileManager.default.removeItem(at: entry.url)
+            total -= entry.size
+            if total <= sizeLimit { break }
+        }
+    }
+
     private static func age(of path: URL) -> TimeInterval? {
         guard let modified = try? FileManager.default
             .attributesOfItem(atPath: path.path)[.modificationDate] as? Date

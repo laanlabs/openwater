@@ -50,6 +50,24 @@ watch_resize() {
 watch_resize 410 502   # Ultra / Ultra 2 (49mm)
 watch_resize 416 496   # Series 10 (46mm)
 
+# Apple TV — the captures, unaltered.
+#
+# No marketing frame and no resampling. A tvOS capture is already 3840 x 2160,
+# which is one of the two sizes App Store Connect accepts for Apple TV, and a
+# television screenshot needs no device frame — the screen *is* the product.
+# Composited headline text would also be wrong here: this listing is read on
+# the same television it is about, at the same distance, so the app's own type
+# is already the right size.
+tv_copy() {
+    local dst="$OUT/appletv"
+    [ -d "$RAW/appletv" ] || { echo "skip appletv (no raw captures)"; return; }
+    rm -rf "$dst"; mkdir -p "$dst"
+    cp "$RAW"/appletv/*.png "$dst"/
+    echo "$dst  3840x2160  ($(ls "$dst"/*.png 2>/dev/null | wc -l | tr -d ' ') files)"
+}
+
+tv_copy
+
 echo
 echo "Verifying dimensions"
 fail=0
@@ -61,6 +79,7 @@ for dir in "$OUT"/*/; do
         # Compare against the size encoded in the directory name where present.
         case "$expected" in
             watch-*) want="${expected#watch-}"; want="${want/x/}" ;;
+            appletv) want="38402160" ;;
             *) continue ;;
         esac
         if [ "$actual" != "$want" ]; then
@@ -69,5 +88,5 @@ for dir in "$OUT"/*/; do
         fi
     done
 done
-[ "$fail" -eq 0 ] && echo "  all watch sizes exact"
+[ "$fail" -eq 0 ] && echo "  all watch and Apple TV sizes exact"
 echo "Done."

@@ -162,6 +162,15 @@ struct WindMapScreen: View {
         // Only when there is nothing to show. A rider who typed a place is
         // not asking to be prompted about Location Services every launch.
         .onAppear { if !location.isChosen { location.locate() } }
+        // The capture seam; see `TVScreenshotRoute`. Held until the centre has
+        // real numbers, so the report is photographed with a forecast in it
+        // rather than mid-pulse.
+        .task(id: centreLoaded) {
+            guard centreLoaded,
+                  let route = TVScreenshotRoute.requested,
+                  route == .conditions || route == .windOutlook else { return }
+            isShowingConditions = true
+        }
         .onChange(of: isActive, initial: true) { _, active in
             if active { wash.wake() } else { wash.sleep() }
         }

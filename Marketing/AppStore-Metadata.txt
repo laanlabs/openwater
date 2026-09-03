@@ -221,7 +221,8 @@ Minimum iOS       18.0
 Minimum watchOS   11.0
 Minimum macOS     15.0
 Minimum visionOS  2.0
-Devices           iPhone, iPad, Apple Watch
+Minimum tvOS      17.0
+Devices           iPhone, iPad, Apple Watch, Apple TV
 
     iOS 18 is the floor set by the two APIs the app genuinely relies on:
     SwiftData's #Index macro and the value-based Tab initialiser. Going
@@ -231,6 +232,11 @@ Devices           iPhone, iPad, Apple Watch
     riders who simply have not updated yet.
 
     watchOS 11 pairs with iOS 18 and covers Apple Watch Series 6 and later.
+
+    tvOS 17 is the floor for the Apple TV app: it is where SwiftUI's
+    `Map` gained the content builder the wind overlay is drawn with, and
+    where `onMapCameraChange` arrived — the whole map tab rests on both.
+    It covers Apple TV HD and Apple TV 4K of every generation.
 
 
 --------------------------------------------------------------------------
@@ -379,6 +385,7 @@ Required sizes and what is in Marketing/screenshots/appstore:
     iPad 13"      2064 x 2752   ipad-13
     Watch 49mm     410 x  502   watch-410x502
     Watch 46mm     416 x  496   watch-416x496
+    Apple TV      3840 x 2160   appletv
 
     All three iPhone sizes are provided because App Store Connect's required
     size depends on which display slot the app record uses, and it rejects
@@ -390,6 +397,21 @@ Required sizes and what is in Marketing/screenshots/appstore:
     recording session — the simulator was driven along a real route with
     `simctl location`, so the speeds, splits and flight timer on them were
     all actually computed.
+
+    The Apple TV screenshots are captures at native 3840 x 2160, which is
+    one of the two sizes App Store Connect accepts for that platform (the
+    other is 1920 x 1080). No frame and no composed headline: a television
+    screenshot needs no device frame because the screen is the product, and
+    the listing is read on the same television at the same distance, so the
+    app's own type is already the right size.
+
+    They are captured with Marketing/capture-tv-screenshots.sh, which seeds
+    a known set of saved spots first — otherwise the favourites screen
+    photographs whatever was last left on the device.
+
+    Order: the map the app opens on, the full report under its crosshairs,
+    the five-day model comparison, the camera grid, the cameras on a map,
+    the radar, and the saved spots board.
 
 Order (most compelling first — most viewers never scroll past the third):
 

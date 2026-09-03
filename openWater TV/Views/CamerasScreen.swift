@@ -93,6 +93,13 @@ struct CamerasScreen: View {
         .fullScreenCover(isPresented: $showsMap) {
             CamsMapScreen(cams: cams)
         }
+        .task(id: cams.isEmpty) {
+            // The capture seam; see `TVScreenshotRoute`. Waits for the cams,
+            // because a map of nothing is not a screenshot of anything.
+            if TVScreenshotRoute.requested == .camerasMap, !cams.isEmpty {
+                showsMap = true
+            }
+        }
         .task(id: areaKey) {
             isSearching = true
             defer { isSearching = false }

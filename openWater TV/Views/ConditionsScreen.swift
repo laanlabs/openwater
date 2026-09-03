@@ -187,6 +187,12 @@ struct ConditionsScreen: View {
         // Keyed on the model: picking a new one re-asks for every number on
         // this screen rather than leaving yesterday's alongside a new label.
         .task(id: modelRaw) { await load() }
+        .task(id: isLoading) {
+            // The capture seam; see `TVScreenshotRoute`.
+            if TVScreenshotRoute.requested == .windOutlook, !isLoading, path.isEmpty {
+                path.append(.wind)
+            }
+        }
     }
 
     private func load() async {

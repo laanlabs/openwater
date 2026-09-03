@@ -298,6 +298,19 @@ private struct FavoriteRow: View {
         return isFocused ? Color.primary.opacity(0.14) : Color.primary.opacity(0.05)
     }
 
+    /// The row's own text colour: dark on the focused row's light halo, white
+    /// on the dark board. Deleting keeps white, because that row is red.
+    private var ink: Color {
+        isFocused && !isDeleting ? .black : .white
+    }
+
+    /// The quieter half of the row — the cardinal, the units, the gust — at a
+    /// contrast that survives both grounds rather than a fixed grey that only
+    /// works on one.
+    private var quietInk: Color {
+        isFocused && !isDeleting ? Color.black.opacity(0.6) : Color.white.opacity(0.65)
+    }
+
     var body: some View {
         HStack(spacing: 32) {
             if isDeleting {
@@ -308,26 +321,30 @@ private struct FavoriteRow: View {
             if isPin {
                 Image(systemName: "mappin.circle.fill")
                     .font(.system(size: 30))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(quietInk)
             }
             Text(name)
                 .font(.system(size: 40, weight: .medium))
-                // A literal colour, not `.primary`: inside a focusable button
+                // Literal colours, not `.primary`: inside a focusable button
                 // tvOS resolves `.primary` to the app's accent, so a board
                 // built from links comes out entirely brand blue — the loudest
-                // thing on screen sitting on the part nobody is reading. The
-                // number carries the tint, and only when it earns it.
-                .foregroundStyle(.white)
+                // thing on screen sitting on the part nobody is reading.
+                //
+                // Which literal, though, has to follow the focus. tvOS paints
+                // the focused row with its own near-white halo, and white text
+                // on it was white on white: the one row a rider is looking at
+                // was the one row they could not read.
+                .foregroundStyle(ink)
                 .lineLimit(1)
             Spacer(minLength: 40)
             if let reading {
                 Image(systemName: "location.north.fill")
                     .font(.system(size: 26))
                     .rotationEffect(.degrees(reading.directionDeg + 180))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(quietInk)
                 Text(reading.cardinal)
                     .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(quietInk)
                     .frame(width: 90, alignment: .leading)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text("\(Int(reading.speedKn.rounded()))")
@@ -338,19 +355,21 @@ private struct FavoriteRow: View {
                         if let gust = reading.gustKn {
                             Text("g\(Int(gust.rounded()))")
                                 .font(.system(size: 22))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(quietInk)
                                 .monospacedDigit()
                         }
                     }
                 }
-                .foregroundStyle(reading.isFiring ? Color.accentColor : Color.white)
+                // Firing keeps the tint on both grounds; the accent is dark
+                // enough to read on the halo and bright enough on the board.
+                .foregroundStyle(reading.isFiring ? Color.accentColor : ink)
                 .frame(width: 190, alignment: .leading)
             } else {
                 // A blank, not a spinner. The row is the right height already
                 // and a spinner on every row reads as a broken screen.
                 Text("—")
                     .font(.system(size: 62, weight: .heavy, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.3))
+                    .foregroundStyle(quietInk.opacity(0.5))
                     .frame(width: 190, alignment: .leading)
             }
         }

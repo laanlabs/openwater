@@ -50,34 +50,41 @@ struct CurrentFlowScreen: View {
     private var now: CurrentsOutlook.Hour? { outlook?.hour(at: nil) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 40) {
-                ScrollStop { header }
-                    .prefersDefaultFocus(in: page)
-                ScrollStop { flowMap }
+        // The map, full screen, and Menu to leave.
+        //
+        // This was a scrolling page with the map a third of the way down it,
+        // 520 points tall, under a headline card — so the thing the screen is
+        // named for had to be scrolled to on a device with no scrolling, only
+        // focus. Everything else here is a caption on the map rather than a
+        // section beside it, so the map takes the glass and the words sit on
+        // top of it.
+        ZStack(alignment: .topLeading) {
+            flowMap
+                .ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                    .padding(28)
+                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 28))
+                    .padding(.leading, 90)
+                    .padding(.top, 40)
+                Spacer()
                 if isLoading {
                     ProgressView().controlSize(.large)
-                        .frame(maxWidth: .infinity, minHeight: 200)
-                } else if let outlook, !outlook.isEmpty {
-                    if !outlook.hours.isEmpty { ScrollStop { chart } }
-                    ForEach(upcoming) { event in
-                        ScrollStop { TurnRow(event: event) }
-                    }
-                    ScrollStop { provenance(outlook) }
-                } else {
-                    ScrollStop {
-                        Text("No current model for this point. Open water away from a tidal coast often has none.")
-                            .font(.system(size: 30))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .padding(.leading, 90)
+                        .padding(.bottom, 60)
+                } else if let outlook, !outlook.isEmpty, !upcoming.isEmpty {
+                    turnsStrip
+                } else if outlook?.isEmpty ?? false {
+                    Text("No current model for this point. Open water away from a tidal coast often has none.")
+                        .font(.system(size: 28))
+                        .padding(24)
+                        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 24))
+                        .padding(.leading, 90)
+                        .padding(.bottom, 60)
+                        .frame(maxWidth: 1100, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 90)
-            .padding(.vertical, 60)
         }
-        .focusScope(page)
-        .background(Color.black.ignoresSafeArea())
         .foregroundStyle(.white)
         .menuBackHint()
         .task {
@@ -85,6 +92,33 @@ struct CurrentFlowScreen: View {
             outlook = await Currents.outlook(at: here)
             isLoading = false
         }
+    }
+
+    /// The turns, along the bottom rather than down the page.
+    ///
+    /// Horizontal because they are a sequence in time and there are only ever
+    /// a handful worth naming — and because a column of them here would be
+    /// the scrolling this screen was rebuilt to get rid of.
+    private var turnsStrip: some View {
+        HStack(spacing: 20) {
+            ForEach(upcoming.prefix(5)) { event in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(headline(event))
+                        .font(.system(size: 26, weight: .semibold))
+                        .lineLimit(1)
+                    Text(event.at, format: .dateTime.weekday(.abbreviated).hour().minute())
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
+                .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 18))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 90)
+        .padding(.bottom, 56)
     }
 
     private var header: some View {
@@ -203,153 +237,14 @@ struct CurrentFlowScreen: View {
                     .padding(18)
                 }
             }
-            .frame(height: 520)
-            .clipShape(RoundedRectangle(cornerRadius: 24))
-        }
-    }
-
-    /// The day's rate. Magnitude only — the direction is the arrows' job, and
-    /// a signed curve would need a convention about which way is positive
-    /// that no two harbours agree on.
-    private var chart: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("THROUGH THE DAY")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Chart {
-                ForEach(dayHours) { hour in
-                    if let speed = hour.speedKn {
-                        AreaMark(x: .value("Time", hour.at), y: .value("Knots", speed))
-                            .foregroundStyle(.linearGradient(
-                                colors: [Color.cyan.opacity(0.5), Color.cyan.opacity(0.04)],
-                                startPoint: .top, endPoint: .bottom))
-                    }
-                }
-                ForEach(dayHours) { hour in
-                    if let speed = hour.speedKn {
-                        LineMark(x: .value("Time", hour.at), y: .value("Knots", speed))
-                            .foregroundStyle(.white)
-                            .lineStyle(StrokeStyle(lineWidth: 4))
-                    }
-                }
-                RuleMark(x: .value("Now", Date()))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                    .annotation(position: .top) {
-                        Text("Now")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-            }
-            .chartYAxis {
-                AxisMarks(values: .automatic(desiredCount: 3)) { value in
-                    AxisGridLine().foregroundStyle(.white.opacity(0.12))
-                    AxisValueLabel {
-                        if let knots = value.as(Double.self) {
-                            Text(String(format: "%.1f", knots))
-                                .font(.system(size: 20))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .hour, count: 6)) { value in
-                    AxisGridLine().foregroundStyle(.white.opacity(0.15))
-                    AxisValueLabel {
-                        if let date = value.as(Date.self) {
-                            Text(date, format: .dateTime.hour())
-                                .font(.system(size: 20))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .frame(height: 320)
-        }
-    }
-
-    /// A day and a half — far enough to plan tomorrow morning's crossing.
-    private var dayHours: [CurrentsOutlook.Hour] {
-        let end = Date().addingTimeInterval(36 * 3600)
-        return (outlook?.hours ?? []).filter {
-            $0.at >= Date().addingTimeInterval(-3 * 3600) && $0.at <= end
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     /// The next few turns. Station predictions name these; the model curve
-    /// never carries them, so this section simply is not there for a modelled
+    /// never carries them, so the strip simply is not there for a modelled
     /// point rather than inventing peaks from a curve.
     private var upcoming: [CurrentsOutlook.Event] {
         Array((outlook?.events ?? []).filter { $0.at > Date() }.prefix(5))
-    }
-
-    /// Which authority is answering. Never blended, and said out loud for the
-    /// reason the tide screen says its datum: a station and a model disagree,
-    /// and a rider who knows the difference wants to know which this is.
-    private func provenance(_ outlook: CurrentsOutlook) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("WHERE THESE NUMBERS COME FROM")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.secondary)
-            switch outlook.source {
-            case .station(let station):
-                Text("\(station.name), \(Format.distance(station.metres, unit: UnitPreferences.forThisDevice.distance)) away — NOAA harmonic predictions. Predicted from harmonics, not measured.")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .model:
-                Text("Open-Meteo ocean model. Worldwide and hourly, and a model — a named current station would be more exact; there is not one within range of this point.")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
-/// One turn of the water: slack, or a peak and how hard it runs.
-private struct TurnRow: View {
-
-    let event: CurrentsOutlook.Event
-
-    private var label: String {
-        switch event.kind {
-        case .maxFlood: "Max flood"
-        case .maxEbb: "Max ebb"
-        case .slack: "Slack"
-        }
-    }
-
-    private var symbol: String {
-        switch event.kind {
-        case .maxFlood: "arrow.up.right.circle.fill"
-        case .maxEbb: "arrow.down.left.circle.fill"
-        case .slack: "pause.circle.fill"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 28) {
-            Image(systemName: symbol)
-                .font(.system(size: 32))
-                .foregroundStyle(event.kind == .slack ? Color.secondary : Color.cyan)
-            Text(label)
-                .font(.system(size: 30, weight: .medium))
-                .frame(width: 190, alignment: .leading)
-            Text(event.at, format: .dateTime.weekday(.abbreviated).hour().minute())
-                .font(.system(size: 30))
-                .monospacedDigit()
-            Spacer()
-            if let speed = event.speedKn {
-                Text(String(format: "%.1f kn", speed))
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-            }
-            Text(event.at, style: .relative)
-                .font(.system(size: 22))
-                .foregroundStyle(.secondary)
-                .frame(width: 210, alignment: .trailing)
-        }
     }
 }

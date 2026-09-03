@@ -213,6 +213,9 @@ struct CamCard: View {
     /// Only meaningful for `.pin`: a map pin wears its name while focused.
     @FocusState private var isPinFocused: Bool
 
+    /// Only meaningful for `.card`: the grid tile draws its own ring.
+    @FocusState private var isCardFocused: Bool
+
     private enum Route: Identifiable {
         /// Something `AVPlayer` can open — the guide's own stream or still,
         /// or a manifest resolved a moment ago.
@@ -330,7 +333,12 @@ struct CamCard: View {
             // cropped at the edges as the card scales under focus.
             Button(action: open) {
                 ZStack {
-                    Color.black
+                    // A tile, not a hole. This was `Color.black` on a black
+                    // page, so a camera with no published still had no edges
+                    // at all — and a card style that lifts and shadows on
+                    // focus has nothing to lift when there is nothing to see.
+                    // Roughly two thirds of the cameras here are that case.
+                    Color.white.opacity(0.10)
                     if let preview = cam.previewUrl {
                         AsyncImage(url: preview) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
@@ -353,8 +361,19 @@ struct CamCard: View {
                 }
                 .frame(width: 420, height: 236)
                 .clipped()
+                // Drawn inside the label so it scales and lifts with the card
+                // rather than sitting still behind it. White at full strength
+                // when focused: on this page the only reliable contrast is
+                // against black, and a tinted ring reads as decoration where
+                // a white one reads as "this one".
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(isCardFocused ? Color.white : Color.white.opacity(0.18),
+                                      lineWidth: isCardFocused ? 6 : 2)
+                }
             }
             .buttonStyle(.card)
+            .focused($isCardFocused)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(cam.displayName)

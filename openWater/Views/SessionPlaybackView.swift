@@ -236,6 +236,7 @@ struct SessionPlaybackView: View {
                     .background(.regularMaterial, in: Circle())
                     .contentShape(Circle())
             }
+            .accessibilityLabel("Close replay")
 
             Spacer()
 
@@ -384,6 +385,8 @@ struct SessionPlaybackView: View {
             speedStrip
                 .frame(height: 26)
                 .padding(.horizontal)
+                // The slider under it is the control; the strip is a picture.
+                .accessibilityHidden(true)
 
             Slider(
                 value: Binding(
@@ -393,12 +396,15 @@ struct SessionPlaybackView: View {
                 in: 0...duration
             )
             .padding(.horizontal)
+            .accessibilityLabel("Playhead")
+            .accessibilityValue("\(Format.duration(elapsed)) of \(Format.duration(duration))")
 
             HStack(spacing: 18) {
                 Button { seek(by: -30) } label: {
                     Image(systemName: "gobackward.30")
                         .font(.title3)
                 }
+                .accessibilityLabel("Back 30 seconds")
 
                 Button {
                     if elapsed >= duration - 0.05 { elapsed = 0 }
@@ -407,11 +413,13 @@ struct SessionPlaybackView: View {
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 46))
                 }
+                .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
                 Button { seek(by: 30) } label: {
                     Image(systemName: "goforward.30")
                         .font(.title3)
                 }
+                .accessibilityLabel("Forward 30 seconds")
 
                 Menu {
                     ForEach([1.0, 5, 10, 30, 60, 120], id: \.self) { rate in
@@ -425,6 +433,8 @@ struct SessionPlaybackView: View {
                         .padding(.vertical, 6)
                         .background(.regularMaterial, in: Capsule())
                 }
+                .accessibilityLabel("Playback speed")
+                .accessibilityValue("\(Int(speedMultiplier)) times")
             }
             .padding(.bottom, 10)
         }

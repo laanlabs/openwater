@@ -138,6 +138,7 @@ struct DownwindDetailView: View {
             .padding(.bottom, 24)
         }
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .readableContentColumn()
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Downwind")
         .navigationBarTitleDisplayMode(.inline)

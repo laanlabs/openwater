@@ -163,7 +163,8 @@ extension Session {
         // The track itself is rebuilt too, not just re-analysed: the ingest
         // filters are sport-specific as well, so a windsurf session reclassified
         // as a kayak should have its implausible-speed ceiling change with it.
-        let track = TrackBuilder(options: .forSport(edits.sport)).build(from: self.track.points)
+        let options: TrackBuilder.Options = trackFilter == .lenient ? .lenient : .forSport(edits.sport)
+        let track = TrackBuilder(options: options).build(from: self.track.points)
         let summary = SessionAnalyzer(
             configuration: .init(
                 sport: edits.sport,

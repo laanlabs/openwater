@@ -98,6 +98,7 @@ struct WaveDetailView: View {
             .padding(.bottom, 24)
         }
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .readableContentColumn()
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Wave Rides")
         .navigationBarTitleDisplayMode(.inline)

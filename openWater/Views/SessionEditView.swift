@@ -132,7 +132,8 @@ struct SessionEditView: View {
                 }
 
                 Section {
-                    LabeledContent("Recorded", value: stored.startDate.formatted(date: .long, time: .shortened))
+                    LabeledContent("Recorded", value: stored.startDate.formatted(
+                        Date.FormatStyle(date: .long, time: .shortened, timeZone: stored.zone)))
                     LabeledContent("Duration", value: Format.duration(stored.duration))
                     LabeledContent("Distance", value: Format.distance(stored.distance, unit: settings.units.distance))
                     if let device = session?.deviceModel {

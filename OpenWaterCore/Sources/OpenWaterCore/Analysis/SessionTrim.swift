@@ -186,7 +186,7 @@ extension Session {
         let points = trim.apply(to: original)
         guard points.count >= 2 else { return result }
 
-        let track = TrackBuilder(options: .forSport(sport)).build(from: points)
+        let track = TrackBuilder(options: trackBuilderOptions).build(from: points)
         let summary = SessionAnalyzer(
             configuration: .init(
                 sport: sport, categories: categories, wind: effectiveWind,

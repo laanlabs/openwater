@@ -162,7 +162,8 @@ struct SessionOverview: View {
             // it twice a centimetre apart just costs a line of screen.
             HStack(spacing: 6) {
                 Text(session.startDate.formatted(
-                    .dateTime.weekday(.wide).month(.abbreviated).day().year().hour().minute()
+                    Date.FormatStyle(timeZone: session.zone)
+                        .weekday(.wide).month(.abbreviated).day().year().hour().minute()
                 ))
                 .font(.headline)
                 if let device = session.deviceModel, device.localizedCaseInsensitiveContains("watch") {

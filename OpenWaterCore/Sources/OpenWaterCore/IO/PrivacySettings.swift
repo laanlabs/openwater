@@ -121,7 +121,7 @@ public struct PrivacySettings: Hashable, Sendable, Codable {
             return result
         }
 
-        let track = TrackBuilder(options: .forSport(session.sport)).build(from: points)
+        let track = TrackBuilder(options: session.trackBuilderOptions).build(from: points)
         result.track = track
         result.startDate = track.startDate ?? session.startDate
         result.endDate = track.endDate ?? session.endDate

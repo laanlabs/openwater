@@ -672,25 +672,10 @@ struct RibbonView: View {
                     }
 
                     ForEach(showsLegs || showsGrouped ? [] : lanes, id: \.id) { lane in
-                        LaneRow(
-                            lane: lane,
-                            // Lanes are scaled to the longest run so their
-                            // lengths are directly comparable — a short run
-                            // looks short, which is information.
-                            widthFraction: ribbon.maxLaneDistance > 0
-                                ? lane.distance / ribbon.maxLaneDistance
-                                : 1,
-                            maxSpeed: maxSpeed,
-                            speedScale: speedScale,
-                            units: units,
-                            isSelected: selectedLane == lane.runIndex,
-                            isBest: bestRunIndex == lane.runIndex
-                        )
-                        .onTapGesture {
-                            withAnimation(.snappy) {
-                                selectedLane = selectedLane == lane.runIndex ? nil : lane.runIndex
-                            }
-                        }
+                        // Lanes are scaled to the longest run so their
+                        // lengths are directly comparable — a short run
+                        // looks short, which is information.
+                        laneRow(lane)
 
                         if showsConnectors, let connector = connector(after: lane.id) {
                             ConnectorRow(connector: connector)
@@ -1464,21 +1449,38 @@ struct RibbonView: View {
         .buttonStyle(.plain)
     }
 
+    /// A real button, like every other row on the tab. As a tap gesture on a
+    /// stack, VoiceOver could not select a stretch at all.
     private func laneRow(_ lane: SessionRibbon.Lane) -> some View {
-        LaneRow(
-            lane: lane,
-            widthFraction: ribbon.maxLaneDistance > 0 ? lane.distance / ribbon.maxLaneDistance : 1,
-            maxSpeed: maxSpeed,
-            speedScale: speedScale,
-            units: units,
-            isSelected: selectedLane == lane.runIndex,
-            isBest: bestRunIndex == lane.runIndex
-        )
-        .onTapGesture {
+        Button {
             withAnimation(.snappy) {
                 selectedLane = selectedLane == lane.runIndex ? nil : lane.runIndex
             }
+        } label: {
+            LaneRow(
+                lane: lane,
+                widthFraction: ribbon.maxLaneDistance > 0 ? lane.distance / ribbon.maxLaneDistance : 1,
+                maxSpeed: maxSpeed,
+                speedScale: speedScale,
+                units: units,
+                isSelected: selectedLane == lane.runIndex,
+                isBest: bestRunIndex == lane.runIndex
+            )
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Self.accessibilityLabel(for: lane, units: units))
+        .accessibilityAddTraits(selectedLane == lane.runIndex ? .isSelected : [])
+    }
+
+    /// What a stretch is, in a sentence: number, kind, tack, average speed
+    /// and distance.
+    static func accessibilityLabel(for lane: SessionRibbon.Lane, units: UnitPreferences) -> String {
+        var parts = ["Stretch \(lane.runIndex + 1)"]
+        parts.append(GroupedRun.Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail).title)
+        if let tack = lane.tack { parts.append(tack == .port ? "port tack" : "starboard tack") }
+        parts.append(Format.speed(lane.averageSpeed, unit: units.speed, decimals: 1))
+        parts.append(Format.distance(lane.distance, unit: units.distance))
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder
@@ -1724,10 +1726,12 @@ struct LaneRow: View {
 
             if let tack = lane.tack {
                 // Port and starboard are conventionally red and green, and using
-                // that here makes an asymmetric session visible at a glance.
+                // that here makes an asymmetric session visible at a glance —
+                // for anyone who sees red and green. The label says it too.
                 Circle()
                     .fill(tack == .port ? Color.red : Color.green)
                     .frame(width: 6, height: 6)
+                    .accessibilityLabel(tack == .port ? "Port tack" : "Starboard tack")
             }
 
             Text(Format.speed(lane.averageSpeed, unit: units.speed, decimals: 1))

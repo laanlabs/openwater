@@ -73,6 +73,28 @@ struct LiveSessionScreen: View {
                     .padding(.top, 6)
             }
 
+            // A grant revoked from Settings or Control Centre mid-session
+            // used to be invisible: fixes stopped arriving, the clock kept
+            // running, and the speed sat frozen at its last value until the
+            // rider stopped and found a track that ended an hour ago.
+            if recorder.location.authorization == .denied || recorder.location.authorization == .restricted {
+                Label("Location access is off — nothing is being recorded. Turn it back on in Settings.",
+                      systemImage: "location.slash.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+            } else if recorder.location.isReducedAccuracy {
+                Label("Precise Location is off — the track will be kilometres coarse. Turn it on in Settings ▸ openWater.",
+                      systemImage: "location.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+            }
+
             if showMap {
                 // Capped rather than greedy: past about a third of the screen
                 // the map stops telling you anything new and starts squeezing

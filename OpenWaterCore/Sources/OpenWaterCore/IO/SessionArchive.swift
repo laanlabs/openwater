@@ -86,7 +86,7 @@ public struct SessionArchive: Sendable, Codable {
     public func upToDateSession(overrides: SportThresholds.Overrides? = nil) -> Session {
         var session = self.session
         if session.summary?.isCurrent != true {
-            let track = TrackBuilder(options: .forSport(session.sport))
+            let track = TrackBuilder(options: session.trackBuilderOptions)
                 .build(from: session.track.points)
             session.track = track
             session.summary = SessionAnalyzer(

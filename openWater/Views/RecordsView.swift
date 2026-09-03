@@ -88,6 +88,7 @@ struct RecordsView: View {
                         }
                     }
                     .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+                    .readableContentColumn()
                 }
             }
             .navigationTitle("Bests")
@@ -225,6 +226,7 @@ struct TrendsView: View {
                         .padding()
                     }
                     .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+                    .readableContentColumn()
                 }
             }
             .navigationTitle("Trends")

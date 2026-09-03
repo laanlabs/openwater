@@ -152,7 +152,8 @@ struct ShareImageView: View {
 
                     VStack {
                         HStack {
-                            Text(session.startDate.formatted(date: .abbreviated, time: .omitted))
+                            Text(session.startDate.formatted(
+                                Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: session.zone)))
                             Spacer()
                             Label(session.sport.displayName, systemImage: session.sport.symbolName)
                         }

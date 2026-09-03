@@ -201,6 +201,13 @@ public final class WindWashModel {
     }
 
     public private(set) var cells: [Cell] = []
+
+    /// The same field as one picture. See `WashRaster` for why.
+    ///
+    /// Published beside `cells` rather than instead of them: the phone still
+    /// draws quads, and swapping both maps at once would put two very
+    /// different renderers into one change. The television reads this.
+    public private(set) var raster: WashRaster?
     public private(set) var field: Field?
     public private(set) var fieldRegion: MKCoordinateRegion?
     public private(set) var isLoading = false
@@ -490,6 +497,7 @@ public final class WindWashModel {
         holds.insert(.asleep)
         cancelRebuild()
         cells = []
+        raster = nil
         field = nil
     }
 
@@ -585,6 +593,9 @@ public final class WindWashModel {
                 // zoom yet means no correction rather than a guessed one.
                 let inset = (degreesPerPixel ?? 0) * Self.seamPixels
                 let window = drawWindow
+                // Read out here rather than inside the detached closure, which
+                // may not reach back into the actor for it.
+                let stamp = fieldStamp
 
                 // `nonisolated` is not enough to leave the main actor under
                 // approachable concurrency — a nonisolated call from here
@@ -593,7 +604,19 @@ public final class WindWashModel {
                 let built = await Task.detached(priority: .userInitiated) {
                     let table = known ?? Self.buildLayout(region: region, mask: mask,
                                                           insetLon: inset, window: window)
-                    return (table, Self.colourCells(table, speeds: hour.speeds, layer: layer))
+                    return (table,
+                            Self.colourCells(table, speeds: hour.speeds, layer: layer),
+                            WashRaster.render(speeds: hour.speeds,
+                                              columns: WindField.columns,
+                                              rows: WindField.rows,
+                                              layer: layer,
+                                              mask: mask,
+                                              region: region,
+                                              stamp: stamp,
+                                              washAlpha: Self.washAlpha,
+                                              colour: { knots in
+                                                  Self.paletteColour(for: knots, layer: layer)
+                                              }))
                 }.value
 
                 guard !Task.isCancelled, rebuildToken == token else { return }
@@ -609,6 +632,7 @@ public final class WindWashModel {
                 }
                 layout = built.0
                 cells = built.1
+                raster = built.2
                 field = Field(
                     id: fieldStamp,
                     flow: layer == .currents ? .current : .wind,
@@ -737,6 +761,24 @@ public final class WindWashModel {
     /// palettes' own band midpoints, so every cell wears its own shade and
     /// the field reads as one continuous surface. The palettes remain the
     /// single source of the colours — this only smooths between them.
+    /// The palette as a `UIColor`, for the raster's per-pixel loop.
+    ///
+    /// `smoothColour` returns a SwiftUI `Color`, and taking components back
+    /// out of one of those costs a bridge per pixel. This is the same ramp
+    /// one step earlier, before the wrapping.
+    nonisolated static func paletteColour(for knots: Double, layer: WashLayer) -> UIColor {
+        guard layer == .currents else { return WindPalette.smooth(for: knots) }
+        let stops = currentStops
+        guard let first = stops.first, let last = stops.last else { return .clear }
+        if knots <= first.at { return first.colour }
+        if knots >= last.at { return last.colour }
+        for index in 1..<stops.count where knots < stops[index].at {
+            let a = stops[index - 1], b = stops[index]
+            return WindPalette.lerp(a.colour, b.colour, (knots - a.at) / (b.at - a.at))
+        }
+        return last.colour
+    }
+
     nonisolated private static func smoothColour(for knots: Double, layer: WashLayer) -> Color {
         // Wind reads its own palette's continuous form — the conditions
         // strip reads the same one, which is why it lives on the palette
@@ -878,6 +920,7 @@ public final class WindWashModel {
         releaseAllHolds()
         cancelRebuild()
         cells = []
+        raster = nil
         field = nil
         fieldRegion = nil
         loadedVisible = nil
@@ -965,6 +1008,7 @@ public final class WindWashModel {
         // while the fetch is in the air; the hud says why the water is bare.
         cancelRebuild()
         cells = []
+        raster = nil
         field = nil
         layout = nil
         // The day goes with them. Clearing only what was drawn left the hours
@@ -1073,6 +1117,7 @@ public final class WindWashModel {
                 // the ocean model. The old region's cells must go with it,
                 // or the wash keeps painting water that isn't there.
                 cells = []
+        raster = nil
                 field = nil
                 // For the wind layer this is not a fact about the place; see
                 // `loadFailed`.

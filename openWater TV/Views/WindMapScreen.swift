@@ -83,6 +83,8 @@ struct WindMapScreen: View {
 
     /// The in-flight centre request, so a settle can retire the one before it.
     @State private var centreTask: Task<Void, Never>?
+    /// The same, for the instruments around the view.
+    @State private var meterTask: Task<Void, Never>?
 
     /// The anemometers around the view, and what they last said.
     ///
@@ -311,25 +313,14 @@ struct WindMapScreen: View {
         // dependency, so the pins would draw once — nameless and numberless —
         // and never update when the readings landed. Same for the wash's own
         // cells. The phone's map hoists all three for exactly this reason.
-        let cells = layer == .off ? [] : wash.cells
+        let raster = layer == .off ? nil : wash.raster
         let field = layer == .off ? nil : wash.field
         return MapReader { proxy in
-            Map(position: $camera, interactionModes: []) {
-                // The wash goes first: map content draws in order, and the
-                // field belongs under every pin.
-                ForEach(cells) { cell in
-                    MapPolygon(coordinates: cell.coordinates)
-                        .foregroundStyle(cell.color)
-                }
-                ForEach(reporting, id: \.station.id) { pin in
-                    Annotation(pin.station.name, coordinate: pin.station.clCoordinate) {
-                        MeterBadge(name: pin.station.name,
-                                   observation: pin.observation,
-                                   showsName: showsMeterNames)
-                    }
-                    .annotationTitles(.hidden)
-                }
-            }
+            // The map draws the ground and nothing else. The wash and the
+            // meters are both layers on top of it now — see `WashRasterLayer`
+            // for why the field stopped being map content, and note the order
+            // here is the order they stack: ground, field, comets, meters.
+            Map(position: $camera, interactionModes: [])
             // While the wash is up the basemap goes muted — Apple's own grey
             // voice — so the chart keeps the shapes and the wash owns the
             // palette. It comes back the moment the wind is switched off.
@@ -365,14 +356,40 @@ struct WindMapScreen: View {
                 // has worked out whether the drawn window moved.
                 wash.viewSettled(on: context.region, layer: layer,
                                  widthPoints: mapWidth, displayScale: displayScale)
-                // Asked here rather than left to `.task(id: centreKey)`,
-                // which was observed not to restart when the key changed —
-                // see `refreshCentre`. One in flight at a time; a settle
+                // Asked here rather than left to `.task(id:)`, which was
+                // observed not to restart when the key changed — see
+                // `refreshCentre`. One of each in flight at a time; a settle
                 // supersedes whatever the last one was asking about.
                 if centreKey != before {
                     centreTask?.cancel()
                     centreTask = Task { await refreshCentre() }
+                    meterTask?.cancel()
+                    meterTask = Task { await refreshMeters() }
                 }
+            }
+            // The field, as one picture rather than as several hundred
+            // quads. It has to go above the map rather than inside it, which
+            // is why the meters below moved out of the map too: an overlay
+            // covers a map's own annotations, and a badge under a translucent
+            // wash is a badge wearing the weather.
+            .overlay {
+                if let raster {
+                    WashRasterLayer(raster: raster, proxy: proxy)
+                        .allowsHitTesting(false)
+                }
+            }
+            // The instruments, above the field rather than beneath it. They
+            // were `Annotation`s, which a wash overlay would sit on top of.
+            .overlay {
+                ForEach(reporting, id: \.station.id) { pin in
+                    if let point = proxy.convert(pin.station.clCoordinate, to: .local) {
+                        MeterBadge(name: pin.station.name,
+                                   observation: pin.observation,
+                                   showsName: showsMeterNames)
+                            .position(point)
+                    }
+                }
+                .allowsHitTesting(false)
             }
             // The living streaks over the wash: the phone's particle
             // animation, streaming with the field. An overlay rather than map
@@ -801,6 +818,14 @@ struct WindMapScreen: View {
         // wrote over each other — and an unreadable number is worse than an
         // absent one.
         let found = await FreeStations.near(centre, limit: 12, radius: radius)
+        // The same check the centre readout makes, for the same reason and
+        // the same bug: the first list is always fetched for MapKit's opening
+        // rectangle, the middle of the United States, and it was still in the
+        // air when the coast arrived. Its answer landed anyway — so the map
+        // carried a dozen Kansas river gauges, projected somewhere off the
+        // left edge of the world, which is why no meter ever appeared over
+        // Montauk. Anything for a place the map has left is dropped.
+        guard isStillCentre(centre) else { return }
         meters = found
         await withTaskGroup(of: (String, StationObservation?).self) { group in
             for station in found {

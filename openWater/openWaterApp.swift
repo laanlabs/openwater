@@ -80,6 +80,10 @@ struct openWaterApp: App {
                 .task {
                     library.applyLaunchArgumentsIfNeeded()
                     library.purgeExpiredTrash()
+                    // Forecast answers nobody can be served again, and the
+                    // oldest of the rest past the cap. Off the main actor:
+                    // it is a directory listing and some unlinks.
+                    Task.detached(priority: .utility) { ForecastCache.sweep() }
                     #if DEBUG
                     // The test set, so a debug build always has the sessions
                     // the expectation pages describe. No-op once they are in,

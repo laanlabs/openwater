@@ -431,7 +431,10 @@ struct RoutePanel: View {
         .padding(.top, 4)
         .frame(maxWidth: 700)
         .frame(maxWidth: .infinity)
-        .task(id: route.id) {
+        // Keyed on the line as well as the id: editing a saved route keeps
+        // its id, and a key of the id alone left the old line's forecast —
+        // chords, arrows, the lot — drawn under the new dashed path.
+        .task(id: "\(route.id)|\(route.waypoints.hashValue)") {
             await weather.load(for: route)
         }
     }

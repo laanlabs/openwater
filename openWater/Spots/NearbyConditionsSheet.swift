@@ -112,7 +112,7 @@ struct NearbyConditionsSheet: View {
                     switch tab {
                     case .conditions: conditionsTab
                     case .water: tideTab
-                    case .currents: CurrentFlowView(coordinate: coordinate)
+                    case .currents: CurrentFlowView(coordinate: coordinate, timeZone: full.timeZone)
                     case .surf: surfTab
                     case .cams: camsTab
                     }
@@ -879,11 +879,17 @@ struct NearbyConditionsSheet: View {
     /// Sun or moon variants, decided by the day's own sunrise and sunset
     /// when the forecast carries them, by a plain 7-to-7 otherwise.
     private func isDaylight(_ date: Date) -> Bool {
-        if let day = full.days.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }),
+        // The spot's calendar, not the phone's: which day an instant belongs
+        // to, and what hour it is, are questions about the shore the icon
+        // is drawn for. Hawaii browsed from Maine got a moon over an
+        // afternoon.
+        var calendar = Calendar.current
+        calendar.timeZone = full.timeZone ?? .current
+        if let day = full.days.first(where: { calendar.isDate($0.date, inSameDayAs: date) }),
            let sunrise = day.sunrise, let sunset = day.sunset {
             return date >= sunrise && date <= sunset
         }
-        let hour = Calendar.current.component(.hour, from: date)
+        let hour = calendar.component(.hour, from: date)
         return hour >= 7 && hour < 19
     }
 
@@ -1617,6 +1623,9 @@ struct NearbyConditionsSheet: View {
         (alerts, tides, buoys) = await (warnings, tideList, buoyList)
         (outlook, waves, full) = await (ahead, sea, everything)
         (surf, tide) = await (sea2, water)
+        // A station curve arrives as bare instants; the detail run above has
+        // the spot's clock, and the screen draws the curve on it.
+        if tide.timeZone == nil { tide.timeZone = full.timeZone }
         isSearching = false
 
         // The multi-day outlook is two more calls, so it lands after the tab
@@ -1650,7 +1659,8 @@ struct NearbyConditionsSheet: View {
         // dozen sequential fetches would hold the whole tab blank.
         await withTaskGroup(of: (String, [TideEvent]).self) { group in
             for station in tides {
-                group.addTask { (station.id, await TidesAndCurrents.today(for: station.id)) }
+                let zone = full.timeZone
+                group.addTask { (station.id, await TidesAndCurrents.today(for: station.id, timeZone: zone)) }
             }
             for await (id, events) in group {
                 guard let at = tides.firstIndex(where: { $0.id == id }) else { continue }

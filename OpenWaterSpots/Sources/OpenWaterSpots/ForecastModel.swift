@@ -72,7 +72,9 @@ public enum ForecastModel: String, CaseIterable, Identifiable, Sendable {
 
     // MARK: The preference
 
-    /// One choice for the whole app, read wherever a wind URL is built —
+    /// One choice for the whole app, read wherever a model wind URL is
+    /// built. The ensemble and near-term requests name their own models by
+    /// design and are the exception —
     /// `UserDefaults` rather than an injected setting because the fetchers
     /// are free functions on `OpenMeteo`, reachable from any actor, and a
     /// defaults read is safe from all of them.

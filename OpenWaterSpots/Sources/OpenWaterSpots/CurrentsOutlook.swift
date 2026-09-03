@@ -1,4 +1,5 @@
 import Foundation
+import os
 import OpenWaterCore
 import SwiftUI
 
@@ -326,7 +327,13 @@ extension TidesAndCurrents {
     /// The currents station index, boiled down and kept on disk like the
     /// tide index — a separate file, because the two lists answer different
     /// questions and refresh independently.
-    private static var cachedCurrents: [DistilledCurrent] = []
+    /// Read and written from whichever task asks first; the lock is what
+    /// keeps two concurrent askers from tearing the array.
+    private static let currentsLock = OSAllocatedUnfairLock<[DistilledCurrent]>(initialState: [])
+    private static var cachedCurrents: [DistilledCurrent] {
+        get { currentsLock.withLock { $0 } }
+        set { currentsLock.withLock { $0 = newValue } }
+    }
 
     private static var currentsCacheURL: URL {
         URL.cachesDirectory.appending(path: "noaa-current-stations.json")
@@ -371,13 +378,9 @@ extension TidesAndCurrents {
             // The bundle's snapshot: same distilled rows, refreshed by
             // scripts/refresh-station-snapshots.sh, so a signal-less first
             // launch still knows its current stations.
-            if let bundled = Bundle.main.url(forResource: "noaa-current-stations", withExtension: "json"),
-               let data = try? Data(contentsOf: bundled),
-               let rows = try? JSONDecoder().decode([DistilledCurrent].self, from: data) {
-                cachedCurrents = rows
-                return rows
-            }
-            return []
+            let rows = bundledCurrentsIndex()
+            if !rows.isEmpty { cachedCurrents = rows }
+            return rows
         }
 
         let rows = distillCurrentsIndex(data)
@@ -385,6 +388,21 @@ extension TidesAndCurrents {
             try? encoded.write(to: currentsCacheURL, options: .atomic)
         }
         cachedCurrents = rows
+        return rows
+    }
+
+    /// The snapshot shipped in the package, or nothing.
+    ///
+    /// `Bundle.module`, not `Bundle.main`: the file lives in this package's
+    /// resource bundle, and the app-bundle lookup its two siblings once made
+    /// misses there every time. It missed here for weeks — a first launch
+    /// with no signal found no current stations anywhere, which reads as a
+    /// fact about the water rather than a wrong bundle.
+    static func bundledCurrentsIndex() -> [DistilledCurrent] {
+        guard let bundled = Bundle.module.url(forResource: "noaa-current-stations", withExtension: "json"),
+              let data = try? Data(contentsOf: bundled),
+              let rows = try? JSONDecoder().decode([DistilledCurrent].self, from: data)
+        else { return [] }
         return rows
     }
 
@@ -435,13 +453,17 @@ extension TidesAndCurrents {
     /// Predictions, not readings — computed from harmonics, and caching
     /// them wrongs nobody (the tide fetcher's words, same endpoint).
     public static func currentPredictions(for station: CurrentStation) async -> CurrentsOutlook {
-        // Yesterday through two days out, station-local — the same window
-        // the model curve covers, so the swap changes authority, not axis.
-        let calendar = Calendar.current
-        let begin = calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        // Yesterday through two days out — the same window the model curve
+        // covers, so the swap changes authority, not axis. Asked for and
+        // parsed in GMT: every stamp is then a true instant, and the screen
+        // draws it in the spot's own zone. `lst_ldt` gave the station's wall
+        // clock, which was parsed as the *phone's* — right on the shore the
+        // station stands on, and six hours out for a rider in New York
+        // reading Kahului.
+        let begin = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
         let stamp = DateFormatter()
         stamp.dateFormat = "yyyyMMdd"
-        stamp.timeZone = .current
+        stamp.timeZone = .gmt
 
         func request(interval: String) -> URL? {
             var components = URLComponents(
@@ -456,7 +478,7 @@ extension TidesAndCurrents {
                 // English units so speeds arrive in knots — the unit every
                 // other number in the Spots layer already speaks.
                 .init(name: "units", value: "english"),
-                .init(name: "time_zone", value: "lst_ldt"),
+                .init(name: "time_zone", value: "gmt"),
                 .init(name: "format", value: "json"),
             ]
             return components.url
@@ -472,8 +494,11 @@ extension TidesAndCurrents {
            let data = await ForecastCache.data(from: url, ttl: 21_600) {
             events = parseEventPredictions(data)
         }
+        // No zone of its own: the station's clock is not known here, and
+        // the caller, which knows the spot's, fills it in — see
+        // `Currents.station(at:)`.
         return CurrentsOutlook(hours: hours, events: events,
-                               source: .station(station), timeZone: .current)
+                               source: .station(station), timeZone: nil)
     }
 
     /// `interval=60` rows, in the two dialects the stations actually speak.
@@ -557,13 +582,12 @@ extension TidesAndCurrents {
             }
     }
 
-    /// Station times arrive as `lst_ldt` — the station's own local clock,
-    /// which for a rider standing on that shore is also theirs. The same
-    /// approximation the tide parser makes, for the same reason.
+    /// Station times are requested in GMT, so every stamp parses to the
+    /// instant it means wherever the phone happens to be.
     private static var stationTimeParser: DateFormatter {
         let parser = DateFormatter()
         parser.dateFormat = "yyyy-MM-dd HH:mm"
-        parser.timeZone = .current
+        parser.timeZone = .gmt
         return parser
     }
 }
@@ -585,15 +609,23 @@ public enum Currents: Sendable {
     /// — or where the nearest answered with nothing, because a failed fetch
     /// is not an authority. The flow screen calls this rather than
     /// `outlook(at:)` since the model already sits under it as the field.
-    public static func station(at coordinate: Geo.Coordinate) async -> CurrentsOutlook? {
+    ///
+    /// - Parameter timeZone: the spot's zone, for drawing the station's
+    ///   instants on a clock the rider recognises. The model path carries
+    ///   its own from the response; a station's predictions arrive as
+    ///   instants with no clock attached.
+    public static func station(at coordinate: Geo.Coordinate,
+                               timeZone: TimeZone? = nil) async -> CurrentsOutlook? {
         guard let station = await TidesAndCurrents.currentStations(near: coordinate, limit: 1).first,
               station.metres <= stationRadius else { return nil }
-        let predicted = await TidesAndCurrents.currentPredictions(for: station)
+        var predicted = await TidesAndCurrents.currentPredictions(for: station)
+        predicted.timeZone = timeZone
         return predicted.isEmpty ? nil : predicted
     }
 
-    public static func outlook(at coordinate: Geo.Coordinate) async -> CurrentsOutlook {
-        if let predicted = await station(at: coordinate) { return predicted }
+    public static func outlook(at coordinate: Geo.Coordinate,
+                               timeZone: TimeZone? = nil) async -> CurrentsOutlook {
+        if let predicted = await station(at: coordinate, timeZone: timeZone) { return predicted }
         return await OpenMeteo.currents(at: coordinate)
     }
 }

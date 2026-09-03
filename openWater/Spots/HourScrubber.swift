@@ -43,6 +43,17 @@ struct HourScrubber: View {
     }
 
     var body: some View {
+        // An empty axis has no hour to land on. `nearestIndex` answers 0 for
+        // it and the drag clamps to `hours[0]`, which traps; every caller
+        // guards this today, and this keeps the next one honest.
+        if hours.isEmpty {
+            Color.clear.frame(height: 54)
+        } else {
+            axis
+        }
+    }
+
+    private var axis: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             let step = width / CGFloat(max(1, hours.count - 1))

@@ -353,10 +353,11 @@ public final class SpotGuideStore {
     /// network: a cached dataset is served instantly and a background refresh
     /// swaps in the new one when it lands.
     public func load() async {
-        if spots.isEmpty, let cached = Self.readCache() {
-            apply(cached)
-        }
-        let stale = Self.cacheAge() ?? .infinity
+        // Read once. `cacheAge()` used to read and decode the whole guide a
+        // second time on the main actor, purely to look at `fetchedAt`.
+        let cached = spots.isEmpty ? Self.readCache() : nil
+        if let cached { apply(cached) }
+        let stale = cached.map { Date().timeIntervalSince($0.fetchedAt) } ?? Self.cacheAge() ?? .infinity
         guard spots.isEmpty || stale > Self.cacheTTL else { return }
         guard !isLoading else { return }
         isLoading = true
@@ -497,7 +498,13 @@ public final class SpotGuideStore {
         let nearest = rows.min {
             abs($0.date.timeIntervalSince(instant)) < abs($1.date.timeIntervalSince(instant))
         }
-        guard let nearest else { return nil }
+        // Nearest, but not from any distance. A series fetched this morning
+        // reaches seventy-two hours from *then*; scrubbed past its end this
+        // afternoon, the last row is hours early, and it wore the scrubbed
+        // hour's label. Ninety minutes is the same tolerance the currents
+        // and ensemble readers use; beyond it the honest answer is nil, and
+        // the pin shows its dash.
+        guard let nearest, abs(nearest.date.timeIntervalSince(instant)) <= 5400 else { return nil }
         return WindReading(speedKn: nearest.speedKn, gustKn: nearest.gustKn,
                            directionDeg: nearest.directionDeg, at: nearest.date)
     }

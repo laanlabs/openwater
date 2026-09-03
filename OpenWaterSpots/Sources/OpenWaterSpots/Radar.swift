@@ -400,7 +400,6 @@ public final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
     /// and rounds its own way, and 512-pixel tiles shift it again. A preload
     /// that warms the wrong zoom warms nothing, so the one number that
     /// matters is taken from the horse's mouth.
-    nonisolated(unsafe) public private(set) static var lastRequestedZoom: Int?
 
     /// Serve a zoomed-in tile by cropping the deepest real one.
     ///
@@ -413,7 +412,6 @@ public final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
         at path: MKTileOverlayPath,
         result: @escaping @Sendable (Data?, (any Error)?) -> Void
     ) {
-        Self.lastRequestedZoom = path.z
         let key = "\(stamp)/\(path.z)/\(path.x)/\(path.y)" as NSString
         if let ready = Self.crops.object(forKey: key) {
             result(ready as Data, nil)

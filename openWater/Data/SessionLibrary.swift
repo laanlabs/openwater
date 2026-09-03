@@ -293,12 +293,28 @@ final class SessionLibrary {
         // A bundle and a single archive are both valid; try the bundle first
         // since a single-session bundle would otherwise decode as neither.
         if let bundle = try? SessionArchiveBundle.decode(data) {
-            for session in bundle.sessions { save(session) }
+            // Brought up to date like a single archive is. A backup taken
+            // before an engine bump used to land every session stale.
+            for session in bundle.sessions {
+                imported(SessionArchive(session: session).upToDateSession())
+            }
             return bundle.sessions.count
         }
         let archive = try SessionArchive.decode(data)
-        save(archive.upToDateSession())
+        imported(archive.upToDateSession())
         return 1
+    }
+
+    /// Save an imported session, and if it turns out to be one the rider
+    /// had put in Recently Deleted, bring it back. Imports carry stable
+    /// ids, so re-importing a deleted file is the rider asking for it
+    /// again — silently updating the trashed row looked like nothing
+    /// happening.
+    @discardableResult
+    func imported(_ session: Session) -> (stored: StoredSession?, persisted: Bool) {
+        let result = save(session)
+        if let stored = result.stored, stored.isTrashed { restore(stored) }
+        return result
     }
 
     // MARK: - Export

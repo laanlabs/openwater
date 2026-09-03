@@ -64,7 +64,8 @@ struct SessionCard: View {
                     }
                     HStack(spacing: 5) {
                         Text(session.startDate.formatted(
-                            .dateTime.weekday(.abbreviated).day().month(.abbreviated).year().hour().minute()
+                            Date.FormatStyle(timeZone: session.zone)
+                                .weekday(.abbreviated).day().month(.abbreviated).year().hour().minute()
                         ))
                         // Which wrist or pocket it came off. Riders who record
                         // on both end up with two sessions from one afternoon,

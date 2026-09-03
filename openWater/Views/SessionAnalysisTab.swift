@@ -520,6 +520,7 @@ struct AnalysisDetail<Content: View>: View {
             .padding(14)
         }
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
+        .readableContentColumn()
         .background(Color(.systemGroupedBackground))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

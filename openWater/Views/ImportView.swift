@@ -203,7 +203,7 @@ struct ExportOption: Identifiable {
     /// A filename that sorts by date and says what it is.
     func filename(for stored: StoredSession) -> String {
         let stamp = stored.startDate.formatted(
-            .iso8601.year().month().day().dateSeparator(.dash)
+            Date.ISO8601FormatStyle(timeZone: stored.zone).year().month().day().dateSeparator(.dash)
         )
         return "openWater-\(stored.sport.rawValue)-\(stamp).\(fileExtension)"
     }
@@ -289,8 +289,16 @@ struct ExportView: View {
     private func export(_ option: ExportOption) {
         do {
             let data = try option.make(stored, library, settings)
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent(option.filename(for: stored))
+            // A directory per session, cleared before writing. The filename
+            // is sport and date, so two sessions on one afternoon collided
+            // in the shared temporary directory and the share link handed
+            // out earlier pointed at the wrong session's file.
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("exports", isDirectory: true)
+                .appendingPathComponent(stored.id.uuidString, isDirectory: true)
+            try? FileManager.default.removeItem(at: directory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent(option.filename(for: stored))
             try data.write(to: url, options: .atomic)
             exportURL = url
             errorMessage = nil

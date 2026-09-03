@@ -133,7 +133,7 @@ extension Session {
 
         guard cleaned.count >= 2 else { return (copy, removed) }
 
-        let track = TrackBuilder(options: .forSport(sport)).build(from: cleaned)
+        let track = TrackBuilder(options: trackBuilderOptions).build(from: cleaned)
         copy.track = track
         copy.summary = SessionAnalyzer(
             configuration: .init(

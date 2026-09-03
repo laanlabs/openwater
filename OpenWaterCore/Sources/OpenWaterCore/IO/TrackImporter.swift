@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A track pulled out of a third-party file, before it becomes a `Session`.
@@ -57,6 +58,11 @@ public struct ImportedTrack: Sendable, Identifiable {
     }
 
     /// Build a session, running the full analysis.
+    ///
+    /// The id is derived from the file's contents rather than minted, so the
+    /// same GPX tapped twice in Messages — or a folder of exports imported
+    /// again — lands on the session it already made instead of beside it.
+    /// `SessionLibrary.save` is idempotent by id, which is all this needs.
     public func makeSession(sport: Sport, wind: Wind? = nil) -> Session {
         let track = TrackBuilder(options: .lenient).build(from: points)
         let summary = SessionAnalyzer(
@@ -64,14 +70,28 @@ public struct ImportedTrack: Sendable, Identifiable {
         ).analyse(track)
 
         return Session(
+            id: stableID,
             sport: sport,
             startDate: track.startDate ?? Date(),
             endDate: track.endDate ?? Date(),
             track: track,
             spotName: name,
             wind: summary.wind,
+            trackFilter: .lenient,
             summary: summary
         )
+    }
+
+    /// One id per distinct recording: the first and last stamps, the count,
+    /// and the format, digested. Two rides cannot share all four.
+    public var stableID: UUID {
+        var text = "\(format.rawValue)|\(points.count)"
+        if let first = points.first?.timestamp { text += "|\(first.timeIntervalSince1970)" }
+        if let last = points.last?.timestamp { text += "|\(last.timeIntervalSince1970)" }
+        let digest = Array(SHA256.hash(data: Data(text.utf8)))
+        return UUID(uuid: (digest[0], digest[1], digest[2], digest[3], digest[4], digest[5],
+                           digest[6], digest[7], digest[8], digest[9], digest[10], digest[11],
+                           digest[12], digest[13], digest[14], digest[15]))
     }
 }
 

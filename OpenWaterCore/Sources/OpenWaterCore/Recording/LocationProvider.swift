@@ -42,6 +42,9 @@ public final class LocationProvider: NSObject {
     public var onFix: ((TrackPoint) -> Void)?
 
     public private(set) var authorization: CLAuthorizationStatus = .notDetermined
+    /// Precise Location is off for this app: fixes are kilometres coarse and
+    /// a track built from them is not a track.
+    public private(set) var isReducedAccuracy = false
     public private(set) var latestAccuracy: Double = -1
     public private(set) var isRunning = false
 
@@ -247,12 +250,17 @@ public final class LocationProvider: NSObject {
 
 extension LocationProvider: CLLocationManagerDelegate {
 
-    public nonisolated func locationManager(
-        _ manager: CLLocationManager,
-        didChangeAuthorization status: CLAuthorizationStatus
-    ) {
+    /// The iOS 14 form, which `PermissionsCheck` already uses; the older
+    /// `didChangeAuthorization` is deprecated and did not carry the
+    /// precise-location answer. Both are read here, so a grant revoked or
+    /// downgraded mid-session shows on the live screen rather than as a
+    /// speed frozen at its last value.
+    public nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        let reduced = manager.accuracyAuthorization == .reducedAccuracy
         Task { @MainActor in
             self.authorization = status
+            self.isReducedAccuracy = reduced
         }
     }
 

@@ -127,6 +127,35 @@ public struct Session: Sendable, Codable, Identifiable {
     public var deviceModel: String?
     public var appVersion: String?
 
+    /// Which ingest filter built `track`, so a rebuild uses the same one.
+    ///
+    /// An imported file is built leniently — a GPX carries whatever accuracy
+    /// its writer chose, if any — and used to be rebuilt against the sport's
+    /// tighter gate on the next engine bump, moving distance and run counts
+    /// for a reason that had nothing to do with the analysis change. Optional
+    /// in storage so older archives decode; nil means the sport's own.
+    public var trackFilter: TrackFilter?
+
+    public enum TrackFilter: String, Sendable, Codable {
+        case sport, lenient
+    }
+
+    /// The options every rebuild of this session's track must use.
+    public var trackBuilderOptions: TrackBuilder.Options {
+        trackFilter == .lenient ? .lenient : .forSport(sport)
+    }
+
+    /// The clock the session was recorded on — "Pacific/Honolulu" — so a
+    /// dawn session in Maui still reads 06:30 when it is opened in New York.
+    /// Stamped at recording; nil for imports and for archives written before
+    /// it existed, which show on the phone's clock as they always have.
+    public var timeZone: String?
+
+    /// `timeZone` as a zone, or the phone's when none was recorded.
+    public var zone: TimeZone {
+        timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+    }
+
     /// Battery level at start and end, 0–1. Recording this is what lets the app
     /// tell a rider honestly why their track ends where it does.
     public var startBattery: Double?
@@ -219,6 +248,8 @@ public struct Session: Sendable, Codable, Identifiable {
         currentSpeed: Double? = nil,
         currentDirectionToward: Double? = nil,
         equipment: Equipment? = nil,
+        trackFilter: TrackFilter? = nil,
+        timeZone: String? = nil,
         summary: SessionSummary? = nil
     ) {
         self.id = id
@@ -248,6 +279,8 @@ public struct Session: Sendable, Codable, Identifiable {
         self.currentSpeed = currentSpeed
         self.currentDirectionToward = currentDirectionToward
         self.equipment = equipment
+        self.trackFilter = trackFilter
+        self.timeZone = timeZone
         self.summary = summary
     }
 }

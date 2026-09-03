@@ -96,12 +96,16 @@ struct SessionListView: View {
 
         var id: String { rawValue }
 
-        func includes(_ date: Date, now: Date = Date()) -> Bool {
+        func includes(_ date: Date, zone: TimeZone = .current, now: Date = Date()) -> Bool {
             switch self {
-            case .allTime: true
-            case .year: Calendar.current.isDate(date, equalTo: now, toGranularity: .year)
-            case .ninety: date > now.addingTimeInterval(-90 * 86_400)
-            case .thirty: date > now.addingTimeInterval(-30 * 86_400)
+            case .allTime: return true
+            case .year:
+                // The session's own year, on the clock it was recorded on.
+                var calendar = Calendar.current
+                calendar.timeZone = zone
+                return calendar.isDate(date, equalTo: now, toGranularity: .year)
+            case .ninety: return date > now.addingTimeInterval(-90 * 86_400)
+            case .thirty: return date > now.addingTimeInterval(-30 * 86_400)
             }
         }
     }
@@ -125,7 +129,7 @@ struct SessionListView: View {
 
     private var filtered: [StoredSession] {
         let matching = sessions.filter { session in
-            period.includes(session.startDate)
+            period.includes(session.startDate, zone: session.zone)
                 && (sportFilter == nil || session.sport == sportFilter)
                 && (!favoritesOnly || session.isFavorite)
                 && matchesQuery(session)
@@ -317,7 +321,7 @@ struct SessionListView: View {
                     // Building the session runs the full analysis, which on a
                     // three-hour FIT is a real amount of work — but it happens
                     // once, on an explicit action, and the result is cached.
-                    library.save(track.makeSession(sport: sport))
+                    library.imported(track.makeSession(sport: sport))
                     // Remembered, so the next file from the same source
                     // arrives with the right thresholds already chosen.
                     settings.lastSport = sport

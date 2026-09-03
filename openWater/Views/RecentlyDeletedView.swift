@@ -96,7 +96,8 @@ struct RecentlyDeletedView: View {
                         .font(.headline)
                         .lineLimit(1)
                 }
-                Text(session.startDate.formatted(date: .abbreviated, time: .shortened))
+                Text(session.startDate.formatted(
+                    Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: session.zone)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {

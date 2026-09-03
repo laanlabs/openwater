@@ -375,7 +375,8 @@ public final class RecordingEngine {
         title: String? = nil,
         spotName: String? = nil,
         swellHeight: Double? = nil,
-        swellDirection: Double? = nil
+        swellDirection: Double? = nil,
+        timeZone: String? = TimeZone.current.identifier
     ) -> Session {
         let track = TrackBuilder(options: .forSport(sport)).build(from: points)
         let summary = SessionAnalyzer(
@@ -396,6 +397,7 @@ public final class RecordingEngine {
             endBattery: endBattery,
             swellHeight: swellHeight,
             swellDirection: swellDirection,
+            timeZone: timeZone,
             summary: summary
         )
     }

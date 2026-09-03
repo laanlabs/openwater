@@ -130,7 +130,7 @@ struct BulkExportView: View {
                     Text(session.displayTitle)
                         .font(.body)
                         .lineLimit(1)
-                    Text("\(session.startDate.formatted(date: .abbreviated, time: .omitted)) · \(Format.distance(session.distance, unit: settings.units.distance))")
+                    Text("\(session.startDate.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: session.zone))) · \(Format.distance(session.distance, unit: settings.units.distance))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

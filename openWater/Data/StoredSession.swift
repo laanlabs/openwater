@@ -85,6 +85,13 @@ final class StoredSession {
     /// thumbnail-sized map can resolve anyway.
     var previewTrack: [Double] = []
 
+    /// The clock it was recorded on, as `Session.timeZone`. Optional for the
+    /// same reason `deviceModel` is.
+    var timeZone: String?
+
+    /// The zone to print its dates in — its own, or the phone's if none.
+    var zone: TimeZone { timeZone.flatMap(TimeZone.init(identifier:)) ?? .current }
+
     /// What recorded it — "Apple Watch", "iPhone", or nil for an imported file.
     ///
     /// Optional so old rows keep decoding: Swift's synthesized decoder does not
@@ -215,6 +222,7 @@ final class StoredSession {
         self.sharedAt = nil
         self.previewTrack = StoredSession.previewTrack(for: session.track)
         self.deviceModel = session.deviceModel
+        self.timeZone = session.timeZone
 
         self.archiveData = archive
     }
@@ -325,6 +333,7 @@ final class StoredSession {
         archiveData = replacement.archiveData
         previewTrack = replacement.previewTrack
         deviceModel = replacement.deviceModel
+        timeZone = replacement.timeZone
         return true
     }
 

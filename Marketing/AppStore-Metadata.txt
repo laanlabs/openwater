@@ -184,7 +184,39 @@ wingfoil,foiling,windsurf,kitesurf,gps,knots,sailing,downwind,parawing,waterspor
 
 
 --------------------------------------------------------------------------
-5. WHAT'S NEW (4000 max) — version 1.0
+5. WHAT'S NEW (4000 max) — version 1.2
+--------------------------------------------------------------------------
+
+    Spots is now a map you can read. The wind wash draws as one picture,
+    with a model picker and an hour clock you can turn three days ahead.
+    Tides and currents get their own screens, in the nearest station's own
+    numbers. The radar loops smoothly and folds its controls away. Saved
+    routes and private spots, a centre pin that says what the water is
+    doing, and a forecast that says so when a request missed rather than
+    showing you an old one.
+
+    Wave rides. Point the swell arrow and see every wave you caught on the
+    map, watch them go past in order, and decide for yourself what counts
+    as a ride. Waves caught straight off the back of the last one are found
+    and marked linked. On a downwinder, one tap takes the wind as the swell.
+
+    Upwind. Tap one leg and then another to measure the stretch between
+    them the same honest way the best beat is measured. Point the VMG at
+    where you were actually going — up the river, not into the bank.
+
+    Apple TV. The whole conditions picture on the big screen: wind, wash,
+    radar, tide and the cameras, for the spots you have saved.
+
+    Apple Watch shows two screens unless you ask for the rest, and pressing
+    stop always puts the session somewhere — or says why not.
+
+    And the small things: the screens agree with each other, a session is
+    never lost quietly, the map takes the whole screen when you turn the
+    phone, and a bug button in the corner sends your numbers with a note.
+
+
+--------------------------------------------------------------------------
+5a. WHAT'S NEW — version 1.0 (as shipped)
 --------------------------------------------------------------------------
 
     First release.
@@ -214,8 +246,10 @@ Privacy Policy URL     [REQUIRED — see section 9]                       [VERIF
 7. VERSION AND BUILD
 --------------------------------------------------------------------------
 
-Version           1.0
+Version           1.2                (iOS and watchOS; both must match)
 Build             1
+tvOS              1.1.1 (1)          Bump before any new tvOS upload — a
+                                     build number cannot be reused.
 Copyright         2026 Laan Labs                                        [VERIFY]
 Minimum iOS       18.0
 Minimum watchOS   11.0
@@ -262,11 +296,38 @@ for it.
     USED FOR TRACKING: No
     PURPOSE:          App Functionality
 
-    Declare this because of one feature: "Share a Link". When a rider taps it,
-    openWater uploads a reduced copy of that session — the track, the speeds
-    and the splits — to Firebase Storage and returns a link they can send to
-    anyone. Nothing is uploaded until they tap it, and nothing else in the app
-    talks to a server.
+    Declare this because of two features, both opt-in per use:
+
+    "Share a Link". When a rider taps it, openWater uploads a reduced copy of
+    that session — the track, the speeds and the splits — to Firebase Storage
+    and returns a link they can send to anyone.
+
+    "Send feedback" (the bug button on every session screen). Sends the
+    rider's note and the numbers the screen was showing to Firestore. Only if
+    the rider switches on "Send my recording too" does the session archive —
+    the full track — go with it. So the label also needs:
+
+    DATA TYPE:        User Content — Other User Content (the note)
+    LINKED TO USER:   No
+    USED FOR TRACKING: No
+    PURPOSE:          App Functionality
+
+    DATA TYPE:        Contact Info — Email Address (optional, if the rider
+                      types one into the feedback sheet's contact field)
+    LINKED TO USER:   No
+    USED FOR TRACKING: No
+    PURPOSE:          App Functionality
+
+    Nothing is uploaded until the rider taps one of those two. The rest of
+    the app's network use is reading, not collecting: Spots fetches forecasts,
+    tides and buoys from Open-Meteo, NOAA and NDBC, and the spot guide and
+    wind-station registry from Firebase, for the place on the map. Those
+    requests carry a coordinate and no identifier, and the app keeps nothing
+    server-side from them.
+
+    The label as of the 1.0 submission declared Precise Location for "Share a
+    Link" only. Update it in App Store Connect for 1.2 — the label is edited
+    there, separately from the build.
 
     Everything else remains true and is checkable in the source:
 
@@ -332,15 +393,23 @@ Permission strings shipping in the build:
     hours with the phone in a pocket or a waterproof pouch and the screen off;
     without background location the recording stops and the user loses their
     session. Location data is transmitted only when the user taps "Share a
-    Link" on a finished session — see below.
+    Link" on a finished session, or switches on "Send my recording too" in
+    the feedback sheet — see below.
 
     SHARING A SESSION TO THE WEB
     Session detail → ••• → "Share a Link" uploads a reduced copy of that one
     session (track, speeds, splits) to Firebase Storage and returns a link at
-    openwaterapp.com/s/<code>. It is the only feature that sends anything off the
-    device, it never happens automatically, and the screen states exactly what
-    is and is not included before the upload. There is no account: the 22-
-    character code in the link is what keeps a share unlisted.
+    openwaterapp.com/s/<code>. It never happens automatically, and the screen
+    states exactly what is and is not included before the upload. There is no
+    account: the 22-character code in the link is what keeps a share unlisted.
+
+    SENDING FEEDBACK
+    The ladybird button on every session screen opens a sheet where the user
+    can write a note about what the app got wrong. Sending it uploads the note
+    and the numbers that screen was showing. A separate switch, off by
+    default, attaches the session recording. Nothing else in the app writes to
+    a server; Spots reads forecasts, tides and buoys from Open-Meteo and NOAA
+    and the spot guide from Firebase, credited on their own screens.
 
     APPLE WATCH
     The watch app records independently and does not require the iPhone to be
@@ -461,3 +530,6 @@ readable — better than any static frame.
         openWater/Assets.xcassets/AppIcon.appiconset/icon-1024.png
     [ ] Archive and validate the build in Xcode
     [ ] Confirm HealthKit entitlement is present on the watch target
+    [ ] 1.2: update the App Privacy label in App Store Connect for the
+        feedback path (section 9) before submitting
+    [ ] 1.2: paste section 5 into What's New; bump tvOS if uploading it

@@ -171,15 +171,143 @@ struct WaveRideTests {
         #expect(bridged.count == 1)
         #expect(bridged.rides[0].duration > 15, "the ride should run through the carve")
 
-        // With no carve tolerance the ride ends at the turn — and the water
-        // after it is not claimed as a second ride, because the eight seconds
-        // behind it were spent at the same speed and nothing *gave* anything.
-        // That is the back-to-back limitation in miniature: the lull a wave is
-        // measured against is the previous wave. See docs/WAVES.md.
+        // With no carve tolerance the ride ends at the turn, and the water
+        // after it is a second ride — caught straight off the back of the
+        // first, so measured against the lull the first rose out of rather
+        // than against the first wave's own speed. It used to vanish here,
+        // which was the back-to-back loss in miniature. See docs/WAVES.md.
         let split = rides(track) { $0.waveBridgeSeconds = 0 }
-        #expect(split.count == 1)
+        #expect(split.count == 2)
         #expect(split.rides[0].duration < bridged.rides[0].duration - 5)
+        #expect(!split.rides[0].linked)
+        #expect(split.rides[1].linked, "the second half was caught off the first")
         #expect(split.timeOnWaves < bridged.timeOnWaves)
+        #expect(bridged.linkedCount == 0)
+    }
+
+    // MARK: Back to back
+
+    /// The good day. Kick out of one wave, lose half a knot in the turn, and
+    /// the next face is under you inside the rise window. Measured against
+    /// the seconds just before it, the second wave shows an eight per cent
+    /// rise against a twelve per cent bar and was not a wave at all.
+    @Test("A wave caught straight after another is found")
+    func linkedWaves() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6, heading: 90, duration: 60),
+            .init(speed: 9, heading: 0, duration: 15),                 // wave one
+            .init(speed: 8.8, heading: 150, duration: 3),              // kick out, turn back
+            .init(speed: 9.5, heading: 10, duration: 15),              // wave two
+            .init(speed: 6, heading: 90, duration: 60),
+        ]))
+        let summary = rides(track)
+        #expect(summary.count == 2, "found \(summary.count): \(summary.rides.map(\.duration))")
+        #expect(summary.rides.first?.linked == false)
+        #expect(summary.rides.last?.linked == true)
+        #expect(summary.linkedCount == 1)
+
+        // And a third, off the back of the second: the lull carries down
+        // the chain, because none of them gave the speed back.
+        let three = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6, heading: 90, duration: 60),
+            .init(speed: 9, heading: 0, duration: 15),
+            .init(speed: 8.8, heading: 150, duration: 3),
+            .init(speed: 9.5, heading: 10, duration: 15),
+            .init(speed: 9.2, heading: 150, duration: 3),
+            .init(speed: 9.8, heading: 0, duration: 15),
+            .init(speed: 6, heading: 90, duration: 60),
+        ]))
+        #expect(rides(three).count == 3)
+        #expect(rides(three).linkedCount == 2)
+    }
+
+    /// The chain has a length. Ten seconds of turning back at the same speed
+    /// is past the rise window, and what is under the board then is not the
+    /// last wave's gift — it is a powered rider holding pace.
+    @Test("A wave is linked only inside the rise window")
+    func linkHasALimit() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6, heading: 90, duration: 60),
+            .init(speed: 9, heading: 0, duration: 15),
+            .init(speed: 8.8, heading: 150, duration: 12),             // too long
+            .init(speed: 9.5, heading: 10, duration: 15),
+            .init(speed: 6, heading: 90, duration: 60),
+        ]))
+        let summary = rides(track)
+        #expect(summary.count == 1, "the second stretch never rose out of a lull of its own")
+        #expect(summary.linkedCount == 0)
+    }
+
+    /// A short hole in the fixes is still a hole. Seven seconds is inside
+    /// the rise window, and the chain must not carry across it — what
+    /// happened in there is not known.
+    @Test("A wave is not linked across a hole in the recording")
+    func noLinkAcrossADropout() {
+        var points = SyntheticTrack.generate(legs: [
+            .init(speed: 6, heading: 90, duration: 60),
+            .init(speed: 9, heading: 0, duration: 40),
+            .init(speed: 6, heading: 90, duration: 60),
+        ])
+        points.removeSubrange(75..<82)
+        let track = builder.build(from: points)
+        let summary = rides(track)
+        #expect(summary.count == 1, "found \(summary.rides.map(\.duration))")
+        #expect(summary.linkedCount == 0)
+    }
+
+    // MARK: Noise
+
+    /// The reason the rise bar is firmer than the glide detector's, tested
+    /// at last: a long steady run with the swell, on a receiver reporting
+    /// position only, has its speed derived from jittery fixes — and jitter
+    /// is not a wave. Before the catch rule, every one of these read as a
+    /// single three-hundred-second wave: the lowest of eight noisy samples
+    /// before it against the highest of three hundred inside it.
+    ///
+    /// Half a metre to a metre of jitter is the realistic band — it makes
+    /// the same sample-to-sample speed steps as the bumpiest real Doppler
+    /// recording — and nothing may be found there. Two and three metres of
+    /// white jitter every second is worse than any receiver, and one seed
+    /// in eight still slips a wave through; the number is pinned so that a
+    /// change which makes it worse is noticed.
+    @Test("GPS jitter on a steady run with the swell is not a wave")
+    func jitterIsNotAWave() {
+        let seeds: [UInt64] = [1, 7, 42, 1234, 2, 3, 99, 31337]
+        func falseWaves(noise: Double) -> Int {
+            seeds.reduce(0) { found, seed in
+                let track = builder.build(from: SyntheticTrack.generate(
+                    legs: [.init(speed: 8, heading: 0, duration: 300)],
+                    speedAccuracy: nil, noise: noise, seed: seed))
+                return found + rides(track).count
+            }
+        }
+        #expect(falseWaves(noise: 0.5) == 0)
+        #expect(falseWaves(noise: 1.0) == 0)
+        #expect(falseWaves(noise: 2.0) <= 1)
+        #expect(falseWaves(noise: 3.0) <= 1)
+    }
+
+    /// The other half of the catch rule: a rider cruising in the cone at a
+    /// powered pace and *then* getting a wave. The cruise was riding by the
+    /// per-sample rule; it was not the wave. The ride begins where the wave
+    /// did, and the cruise is not in it.
+    @Test("A ride begins at the catch, not at the cruise before it")
+    func rideBeginsAtTheCatch() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6, heading: 90, duration: 60),
+            .init(speed: 6.5, heading: 10, duration: 30),              // cruising in the cone
+            .init(speed: 9, heading: 0, duration: 20),                 // the wave
+            .init(speed: 6, heading: 90, duration: 60),
+        ]))
+        let summary = rides(track)
+        #expect(summary.count == 1)
+        let ride = try! #require(summary.rides.first)
+        // Within a couple of samples of the step: the catch is found where
+        // the window ahead is already lifted, which is a sample or two
+        // before the first fast fix.
+        #expect(ride.startElapsed >= 86 && ride.startElapsed <= 92,
+                "the ride should begin where the wave did, not at \(ride.startElapsed)")
+        #expect(ride.duration < 25)
     }
 
     // MARK: What the receiver did not see

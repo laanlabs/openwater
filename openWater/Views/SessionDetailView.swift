@@ -364,6 +364,30 @@ struct SessionDetailView: View {
         archiveToSend = SharedFile(url: url)
     }
 
+    /// Take the wind's bearing as the swell's — the downwinder's answer.
+    ///
+    /// The wave finder is anchored on the swell arrow because on a wave day
+    /// the wind and the swell disagree. On a river or a bay downwinder they
+    /// do not: the bumps are wind waves and they travel with the wind, so
+    /// the arrow the rider would have to drag is the one the app already
+    /// has. A swell edit re-runs nothing — the finder reads the session on
+    /// demand — so this is a save and a reload, and the height is left
+    /// alone for the rider to add.
+    private func useWindForSwell(_ session: Session) {
+        guard let wind = session.effectiveWind else { return }
+        let categories = settings.categories
+        let overrides = settings.overrides(for: session.sport)
+        Task {
+            let edited = await Task.detached {
+                var edits = Session.Edits(session: session)
+                edits.swellDirection = wind.directionFrom
+                return session.applying(edits, categories: categories, overrides: overrides)
+            }.value
+            library.save(edited)
+            await loadSession()
+        }
+    }
+
     private func applyConditions(_ applied: WindSetterView.Applied,
                                  to session: Session) {
         let categories = settings.categories
@@ -485,6 +509,7 @@ struct SessionDetailView: View {
                     summary: summary,
                     revision: revision,
                     onSetWind: { isSettingWind = true },
+                    onUseWindForSwell: { useWindForSwell(session) },
                     onEdit: { isEditing = true }
                 )
             }

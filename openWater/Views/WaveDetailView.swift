@@ -14,6 +14,15 @@ struct WaveDetailView: View {
     let session: Session
     let summary: SessionSummary
     var onSetWind: () -> Void = {}
+    /// Take the wind's bearing as the swell's, for the downwinder whose
+    /// bumps travel with the wind. Offered only when there is a wind to take.
+    var onUseWindForSwell: () -> Void = {}
+
+    /// Which way the map is turned, so the pointers on the badges can turn
+    /// the other way. A ride's bearing is a fact about the world; the badge
+    /// rotates in screen space, and the two only agreed while the map was
+    /// north-up.
+    @State private var mapHeading: Double = 0
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.floatingTabBarHeight) private var tabBarHeight
@@ -153,15 +162,39 @@ struct WaveDetailView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(action: onSetWind) {
-                Text("Set the swell")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Self.waveColour, in: Capsule())
-                    .foregroundStyle(.white)
+            HStack(spacing: 10) {
+                Button(action: onSetWind) {
+                    Text("Set the swell")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Self.waveColour, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+
+                // The downwinder's answer, one tap: the bumps are wind
+                // waves and they travel with the wind, so the arrow the
+                // rider would drag is the one the app already has.
+                if session.sport.isWindPowered, let wind = session.effectiveWind {
+                    Button(action: onUseWindForSwell) {
+                        Text("Bumps with the wind · \(Format.cardinal(wind.directionFrom)) \(Int(wind.directionFrom.rounded()))°")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Self.waveColour.opacity(0.14), in: Capsule())
+                            .foregroundStyle(Self.waveColour)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Use the wind direction as the swell direction")
+                }
             }
-            .buttonStyle(.plain)
+            if session.sport.isWindPowered, session.effectiveWind != nil {
+                Text("On a downwinder the bumps travel with the wind, and the wind is the swell. On a groundswell day, point the swell arrow yourself — that is the day the two disagree.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(14)
         .cardChrome()
@@ -223,6 +256,14 @@ struct WaveDetailView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(waves.count == 1 ? "1 wave" : "\(waves.count) waves")
                         .font(.subheadline.weight(.bold))
+                    // Caught straight off the back of the one before — the
+                    // thing a rider is trying to do, and until now the
+                    // thing the finder could not see.
+                    if waves.linkedCount > 0 {
+                        Text("· \(waves.linkedCount) linked")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Self.waveColour)
+                    }
                     Spacer(minLength: 8)
                     Text("\(Format.distance(waves.distance, unit: units.distance)) · \(Format.shortDuration(waves.timeOnWaves)) riding")
                         .font(.caption)
@@ -424,7 +465,7 @@ struct WaveDetailView: View {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 11, weight: .black))
                         .foregroundStyle(.white)
-                        .rotationEffect(.degrees(ride.netBearing))
+                        .rotationEffect(.degrees(ride.netBearing - mapHeading))
                         .frame(width: 22, height: 22)
                         .background(Self.waveColour, in: Circle())
                         .overlay(Circle().stroke(.white, lineWidth: 1.5))
@@ -445,6 +486,9 @@ struct WaveDetailView: View {
             }
         }
         .mapStyle(settings.mapStyle.mapStyle)
+        .onMapCameraChange(frequency: .continuous) { context in
+            mapHeading = context.camera.heading
+        }
         .overlay(alignment: .bottomLeading) {
             // Offered whenever *anything* is singled out, not just when a
             // wave was tapped: pausing mid-replay also leaves one wave lit,
@@ -483,7 +527,7 @@ struct WaveDetailView: View {
                     .foregroundStyle(Self.waveColour)
             }
             .offset(y: -(size / 2 + (lead ? 7 : 6)))
-            .rotationEffect(.degrees(ride.netBearing))
+            .rotationEffect(.degrees(ride.netBearing - mapHeading))
 
             Text("\(ride.id + 1)")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -750,9 +794,20 @@ struct WaveDetailView: View {
                                         : Color.secondary.opacity(0.35), in: Circle())
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(Format.distance(ride.distance, unit: units.distance)) · \(Format.shortDuration(ride.duration))")
-                                .font(.subheadline.weight(.semibold))
-                                .monospacedDigit()
+                            HStack(spacing: 6) {
+                                Text("\(Format.distance(ride.distance, unit: units.distance)) · \(Format.shortDuration(ride.duration))")
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                                if ride.linked {
+                                    Text("linked")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Self.waveColour.opacity(0.14), in: Capsule())
+                                        .foregroundStyle(Self.waveColour)
+                                        .accessibilityLabel("caught off the wave before")
+                                }
+                            }
                             Text("\(Format.speed(ride.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(ride.peakSpeed, unit: units.speed, decimals: 1)) peak")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -808,7 +863,11 @@ struct WaveDetailView: View {
                  + "their own direction. Runs and glides are unchanged by any "
                  + "of this. Each ride's number carries a pointer turned the "
                  + "way that ride made ground, and the one you tap also shows "
-                 + "an arrow where it kicked out. Press play under the map to "
+                 + "an arrow where it kicked out. A ride marked *linked* was "
+                 + "caught straight off the back of the one before it, inside "
+                 + "\(Int(DownwindAnalyzer.riseWindow)) seconds of its kick-out, and is measured against the "
+                 + "lull that first wave rose out of — you never gave the speed "
+                 + "back. Press play under the map to "
                  + "watch them in the order they came.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

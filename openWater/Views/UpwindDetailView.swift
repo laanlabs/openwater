@@ -46,6 +46,9 @@ struct UpwindDetailView: View {
     @State private var isSettingCourse = false
     @State private var isRecomputing = false
     @State private var isMapFullScreen = false
+    /// Which way the map is turned, so the badge arrows can turn the other
+    /// way and keep pointing at the world rather than at the screen.
+    @State private var mapHeading: Double = 0
 
     /// The parent's copy and its revision — see `SessionDetailView.revision`.
     /// Local state above lets this screen re-analyse in place; a new revision
@@ -429,6 +432,9 @@ struct UpwindDetailView: View {
             }
         }
         .mapStyle(settings.mapStyle.mapStyle)
+        .onMapCameraChange(frequency: .continuous) { context in
+            mapHeading = context.camera.heading
+        }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 6) {
                 windBadge
@@ -475,7 +481,7 @@ struct UpwindDetailView: View {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.down")
                     .font(.system(size: 15, weight: .bold))
-                    .rotationEffect(.degrees(wind.directionFrom))
+                    .rotationEffect(.degrees(wind.directionFrom - mapHeading))
                 VStack(alignment: .leading, spacing: 0) {
                     Text("\(Format.cardinal(wind.directionFrom)) \(Int(wind.directionFrom.rounded()))°"
                          + (wind.speed.map { " · \(Int(($0 * 1.94384).rounded())) kn" } ?? ""))
@@ -507,7 +513,7 @@ struct UpwindDetailView: View {
             HStack(spacing: 8) {
                 Image(systemName: "location.north.fill")
                     .font(.system(size: 13, weight: .bold))
-                    .rotationEffect(.degrees(course ?? wind.directionFrom))
+                    .rotationEffect(.degrees((course ?? wind.directionFrom) - mapHeading))
                     .foregroundStyle(course == nil ? .secondary : .primary)
                 VStack(alignment: .leading, spacing: 0) {
                     if let course {

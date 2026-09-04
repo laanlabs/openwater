@@ -15,7 +15,7 @@ struct RideTimelineTests {
         WaveRide(id: id, startElapsed: from, endElapsed: to,
                  startIndex: Int(from), endIndex: Int(to),
                  distance: 100, entrySpeed: 5, peakSpeed: 9, averageSpeed: 7,
-                 offSwell: 20, netBearing: 0)
+                 offSwell: 20, netBearing: 0, linked: false)
     }
 
     private var timeline: RideTimeline {

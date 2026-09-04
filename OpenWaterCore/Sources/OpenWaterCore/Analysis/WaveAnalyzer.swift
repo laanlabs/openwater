@@ -24,6 +24,17 @@ public struct WaveRide: Hashable, Sendable, Identifiable {
     /// guarantee that every ride here went the way the waves were going.
     public let netBearing: Double
 
+    /// Caught straight off the back of the ride before it — within the
+    /// rise window of its kick-out, with no hole in the recording between.
+    ///
+    /// The rise test asks what the wave *gave* over the lull before it, and
+    /// a rider who links waves never has a lull: the next face is under them
+    /// before the last one's speed has gone. Such a ride is measured against
+    /// the lull the *previous* wave rose out of — the speed was the wave's
+    /// gift and it is still being ridden — and marked here, because linking
+    /// is the thing a rider is trying to do.
+    public let linked: Bool
+
     public var duration: TimeInterval { endElapsed - startElapsed }
     public var midIndex: Int { (startIndex + endIndex) / 2 }
 }
@@ -66,6 +77,9 @@ public struct WaveRideSummary: Sendable {
     public let usedMotionData: Bool
 
     public var count: Int { rides.count }
+
+    /// Rides caught straight off the back of the one before.
+    public var linkedCount: Int { rides.filter(\.linked).count }
 
     public static let none = WaveRideSummary(
         rides: [], timeOnWaves: 0, distance: 0,
@@ -229,6 +243,100 @@ public struct WaveRideFinder {
         return finder
     }
 
+    // MARK: - The rise
+
+    /// Fewest fixes either window may be judged on, whatever the sample
+    /// rate. Three is the least a median means anything with; a receiver
+    /// reporting every five seconds gets its window stretched to reach them.
+    private static let fewestInWindow = 3
+
+    /// How far back the lull may be looked for when the fixes are sparse.
+    private static let furthestLull: TimeInterval = 30
+
+    /// How many of the trace's own sample-to-sample speed steps a rise has
+    /// to be worth before it is believed.
+    ///
+    /// Measured on six real Doppler recordings the typical step is 0.12 to
+    /// 0.25 m/s, the bumpiest downwinder at the top of that; four of those
+    /// is half a metre a second to one, which is about what the twelve per
+    /// cent bar already asks at riding speed, so on a clean trace this
+    /// changes little. On a trace whose speed is derived from jittery
+    /// positions the steps are two to eight times larger, and scanning a
+    /// long candidate for a catch is scanning hundreds of noisy windows for
+    /// the one that happened to be high — this is what stops that one from
+    /// being called a wave.
+    private static let stepsPerRise: Double = 4
+
+    /// The trace's typical sample-to-sample speed step while moving: the
+    /// median absolute difference, which jitter raises and a real wave does
+    /// not, since a wave is a handful of steps among thousands.
+    private func speedStep(in track: Track, breaks: [Bool]) -> Double {
+        var steps: [Double] = []
+        steps.reserveCapacity(track.count)
+        for i in 1..<track.count where !breaks[i] {
+            guard track.speed[i] >= thresholds.movingSpeed,
+                  track.speed[i - 1] >= thresholds.movingSpeed else { continue }
+            steps.append(abs(track.speed[i] - track.speed[i - 1]))
+        }
+        guard steps.count >= Self.fewestInWindow else { return 0 }
+        return steps.sorted()[steps.count / 2]
+    }
+
+    /// The lull before a moment: the typical speed over the rise window
+    /// before it. The median rather than the minimum the glide detector
+    /// uses, because on a position-derived trace the minimum of eight
+    /// jittery samples is the jitter. Nil when there is nothing to judge
+    /// from — the recording starts here, or a hole ends here.
+    private func lullBefore(_ index: Int, in track: Track, breaks: [Bool]) -> Double? {
+        let start = track.elapsed[index] - DownwindAnalyzer.riseWindow
+        let furthest = track.elapsed[index] - Self.furthestLull
+        var speeds: [Double] = []
+        var k = index
+        while k > 0, !breaks[k],
+              track.elapsed[k - 1] >= furthest,
+              track.elapsed[k - 1] >= start || speeds.count < Self.fewestInWindow {
+            k -= 1
+            speeds.append(track.speed[k])
+        }
+        guard speeds.count >= Self.fewestInWindow else { return nil }
+        return max(0.1, speeds.sorted()[speeds.count / 2])
+    }
+
+    /// How long a wave has to hold what it gave, seconds. Half the rise
+    /// window, because a bump on a downwinder lifts the board for a few
+    /// seconds before the rider drops off its back, and asking for eight
+    /// seconds of lift lost a fifth of a real parawing run's waves.
+    static let catchWindow: TimeInterval = 4
+
+    /// What the wave gave at the catch: the typical speed over the catch
+    /// window from a moment, or over the rest of the stretch if that is
+    /// sooner. The median, so one lucky sample is not a wave.
+    ///
+    /// On a trace whose speed was *derived from positions* the judgement is
+    /// harder to trust, and it is made more slowly: the lower quartile over
+    /// the whole rise window, so the wave has to have lifted nearly every
+    /// sample for eight seconds. Measured on six real Doppler recordings and
+    /// on synthetic position jitter, the sample-to-sample speed steps of the
+    /// bumpiest real downwinder and of half a metre of jitter are the same
+    /// number — nothing in the speed's shape tells them apart. What does is
+    /// where the speed came from. Doppler is a velocity measurement with a
+    /// tenth of a metre a second of noise on it; a derived speed is the
+    /// difference of two jittery positions and inherits all of it. The
+    /// builder knows which it did, and the finder believes it.
+    private func catchSpeed(from index: Int, to end: Int, in track: Track,
+                            conservative: Bool) -> Double {
+        let window = conservative ? DownwindAnalyzer.riseWindow : Self.catchWindow
+        let limit = track.elapsed[index] + window
+        var speeds: [Double] = []
+        var k = index
+        while k <= end, track.elapsed[k] <= limit || speeds.count < Self.fewestInWindow {
+            speeds.append(track.speed[k])
+            k += 1
+        }
+        let sorted = speeds.sorted()
+        return conservative ? sorted[sorted.count / 4] : sorted[sorted.count / 2]
+    }
+
     // MARK: - Find
 
     /// The waves ridden, measured against `swellFrom` — degrees the swell
@@ -260,6 +368,13 @@ public struct WaveRideFinder {
         for i in 1..<track.count {
             breaksRide[i] = track.elapsed[i] - track.elapsed[i - 1] > gapLimit
         }
+
+        // How much a rise has to be worth on *this* trace before it is
+        // believed — see `stepsPerRise`.
+        let riseFloor = Self.stepsPerRise * speedStep(in: track, breaks: breaksRide)
+        // See `catchSpeed`: a speed that came from positions is judged more
+        // slowly than one the receiver measured.
+        let conservative = track.speedSource != .doppler
 
         // Smoothed acceleration, for the deceleration test — a single noisy
         // fix should not end a ride.
@@ -351,6 +466,11 @@ public struct WaveRideFinder {
         var out: [WaveRide] = []
         var timeOnWaves: TimeInterval = 0
         var distanceOnWaves = 0.0
+        // The last wave accepted — where it ended, and the lull it rose out
+        // of — so the next can be measured against that lull if it came
+        // straight after. Named or not: a wave too short to name still gave
+        // the speed the next one is carrying.
+        var previous: (endIndex: Int, lull: Double)?
         index = 0
         while index < track.count {
             guard riding[index] else { index += 1; continue }
@@ -359,15 +479,66 @@ public struct WaveRideFinder {
             defer { index = j + 1 }
             guard j > index else { continue }
 
-            let duration = track.elapsed[j] - track.elapsed[index]
-            var peak = 0.0
-            for k in index...j { peak = max(peak, track.speed[k]) }
-
             // The wave has to have *given* something: speed above the lull
             // before it. Cruising through the cone at one powered pace is a
             // reach that happens to point at the beach.
-            let rose = peak >= glides.troughBefore(index, in: track) * (1 + minimumRise)
-            guard rose else { continue }
+            //
+            // Given it *at the catch*, and given it to the typical speed, not
+            // to one sample. This was the peak of the whole stretch against
+            // the slowest single fix in the eight seconds before it, and a
+            // stretch can be minutes long once carves are bridged — so on a
+            // trace whose speed is derived from jittery positions, a steady
+            // run with the swell read as one three-hundred-second wave: the
+            // lowest of eight noisy samples against the highest of three
+            // hundred. A wave gives its speed when you drop in. So the
+            // stretch is scanned for the moment the typical speed over the
+            // next rise window beats the typical speed over the last one by
+            // the bar, and the ride *begins there*: the cruise in the cone
+            // before the wave arrived was riding by the per-sample rule, but
+            // it was not the wave. A stretch with no such moment — a steady
+            // pace, or jitter — is not a wave at all.
+            //
+            // Unless the lull never came. A wave caught straight off the back
+            // of another — kicked out, turned, and onto the next face inside
+            // the rise window — has the last wave's speed still under it, and
+            // measured against the seconds just before it shows no rise at
+            // all. That was how a good day lost half its waves. The lull it
+            // is measured against is then the one the previous wave rose out
+            // of: the speed was that wave's gift, and the rider never gave it
+            // back. A hole in the recording between them breaks the chain —
+            // what happened across a hole is not known, and a ride that
+            // claims to have carried through one is a guess.
+            var caughtAt: Int?
+            var lull = 0.0
+            var linked = false
+            for k in index...j {
+                var carried: Double?
+                var carriedHere = false
+                if let previous,
+                   track.elapsed[k] - track.elapsed[previous.endIndex] <= DownwindAnalyzer.riseWindow,
+                   !((previous.endIndex + 1)...k).contains(where: { breaksRide[$0] }) {
+                    carried = previous.lull
+                    carriedHere = true
+                }
+                let before = lullBefore(k, in: track, breaks: breaksRide)
+                // No lull behind it — the recording starts here, or resumes
+                // here after a hole — is no evidence of a rise. Saying nothing
+                // is the honest answer.
+                guard let candidateLull = [before, carried].compactMap({ $0 }).min() else { continue }
+                let caught = catchSpeed(from: k, to: j, in: track, conservative: conservative)
+                guard caught >= candidateLull * (1 + minimumRise),
+                      caught - candidateLull >= riseFloor else { continue }
+                caughtAt = k
+                lull = candidateLull
+                linked = carriedHere
+                break
+            }
+            guard let start = caughtAt, start < j else { continue }
+            index = start
+
+            let duration = track.elapsed[j] - track.elapsed[index]
+            var peak = 0.0
+            for k in index...j { peak = max(peak, track.speed[k]) }
 
             // And the ride as a whole went the way the waves were going —
             // takeoff to kick-out, not only sample by sample. The per-sample
@@ -382,6 +553,7 @@ public struct WaveRideFinder {
             let distance = track.cumulativeDistance[j] - track.cumulativeDistance[index]
             timeOnWaves += duration
             distanceOnWaves += distance
+            previous = (j, lull)
             guard duration >= shortestRide else { continue }
 
             var offSum = 0.0
@@ -399,7 +571,8 @@ public struct WaveRideFinder {
                 peakSpeed: peak,
                 averageSpeed: duration > 0 ? distance / duration : 0,
                 offSwell: offSum / Double(j - index + 1),
-                netBearing: net
+                netBearing: net,
+                linked: linked
             ))
         }
 

@@ -26,6 +26,8 @@ struct SessionAnalysisTab: View {
     var revision: Int = 0
 
     var onSetWind: () -> Void = {}
+    /// Take the wind as the swell — see `SessionDetailView.useWindForSwell`.
+    var onUseWindForSwell: () -> Void = {}
     var onEdit: () -> Void = {}
 
     @Environment(AppSettings.self) private var settings
@@ -388,7 +390,8 @@ struct SessionAnalysisTab: View {
         Section("Waves") {
             AnalysisRow(symbol: "figure.surfing", title: "Wave rides",
                         value: waveValue, warning: swellWarning) {
-                WaveDetailView(session: session, summary: summary, onSetWind: onSetWind)
+                WaveDetailView(session: session, summary: summary,
+                               onSetWind: onSetWind, onUseWindForSwell: onUseWindForSwell)
             }
         }
     }

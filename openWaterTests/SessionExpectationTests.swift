@@ -84,6 +84,14 @@ final class SessionExpectationTests: XCTestCase {
 
         var windDirection: Double?
         var windSource: String?
+
+        /// Wave rides, when the recording carries a swell direction to
+        /// measure them against — nil otherwise, so a session without one
+        /// pins nothing. Found through `WaveRideFinder.forSport` with the
+        /// sport's stock rules, exactly as a fresh install reads them.
+        var waves: Int?
+        var waveTime: Double?
+        var wavesLinked: Int?
     }
 
     // MARK: Where things live
@@ -152,6 +160,11 @@ final class SessionExpectationTests: XCTestCase {
             legsByKind[leg.kind(in: summary.ribbon), default: 0] += 1
         }
 
+        let waves: WaveRideSummary? = session.swellDirection.map { swellFrom in
+            WaveRideFinder.forSport(session.sport)
+                .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
+        }
+
         let expectation = Expectation(
             sport: session.sport.rawValue,
             points: session.track.points.count,
@@ -178,7 +191,10 @@ final class SessionExpectationTests: XCTestCase {
             legsReaching: legsByKind[.reaching] ?? 0,
             legsUpwind: legsByKind[.upwind] ?? 0,
             windDirection: summary.wind?.directionFrom,
-            windSource: summary.wind?.source.rawValue
+            windSource: summary.wind?.source.rawValue,
+            waves: waves?.count,
+            waveTime: waves?.timeOnWaves,
+            wavesLinked: waves?.linkedCount
         )
 
         return (url.deletingPathExtension().lastPathComponent,
@@ -248,7 +264,7 @@ final class SessionExpectationTests: XCTestCase {
     /// and it would be worthless if regenerating wiped it.
     private func document(
         for session: Session, summary: SessionSummary, runs: [GroupedRun],
-        place: String?, existing: String?
+        expectation: Expectation, place: String?, existing: String?
     ) -> String {
         var out = ""
 
@@ -310,6 +326,11 @@ final class SessionExpectationTests: XCTestCase {
         out += "| Falls | \(summary.fallSummary.count) |\n"
         out += "| Jumps | \(summary.jumps.count) |\n"
         out += "| Glides | \(summary.downwind.glides.count) · \(duration(summary.downwind.glideTime)) gliding |\n"
+        if let waves = expectation.waves, let time = expectation.waveTime {
+            out += "| Waves | \(waves) · \(duration(time)) riding"
+            if let linked = expectation.wavesLinked, linked > 0 { out += " · \(linked) linked" }
+            out += " |\n"
+        }
         out += "\n"
 
         // What the tab opens on. For a point-to-point session the top level
@@ -479,6 +500,7 @@ final class SessionExpectationTests: XCTestCase {
                 let page = Self.expectationsDirectory.appendingPathComponent("\(key).md")
                 let existing = try? String(contentsOf: page, encoding: .utf8)
                 let text = document(for: session, summary: summary, runs: runs,
+                                    expectation: actual,
                                     place: await placeName(for: session.track),
                                     existing: existing)
                 try text.write(to: page, atomically: true, encoding: .utf8)
@@ -555,6 +577,15 @@ final class SessionExpectationTests: XCTestCase {
         check("downwind legs", actual.legsDownwind, expected.legsDownwind)
         check("reaching legs", actual.legsReaching, expected.legsReaching)
         check("upwind legs", actual.legsUpwind, expected.legsUpwind)
+
+        XCTAssertEqual(actual.waves, expected.waves, "\(key) (\(file)): waves")
+        XCTAssertEqual(actual.wavesLinked, expected.wavesLinked, "\(key) (\(file)): linked waves")
+        if let a = actual.waveTime, let b = expected.waveTime {
+            check("wave time", a, b, 0.5)
+        } else {
+            XCTAssertEqual(actual.waveTime == nil, expected.waveTime == nil,
+                           "\(key) (\(file)): wave time presence")
+        }
 
         XCTAssertEqual(actual.windSource, expected.windSource, "\(key) (\(file)): wind source")
         if let a = actual.windDirection, let b = expected.windDirection {

@@ -37,9 +37,22 @@ Contiguous riding samples become a candidate ride. Then:
   the rider stayed flying and never turned properly away.
 - **A ride never spans a gap in the fixes.** Two samples either side of a
   dropout are adjacent in the array and a minute apart on the water.
-- **The wave has to have given something.** The peak must beat the lull before
-  it by the rise fraction. A wave gives speed for nothing; cruising through the
-  cone at one powered pace is a reach that happens to point at the beach.
+- **The wave has to have given something, and given it at the catch.** The
+  candidate is scanned for the moment the typical speed over the next few
+  seconds beats the typical speed over the eight seconds before by the rise
+  fraction, and the ride *begins there*. The cruise in the cone before the
+  wave arrived was riding by the per-sample rule; it was not the wave. A
+  candidate with no such moment — a steady powered pace, or jitter — is not a
+  wave at all. Both ends are medians, not single samples, and the rise also
+  has to be worth four of the trace's own sample-to-sample speed steps, so a
+  jittery trace sets itself a higher bar. On a trace whose speed was derived
+  from positions rather than measured by Doppler, the catch is judged more
+  slowly still: the lower quartile over the whole rise window.
+- **Unless the lull never came.** A wave caught straight off the back of the
+  one before — inside the rise window of its kick-out, with no hole in the
+  recording between — is measured against the lull the *previous* wave rose
+  out of, and marked **linked**. The speed was that wave's gift and the rider
+  never gave it back.
 - **The whole ride went that way.** Takeoff-to-kick-out bearing inside the
   cone, so a run of bridged carves cannot add up to a ride that wandered
   sideways.
@@ -98,7 +111,8 @@ foil, because the board was rattling.
 ## 4. What is measured
 
 Per ride: distance, entry speed, peak speed, average speed, the mean degrees
-off the swell's travel, and the bearing it made ground along. Per session:
+off the swell's travel, the bearing it made ground along, and whether it was
+linked off the ride before. Per session:
 every second and every metre on a wave — named ride or not, the same
 population for both, so the two can be printed side by side — plus the
 longest, the fastest, the typical duration, the speed floor that was applied,
@@ -129,42 +143,30 @@ see §6.
 
 Ordered by what I would do next, not by size.
 
-### 6.1 The test bed cannot see wave numbers
+### 6.1 The test bed can see wave numbers, but has nothing to look at
 
-`openWaterTests/SessionExpectationTests.swift` re-measures eleven real
-recordings and pins the numbers a rider reads — glides, turns, falls, legs,
-runs. It pins nothing about waves, so a change to `WaveRideFinder` moves every
-rider's wave count with no signal in CI. The synthetic suite is a genuine
-substitute for the *rules*, but not for "this real session still reads the
-same".
+`openWaterTests/SessionExpectationTests.swift` now carries `waves`,
+`waveTime` and `wavesLinked`, filled when a recording has a swell direction
+and left nil otherwise — so a session with one pins its wave count in CI the
+way it pins its glides. **No recording in `testdata/` carries a swell
+direction yet**, so every one is still nil. The recipe: set a swell direction
+on a real wave session in the app — or tap *Bumps with the wind* on a
+downwinder — export it as `.openwater` into `testdata/`, run
+`scripts/record-expectations.sh`, and read the diff. A wave session from the
+rider is the blocking input, not the code.
 
-It cannot be fixed by editing the harness alone: **no recording in `testdata/`
-carries a swell direction**, so there would be nothing to record. The recipe,
-when a session with swell exists:
+Until then the numbers below are the reference, measured on 4 September 2026
+with the wind as the swell, the way the new button would set it:
 
-1. Set a swell direction on a real wave session in the app, and export it as
-   `.openwater` into `testdata/`.
-2. Add `waves: Int?` and `waveTime: Double?` to `Expectation`, filled from
-   `WaveRideFinder.forSport(...).rides(...)` when `session.swellDirection` is
-   non-nil and left nil otherwise.
-3. `scripts/record-expectations.sh`, then read the diff.
+| session | before | after |
+| --- | --- | --- |
+| test-11 (parawing, Columbia) | 27 waves · 16:42 | 25 waves · 15:30 · 5 linked |
+| test-9 (parawing) | 5 · 7:52 | 5 · 7:44 · 2 linked |
+| test-2 (wing) | 7 · 15:35 | 7 · 15:35 |
+| test-1 (wing, ocean) | 15 · 31:26 | 15 · 29:58 |
 
-A wave session from the rider is the blocking input, not the code.
-
-### 6.2 Back-to-back waves are lost
-
-The rise test compares a ride's peak against the lull before it, and the lull
-is the minimum speed over the previous eight seconds
-(`DownwindAnalyzer.riseWindow`). A wave caught straight after another has the
-*previous wave's* speed sitting in that window, so it never shows a rise and
-disappears.
-
-This is visible in the tests: turn the carve tolerance off and the water after
-a carve is not claimed as a second ride, for exactly this reason. It is the
-most likely cause of "it missed half my waves" on a good day, and the least
-safe thing here to change blind — a shorter window finds more waves and also
-more not-waves. It wants a real session with a rider's own count beside it,
-the way the run merge was settled.
+The riding time that went was cruise before a catch, no longer counted as the
+wave.
 
 ### 6.3 Ground speed, not speed through water
 
@@ -186,21 +188,44 @@ is local to this phone's settings.
 
 ### 6.5 Smaller things
 
-- **The map badge arrow** rotates by the ride's bearing in screen space, which
-  is correct only while the map is north-up.
 - **The row is offered for every sport,** including a flat-water kayak session
   where the swell will never mean anything. Defensible — a row that vanishes
   reads as a missing feature — but it is a permanent nag on the wrong sports.
 - **`withSwell` needs a minute of evidence** before its median is trusted, and
   the fallback is the whole session's median, which on a mostly-upwind day is
   not a wave-riding pace.
-- **Noise has never been tested.** The 12 % rise exists so that GPS jitter on a
-  long steady reach does not read as a wave, and no test builds a jittery
-  derived-speed track to prove it.
+- **Heavy position jitter can still make a wave.** At two and three metres of
+  white jitter every second — worse than any receiver — one seed in eight
+  still slips a ride through on a derived-speed trace. Pinned in the test so a
+  change that makes it worse is noticed; not worth the sensitivity it would
+  cost on real bumps to close.
+- **The catch is found a sample or two early.** The scan takes the first
+  moment the window ahead is already lifted, which is one or two fixes before
+  the first fast one. Entry speeds read a touch low because of it.
 
 ---
 
-## 7. What was fixed on 3 September 2026
+## 7. What was fixed on 4 September 2026
+
+- **Back-to-back waves were lost.** A wave caught inside the rise window of
+  the last one's kick-out is now measured against the lull that wave rose out
+  of, and marked *linked* on the card, the list and the footer. Five of
+  test-11's twenty-five are linked; before, they were the ones missing.
+- **A ride began at the cruise, not the catch,** and a steady jittery run read
+  as one long wave. The rise is now judged at the catch, on medians, against
+  a bar that scales with the trace's own noise — and more conservatively when
+  the speed was derived from positions. Tested on synthetic jitter at four
+  levels and on six real recordings.
+- **The downwinder had no way in.** The wave finder needs a swell arrow, and
+  on a river the swell is the wind. *Bumps with the wind* on the empty screen
+  sets the swell direction to the wind's in one tap, with no re-analysis.
+- **The map badge pointers** now turn against the map's heading, so they keep
+  pointing at the world when the map is rotated. The Upwind screen's wind and
+  course badges got the same fix.
+- **The expectation harness** records wave counts for any recording with a
+  swell direction. Six tests added.
+
+## 8. What was fixed on 3 September 2026
 
 For the record, since several of these were invisible from the screen:
 

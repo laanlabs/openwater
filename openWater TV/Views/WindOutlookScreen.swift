@@ -70,7 +70,18 @@ struct WindOutlookScreen: View {
                     }
                 } else {
                     ScrollStop { chart }
-                    ScrollStop { legend }
+                    // Not a ScrollStop. That wrapper is `.focusable()`, and on
+                    // tvOS an outer focusable view *is* the focus target: the
+                    // remote lands on the whole block, the buttons inside it
+                    // never get a turn, and the panel lights up as one — which
+                    // read as "it selects them all". The rows are focusable in
+                    // their own right, and a focused row is all a tvOS
+                    // ScrollView needs to bring this section on screen. The
+                    // padding matches what ScrollStop would have added, so the
+                    // column still lines up.
+                    legend
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 18)
                     ScrollStop { agreement }
                 }
             }

@@ -97,6 +97,37 @@ struct SessionEditingTests {
         #expect(decoded.currentDirectionToward == 15)
     }
 
+    @Test("Naming a course re-runs the analysis and measures the beat along it")
+    func courseChangeReanalyses() throws {
+        let original = session()
+        #expect(original.courseDirection == nil)
+        #expect(original.summary?.polar?.courseDirection == nil)
+
+        var edits = Session.Edits(session: original)
+        #expect(edits.courseDirection == nil)
+        edits.courseDirection = 372  // a sloppy 12°, to be tidied
+        #expect(original.requiresReanalysis(for: edits))
+
+        let edited = original.applying(edits)
+        #expect(edited.courseDirection == 12)
+        #expect(edited.summary?.polar?.courseDirection == 12)
+        // The wind is untouched: a course is where you were going, not
+        // where it was blowing from.
+        #expect(edited.wind == original.wind)
+
+        // Round-trips through the archive, and pre-fills the next edit.
+        let data = try SessionArchive(session: edited).encoded()
+        let decoded = try SessionArchive.decode(data).session
+        #expect(decoded.courseDirection == 12)
+        #expect(Session.Edits(session: decoded).courseDirection == 12)
+
+        // And clearing it is a change too — back to dead upwind.
+        var cleared = Session.Edits(session: edited)
+        cleared.courseDirection = nil
+        #expect(edited.requiresReanalysis(for: cleared))
+        #expect(edited.applying(cleared).summary?.polar?.courseDirection == nil)
+    }
+
     @Test("Changing the sport re-runs the analysis")
     func sportChangeReanalyses() {
         let original = session(sport: .wingfoil)

@@ -100,6 +100,28 @@ public struct Session: Sendable, Codable, Identifiable {
     /// and would throw on a missing key for anything else.
     public var currentDirectionToward: Double?
 
+    /// Degrees the rider was trying to make good *toward*, 0–360, when that
+    /// was not straight into the wind.
+    ///
+    /// VMG is measured along an axis, and the default axis is the wind's:
+    /// upwind is toward where it comes from. On open water that is the
+    /// whole story. On a river it is not — the wind at Rufus blows from
+    /// 258° and the Columbia runs at 240°, so a rider working up the river
+    /// is not trying to go to 258°; that heading is a bank. Measured to the
+    /// wind, their beat looks like it wandered. Measured to where they were
+    /// actually going, it reads as the beat it was.
+    ///
+    /// `nil` means the wind, which is the honest default: the number a rider
+    /// compares across sessions is dead-upwind VMG, and a course only
+    /// replaces it when they say so. Toward, like the current and unlike the
+    /// wind, because a destination is a place you go to. Nothing about the
+    /// polar or the tacks reads this — those are angles to the wind, and a
+    /// course does not change which side the wind was on.
+    ///
+    /// Optional in storage, so archives written before it existed still
+    /// decode.
+    public var courseDirection: Double?
+
     /// Wind for the session — estimated on import, overridable by the rider.
     ///
     /// Prefer `effectiveWind` when reading: the analysis carries its own copy,
@@ -247,6 +269,7 @@ public struct Session: Sendable, Codable, Identifiable {
         swellDirection: Double? = nil,
         currentSpeed: Double? = nil,
         currentDirectionToward: Double? = nil,
+        courseDirection: Double? = nil,
         equipment: Equipment? = nil,
         trackFilter: TrackFilter? = nil,
         timeZone: String? = nil,
@@ -278,6 +301,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.swellDirection = swellDirection
         self.currentSpeed = currentSpeed
         self.currentDirectionToward = currentDirectionToward
+        self.courseDirection = courseDirection
         self.equipment = equipment
         self.trackFilter = trackFilter
         self.timeZone = timeZone

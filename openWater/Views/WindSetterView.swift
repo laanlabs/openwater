@@ -804,7 +804,7 @@ struct WindSetterView: View {
 }
 
 /// A lat/lon polyline as a `Shape`, equirectangular, aspect-preserving.
-private struct TrackPathShape: Shape {
+struct TrackPathShape: Shape {
     let coordinates: [(Double, Double)]
 
     func path(in rect: CGRect) -> Path {

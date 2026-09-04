@@ -91,6 +91,22 @@ public struct Wind: Hashable, Sendable, Codable {
     public func vmgMagnitude(speed: Double, heading: Double) -> Double {
         abs(vmg(speed: speed, heading: heading))
     }
+
+    /// Velocity made good along a chosen axis rather than the wind's.
+    ///
+    /// `toward` is the bearing the rider was trying to reach — up a river,
+    /// out to a mark — and `nil` means the wind, which makes this the plain
+    /// `vmg` above. Positive is progress toward it; negative is progress away.
+    public func vmg(speed: Double, heading: Double, toward course: Double?) -> Double {
+        guard let course else { return vmg(speed: speed, heading: heading) }
+        return speed * cos(Geo.angleDelta(from: course, to: heading) * .pi / 180)
+    }
+
+    /// Where made-good is measured toward: the course when one is set,
+    /// otherwise straight into the wind.
+    public func madeGoodAxis(course: Double?) -> Double {
+        course ?? directionFrom
+    }
 }
 
 /// Infers the wind direction from the shape of the track.

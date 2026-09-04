@@ -252,6 +252,30 @@ which is what the run columns above count. Zero jumps.
 
 ---
 
+## 6.1 Made good: toward the wind, or toward where you were going
+
+VMG is progress along an axis, and the default axis is the wind's — the
+number a rider compares across sessions. The Upwind screen also lets them
+change two things about it, both stored on the session and both re-running
+the analysis.
+
+**A course** (`Session.courseDirection`, degrees *toward*). On a river the
+wind's bearing is a bank: at Rufus the wind comes from 258° and the Columbia
+runs at about 240°, so a rider working up the gorge is not trying to reach
+258°. With a course set, the beat, the run and every leg's made-good are net
+displacement toward the course instead of toward the wind. Which samples
+*are* upwind, and which tack, stay measured to the wind — a course changes
+what counts as progress, not what counts as a leg. `nil` means the wind.
+
+**A chosen stretch.** The best beat is the finder's pick: the best kilometre
+with real distance on both tacks. Tapping one leg and then another measures
+the stretch between them the same way — net displacement over elapsed time,
+tacks and wobbles included (`PolarAnalysis.BothTacksVMG.measured`). The
+selection is always contiguous, because a beat is a stretch of time and a
+stretch skips nothing: legs 10 to 21 on test-8 straddle a run back down the
+river and read as 0.4 kn, and the card says why rather than hiding it.
+Legs 14 to 18, sailed back to back, read as 4.9 kn toward 240°.
+
 ## 7. Where the rules live
 
 | rule | code |
@@ -261,6 +285,8 @@ which is what the run columns above count. Zero jumps.
 | Flying, touchdowns, dips, recovery | `FoilDetector` |
 | Legs, stops, transport jumps | `SessionShapeAnalyzer` |
 | Per-sport speeds and floors | `SportThresholds.forSport` |
+| Best beat, and a chosen stretch measured the same way | `BothTacksVMGFinder`, `PolarAnalysis.BothTacksVMG.measured` |
+| The made-good axis (the wind, or a course) | `Session.courseDirection`, `Wind.madeGoodAxis` |
 
 An analysis change means bumping `SessionSummary.currentVersion` and
 re-running `scripts/record-expectations.sh`, then reading the diff on

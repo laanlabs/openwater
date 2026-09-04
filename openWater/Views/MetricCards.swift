@@ -608,7 +608,9 @@ struct AngleSummary: View {
             }
 
             if polar.beat != nil {
-                Text("Beat and run VMG are measured over your best continuous kilometre with real distance on both tacks — turning cost included, single-tack wind-shift flattery excluded.")
+                Text(polar.courseDirection.map { course in
+                    "Beat and run VMG are measured toward the course you set, \(Int(course.rounded()))°, over your best continuous kilometre with real distance on both tacks — turning cost included, single-tack wind-shift flattery excluded."
+                } ?? "Beat and run VMG are measured over your best continuous kilometre with real distance on both tacks — turning cost included, single-tack wind-shift flattery excluded.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -913,6 +915,19 @@ struct UpwindCard: View {
     let runs: [Run]
     let units: UnitPreferences
 
+    /// A stretch the rider chose on the Upwind screen — legs 10 to 21, say —
+    /// measured the way the best beat is. When present it takes the headline
+    /// and the best beat steps aside, because the rider asked a more specific
+    /// question than "what was your best kilometre".
+    var chosen: PolarAnalysis.BothTacksVMG?
+    /// What to call the chosen stretch: "legs 10–21".
+    var chosenLabel: String?
+    /// A caveat about the chosen stretch — time between the legs that the
+    /// number counts against it.
+    var chosenNote: String?
+    /// Back to the best beat.
+    var onClearChosen: (() -> Void)?
+
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
 
     /// Fastest upwind leg — best average speed of any run sailed above a beam
@@ -925,40 +940,71 @@ struct UpwindCard: View {
         .max { $0.averageSpeed < $1.averageSpeed }
     }
 
+    /// The stretch on the headline: the rider's choice if they made one,
+    /// otherwise the best beat.
+    private var headline: (measure: PolarAnalysis.BothTacksVMG, over: String)? {
+        if let chosen, let chosenLabel { return (chosen, chosenLabel) }
+        if let beat = polar.beat { return (beat, "your best beat") }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("UPWIND")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            if let beat = polar.beat {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(Format.speed(beat.vmg, unit: units.speed, decimals: 1,
-                                              includeSymbol: false))
-                                .font(.system(size: 34, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                            Text("\(units.speed.symbol) VMG")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.tint)
+            if let headline {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text(Format.speed(headline.measure.vmg, unit: units.speed, decimals: 1,
+                                                  includeSymbol: false))
+                                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .contentTransition(.numericText())
+                                Text("\(units.speed.symbol) VMG")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.tint)
+                            }
+                            Text(madeGoodLine(over: headline.over))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(subtitle(headline.measure))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
-                        Text("made good over your best beat")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(beatSubtitle(beat))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if let angle = headline.measure.meanAngle {
+                            Text(String(format: "@ %.0f°", angle))
+                                .font(.system(.title3, design: .monospaced).weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    Spacer()
-                    if let angle = beat.meanAngle {
-                        Text(String(format: "@ %.0f°", angle))
-                            .font(.system(.title3, design: .monospaced).weight(.medium))
+
+                    if chosen != nil, let chosenNote {
+                        Label(chosenNote, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    // The way back, on the card that changed. "Show all legs"
+                    // lives on the map, but a rider reading the number does
+                    // not know the map is where the number came from.
+                    if chosen != nil, let onClearChosen {
+                        Button(action: onClearChosen) {
+                            Label("Back to your best beat", systemImage: "arrow.uturn.backward")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
                     }
                 }
                 .padding(12)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                .animation(.snappy, value: chosen)
             }
 
             // "Tacking through" and "Run VMG down" used to be here too. They
@@ -981,11 +1027,21 @@ struct UpwindCard: View {
         }
     }
 
-    private func beatSubtitle(_ beat: PolarAnalysis.BothTacksVMG) -> String {
+    /// "made good over your best beat", or, with a course set, "made good
+    /// toward 240° over legs 10–21" — the axis is the thing that changed,
+    /// so it is said in the same breath as the number.
+    private func madeGoodLine(over: String) -> String {
+        if let course = polar.courseDirection {
+            return "made good toward \(Format.cardinal(course)) \(Int(course.rounded()))° over \(over)"
+        }
+        return "made good over \(over)"
+    }
+
+    private func subtitle(_ measure: PolarAnalysis.BothTacksVMG) -> String {
         var parts: [String] = []
-        if let legs = beat.legs { parts.append("\(legs) \(legs == 1 ? "leg" : "legs")") }
-        parts.append(Format.distance(beat.distance, unit: units.distance))
-        parts.append("both tacks \(Int(beat.portShare * 100))/\(Int((1 - beat.portShare) * 100))")
+        if let legs = measure.legs { parts.append("\(legs) \(legs == 1 ? "leg" : "legs")") }
+        parts.append(Format.distance(measure.distance, unit: units.distance))
+        parts.append("both tacks \(Int(measure.portShare * 100))/\(Int((1 - measure.portShare) * 100))")
         return parts.joined(separator: " · ")
     }
 }

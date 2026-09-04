@@ -10,6 +10,13 @@ import SwiftUI
 /// which tack carried it, which leg was the good one, and what angle each was
 /// actually sailed at. Port legs are red and starboard legs green, because
 /// those are the colours the sport already painted on every bow.
+///
+/// Two things here are the rider's to change. **Which stretch** — the best
+/// beat is the finder's pick, but tapping one leg and then another measures
+/// the legs between them the same honest way, for the rider who wants the
+/// twelve legs up the river and not the finder's best kilometre. And **which
+/// way** — made-good is measured straight into the wind unless a course is
+/// set, and on a river the wind's bearing is a bank. See `CourseSetterView`.
 struct UpwindDetailView: View {
 
     @Environment(AppSettings.self) private var settings
@@ -24,9 +31,19 @@ struct UpwindDetailView: View {
     @State private var polar: PolarAnalysis
 
     @State private var legs: [UpwindLeg] = []
-    @State private var selectedLeg: Int?
+    /// The legs the rider has chosen, by index, always contiguous: a beat is
+    /// a stretch of time, and a stretch skips nothing. One tap picks a leg;
+    /// a tap on another leg stretches the choice to include it.
+    @State private var selection: ClosedRange<Int>?
+    /// The chosen stretch, measured. Kept as state rather than derived so the
+    /// prefix sums are built once per choice, not once per layout pass.
+    @State private var chosen: PolarAnalysis.BothTacksVMG?
+    /// What the chosen stretch contains besides the chosen legs, when that
+    /// is worth saying — see `measureSelection`.
+    @State private var chosenNote: String?
     @State private var samples: [(elapsed: TimeInterval, vmg: Double)] = []
     @State private var isSettingWind = false
+    @State private var isSettingCourse = false
     @State private var isRecomputing = false
     @State private var isMapFullScreen = false
 
@@ -46,8 +63,84 @@ struct UpwindDetailView: View {
 
     private var wind: Wind { polar.wind }
 
+    /// The bearing made-good is measured toward, when it is not the wind's.
+    private var course: Double? { polar.courseDirection }
+
     private func colour(_ tack: Tack) -> Color {
         tack == .port ? .red : .green
+    }
+
+    private func isSelected(_ leg: UpwindLeg) -> Bool {
+        selection?.contains(leg.id) ?? false
+    }
+
+    /// The selection rule, in one place so the map and the list agree.
+    ///
+    /// Nothing chosen: this leg. This leg alone: nothing. A leg inside a
+    /// wider choice: narrow to it — the rider is starting over from here.
+    /// A leg outside: widen to reach it. So "legs 10 to 21" is two taps, and
+    /// every state is one tap from the one the rider meant.
+    private func toggle(_ leg: UpwindLeg) {
+        withAnimation(.snappy) {
+            guard let current = selection else {
+                selection = leg.id...leg.id
+                return
+            }
+            if current == leg.id...leg.id {
+                selection = nil
+            } else if current.contains(leg.id) {
+                selection = leg.id...leg.id
+            } else {
+                selection = min(current.lowerBound, leg.id)...max(current.upperBound, leg.id)
+            }
+        }
+    }
+
+    private func clearSelection() {
+        withAnimation(.snappy) { selection = nil }
+    }
+
+    /// Measure the chosen legs the way the best beat is measured — net
+    /// displacement along the axis from the first leg's start to the last
+    /// leg's end, over the time it took, tacks between them included.
+    private func measureSelection() {
+        guard let selection,
+              let first = legs.first(where: { $0.id == selection.lowerBound }),
+              let last = legs.first(where: { $0.id == selection.upperBound })
+        else {
+            chosen = nil
+            chosenNote = nil
+            return
+        }
+        var measure = PolarAnalysis.BothTacksVMG.measured(
+            track: session.track, wind: wind, toward: course,
+            from: first.startIndex, to: last.endIndex)
+        // The finder counts legs as tack changes, which inside a beat is the
+        // same thing. Inside a rider's choice it is not: legs 10 to 21 on a
+        // river can hold a run back down between them, and every gybe on
+        // the way counted as a "leg". The rider chose twelve; say twelve.
+        measure?.legs = selection.count
+        chosen = measure
+
+        // And say what else is in there. A stretch is measured as time, so
+        // a choice that straddles a run back down, or a rest on the beach,
+        // pays for it in the number — which is right, and baffling unless
+        // it is said. Only worth saying when it is a real share.
+        let inLegs = legs.filter { selection.contains($0.id) }.reduce(0.0) { $0 + $1.duration }
+        let span = last.endElapsed - first.startElapsed
+        let between = span - inLegs
+        if between > 60, between > span * 0.25 {
+            chosenNote = "\(Format.shortDuration(between)) of this stretch was between those legs — a run back down, a rest — and the number pays for it. For a beat, choose legs sailed back to back."
+        } else {
+            chosenNote = nil
+        }
+    }
+
+    /// "legs 10–21", or "leg 10".
+    private var selectionLabel: String? {
+        guard let selection else { return nil }
+        if selection.count == 1 { return "leg \(selection.lowerBound + 1)" }
+        return "legs \(selection.lowerBound + 1)–\(selection.upperBound + 1)"
     }
 
     var body: some View {
@@ -57,7 +150,9 @@ struct UpwindDetailView: View {
                 // on Summary with this screen behind it; now that Analysis
                 // lists topics rather than stacking cards, the answer and the
                 // evidence belong together on one screen.
-                UpwindCard(polar: polar, runs: summary.runs, units: settings.units)
+                UpwindCard(polar: polar, runs: summary.runs, units: settings.units,
+                           chosen: chosen, chosenLabel: selectionLabel,
+                           chosenNote: chosenNote, onClearChosen: clearSelection)
                     .cardChrome()
 
                 if !polar.wind.hasSpeed {
@@ -95,7 +190,9 @@ struct UpwindDetailView: View {
                     legList
                 }
 
-                Text("A leg is continuous sailing on one tack above a beam reach. VMG is measured as ground actually made toward the wind over the leg's time — wandering costs it, so these are honest numbers, not speed × cos(angle).")
+                Text(course == nil
+                     ? "A leg is continuous sailing on one tack above a beam reach. VMG is measured as ground actually made toward the wind over the leg's time — wandering costs it, so these are honest numbers, not speed × cos(angle). Tap a leg, then another, to measure the stretch between them. If the wind's bearing is not where you were going — up a river, say — set a course on the map and made-good is measured toward it instead."
+                     : "A leg is continuous sailing on one tack above a beam reach. VMG here is ground actually made toward your course over the leg's time — wandering costs it, so these are honest numbers, not speed × cos(angle). Which legs count as upwind, and which tack, are still measured to the wind. Tap a leg, then another, to measure the stretch between them.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -121,11 +218,26 @@ struct UpwindDetailView: View {
             polar = incoming.polar
             legs = upwindLegs(track: session.track, wind: polar.wind)
             samples = computeVMGSamples()
-            selectedLeg = nil
+            selection = nil
         }
+        .onChange(of: selection) { _, _ in measureSelection() }
         .sheet(isPresented: $isSettingWind) {
             WindSetterView(session: session) { applied in
-                applyConditions(applied)
+                apply { edits in
+                    edits.windDirection = applied.windDirection
+                    edits.windSpeed = applied.windSpeed
+                    edits.windTimeline = applied.windTimeline
+                    edits.swellHeight = applied.swellHeight
+                    edits.swellDirection = applied.swellDirection
+                    edits.currentSpeed = applied.currentSpeed
+                    edits.currentDirectionToward = applied.currentDirectionToward
+                }
+            }
+        }
+        .sheet(isPresented: $isSettingCourse) {
+            CourseSetterView(trackPoints: session.track.points, wind: wind,
+                             initial: course) { direction in
+                apply { edits in edits.courseDirection = direction }
             }
         }
         .fullScreenCover(isPresented: $isMapFullScreen) {
@@ -150,10 +262,11 @@ struct UpwindDetailView: View {
         }
     }
 
-    /// Every number on this screen is measured from one direction, so
-    /// changing it re-runs the whole chain: analysis, polar, legs, samples —
-    /// and the library keeps the saved result so the rest of the app agrees.
-    private func applyConditions(_ applied: WindSetterView.Applied) {
+    /// Every number on this screen is measured from one direction — two,
+    /// with a course set — so changing either re-runs the whole chain:
+    /// analysis, polar, legs, samples — and the library keeps the saved
+    /// result so the rest of the app agrees.
+    private func apply(_ change: @escaping @Sendable (inout Session.Edits) -> Void) {
         isRecomputing = true
         let categories = settings.categories
         let overrides = settings.overrides(for: session.sport)
@@ -161,13 +274,7 @@ struct UpwindDetailView: View {
         Task {
             let edited = await Task.detached {
                 var edits = Session.Edits(session: current)
-                edits.windDirection = applied.windDirection
-                edits.windSpeed = applied.windSpeed
-                edits.windTimeline = applied.windTimeline
-                edits.swellHeight = applied.swellHeight
-                edits.swellDirection = applied.swellDirection
-                edits.currentSpeed = applied.currentSpeed
-                edits.currentDirectionToward = applied.currentDirectionToward
+                change(&edits)
                 return current.applying(edits, categories: categories, overrides: overrides)
             }.value
             library.save(edited)
@@ -177,7 +284,7 @@ struct UpwindDetailView: View {
                 polar = newPolar
                 legs = upwindLegs(track: edited.track, wind: newPolar.wind)
                 samples = computeVMGSamples()
-                selectedLeg = nil
+                selection = nil
             }
             isRecomputing = false
         }
@@ -237,18 +344,20 @@ struct UpwindDetailView: View {
                 polar = newPolar
                 legs = upwindLegs(track: edited.track, wind: newPolar.wind)
                 samples = computeVMGSamples()
-                selectedLeg = nil
+                selection = nil
             }
             isRecomputing = false
         }
     }
 
-    /// The rider's own idea of what an upwind leg is.
+    /// The rider's own idea of what an upwind leg is, measured toward
+    /// their course when they set one.
     private func upwindLegs(track: Track, wind: Wind) -> [UpwindLeg] {
         let t = settings.thresholds(for: session.sport)
         return UpwindLegFinder.legs(
             track: track,
             wind: wind,
+            madeGoodToward: polar.courseDirection,
             upwindLimit: t.upwindLegAngle,
             minimumDistance: t.upwindLegMinimumDistance,
             minimumDuration: t.upwindLegMinimumDuration
@@ -266,14 +375,22 @@ struct UpwindDetailView: View {
             // The wind axis, dashed across the water. This is what makes the
             // zig-zag legible as a *beat*: every leg reads against the line
             // it is trying to climb.
-            MapPolyline(coordinates: windAxis)
-                .stroke(.indigo.opacity(0.55), style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
+            MapPolyline(coordinates: axis(toward: wind.directionFrom))
+                .stroke(.indigo.opacity(course == nil ? 0.55 : 0.3), style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
+
+            // And the course, when there is one: the line the rider was
+            // actually climbing, solid so it reads as the one that counts,
+            // with the wind's axis left faint beside it for the comparison.
+            if let course {
+                MapPolyline(coordinates: axis(toward: course))
+                    .stroke(.tint.opacity(0.6), style: StrokeStyle(lineWidth: 2.5, dash: [14, 5]))
+            }
 
             ForEach(legs) { leg in
                 MapPolyline(coordinates: session.track.points[leg.startIndex...leg.endIndex].map(\.clCoordinate))
                     .stroke(
-                        colour(leg.tack).opacity(selectedLeg == nil || selectedLeg == leg.id ? 0.9 : 0.25),
-                        style: StrokeStyle(lineWidth: selectedLeg == leg.id ? 6 : 4, lineCap: .round)
+                        colour(leg.tack).opacity(selection == nil || isSelected(leg) ? 0.9 : 0.25),
+                        style: StrokeStyle(lineWidth: isSelected(leg) ? 6 : 4, lineCap: .round)
                     )
 
                 // Number-only dots: eleven full "n · 54°" capsules stacked on
@@ -282,11 +399,9 @@ struct UpwindDetailView: View {
                 // appears when a leg is chosen, and always lives in the list.
                 Annotation("", coordinate: session.track.points[leg.midIndex].clCoordinate, anchor: .center) {
                     Button {
-                        withAnimation(.snappy) {
-                            selectedLeg = selectedLeg == leg.id ? nil : leg.id
-                        }
+                        toggle(leg)
                     } label: {
-                        if selectedLeg == leg.id {
+                        if selection == leg.id...leg.id {
                             Text("\(leg.index + 1) · \(Int(leg.meanAngle.rounded()))° · \(Format.speed(leg.vmg, unit: settings.units.speed, decimals: 1)) VMG")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .monospacedDigit()
@@ -296,13 +411,16 @@ struct UpwindDetailView: View {
                                 .foregroundStyle(.white)
                                 .shadow(radius: 2)
                         } else {
+                            // Inside a wider choice the dots stay dots — a
+                            // dozen capsules would bury each other — but
+                            // grow a little and keep their ring bold.
                             Text("\(leg.index + 1)")
                                 .font(.system(size: 10, weight: .bold, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(.white)
-                                .frame(width: 18, height: 18)
-                                .background(colour(leg.tack).opacity(0.9), in: Circle())
-                                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                .frame(width: isSelected(leg) ? 22 : 18, height: isSelected(leg) ? 22 : 18)
+                                .background(colour(leg.tack).opacity(selection == nil || isSelected(leg) ? 0.9 : 0.5), in: Circle())
+                                .overlay(Circle().stroke(.white, lineWidth: isSelected(leg) ? 2.5 : 1.5))
                         }
                     }
                     .buttonStyle(.plain)
@@ -311,16 +429,22 @@ struct UpwindDetailView: View {
             }
         }
         .mapStyle(settings.mapStyle.mapStyle)
-        .overlay(alignment: .topTrailing) { windBadge }
+        .overlay(alignment: .topTrailing) {
+            VStack(alignment: .trailing, spacing: 6) {
+                windBadge
+                courseBadge
+            }
+            .padding(10)
+        }
         .overlay(alignment: .bottomLeading) {
             // The counterpart of choosing a leg: everything else dims when one
             // is selected, so putting it back cannot depend on the rider
             // re-finding an 18-point dot they may have tapped by accident.
-            if selectedLeg != nil {
+            if let selectionLabel {
                 Button {
-                    withAnimation(.snappy) { selectedLeg = nil }
+                    clearSelection()
                 } label: {
-                    Label("Show all legs", systemImage: "xmark.circle.fill")
+                    Label("Measuring \(selectionLabel) · clear", systemImage: "xmark.circle.fill")
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -371,12 +495,54 @@ struct UpwindDetailView: View {
             .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
         }
         .buttonStyle(.plain)
-        .padding(10)
     }
 
-    /// A line through the middle of the track along the wind's axis, long
-    /// enough to cross the whole session.
-    private var windAxis: [CLLocationCoordinate2D] {
+    /// Where made-good is measured toward, and the way to change it. Under
+    /// the wind badge because it answers the next question a rider asks
+    /// after "is the wind right": "but I was not going that way".
+    private var courseBadge: some View {
+        Button {
+            isSettingCourse = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .rotationEffect(.degrees(course ?? wind.directionFrom))
+                    .foregroundStyle(course == nil ? .secondary : .primary)
+                VStack(alignment: .leading, spacing: 0) {
+                    if let course {
+                        Text("toward \(Format.cardinal(course)) \(Int(course.rounded()))°")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        Text("made good · \(Int(abs(Geo.angleDelta(from: wind.directionFrom, to: course)).rounded()))° off the wind")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("toward the wind")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        Text("made good · tap to set a course")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Image(systemName: course == nil ? "plus.circle.fill" : "pencil.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tint)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(course.map { "Made good toward \(Int($0.rounded())) degrees, tap to adjust" }
+                            ?? "Made good toward the wind, tap to set a course")
+    }
+
+    /// A line through the middle of the track along a bearing, long enough
+    /// to cross the whole session.
+    private func axis(toward bearing: Double) -> [CLLocationCoordinate2D] {
         let points = session.track.points
         guard !points.isEmpty else { return [] }
         let midLat = points.map(\.latitude).reduce(0, +) / Double(points.count)
@@ -384,7 +550,7 @@ struct UpwindDetailView: View {
         let lats = points.map(\.latitude)
         let lons = points.map(\.longitude)
         let span = max((lats.max()! - lats.min()!), (lons.max()! - lons.min()!) * cos(midLat * .pi / 180)) * 0.75
-        let radians = wind.directionFrom * .pi / 180
+        let radians = bearing * .pi / 180
         let dLat = cos(radians) * span
         let dLon = sin(radians) * span / cos(midLat * .pi / 180)
         return [
@@ -408,14 +574,16 @@ struct UpwindDetailView: View {
                 .foregroundStyle(.secondary)
 
             Chart {
-                if let beat = polar.beat {
+                // The stretch the headline is about: the rider's choice when
+                // they made one, otherwise the best beat.
+                if let span = chosen ?? polar.beat {
                     RectangleMark(
-                        xStart: .value("From", beat.startElapsed / 60),
-                        xEnd: .value("To", beat.endElapsed / 60),
+                        xStart: .value("From", span.startElapsed / 60),
+                        xEnd: .value("To", span.endElapsed / 60),
                         yStart: .value("Bottom", chartFloor),
                         yEnd: .value("Top", chartCeiling)
                     )
-                    .foregroundStyle(.tint.opacity(0.12))
+                    .foregroundStyle(.tint.opacity(chosen == nil ? 0.12 : 0.2))
                 }
 
                 ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
@@ -439,7 +607,7 @@ struct UpwindDetailView: View {
                         yStart: .value("Lane", chartFloor),
                         yEnd: .value("Lane", chartFloor + laneHeight)
                     )
-                    .foregroundStyle(colour(leg.tack).opacity(0.7))
+                    .foregroundStyle(colour(leg.tack).opacity(selection == nil || isSelected(leg) ? 0.7 : 0.25))
                     .cornerRadius(1)
                 }
             }
@@ -451,7 +619,9 @@ struct UpwindDetailView: View {
             HStack(spacing: 12) {
                 LegKey(colour: .red, label: "Port legs")
                 LegKey(colour: .green, label: "Starboard legs")
-                if polar.beat != nil {
+                if chosen != nil, let selectionLabel {
+                    LegKey(colour: Color.accentColor.opacity(0.35), label: selectionLabel.capitalized)
+                } else if polar.beat != nil {
                     LegKey(colour: Color.accentColor.opacity(0.25), label: "Best beat")
                 }
                 Spacer(minLength: 0)
@@ -463,8 +633,9 @@ struct UpwindDetailView: View {
 
     private var units: SpeedUnit { settings.units.speed }
 
-    /// Signed VMG per sample, downsampled by bucket mean — peaks matter less
-    /// here than the shape of working versus running. Computed once on appear:
+    /// Signed VMG per sample along the made-good axis, downsampled by bucket
+    /// mean — peaks matter less here than the shape of working versus
+    /// running. Computed once on appear:
     /// as a computed property it ran on every layout pass, and worse, the
     /// floor/lane/ceiling getters once referred to *each other* — laneHeight
     /// asked chartFloor which asked laneHeight, and the recursion took the app
@@ -479,7 +650,7 @@ struct UpwindDetailView: View {
             let end = min(i + stride, track.count)
             var sum = 0.0
             for k in i..<end {
-                sum += wind.vmg(speed: track.speed[k], heading: track.course[k])
+                sum += wind.vmg(speed: track.speed[k], heading: track.course[k], toward: course)
             }
             result.append((track.elapsed[(i + end - 1) / 2], sum / Double(end - i)))
             i = end
@@ -508,14 +679,24 @@ struct UpwindDetailView: View {
 
     private var legList: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("LEGS")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("LEGS")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(selection == nil
+                     ? "tap one, then another, to measure a stretch"
+                     : "tap a leg outside to widen · inside to start over")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
 
             VStack(spacing: 0) {
                 ForEach(legs) { leg in
                     Button {
-                        selectedLeg = selectedLeg == leg.id ? nil : leg.id
+                        toggle(leg)
                     } label: {
                         HStack(spacing: 10) {
                             Circle()
@@ -541,7 +722,7 @@ struct UpwindDetailView: View {
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 12)
-                        .background(selectedLeg == leg.id ? colour(leg.tack).opacity(0.1) : .clear)
+                        .background(isSelected(leg) ? colour(leg.tack).opacity(0.1) : .clear)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

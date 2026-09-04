@@ -50,6 +50,10 @@ extension Session {
         /// opposite of the wind's. Nothing in the analysis reads either yet,
         /// so both ride along as metadata and force no recompute.
         public var currentDirectionToward: Double?
+        /// Degrees the rider was making good *toward*, when the answer is not
+        /// "the wind". This one does force a recompute: the beat, the run and
+        /// every leg's made-good are measured along it.
+        public var courseDirection: Double?
         /// What the rider was on.
         public var equipment: Equipment?
 
@@ -68,6 +72,7 @@ extension Session {
             swellDirection: Double? = nil,
             currentSpeed: Double? = nil,
             currentDirectionToward: Double? = nil,
+            courseDirection: Double? = nil,
             equipment: Equipment? = nil
         ) {
             self.sport = sport
@@ -84,6 +89,7 @@ extension Session {
             self.swellDirection = swellDirection
             self.currentSpeed = currentSpeed
             self.currentDirectionToward = currentDirectionToward
+            self.courseDirection = courseDirection
             self.equipment = equipment
         }
 
@@ -110,6 +116,7 @@ extension Session {
             self.swellDirection = session.swellDirection
             self.currentSpeed = session.currentSpeed
             self.currentDirectionToward = session.currentDirectionToward
+            self.courseDirection = session.courseDirection
             self.equipment = session.equipment
         }
     }
@@ -125,6 +132,9 @@ extension Session {
         let currentManual = current?.source == .manual ? current?.directionFrom : nil
         if edits.windDirection != currentManual { return true }
         if edits.windSpeed != current?.speed { return true }
+        // The axis VMG is measured along. Not cosmetic: the beat and every
+        // leg's made-good are net displacement along it.
+        if edits.courseDirection != courseDirection { return true }
 
         return false
     }
@@ -155,6 +165,7 @@ extension Session {
 
         result.sport = edits.sport
         result.foilTakeoffSpeed = edits.foilTakeoffSpeed
+        result.courseDirection = edits.courseDirection.map(Geo.normalizeDegrees)
 
         let wind: Wind? = edits.windDirection.map {
             Wind(directionFrom: $0, speed: edits.windSpeed, source: .manual, confidence: 1)
@@ -171,7 +182,8 @@ extension Session {
                 categories: categories,
                 wind: wind,
                 foilTakeoffSpeed: edits.foilTakeoffSpeed,
-                overrides: overrides
+                overrides: overrides,
+                courseDirection: result.courseDirection
             )
         ).analyse(track)
 

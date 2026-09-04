@@ -71,6 +71,17 @@ public struct PolarAnalysis: Hashable, Sendable, Codable {
     /// The same measured dead downwind.
     public var broadRun: BothTacksVMG?
 
+    /// The bearing `beat`, `broadRun` and the upwind legs were measured
+    /// toward, when it was not the wind's. `nil` means dead upwind — the
+    /// default, and the number comparable across sessions. See
+    /// `Session.courseDirection` for why a rider would set one. Optional so
+    /// summaries encoded before it existed decode without it.
+    public var courseDirection: Double?
+
+    /// Where made-good is measured toward: the course when one is set,
+    /// otherwise straight into the wind.
+    public var madeGoodAxis: Double { courseDirection ?? wind.directionFrom }
+
     public struct BothTacksVMG: Hashable, Sendable, Codable {
         /// Net speed made good along the wind axis, m/s.
         public let vmg: Double
@@ -188,7 +199,7 @@ public struct PolarBuilder: Sendable {
         self.minimumBinDistance = minimumBinDistance
     }
 
-    public func build(track: Track, wind: Wind) -> PolarAnalysis {
+    public func build(track: Track, wind: Wind, courseDirection: Double? = nil) -> PolarAnalysis {
         // Collect per-sample observations bucketed by signed TWA.
         var signedBuckets: [Int: Bucket] = [:]
         var foldedBuckets: [Int: Bucket] = [:]
@@ -340,9 +351,10 @@ public struct PolarBuilder: Sendable {
         analysis.portDownwindHeading = portDownwind.totalWeight > minimumBinDistance ? portDownwind.mean : nil
         analysis.starboardDownwindHeading = starboardDownwind.totalWeight > minimumBinDistance ? starboardDownwind.mean : nil
 
-        let both = BothTacksVMGFinder().find(track: track, wind: wind)
+        let both = BothTacksVMGFinder().find(track: track, wind: wind, toward: courseDirection)
         analysis.beat = both.beat
         analysis.broadRun = both.run
+        analysis.courseDirection = courseDirection.map(Geo.normalizeDegrees)
         return analysis
     }
 }
@@ -356,6 +368,10 @@ public struct PolarBuilder: Sendable {
 /// wind neither was sailed in. Requiring one continuous stretch with real
 /// distance on both tacks makes the number survivable in an argument: it is
 /// what the rider's position actually did, tack cost and all.
+///
+/// The axis is the wind's unless the rider names a course — see
+/// `Session.courseDirection`. Tacks are always the wind's: which side the
+/// wind was on does not change because the river bends.
 struct BothTacksVMGFinder {
 
     /// Sailed path a stretch must cover before it counts.
@@ -366,15 +382,54 @@ struct BothTacksVMGFinder {
     /// while still excluding the one-gybe reach.
     var minimumTackShare: Double = 0.25
 
-    func find(track: Track, wind: Wind) -> (beat: PolarAnalysis.BothTacksVMG?, run: PolarAnalysis.BothTacksVMG?) {
+    func find(track: Track, wind: Wind, toward course: Double? = nil)
+        -> (beat: PolarAnalysis.BothTacksVMG?, run: PolarAnalysis.BothTacksVMG?)
+    {
         let n = track.count
         guard n >= 3 else { return (nil, nil) }
+        let sums = MadeGoodSums(track: track, wind: wind, toward: course)
 
-        // Per-step: sailed distance, distance on port, and displacement along
-        // the wind axis (positive toward where the wind comes from), all as
-        // prefix sums so any window is O(1).
-        let toWind = wind.directionFrom * Double.pi / 180
-        let axisEast = sin(toWind), axisNorth = cos(toWind)
+        var beat: PolarAnalysis.BothTacksVMG?
+        var run: PolarAnalysis.BothTacksVMG?
+
+        // For each start, the shortest window that satisfies the distance —
+        // the two-pointer never retreats, so the whole scan is O(n).
+        var j = 0
+        for i in 0..<(n - 1) {
+            if j <= i { j = i + 1 }
+            while j < n, sums.sailed[j] - sums.sailed[i] < minimumDistance { j += 1 }
+            guard j < n else { break }
+
+            guard let candidate = sums.measure(track: track, from: i, to: j) else { continue }
+            guard candidate.portShare >= minimumTackShare,
+                  candidate.portShare <= 1 - minimumTackShare else { continue }
+
+            let signed = sums.upAxis[j] - sums.upAxis[i]
+            if signed > 0 {
+                if candidate.vmg > (beat?.vmg ?? 0) { beat = candidate }
+            } else if signed < 0 {
+                if candidate.vmg > (run?.vmg ?? 0) { run = candidate }
+            }
+        }
+        return (beat, run)
+    }
+}
+
+/// Per-step prefix sums along a made-good axis, so any window of the track
+/// can be measured in O(1): sailed distance, distance on port, displacement
+/// along the axis, angle-weighted distance, and tack changes.
+struct MadeGoodSums {
+    let sailed: [Double]
+    let port: [Double]
+    /// Displacement along the axis, positive toward it.
+    let upAxis: [Double]
+    let angleWeighted: [Double]
+    let legCount: [Int]
+
+    init(track: Track, wind: Wind, toward course: Double?) {
+        let n = track.count
+        let axis = wind.madeGoodAxis(course: course) * Double.pi / 180
+        let axisEast = sin(axis), axisNorth = cos(axis)
         let metresPerDegree = 111_320.0
 
         var sailed = [0.0], port = [0.0], upAxis = [0.0], angleWeighted = [0.0]
@@ -382,7 +437,7 @@ struct BothTacksVMGFinder {
         sailed.reserveCapacity(n); port.reserveCapacity(n); upAxis.reserveCapacity(n)
         angleWeighted.reserveCapacity(n); legCount.reserveCapacity(n)
         var previousTackIsPort: Bool?
-        for i in 1..<n {
+        for i in 1..<max(1, n) {
             let step = track.cumulativeDistance[i] - track.cumulativeDistance[i - 1]
             let a = track.points[i - 1], b = track.points[i]
             let dE = (b.longitude - a.longitude) * metresPerDegree * cos(a.latitude * .pi / 180)
@@ -400,42 +455,55 @@ struct BothTacksVMGFinder {
             if step > 1 { previousTackIsPort = isPort }
             legCount.append(flips)
         }
+        self.sailed = sailed
+        self.port = port
+        self.upAxis = upAxis
+        self.angleWeighted = angleWeighted
+        self.legCount = legCount
+    }
 
-        var beat: PolarAnalysis.BothTacksVMG?
-        var run: PolarAnalysis.BothTacksVMG?
+    /// The stretch from sample `i` to sample `j`, measured. VMG is the
+    /// magnitude of net progress along the axis over time — the caller reads
+    /// the sign from `upAxis` when it needs to know which way.
+    func measure(track: Track, from i: Int, to j: Int) -> PolarAnalysis.BothTacksVMG? {
+        guard i >= 0, j < sailed.count, j > i else { return nil }
+        let path = sailed[j] - sailed[i]
+        let dt = track.elapsed[j] - track.elapsed[i]
+        guard dt > 0, path > 0 else { return nil }
+        return PolarAnalysis.BothTacksVMG(
+            vmg: abs(upAxis[j] - upAxis[i]) / dt,
+            startElapsed: track.elapsed[i],
+            endElapsed: track.elapsed[j],
+            distance: path,
+            portShare: (port[j] - port[i]) / path,
+            legs: legCount[j] - legCount[i] + 1,
+            meanAngle: (angleWeighted[j] - angleWeighted[i]) / path
+        )
+    }
+}
 
-        // For each start, the shortest window that satisfies the distance —
-        // the two-pointer never retreats, so the whole scan is O(n).
-        var j = 0
-        for i in 0..<(n - 1) {
-            if j <= i { j = i + 1 }
-            while j < n, sailed[j] - sailed[i] < minimumDistance { j += 1 }
-            guard j < n else { break }
+extension PolarAnalysis.BothTacksVMG {
 
-            let path = sailed[j] - sailed[i]
-            let dt = track.elapsed[j] - track.elapsed[i]
-            guard dt > 0, path > 0 else { continue }
-
-            let portShare = (port[j] - port[i]) / path
-            guard portShare >= minimumTackShare, portShare <= 1 - minimumTackShare else { continue }
-
-            let vmg = (upAxis[j] - upAxis[i]) / dt
-            let candidate = PolarAnalysis.BothTacksVMG(
-                vmg: abs(vmg),
-                startElapsed: track.elapsed[i],
-                endElapsed: track.elapsed[j],
-                distance: path,
-                portShare: portShare,
-                legs: legCount[j] - legCount[i] + 1,
-                meanAngle: (angleWeighted[j] - angleWeighted[i]) / path
-            )
-            if vmg > 0 {
-                if candidate.vmg > (beat?.vmg ?? 0) { beat = candidate }
-            } else if vmg < 0 {
-                if candidate.vmg > (run?.vmg ?? 0) { run = candidate }
-            }
-        }
-        return (beat, run)
+    /// A stretch of the track the rider chose, measured the same way the
+    /// best beat is: net displacement along the axis over the time it took,
+    /// tacks and wobbles included.
+    ///
+    /// This is what "select legs 10 to 21" means. The beat finder picks the
+    /// stretch for you; this lets the rider pick — the twelve legs up the
+    /// river before the wind died, say — and get the same honest number for
+    /// it. It is signed by construction only in the sense that the caller
+    /// asked for upwind: progress *away* from the axis still comes back as
+    /// a magnitude, so a span sailed back down the course reads as its
+    /// speed down, not as zero.
+    ///
+    /// `toward` is the course to measure along; `nil` is the wind.
+    public static func measured(
+        track: Track, wind: Wind, toward course: Double? = nil,
+        from startIndex: Int, to endIndex: Int
+    ) -> PolarAnalysis.BothTacksVMG? {
+        guard track.count >= 2 else { return nil }
+        return MadeGoodSums(track: track, wind: wind, toward: course)
+            .measure(track: track, from: startIndex, to: endIndex)
     }
 }
 

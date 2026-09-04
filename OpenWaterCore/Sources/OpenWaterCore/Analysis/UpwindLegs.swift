@@ -87,9 +87,15 @@ public enum UpwindLegFinder {
     /// seconds, and stricter minimums (150 m, 25 s at first) silently
     /// swallowed half of a real session's zig-zag. Jitter stays out on the
     /// moving-speed floor, not on leg length.
+    ///
+    /// `madeGoodToward` is the axis a leg's `madeGood` and `vmg` are measured
+    /// along — the rider's course when they named one, otherwise the wind.
+    /// Which samples *are* a leg, and which tack, stay measured to the wind:
+    /// a course changes what counts as progress, not what counts as upwind.
     public static func legs(
         track: Track,
         wind: Wind,
+        madeGoodToward course: Double? = nil,
         upwindLimit: Double = UpwindLegFinder.upwindLimit,
         minimumSpeed: Double = 2.0,
         minimumDistance: Double = 80,
@@ -99,11 +105,12 @@ public enum UpwindLegFinder {
         let n = track.count
         guard n > 2 else { return [] }
         let metresPerDegree = 111_320.0
-        // Unit vector pointing *at* the wind — the direction made good is
-        // measured along. `directionFrom` is where the wind comes from, which
-        // is exactly where upwind progress goes to.
-        let axisEast = sin(wind.directionFrom * .pi / 180)
-        let axisNorth = cos(wind.directionFrom * .pi / 180)
+        // Unit vector pointing *at* the axis — the direction made good is
+        // measured along. By default that is `directionFrom`: where the wind
+        // comes from is exactly where upwind progress goes to.
+        let axis = wind.madeGoodAxis(course: course) * .pi / 180
+        let axisEast = sin(axis)
+        let axisNorth = cos(axis)
 
         struct Building {
             var start: Int

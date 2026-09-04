@@ -34,13 +34,19 @@ public struct SessionAnalyzer: Sendable {
         /// session rather than on every session of the sport.
         public var overrides: SportThresholds.Overrides?
 
+        /// Degrees the rider was making good toward, when not the wind. The
+        /// polar's beat and run are measured along it; the polar's angles
+        /// are still angles to the wind. See `Session.courseDirection`.
+        public var courseDirection: Double?
+
         public init(
             sport: Sport,
             categories: [SpeedCategory] = SpeedCategory.standard,
             wind: Wind? = nil,
             quickMode: Bool = false,
             foilTakeoffSpeed: Double? = nil,
-            overrides: SportThresholds.Overrides? = nil
+            overrides: SportThresholds.Overrides? = nil,
+            courseDirection: Double? = nil
         ) {
             self.sport = sport
             self.categories = categories
@@ -48,6 +54,7 @@ public struct SessionAnalyzer: Sendable {
             self.quickMode = quickMode
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.overrides = overrides
+            self.courseDirection = courseDirection
         }
     }
 
@@ -117,7 +124,8 @@ public struct SessionAnalyzer: Sendable {
         // --- Polar, and back-fill the per-run wind figures.
         var polar: PolarAnalysis?
         if let wind, sport.isWindPowered {
-            polar = PolarBuilder().build(track: track, wind: wind)
+            polar = PolarBuilder().build(track: track, wind: wind,
+                                         courseDirection: configuration.courseDirection)
             let flyingMask = foilDetector.flyingMask(flights: flights, count: track.count)
             runs = runs.map { run in
                 var r = run

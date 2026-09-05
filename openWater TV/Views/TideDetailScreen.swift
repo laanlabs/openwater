@@ -17,6 +17,8 @@ import SwiftUI
 /// chart that invites a rider to compare two numbers that cannot be compared.
 struct TideDetailScreen: View {
 
+    @Environment(TVUnits.self) private var units
+
     let here: Geo.Coordinate
     let placeName: String
 
@@ -25,7 +27,7 @@ struct TideDetailScreen: View {
 
     @Namespace private var page
 
-    private var unit: DistanceUnit { UnitPreferences.forThisDevice.distance }
+    private var unit: DistanceUnit { units.preferences.distance }
 
     /// How much of the curve is drawn.
     ///

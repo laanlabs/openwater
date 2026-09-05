@@ -962,6 +962,8 @@ struct WindMapScreen: View {
 /// question somebody asks.
 private struct CentreReadout: View {
 
+    @Environment(TVUnits.self) private var units
+
     let wind: WindReading?
     let weather: SpotWeather?
     let isWaiting: Bool
@@ -973,8 +975,7 @@ private struct CentreReadout: View {
 
     private var temperature: String? {
         guard let weather else { return nil }
-        return Format.temperature(weather.temperatureC,
-                                  unit: UnitPreferences.forThisDevice.temperatureUnit)
+        return Format.temperature(weather.temperatureC, unit: units.temperature)
     }
 
     var body: some View {
@@ -1038,14 +1039,14 @@ private struct CentreReadout: View {
                 Image(systemName: "location.north.fill")
                     .font(.system(size: 24, weight: .heavy))
                     .rotationEffect(.degrees(wind.directionDeg + 180))
-                Text("\(Int(wind.speedKn.rounded()))")
+                Text(units.windValue(wind.speedKn))
                     .font(.system(size: 46, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("kn \(wind.cardinal)")
+                    Text("\(units.speedSymbol) \(wind.cardinal)")
                         .font(.system(size: 22, weight: .semibold))
                     if let gust = wind.gustKn {
-                        Text("g\(Int(gust.rounded()))")
+                        Text("g\(units.windValue(gust))")
                             .font(.system(size: 20))
                             .monospacedDigit()
                             .foregroundStyle(.white.opacity(0.75))
@@ -1370,6 +1371,8 @@ private struct NoPlaceYet: View {
 /// at the end of that jetty says" without reading a word.
 private struct MeterBadge: View {
 
+    @Environment(TVUnits.self) private var units
+
     let name: String
     let observation: StationObservation
     let showsName: Bool
@@ -1389,8 +1392,8 @@ private struct MeterBadge: View {
     /// reading. Following what the instrument actually said rather than
     /// insisting on a mean is `WIND_MAP_RULES` R4's third clause.
     private var speed: String {
-        if let mean = observation.windKn { return "\(Int(mean.rounded()))" }
-        if let gust = observation.gustKn { return "g\(Int(gust.rounded()))" }
+        if let mean = observation.windKn { return units.windValue(mean) }
+        if let gust = observation.gustKn { return "g\(units.windValue(gust))" }
         return "—"
     }
 
@@ -1408,7 +1411,7 @@ private struct MeterBadge: View {
                     .font(.system(size: 25, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                 if let gust = observation.gustKn, observation.windKn != nil {
-                    Text("g\(Int(gust.rounded()))")
+                    Text("g\(units.windValue(gust))")
                         .font(.system(size: 16, weight: .semibold))
                         .opacity(0.75)
                 }

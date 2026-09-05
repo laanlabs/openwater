@@ -42,6 +42,8 @@ struct SpotScreen: View {
 /// neither.
 struct ForecastStrip: View {
 
+    @Environment(TVUnits.self) private var units
+
     let hours: [WindForecastHour]
 
     private var peak: Double { max(hours.map(\.speedKn).max() ?? 1, 15) }
@@ -54,7 +56,7 @@ struct ForecastStrip: View {
             HStack(alignment: .bottom, spacing: 12) {
                 ForEach(hours) { hour in
                     VStack(spacing: 10) {
-                        Text("\(Int(hour.speedKn.rounded()))")
+                        Text(units.windValue(hour.speedKn))
                             .font(.system(size: 24, weight: .semibold))
                             .monospacedDigit()
                         RoundedRectangle(cornerRadius: 6)
@@ -80,6 +82,8 @@ struct ForecastStrip: View {
 /// conditions screen for `ForecastStrip`'s reason.
 struct MeasuredStations: View {
 
+    @Environment(TVUnits.self) private var units
+
     let rows: [(FreeStation, StationObservation)]
 
     /// The mean, on its own, as a number.
@@ -90,18 +94,14 @@ struct MeasuredStations: View {
     /// decides whether to go, the second whether it will be pleasant. So
     /// they are two labels now, sized differently, with the word "gusting"
     /// spelled out rather than compressed to a g.
-    static func mean(_ observation: StationObservation) -> String? {
-        if let mean = observation.windKn { return "\(Int(mean.rounded()))" }
+    /// In knots; the view prints it in the rider's unit.
+    static func mean(_ observation: StationObservation) -> Double? {
+        if let mean = observation.windKn { return mean }
         // A gust with no mean is still a reading — the weather service writes
         // that "0G4" — so a station reporting only gusts shows a zero mean
         // rather than a dash, and the gust below carries the information.
-        if observation.gustKn != nil { return "0" }
+        if observation.gustKn != nil { return 0 }
         return nil
-    }
-
-    static func gust(_ observation: StationObservation) -> String? {
-        guard let gust = observation.gustKn else { return nil }
-        return "gusting \(Int(gust.rounded()))"
     }
 
     var body: some View {
@@ -127,10 +127,10 @@ struct MeasuredStations: View {
                         // the instrument actually said.
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             if let mean = Self.mean(observation) {
-                                Text(mean)
+                                Text(units.windValue(mean))
                                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                                     .monospacedDigit()
-                                Text("kn")
+                                Text(units.speedSymbol)
                                     .font(.system(size: 21, weight: .semibold))
                                     .foregroundStyle(.secondary)
                             } else {
@@ -138,8 +138,8 @@ struct MeasuredStations: View {
                                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                                     .foregroundStyle(.secondary)
                             }
-                            if let gust = Self.gust(observation) {
-                                Text(gust)
+                            if let gust = observation.gustKn {
+                                Text("gusting \(units.windValue(gust))")
                                     .font(.system(size: 21))
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()

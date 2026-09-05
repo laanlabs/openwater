@@ -78,7 +78,10 @@ public struct WashRaster: Sendable {
         // a couple of hundred steps of it, and at that width the banding is
         // finer than the bitmap's own interpolation.
         let steps = 256
-        let topKnots = 45.0
+        // The ramp's ceiling in the layer's own unit — see `WashLayer.rampTop`.
+        // `knots` below is that unit, whatever it is; the name survives from
+        // when there was only wind.
+        let topKnots = layer.rampTop
         var ramp = [(r: Double, g: Double, b: Double)](repeating: (0, 0, 0), count: steps)
         for index in 0..<steps {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
@@ -144,7 +147,9 @@ public struct WashRaster: Sendable {
                 let feather = min(1, edge / featherFraction)
                 // A sample the model half-saw is painted half as strongly.
                 let seen = min(1, (coverage - 0.25) / 0.45 + 0.25)
-                let alpha = washAlpha * feather * max(0, seen)
+                // Rain fades in from dry; wind and current paint everywhere
+                // the model answered. See `WashLayer.opacity(for:)`.
+                let alpha = washAlpha * feather * max(0, seen) * layer.opacity(for: knots)
                 guard alpha > 0.002 else { continue }
 
                 let shade = ramp[max(0, min(steps - 1,

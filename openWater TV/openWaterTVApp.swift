@@ -52,6 +52,9 @@ struct RootView: View {
     /// Montauk and presses across should not have to find Montauk twice.
     @State private var location = TVLocation()
 
+    /// The units every number on this box is printed in — see `TVUnits`.
+    @State private var units = TVUnits()
+
     @State private var tab = TVScreenshotRoute.requested?.tab ?? Tab.map
 
     enum Tab: Hashable { case map, cameras, radar, favorites, settings }
@@ -82,6 +85,7 @@ struct RootView: View {
                 .tag(Tab.settings)
         }
         .environment(location)
+        .environment(units)
         // A spot asking to be looked at is the one thing that changes tabs
         // without a press on the bar. The map does the framing itself; this
         // only makes sure it is the tab on screen when it does.

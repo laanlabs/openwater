@@ -21,6 +21,14 @@ import SwiftUI
 /// two translucent fields over one another would say nothing about either.
 public enum WashLayer: String, CaseIterable, Sendable {
     case off, wind, currents
+    /// Model precipitation, millimetres an hour, through the same grid and
+    /// the same clock as the wind. This is the television's "rain
+    /// forecast" — what weather.gov and weather.com call future radar,
+    /// which is not radar at all but a model's rain rendered in radar
+    /// colours. RainViewer's free feed publishes no forecast frames, so a
+    /// scrubbable picture of what is coming has to be drawn from the model,
+    /// and the wash already knows how to draw a model over a map.
+    case rain
 
     /// The caption's front half; the view appends the clock — "now", or
     /// the scrubbed hour while a slider owns the map. The wind half names
@@ -33,7 +41,41 @@ public enum WashLayer: String, CaseIterable, Sendable {
         case .off: nil
         case .wind: "Wind wash · \(ForecastModel.selected.captionName)"
         case .currents: "Current wash · Open-Meteo ocean model"
+        case .rain: "Model rain · \(ForecastModel.selected.captionName) — not radar"
         }
+    }
+
+    /// The sampling grid: points across and down the fetched rectangle.
+    ///
+    /// Wind and current keep `WindField`'s 7×9 — the compromise that keeps
+    /// the wash one request and the quads within budget. Rain is 13×17,
+    /// because rain has structure at a scale wind does not: a shower is a
+    /// few kilometres wide where a sea breeze is a coast long, and at 7×9 a
+    /// thunderstorm over Montauk painted as one soft blob across half of
+    /// Long Island Sound. Two hundred and twenty-one points is still one
+    /// request, answered in about a second (measured 2026-09-05).
+    public var columns: Int { self == .rain ? 13 : WindField.columns }
+    public var rows: Int { self == .rain ? 17 : WindField.rows }
+
+    /// The top of the colour ramp in the layer's own unit — knots for wind
+    /// and current, millimetres an hour for rain, where twelve is a
+    /// downpour and anything past it is the same red.
+    public var rampTop: Double {
+        self == .rain ? 12 : 45
+    }
+
+    /// How strongly a value paints, 0–1.
+    ///
+    /// Wind and current paint at full strength wherever the model answered:
+    /// a calm is a colour (white) because "no wind" is a fact about the air
+    /// worth showing. Rain is the other way round. "No rain" is the map, and
+    /// a field that painted every dry cell in the ramp's first colour would
+    /// read as drizzle everywhere. So dry is transparent, and the wash fades
+    /// in across the first third of a millimetre — a trace shows faintly,
+    /// real rain shows fully.
+    public func opacity(for value: Double) -> Double {
+        guard self == .rain else { return 1 }
+        return max(0, min(1, (value - 0.05) / 0.35))
     }
 
     /// What the hud says while this layer's field is in the air. Named for
@@ -43,6 +85,7 @@ public enum WashLayer: String, CaseIterable, Sendable {
         switch self {
         case .off, .wind: "Getting the wind"
         case .currents: "Getting the current"
+        case .rain: "Getting the rain"
         }
     }
 }
@@ -603,12 +646,13 @@ public final class WindWashModel {
                 // thread", and it is the same handover `loadMask` uses.
                 let built = await Task.detached(priority: .userInitiated) {
                     let table = known ?? Self.buildLayout(region: region, mask: mask,
-                                                          insetLon: inset, window: window)
+                                                          insetLon: inset, window: window,
+                                                          layer: layer)
                     return (table,
                             Self.colourCells(table, speeds: hour.speeds, layer: layer),
                             WashRaster.render(speeds: hour.speeds,
-                                              columns: WindField.columns,
-                                              rows: WindField.rows,
+                                              columns: layer.columns,
+                                              rows: layer.rows,
                                               layer: layer,
                                               mask: mask,
                                               region: region,
@@ -638,7 +682,7 @@ public final class WindWashModel {
                     flow: layer == .currents ? .current : .wind,
                     mask: mask,
                     region: region,
-                    columns: WindField.columns, rows: WindField.rows,
+                    columns: layer.columns, rows: layer.rows,
                     vectors: zip(hour.speeds, hour.directions).map { speed, direction in
                         guard let speed, let direction else { return nil }
                         let runs = (layer == .wind ? direction + 180 : direction) * .pi / 180
@@ -706,7 +750,9 @@ public final class WindWashModel {
     /// ever built, so the count that reaches MapKit stays near the budget
     /// at every zoom.
     public nonisolated static func drawUpsample(field: MKCoordinateRegion,
-                                         window: MKCoordinateRegion?) -> Int {
+                                         window: MKCoordinateRegion?,
+                                         columns: Int = WindField.columns,
+                                         rows: Int = WindField.rows) -> Int {
         guard let window else { return minUpsample }
         let share = min(1, window.span.latitudeDelta / field.span.latitudeDelta)
             * min(1, window.span.longitudeDelta / field.span.longitudeDelta)
@@ -714,9 +760,9 @@ public final class WindWashModel {
         // total ≈ columns² · (rows−1)/(columns−1) · share, in cells across
         // the *field*; solve that for the cells-across that spends the
         // budget on the window.
-        let aspect = Double(WindField.rows - 1) / Double(WindField.columns - 1)
+        let aspect = Double(rows - 1) / Double(columns - 1)
         let across = (Double(drawBudget) / (aspect * share)).squareRoot()
-        let steps = Int((across / Double(WindField.columns - 1)).rounded(.down))
+        let steps = Int((across / Double(columns - 1)).rounded(.down))
         return max(minUpsample, min(steps, 512))
     }
     /// The wash's strength. The balance that took three tries: heavy
@@ -767,6 +813,7 @@ public final class WindWashModel {
     /// out of one of those costs a bridge per pixel. This is the same ramp
     /// one step earlier, before the wrapping.
     nonisolated static func paletteColour(for knots: Double, layer: WashLayer) -> UIColor {
+        if layer == .rain { return RainPalette.colour(for: knots) }
         guard layer == .currents else { return WindPalette.smooth(for: knots) }
         let stops = currentStops
         guard let first = stops.first, let last = stops.last else { return .clear }
@@ -783,6 +830,7 @@ public final class WindWashModel {
         // Wind reads its own palette's continuous form — the conditions
         // strip reads the same one, which is why it lives on the palette
         // rather than here.
+        if layer == .rain { return Color(uiColor: RainPalette.colour(for: knots)) }
         guard layer == .currents else { return Color(uiColor: WindPalette.smooth(for: knots)) }
         let stops = currentStops
         guard let first = stops.first, let last = stops.last else { return .clear }
@@ -1029,8 +1077,8 @@ public final class WindWashModel {
             // the bottom and strand the hud spinning. The token keeps a
             // superseded load from clearing a newer one's flag.
             defer { if loadToken == token { isLoading = false } }
-            let coords = gridCoordinates(for: target)
-            let count = WindField.columns * WindField.rows
+            let coords = gridCoordinates(for: target, layer: layer)
+            let count = layer.columns * layer.rows
             // Three days deep and six hours behind, rather than one
             // hour: the map's time slider and the route panel's both
             // scrub the wash through these rows, and the depth costs the
@@ -1087,6 +1135,27 @@ public final class WindWashModel {
                     }
                     return (axis, day)
                 }.value
+            case .rain:
+                // The same grid, the same three days, one variable: how
+                // much falls in each hour. No direction — rain has none the
+                // wash can use — so the field's vectors stay nil and no
+                // comets are seeded over it.
+                let field = await OpenMeteo.rainAlong(
+                    coords, hours: SpotGuideStore.scrubForecastHours,
+                    pastHours: SpotGuideStore.scrubPastHours)
+                guard !Task.isCancelled else { return }
+                (axis, day) = await Task.detached(priority: .userInitiated) {
+                    let axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
+                    let slots = Self.slotIndex(of: axis)
+                    var day = Self.blankDay(hours: axis.count, points: count)
+                    for (coordIndex, rows) in field.enumerated() where coordIndex < count {
+                        for row in rows {
+                            guard let slot = slots[row.date] else { continue }
+                            day[slot].speeds[coordIndex] = row.millimetres
+                        }
+                    }
+                    return (axis, day)
+                }.value
             case .off:
                 return
             }
@@ -1119,9 +1188,10 @@ public final class WindWashModel {
                 cells = []
         raster = nil
                 field = nil
-                // For the wind layer this is not a fact about the place; see
-                // `loadFailed`.
-                loadFailed = layer == .wind
+                // For the wind and rain layers this is not a fact about the
+                // place — the atmospheric model covers every coordinate a
+                // map can show; see `loadFailed`.
+                loadFailed = layer == .wind || layer == .rain
             } else {
                 loadFailed = false
                 apply()
@@ -1143,16 +1213,16 @@ public final class WindWashModel {
         Dictionary(axis.enumerated().map { ($1, $0) }) { first, _ in first }
     }
 
-    private func gridCoordinates(for region: MKCoordinateRegion) -> [Geo.Coordinate] {
+    private func gridCoordinates(for region: MKCoordinateRegion, layer: WashLayer) -> [Geo.Coordinate] {
         var out: [Geo.Coordinate] = []
-        for row in 0..<WindField.rows {
-            for column in 0..<WindField.columns {
+        for row in 0..<layer.rows {
+            for column in 0..<layer.columns {
                 out.append(Geo.Coordinate(
                     latitude: max(-89, min(89,
                         region.center.latitude - region.span.latitudeDelta / 2
-                        + region.span.latitudeDelta * Double(row) / Double(WindField.rows - 1))),
+                        + region.span.latitudeDelta * Double(row) / Double(layer.rows - 1))),
                     longitude: region.center.longitude - region.span.longitudeDelta / 2
-                        + region.span.longitudeDelta * Double(column) / Double(WindField.columns - 1)
+                        + region.span.longitudeDelta * Double(column) / Double(layer.columns - 1)
                 ))
             }
         }
@@ -1175,10 +1245,11 @@ public final class WindWashModel {
     nonisolated private static func buildLayout(region: MKCoordinateRegion,
                                                 mask: WaterMask,
                                                 insetLon: Double,
-                                                window: MKCoordinateRegion?) -> [CellLayout] {
-        let columns = WindField.columns
-        let rows = WindField.rows
-        let upsample = drawUpsample(field: region, window: window)
+                                                window: MKCoordinateRegion?,
+                                                layer: WashLayer) -> [CellLayout] {
+        let columns = layer.columns
+        let rows = layer.rows
+        let upsample = drawUpsample(field: region, window: window, columns: columns, rows: rows)
         let cellColumns = (columns - 1) * upsample
         let cellRows = (rows - 1) * upsample
         // The feather is a width of *field*, not a count of cells — so it
@@ -1287,8 +1358,8 @@ public final class WindWashModel {
     /// `drainRebuilds` is about MapKit's diffing rather than this.
     nonisolated private static func colourCells(_ layout: [CellLayout], speeds: [Double?],
                                                 layer: WashLayer) -> [Cell] {
-        let columns = WindField.columns
-        let rows = WindField.rows
+        let columns = layer.columns
+        let rows = layer.rows
 
         /// Bilinear sample at fractional grid coordinates, with however
         /// much of the water it could actually see.
@@ -1347,6 +1418,8 @@ public final class WindWashModel {
             // rather than position decides: a cell the model half-saw is
             // painted half as strongly.
             let alpha = cell.ringAlpha * min(1, (found.coverage - 0.25) / 0.45 + 0.25)
+                * layer.opacity(for: found.knots)
+            guard alpha > 0.002 else { continue }
             out.append(Cell(id: cell.id, coordinates: cell.coordinates,
                             color: smoothColour(for: found.knots, layer: layer).opacity(alpha)))
         }

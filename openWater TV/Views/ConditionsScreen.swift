@@ -48,6 +48,7 @@ struct ConditionsScreen: View {
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(TVLocation.self) private var location
+    @Environment(TVUnits.self) private var units
     @Environment(\.dismiss) private var dismiss
 
     /// Where in the stack we are, so Menu can be answered explicitly — see
@@ -98,11 +99,11 @@ struct ConditionsScreen: View {
         ForecastModel(rawValue: modelRaw) ?? .automatic
     }
 
-    /// How far out a spot's cameras reach. Sixty kilometres, as the board's
-    /// report always had it: a spot is a launch, and the cameras a rider
-    /// checks before driving to one are along its own stretch of coast, not
-    /// the eighty the cameras tab sweeps for a whole area.
-    private static let cameraRadius: Double = 60_000
+    /// How far out a spot's cameras reach: the same radius the cameras tab
+    /// uses, set in Settings. It was a fixed sixty kilometres here against
+    /// the tab's eighty, and two numbers for one question meant the tab
+    /// could list a camera the spot's own page did not.
+    private var cameraRadius: Double { TVSettings.cameraRadiusMetres }
 
     /// The guide's nearest launch, when there is one close enough to be what
     /// somebody means by "here". Ten kilometres: past that the name would be
@@ -221,7 +222,9 @@ struct ConditionsScreen: View {
         // press away; both are cheap enough to have ready before the press.
         async let sea = OpenMeteo.surf(at: here)
         async let water = Tides.curve(at: here)
-        async let sky = OpenMeteo.detail(at: here)
+        // Ten days, the same request the weather screen makes, so the two
+        // share one cached answer rather than asking the model twice.
+        async let sky = OpenMeteo.detail(at: here, days: 10)
         async let running = Currents.outlook(at: here)
         weather = await air
         wind = await blowing
@@ -249,9 +252,9 @@ struct ConditionsScreen: View {
         // still anchors the search on its own region; a bare coordinate
         // borrows the nearest one, which is what the cameras tab does.
         let around = if let spot {
-            await guide.nearbyResources(to: spot, radius: Self.cameraRadius)
+            await guide.nearbyResources(to: spot, radius: cameraRadius)
         } else {
-            await guide.nearbyResources(near: here, radius: Self.cameraRadius)
+            await guide.nearbyResources(near: here, radius: cameraRadius)
         }
         // Playable first, then nearest — the cameras tab's order, because the
         // point of a camera on this screen is watching it on this screen.
@@ -295,7 +298,7 @@ struct ConditionsScreen: View {
                 .lineLimit(2)
             HStack(spacing: 20) {
                 if let nearest {
-                    Text("\(Format.distance(nearest.metres, unit: UnitPreferences.forThisDevice.distance)) from the pin")
+                    Text("\(Format.distance(nearest.metres, unit: units.preferences.distance)) from the pin")
                 }
                 Text(coordinateLabel)
             }
@@ -307,14 +310,14 @@ struct ConditionsScreen: View {
                     Image(systemName: "location.north.fill")
                         .font(.system(size: 40))
                         .rotationEffect(.degrees(wind.directionDeg + 180))
-                    Text("\(Int(wind.speedKn.rounded()))")
+                    Text(units.windValue(wind.speedKn))
                         .font(.system(size: 130, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("kn \(wind.cardinal)")
+                        Text("\(units.speedSymbol) \(wind.cardinal)")
                             .font(.system(size: 34, weight: .semibold))
                         if let gust = wind.gustKn {
-                            Text("gusting \(Int(gust.rounded()))")
+                            Text("gusting \(units.windValue(gust))")
                                 .font(.system(size: 28))
                                 .foregroundStyle(.secondary)
                         }
@@ -325,7 +328,7 @@ struct ConditionsScreen: View {
                                 .font(.system(size: 40))
                                 .foregroundStyle(weather.tint)
                             Text(Format.temperature(weather.temperatureC,
-                                                    unit: UnitPreferences.forThisDevice.temperatureUnit))
+                                                    unit: units.temperature))
                                 .font(.system(size: 44, weight: .semibold, design: .rounded))
                                 .monospacedDigit()
                         }
@@ -425,7 +428,7 @@ struct ConditionsScreen: View {
             NavigationLink(value: Detail.weather) {
                 DetailRow(symbol: "cloud.sun", title: "Weather",
                           value: weatherSummary,
-                          detail: "Chance of rain, temperature, the week")
+                          detail: "Chance of rain, temperature, the next ten days")
             }
             .buttonStyle(.plain)
         }
@@ -504,8 +507,7 @@ struct ConditionsScreen: View {
     /// that changes a plan. A temperature never stopped anybody going.
     private var weatherSummary: String {
         let degrees = weather.map {
-            Format.temperature($0.temperatureC,
-                               unit: UnitPreferences.forThisDevice.temperatureUnit)
+            Format.temperature($0.temperatureC, unit: units.temperature)
         }
         guard let chance = rainChance else { return degrees ?? "—" }
         let rain = "\(Int(chance.rounded()))% rain"
@@ -528,12 +530,12 @@ struct ConditionsScreen: View {
 
     private var windSummary: String {
         guard let wind else { return "—" }
-        return "\(Int(wind.speedKn.rounded())) kn now"
+        return "\(units.windLabel(wind.speedKn)) now"
     }
 
     private var waveSummary: String {
         guard let surf, let height = surf.waveHeightM else { return "—" }
-        let unit = UnitPreferences.forThisDevice.distance
+        let unit = units.preferences.distance
         if let period = surf.wavePeriodS {
             return "\(Format.height(height, unit: unit)) at \(Int(period.rounded())) s"
         }
@@ -544,7 +546,7 @@ struct ConditionsScreen: View {
     /// metre on the way up is a different beach from a metre on the way down.
     private var tideSummary: String {
         guard let tide, !tide.isEmpty, let now = tide.now else { return "—" }
-        let unit = UnitPreferences.forThisDevice.distance
+        let unit = units.preferences.distance
         let state = tide.isRising == true ? "rising" : (tide.isRising == false ? "falling" : "")
         return state.isEmpty
         ? Format.height(now.metres, unit: unit)

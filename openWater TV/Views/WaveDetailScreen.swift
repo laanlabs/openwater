@@ -17,6 +17,8 @@ import SwiftUI
 /// facing where the guide knows which way the spot looks.
 struct WaveDetailScreen: View {
 
+    @Environment(TVUnits.self) private var units
+
     let here: Geo.Coordinate
     let placeName: String
 
@@ -27,7 +29,7 @@ struct WaveDetailScreen: View {
 
     @Namespace private var page
 
-    private var unit: DistanceUnit { UnitPreferences.forThisDevice.distance }
+    private var unit: DistanceUnit { units.preferences.distance }
 
     /// Five days, the same horizon the wind screen draws, and for the same
     /// reason: past that the models are guessing and drawing them at equal
@@ -230,6 +232,8 @@ private struct DayRow: View {
 /// A quarter of a day: dawn, morning, afternoon, evening.
 private struct BandCell: View {
 
+    @Environment(TVUnits.self) private var units
+
     let band: SurfOutlook.Band
     let unit: DistanceUnit
 
@@ -271,7 +275,7 @@ private struct BandCell: View {
                 // Green is not "good surf" — it is "the wind is not spoiling
                 // it", which is the only claim this app is willing to make
                 // about somebody else's beach.
-                Text("\(Int(knots.rounded())) kn \(effect.rawValue)")
+                Text("\(units.windLabel(knots)) \(effect.rawValue)")
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(effect.isFavourable ? Color.green : Color.secondary)
             }

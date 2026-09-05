@@ -384,9 +384,27 @@ in `WebcamStreamTests`. The rest hand off to the phone by QR code, which is
 the honest answer until a shape rather than a site can be written for them.
 
 **RainViewer publishes no forecast frames.** The loop is history only;
-`radar.nowcast` returns an empty array on the free tier. The code already
-carries forecast frames when there are any, so if that changes the loop
-extends forward with no further work.
+`radar.nowcast` returns an empty array on the free tier (re-checked
+2026-09-05). The code already carries forecast frames when there are any,
+so if that changes the loop extends forward with no further work. In the
+meantime the television's Radar tab has a *Show future* checkbox on the
+observed loop — the RainViewer frames run on into the HRRR frames in one
+loop, same pace, the caption switching to FORECAST at the join — and a
+forecast-only *Rain forecast* layer under More options. Over the
+continental US it shows the HRRR's own simulated reflectivity — the field
+behind weather.gov's "future radar" — as Iowa State Mesonet's georeferenced
+PNGs (`HRRRReflectivity`), nine quarter-hour frames from now to two hours
+ahead, drawn as motion: the echoes' shift between consecutive frames is
+measured by block matching on the rendered alpha (one vector per pair, with
+a sub-pixel fit), and the loop slides the outgoing frame along it while the
+next slides in behind — the future-radar trick, done with two image views
+and a transform. Each frame is cropped to the view, the black ground and
+the pale sub-15 dBZ greys keyed out, resampled row by row into one Mercator
+image, drawn once and Gaussian-blurred by about a third of a source pixel —
+which is what turns 2 km squares into radar-looking echoes. Captioned with
+the run it came from and "not an observation". Elsewhere it falls back to the wash's `.rain` layer: Open-Meteo
+precipitation on a 13×17 grid with `minutely_15` rows for the first three
+hours. Both are models and both captions say so.
 
 ---
 

@@ -285,6 +285,8 @@ private struct DeleteBanner: View {
 
 private struct FavoriteRow: View {
 
+    @Environment(TVUnits.self) private var units
+
     let name: String
     /// A pin of the rider's own rather than a listed launch — marked, because
     /// the two came from different places and one of them is not in the guide.
@@ -352,13 +354,13 @@ private struct FavoriteRow: View {
                     .foregroundStyle(quietInk)
                     .frame(width: 90, alignment: .leading)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("\(Int(reading.speedKn.rounded()))")
+                    Text(units.windValue(reading.speedKn))
                         .font(.system(size: 62, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("kn").font(.system(size: 24, weight: .semibold))
+                        Text(units.speedSymbol).font(.system(size: 24, weight: .semibold))
                         if let gust = reading.gustKn {
-                            Text("g\(Int(gust.rounded()))")
+                            Text("g\(units.windValue(gust))")
                                 .font(.system(size: 22))
                                 .foregroundStyle(quietInk)
                                 .monospacedDigit()

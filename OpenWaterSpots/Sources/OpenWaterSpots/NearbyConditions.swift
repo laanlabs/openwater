@@ -614,7 +614,11 @@ extension OpenMeteo {
     /// One request for the lot. Splitting current, hourly and daily into three
     /// calls would triple the round trips for data the API is happy to return
     /// together.
-    public static func detail(at coordinate: Geo.Coordinate) async -> WeatherDetail {
+    ///
+    /// `days` is how far the daily rows run; the model offers up to sixteen.
+    /// Five is the phone's sheet; the television asks for ten, because a
+    /// screen with room for a week and a half should show one.
+    public static func detail(at coordinate: Geo.Coordinate, days: Int = 5) async -> WeatherDetail {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),
@@ -623,7 +627,7 @@ extension OpenMeteo {
             .init(name: "hourly", value: "temperature_2m,dew_point_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code,visibility,uv_index"),
             .init(name: "daily", value: "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"),
             .init(name: "wind_speed_unit", value: "kn"),
-            .init(name: "forecast_days", value: "5"),
+            .init(name: "forecast_days", value: String(min(max(days, 1), 16))),
             .init(name: "timeformat", value: "unixtime"),
             // Without this the model answers in GMT and a rider in California
             // sees yesterday's date on today's row.
@@ -878,6 +882,89 @@ public enum OpenMeteo: Sendable {
             directions: series("wind_direction_10m"),
             timeZone: (root["timezone"] as? String).flatMap(TimeZone.init(identifier:))
         )
+    }
+
+    /// One step of model rain at one point, for the rain wash.
+    public struct RainForecastHour: Sendable {
+        public let date: Date
+        /// Millimetres an hour — a rate, whatever the step. Open-Meteo's
+        /// hourly `precipitation` is the sum for the hour ending at `date`,
+        /// which is already a rate; its 15-minute sum is scaled by four so a
+        /// shower reads the same colour at both resolutions.
+        public let millimetres: Double
+    }
+
+    /// Precipitation along a list of points — the rain wash's one request,
+    /// shaped like `windAlong` below so the wash can lay both onto the same
+    /// clock. Same model choice, same cache, same three days.
+    ///
+    /// **Quarter hours for the first three.** The first version of this was
+    /// hourly throughout, and a rain forecast in hourly steps is not what
+    /// anybody means by "what is coming in the next couple of hours": a
+    /// shower that crosses a bay in forty minutes is one frame. Open-Meteo
+    /// publishes `minutely_15` precipitation — genuine 15-minute model output
+    /// over North America and central Europe, interpolated elsewhere — so
+    /// the next three hours come back in twelve steps and the hourly rows
+    /// take over after them. One request still.
+    public static func rainAlong(_ coordinates: [Geo.Coordinate],
+                                 hours: Int = 4,
+                                 pastHours: Int = 0,
+                                 quarterHours: Int = 12) async -> [[RainForecastHour]] {
+        guard !coordinates.isEmpty else { return [] }
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+        components.queryItems = [
+            .init(name: "latitude",
+                  value: coordinates.map { String(format: "%.4f", $0.latitude) }.joined(separator: ",")),
+            .init(name: "longitude",
+                  value: coordinates.map { String(format: "%.4f", $0.longitude) }.joined(separator: ",")),
+            .init(name: "hourly", value: "precipitation"),
+            .init(name: "forecast_hours", value: String(hours)),
+            .init(name: "timeformat", value: "unixtime"),
+        ]
+        if quarterHours > 0 {
+            components.queryItems?.append(.init(name: "minutely_15", value: "precipitation"))
+            components.queryItems?.append(.init(name: "forecast_minutely_15", value: String(quarterHours)))
+        }
+        if pastHours > 0 {
+            components.queryItems?.append(.init(name: "past_hours", value: String(pastHours)))
+        }
+        if let model = ForecastModel.queryItem { components.queryItems?.append(model) }
+        guard let url = components.url,
+              let data = await ForecastCache.data(from: url, ttl: 900),
+              let root = try? JSONSerialization.jsonObject(with: data)
+        else { return [] }
+
+        let points = (root as? [[String: Any]]) ?? (root as? [String: Any]).map { [$0] } ?? []
+        return points.map { point -> [RainForecastHour] in
+            guard let hourly = point["hourly"] as? [String: Any],
+                  let times = hourly["time"] as? [Double],
+                  let amounts = (hourly["precipitation"] as? [Any])?.map({ $0 as? Double })
+            else { return [] }
+
+            var rows: [RainForecastHour] = []
+            var quarterWindow: ClosedRange<Double>?
+            if let quarterly = point["minutely_15"] as? [String: Any],
+               let quarterTimes = quarterly["time"] as? [Double],
+               let quarterAmounts = (quarterly["precipitation"] as? [Any])?.map({ $0 as? Double }),
+               let first = quarterTimes.first, let last = quarterTimes.last {
+                quarterWindow = first ... (last + 900)
+                for step in quarterTimes.indices {
+                    guard let amount = quarterAmounts[safe: step] ?? nil else { continue }
+                    rows.append(RainForecastHour(date: Date(timeIntervalSince1970: quarterTimes[step]),
+                                                 millimetres: amount * 4))
+                }
+            }
+            // The hourly rows carry the past and everything after the
+            // quarter-hour window; inside it they would be a second, coarser
+            // opinion about the same minutes.
+            for hour in times.indices {
+                guard let amount = amounts[safe: hour] ?? nil else { continue }
+                if let quarterWindow, quarterWindow.contains(times[hour]) { continue }
+                rows.append(RainForecastHour(date: Date(timeIntervalSince1970: times[hour]),
+                                             millimetres: amount))
+            }
+            return rows.sorted { $0.date < $1.date }
+        }
     }
 
     /// The next few hours of wind at several points, in one request.

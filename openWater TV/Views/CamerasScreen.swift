@@ -47,15 +47,17 @@ struct CamerasScreen: View {
 
     @Environment(SpotGuideStore.self) private var guide
     @Environment(TVLocation.self) private var location
+    @Environment(TVUnits.self) private var units
 
     @State private var cams: [SpotGuideStore.GuideResource] = []
     @State private var isSearching = true
 
-    /// How far out "your area" reaches. Wider than the phone's forty
-    /// kilometres because a television is not standing on the beach — the
-    /// question here is which cams are on this coast, not which one is at the
-    /// launch under your feet.
-    private static let radius: Double = 80_000
+    /// How far out "your area" reaches. Eighty kilometres unless Settings
+    /// says otherwise — wider than the phone's forty because a television is
+    /// not standing on the beach; the question here is which cams are on
+    /// this coast, not which one is at the launch under your feet.
+    @AppStorage(TVSettings.cameraRadiusKey) private var radiusKm = TVSettings.defaultCameraRadiusKm
+    private var radius: Double { Double(radiusKm) * 1000 }
 
     private let columns = [GridItem(.adaptive(minimum: 420), spacing: 40)]
 
@@ -71,14 +73,18 @@ struct CamerasScreen: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isSearching {
+                if isSearching || (guide.spots.isEmpty && guide.isLoading) {
                     ProgressView()
                 } else if cams.isEmpty {
                     // Only a *named* place goes into the sentence. The generic
                     // name a bare fix carries would turn "none near \(place)"
                     // into "none near Nearby".
                     EmptyCams(place: location.isChosen ? location.name : "",
-                              hasSomewhere: location.here != nil || !guide.favorites.isEmpty)
+                              radius: TVSettings.cameraRadiusLabel(radiusKm, unit: units.preferences.distance),
+                              hasSomewhere: location.here != nil || !guide.favorites.isEmpty,
+                              guideIsMissing: guide.spots.isEmpty) {
+                        Task { await guide.load() }
+                    }
                 } else {
                     grid
                 }
@@ -106,13 +112,13 @@ struct CamerasScreen: View {
             defer { isSearching = false }
             var found: [String: SpotGuideStore.GuideResource] = [:]
             if let here = location.here {
-                for cam in await guide.nearbyResources(near: here, radius: Self.radius)
+                for cam in await guide.nearbyResources(near: here, radius: radius)
                 where cam.kind == .camera {
                     found[cam.id] = cam
                 }
             } else {
                 for spot in guide.favorites {
-                    for cam in await guide.nearbyResources(to: spot, radius: 60_000)
+                    for cam in await guide.nearbyResources(to: spot, radius: radius)
                     where cam.kind == .camera {
                         // Two spots on the same stretch of coast pull the same
                         // cams; the nearer claim wins so the distance shown is
@@ -134,12 +140,23 @@ struct CamerasScreen: View {
     }
 
     /// What the list depends on: where here is, or — with nowhere at all —
-    /// which spots are starred.
+    /// which spots are starred. And whether the guide has arrived.
+    ///
+    /// The last term is the fix for a television in New York that said "no
+    /// cameras around here" over a coast with thirty-three. The camera
+    /// search borrows its country from the nearest guide spot, and on a cold
+    /// launch this tab can be opened before the guide has downloaded — at
+    /// which point there is no nearest spot, no country, and an empty
+    /// answer that this key never asked to have another look at. Now the
+    /// guide landing is a change, and the search runs again.
     private var areaKey: String {
+        let where_: String
         if let here = location.here {
-            return String(format: "%.2f,%.2f", here.latitude, here.longitude)
+            where_ = String(format: "%.2f,%.2f", here.latitude, here.longitude)
+        } else {
+            where_ = guide.favorites.map(\.spotId).joined()
         }
-        return guide.favorites.map(\.spotId).joined()
+        return where_ + "|" + (guide.spots.isEmpty ? "noguide" : "guide") + "|\(radiusKm)"
     }
 
     private var grid: some View {
@@ -188,6 +205,8 @@ struct CamerasScreen: View {
 /// between choosing a camera and guessing at one. A badge under it says where
 /// pressing it goes.
 struct CamCard: View {
+
+    @Environment(TVUnits.self) private var units
 
     let cam: SpotGuideStore.GuideResource
 
@@ -383,7 +402,7 @@ struct CamCard: View {
                     .lineLimit(1)
                 HStack(spacing: 10) {
                     badge
-                    Text(Format.distance(cam.metres, unit: UnitPreferences.forThisDevice.distance))
+                    Text(Format.distance(cam.metres, unit: units.preferences.distance))
                         .font(.system(size: 19))
                         .foregroundStyle(.secondary)
                 }
@@ -630,6 +649,8 @@ private struct RefreshingStill: View {
 /// room is still a thing somebody can type.
 private struct CamHandoff: View {
 
+    @Environment(TVUnits.self) private var units
+
     let cam: SpotGuideStore.GuideResource
     /// Why the stream could not be resolved, when one was asked for. Nil when
     /// the switch is off and nothing was ever tried.
@@ -655,7 +676,7 @@ private struct CamHandoff: View {
                     // link says; the brand is what the reader knows.
                     Label(isYouTube ? "YouTube" : cam.providerLabel,
                           systemImage: isYouTube ? "play.rectangle" : "globe")
-                    Text(Format.distance(cam.metres, unit: UnitPreferences.forThisDevice.distance))
+                    Text(Format.distance(cam.metres, unit: units.preferences.distance))
                 }
                 .font(.system(size: 26))
                 .foregroundStyle(.secondary)
@@ -767,22 +788,45 @@ private struct EmptyCams: View {
     /// What to call the area that came up empty. Blank when the box has
     /// nowhere at all, which is a different sentence.
     let place: String
+    /// How far was looked, as the rider would say it — so the sentence can
+    /// point at the setting that widens it.
+    let radius: String
     let hasSomewhere: Bool
+    /// The guide never arrived, so there was nothing to search — a different
+    /// fact from "searched and found none", and one with a button.
+    var guideIsMissing = false
+    var retry: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 24) {
-            Image(systemName: "video.slash")
+            Image(systemName: guideIsMissing ? "wifi.slash" : "video.slash")
                 .font(.system(size: 72))
                 .foregroundStyle(.secondary)
-            Text(hasSomewhere ? "No cameras around here" : "Set a location first")
+            Text(title)
                 .font(.system(size: 42, weight: .bold))
-            Text(hasSomewhere
-                 ? "The guide has no cameras \(place.isEmpty ? "in this area" : "near \(place)") at all —\nnot ones this Apple TV can play, and not ones to hand to a phone.\nMove the map somewhere else and come back."
-                 : "Open the Map tab and say where you are. Cameras are found\naround it.")
+            Text(detail)
                 .font(.system(size: 26))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            if guideIsMissing {
+                Button("Try again", action: retry)
+                    .padding(.top, 12)
+            }
         }
         .padding(60)
+    }
+
+    private var title: String {
+        if guideIsMissing { return "Couldn't load the guide" }
+        return hasSomewhere ? "No cameras around here" : "Set a location first"
+    }
+
+    private var detail: String {
+        if guideIsMissing {
+            return "The list of spots and cameras didn't download, so there is nothing to search.\nCheck the network and try again."
+        }
+        return hasSomewhere
+            ? "The guide has no cameras within \(radius) \(place.isEmpty ? "of here" : "of \(place)") —\nnot ones this Apple TV can play, and not ones to hand to a phone.\nWiden the search radius in Settings, or move the map and come back."
+            : "Open the Map tab and say where you are. Cameras are found\naround it."
     }
 }

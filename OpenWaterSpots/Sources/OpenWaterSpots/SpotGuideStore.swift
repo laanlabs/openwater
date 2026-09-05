@@ -1019,8 +1019,13 @@ public final class SpotGuideStore {
         let cacheKey = "\(field)=\(value)"
         if let cached = nearbyCache[cacheKey] { return cached }
 
+        // A stored *empty* list is not an answer to trust for a week. It is
+        // what a failed first fetch left behind — `runQuery` collapses
+        // errors to nothing — and honouring it is how a television in New
+        // York went on saying "no cameras around here" over a coast with
+        // thirty-three, launch after launch, until the cache aged out.
         if let held = Self.storedResources(for: cacheKey),
-           held.age < Self.resourceCacheTTL {
+           held.age < Self.resourceCacheTTL, !held.resources.isEmpty {
             nearbyCache[cacheKey] = held.resources
             return held.resources
         }
@@ -1065,10 +1070,14 @@ public final class SpotGuideStore {
 
         // An empty answer is indistinguishable from a failed fetch here —
         // `runQuery` collapses errors to nothing — so an old copy on disk
-        // outranks it, and only a real answer overwrites one.
-        if found.isEmpty, let held = Self.storedResources(for: cacheKey) {
-            nearbyCache[cacheKey] = held.resources
-            return held.resources
+        // outranks it, only a real answer is written to disk, and an empty
+        // one is not even kept for the session: the next look asks again.
+        if found.isEmpty {
+            if let held = Self.storedResources(for: cacheKey), !held.resources.isEmpty {
+                nearbyCache[cacheKey] = held.resources
+                return held.resources
+            }
+            return []
         }
         Self.storeResources(found, for: cacheKey)
         nearbyCache[cacheKey] = found

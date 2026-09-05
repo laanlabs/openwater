@@ -21,6 +21,8 @@ import SwiftUI
 /// actual message.
 struct WindOutlookScreen: View {
 
+    @Environment(TVUnits.self) private var units
+
     let here: Geo.Coordinate
     let placeName: String
 
@@ -157,7 +159,7 @@ struct WindOutlookScreen: View {
                     if let speed, hour < outlook.hours.count, enabled.contains(model.id) {
                         LineMark(
                             x: .value("Hour", outlook.hours[hour]),
-                            y: .value("Knots", speed),
+                            y: .value("Speed", units.wind(speed)),
                             series: .value("Model", model.label)
                         )
                         .foregroundStyle(Self.colour(index))
@@ -178,7 +180,7 @@ struct WindOutlookScreen: View {
                 if let speed, hour < outlook.hours.count {
                     LineMark(
                         x: .value("Hour", outlook.hours[hour]),
-                        y: .value("Knots", speed),
+                        y: .value("Speed", units.wind(speed)),
                         series: .value("Model", "Average")
                     )
                     .foregroundStyle(.white)
@@ -187,7 +189,7 @@ struct WindOutlookScreen: View {
             }
             // The floor of the plot, drawn: below it are directions, not
             // speeds, and the eye needs telling where one stops.
-            RuleMark(y: .value("Knots", 0))
+            RuleMark(y: .value("Speed", 0))
                 .foregroundStyle(.white.opacity(0.35))
                 .lineStyle(StrokeStyle(lineWidth: 2))
 
@@ -197,7 +199,7 @@ struct WindOutlookScreen: View {
                     if let direction = series.directions[safe: hour] ?? nil {
                         PointMark(
                             x: .value("Hour", outlook.hours[hour]),
-                            y: .value("Knots", rowY(row))
+                            y: .value("Speed", rowY(row))
                         )
                         .symbol {
                             // `arrow.down` turned by the "from" bearing points
@@ -214,11 +216,11 @@ struct WindOutlookScreen: View {
 
             // Fifteen knots: this app's own "firing" line, and the only
             // horizontal a rider is really reading against.
-            RuleMark(y: .value("Firing", 15))
+            RuleMark(y: .value("Firing", units.wind(15)))
                 .foregroundStyle(Color.accentColor.opacity(0.5))
                 .lineStyle(StrokeStyle(lineWidth: 2, dash: [10, 8]))
                 .annotation(position: .top, alignment: .leading) {
-                    Text("15 kn")
+                    Text(units.windLabel(15))
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
                 }
@@ -229,8 +231,8 @@ struct WindOutlookScreen: View {
             AxisMarks(values: Array(stride(from: 0.0, through: yMax, by: yMax > 30 ? 10 : 5))) { value in
                 AxisGridLine().foregroundStyle(.white.opacity(0.12))
                 AxisValueLabel {
-                    if let knots = value.as(Double.self) {
-                        Text("\(Int(knots))")
+                    if let speed = value.as(Double.self) {
+                        Text("\(Int(speed))")
                             .font(.system(size: 22))
                             .foregroundStyle(.secondary)
                     }
@@ -259,16 +261,16 @@ struct WindOutlookScreen: View {
     private static let rowHeight: CGFloat = 44
     private static let arrowEveryHours = 3
 
-    /// The top of the knots axis: the strongest thing drawn, to a round
-    /// number, and never below twenty so a calm week still has a firing
-    /// line with room above it.
+    /// The top of the speed axis, in the rider's unit: the strongest thing
+    /// drawn, to a round number, and never below twenty knots' worth so a
+    /// calm week still has a firing line with room above it.
     private var yMax: Double {
         let strongest = outlook.models
             .filter { enabled.contains($0.id) }
             .flatMap(\.speeds)
             .compactMap { $0 }
             .max() ?? 0
-        return max(20, (strongest / 5).rounded(.up) * 5)
+        return (max(units.wind(20), units.wind(strongest)) / 5).rounded(.up) * 5
     }
 
     /// Where row `index` sits on the knots axis — below zero, one row height

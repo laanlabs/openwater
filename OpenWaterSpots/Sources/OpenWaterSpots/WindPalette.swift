@@ -87,3 +87,41 @@ public nonisolated enum WindPalette: Sendable {
         }
     }
 }
+
+/// The rain wash's colours, millimetres an hour.
+///
+/// The ramp every radar has taught a room to read — blue for light rain,
+/// green through yellow as it builds, orange and red for a downpour — so a
+/// model's rain drawn in it is read at a glance as "rain, and how much". It
+/// is deliberately the radar convention and not the wind palette: green
+/// means fourteen knots everywhere else in this app, and a rain field that
+/// borrowed it would say the wrong thing about the same colour.
+///
+/// The stops start at a tenth of a millimetre because that is where the wash
+/// starts to be visible at all — see `WashLayer.opacity(for:)`, which fades
+/// the paint in below half a millimetre so dry ground stays the map.
+public nonisolated enum RainPalette: Sendable {
+
+    public static let stops: [(at: Double, colour: UIColor)] = [
+        (0.1, UIColor(red: 0.62, green: 0.80, blue: 0.98, alpha: 1)),
+        (0.5, UIColor(red: 0.30, green: 0.58, blue: 0.96, alpha: 1)),
+        (1.5, UIColor(red: 0.13, green: 0.36, blue: 0.90, alpha: 1)),
+        (3.0, UIColor(red: 0.20, green: 0.74, blue: 0.36, alpha: 1)),
+        (5.0, UIColor(red: 0.95, green: 0.86, blue: 0.25, alpha: 1)),
+        (8.0, UIColor(red: 0.96, green: 0.55, blue: 0.15, alpha: 1)),
+        (12.0, UIColor(red: 0.86, green: 0.15, blue: 0.30, alpha: 1)),
+    ]
+
+    /// The ramp read as a gradient, the way the wind palette's `smooth` is.
+    public static func colour(for millimetresPerHour: Double) -> UIColor {
+        guard let first = stops.first, let last = stops.last else { return .clear }
+        if millimetresPerHour <= first.at { return first.colour }
+        if millimetresPerHour >= last.at { return last.colour }
+        for index in 1..<stops.count where millimetresPerHour < stops[index].at {
+            let a = stops[index - 1], b = stops[index]
+            return WindPalette.lerp(a.colour, b.colour,
+                                    (millimetresPerHour - a.at) / (b.at - a.at))
+        }
+        return last.colour
+    }
+}

@@ -18,6 +18,8 @@ import SwiftUI
 /// checks one and then the other.
 struct WeatherDetailScreen: View {
 
+    @Environment(TVUnits.self) private var units
+
     let here: Geo.Coordinate
     let placeName: String
 
@@ -26,10 +28,16 @@ struct WeatherDetailScreen: View {
 
     @Namespace private var page
 
-    private var unit: TemperatureUnit { UnitPreferences.forThisDevice.temperatureUnit }
+    private var unit: TemperatureUnit { units.temperature }
+
+    /// How far the day rows run. Ten: the model carries sixteen, but past
+    /// ten a daily high is a coin toss wearing a number, and a rider planning
+    /// a weekend two weeks out should be reading the wind screen's spread,
+    /// not this.
+    static let days = 10
 
     /// Two days of hours. Past that the hourly resolution is pretending, and
-    /// the day rows below carry the rest of the week.
+    /// the day rows below carry the rest of the ten days.
     private var hours: [WeatherDetail.Hour] {
         let horizon = Date().addingTimeInterval(48 * 3600)
         return detail.hours.filter { $0.at >= Date().addingTimeInterval(-3600) && $0.at <= horizon }
@@ -75,7 +83,7 @@ struct WeatherDetailScreen: View {
         .menuBackHint()
         .task {
             isLoading = true
-            detail = await OpenMeteo.detail(at: here)
+            detail = await OpenMeteo.detail(at: here, days: Self.days)
             isLoading = false
         }
     }
@@ -132,7 +140,7 @@ struct WeatherDetailScreen: View {
             }
             if let visibility = now.visibilityM {
                 Reading(label: "VISIBILITY",
-                        value: Format.distance(visibility, unit: UnitPreferences.forThisDevice.distance))
+                        value: Format.distance(visibility, unit: units.preferences.distance))
             }
             Spacer()
         }
@@ -245,8 +253,10 @@ private struct Reading: View {
     }
 }
 
-/// One day of the week ahead.
+/// One day of the ten ahead.
 private struct DayRow: View {
+
+    @Environment(TVUnits.self) private var units
 
     let day: WeatherDetail.Day
     let unit: TemperatureUnit
@@ -275,7 +285,7 @@ private struct DayRow: View {
                 Spacer().frame(width: 130)
             }
             if let wind = day.windMaxKn {
-                Text("\(Int(wind.rounded())) kn")
+                Text(units.windLabel(wind))
                     .font(.system(size: 26))
                     .monospacedDigit()
                     .foregroundStyle(wind >= 15 ? Color.accentColor : Color.secondary)

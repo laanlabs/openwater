@@ -71,6 +71,11 @@ public enum WebcamStream {
 
     public static func find(at page: URL) async -> [Stream] {
         if let hit = cache[page], Date().timeIntervalSince(hit.at) < ttl { return hit.streams }
+        // A link that already *is* the video needs no reading. Palmetto
+        // Dunes lists its cameras as `.../playlist.m3u8` outright, and
+        // fetching that as a page found only the chunklist inside it — a
+        // stream one level too deep, and one the operator can rename.
+        if let direct = directMedia(page) { return [direct] }
         let found = await harvest(page, depth: 0)
         cache[page] = Cached(streams: found, at: Date())
         logger.notice("""
@@ -104,13 +109,13 @@ public enum WebcamStream {
 
         var pooled: [Stream] = []
         pooled += await splitURLs(in: html)
-        pooled += playlists(in: html)
-        pooled += metaDeclared(in: html, base: base)
-        pooled += videoElements(in: html, base: base)
-        pooled += mediaArrays(in: html, base: base)
+        pooled += await hostedStreams(in: html)
+        pooled += read(html, base: base)
 
         if pooled.isEmpty, depth == 0 {
-            for frame in iframes(in: html, base: base).prefix(3) {
+            // The frames the page draws, and the ones a player SDK would
+            // draw for it — see `embeddedPlayers`.
+            for frame in (iframes(in: html, base: base) + embeddedPlayers(in: html)).prefix(3) {
                 let inner = await harvest(frame, depth: 1)
                 if !inner.isEmpty { pooled += inner; break }
             }
@@ -123,6 +128,31 @@ public enum WebcamStream {
         return pooled
             .filter { seen.insert($0.url).inserted }
             .sorted { !$0.isClip && $1.isClip }
+    }
+
+    /// Every reader that needs nothing but the page — the split-URL reader
+    /// probes the network and is called beside this. Internal so a page can
+    /// be handed in from a test as text, which is how a new shape gets
+    /// pinned before it is trusted: the fixture is the operator's page as it
+    /// was the day the rule was written.
+    static func read(_ html: String, base: URL) -> [Stream] {
+        var pooled: [Stream] = []
+        pooled += playlists(in: html)
+        pooled += relativeMedia(in: html, base: base)
+        pooled += metaDeclared(in: html, base: base)
+        pooled += videoElements(in: html, base: base)
+        pooled += mediaArrays(in: html, base: base)
+        return pooled
+    }
+
+    /// `unescape`, for tests that hand in a raw page the way `harvest` gets one.
+    static func prepared(_ raw: String) -> String { unescape(raw) }
+
+    /// The link itself, when it is a playlist or a clip rather than a page.
+    static func directMedia(_ url: URL) -> Stream? {
+        let ext = url.pathExtension.lowercased()
+        guard ["m3u8", "mp4", "m4v", "mov"].contains(ext) else { return nil }
+        return Stream(url: url, label: name(from: url, index: 0), isClip: ext != "m3u8")
     }
 
     private static func load(_ page: URL) async -> (html: String, base: URL)? {
@@ -204,12 +234,80 @@ public enum WebcamStream {
         return live
     }
 
+    /// A media host and a stream id in two script variables, joined by a
+    /// path only the player script knows.
+    ///
+    /// This is ipcamlive's player page, and it is written as a site rule
+    /// because it is one: `var address = 'http://s66.ipcamlive.com/'` and
+    /// `var streamid = '42jy…'`, with the playlist at
+    /// `streams/<id>/stream.m3u8` on that host. Measured 2026-09-05, that is
+    /// roughly sixty of the guide's cameras — the largest family after
+    /// Surfline and YouTube — every one of them a page this file could read
+    /// nothing from, and every one a public HLS stream once the two halves
+    /// are put together. `https` even where the page says `http`: the host
+    /// answers both, and a television will not load the plain one.
+    ///
+    /// Probed before it is believed, like the split URLs above — the shape is
+    /// a convention, not something the page literally says.
+    private static func hostedStreams(in html: String) async -> [Stream] {
+        var found: [Stream] = []
+        for url in hostedStreamCandidates(in: html) where await answers(url) {
+            found.append(Stream(url: url, label: name(from: url, index: found.count), isClip: false))
+        }
+        return found
+    }
+
+    static func hostedStreamCandidates(in html: String) -> [URL] {
+        let hosts = matches(#"\baddress\s*=\s*["']https?://([^"'/\s]+)/?["']"#, in: html)
+        let ids = matches(#"\bstreamid\s*=\s*["']([A-Za-z0-9_-]{6,})["']"#, in: html)
+        guard let host = hosts.first, let id = ids.first else { return [] }
+        return [URL(string: "https://\(host)/streams/\(id)/stream.m3u8")].compactMap { $0 }
+    }
+
+    /// The frame a player SDK would draw, from the id the page hands it.
+    ///
+    /// Angelcam's embed is one line — `new Angelcam.player('holder', { id:
+    /// 'j3l74078lm' })` — and its SDK turns that into an iframe at
+    /// `v.angelcam.com/iframe?v=<id>`, whose page carries the playlist. Pages
+    /// that write the iframe themselves were already read (the frame is
+    /// followed); pages that let the SDK write it found nothing, for want of
+    /// the one URL the script would have built. So it is built here and
+    /// followed the same way.
+    static func embeddedPlayers(in html: String) -> [URL] {
+        matches(#"Angelcam\.player\s*\([^)]*?\bid\s*:\s*["']([A-Za-z0-9]+)["']"#, in: html)
+            .compactMap { URL(string: "https://v.angelcam.com/iframe?v=\($0)") }
+    }
+
     /// Any HLS playlist written into the page whole.
     private static func playlists(in html: String) -> [Stream] {
         matches(#"(https?://[^"'\s\\<>]+?\.m3u8[^"'\s\\<>]*)"#, in: html)
             .compactMap { URL(string: unescape($0)) }
             .enumerated()
             .map { Stream(url: $1, label: name(from: $1, index: $0), isClip: false) }
+    }
+
+    /// A media path written relative to the page.
+    ///
+    /// The smallest operator page there is — measured on nationalwebcam.com,
+    /// Old Harbor on Block Island: a `<video>`, hls.js from a CDN, and
+    /// `var videoSrc = '/hls/stream.m3u8'`. Nothing above could see it. The
+    /// whole-URL reader wants a scheme and a host, the `<video>` reader wants
+    /// a `src` the script never writes, and the array reader wants two names.
+    /// One quoted path is what a page serving its own stream from its own
+    /// box writes, and it resolves against the page like any other link.
+    ///
+    /// Only paths: a leading slash, a dot, or a bare filename. A quoted
+    /// string with a `+` or a `${` in it is script assembling a URL, not a
+    /// URL, and is left to the readers that understand the assembly.
+    private static func relativeMedia(in html: String, base: URL) -> [Stream] {
+        matches(#"["']((?:\.{0,2}/|//)?[A-Za-z0-9_./%-]+\.(?:m3u8|mp4|m4v|mov)(?:\?[^"'\s<>]*)?)["']"#,
+                in: html)
+            .filter { !$0.contains("+") && !$0.contains("${") && !$0.hasPrefix("http") }
+            .compactMap { URL(string: $0, relativeTo: base)?.absoluteURL }
+            .filter { $0.scheme?.hasPrefix("http") == true }
+            .enumerated()
+            .map { Stream(url: $1, label: name(from: $1, index: $0),
+                          isClip: !$1.absoluteString.contains(".m3u8")) }
     }
 
     /// The standard ways a page declares its own media to anything that is
@@ -359,17 +457,27 @@ public enum WebcamStream {
         }
     }
 
-    /// These arrive inside JSON and inside HTML attributes, escaped both ways.
+    /// These arrive inside JSON and inside HTML attributes, escaped both ways
+    /// — and sometimes escaped twice.
     ///
     /// The `\uXXXX` pass is general rather than the single `&` it used to
     /// be: Angelcam escapes the hyphens in its own hostname as `-`, which
     /// no amount of guessing at individual sequences would have caught.
+    ///
+    /// Any run of backslashes counts as one. wetter.com writes its player
+    /// config as JSON inside a JavaScript string, so a slash arrives as
+    /// `\\\/` and a hyphen as `\\u002D`; peeling one layer left a stray
+    /// backslash in the URL, and a URL pattern that (rightly) refuses
+    /// backslashes stopped dead at it. There is no page on which two
+    /// backslashes before a slash mean anything but "a slash, quoted twice".
     private static func unescape(_ text: String) -> String {
-        var out = text
-            .replacingOccurrences(of: "\\/", with: "/")
-            .replacingOccurrences(of: "&amp;", with: "&")
+        var out = text.replacingOccurrences(of: "&amp;", with: "&")
+        if let slashes = try? NSRegularExpression(pattern: #"\\+/"#) {
+            out = slashes.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out),
+                                                   withTemplate: "/")
+        }
         guard out.contains("\\u"),
-              let regex = try? NSRegularExpression(pattern: #"\\u([0-9a-fA-F]{4})"#)
+              let regex = try? NSRegularExpression(pattern: #"\\+u([0-9a-fA-F]{4})"#)
         else { return out }
         let range = NSRange(out.startIndex ..< out.endIndex, in: out)
         for match in regex.matches(in: out, range: range).reversed() {

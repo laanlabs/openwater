@@ -47,6 +47,52 @@ final class TVLocation: NSObject {
     /// fallback box at all.
     var mapRegion: MKCoordinateRegion?
 
+    /// A point the wind map has been asked to show, without keeping it.
+    ///
+    /// This is what a starred spot's "see it on the map" row sets. It is
+    /// deliberately not `choose`: the pin is the place the *app* is about —
+    /// the cameras tab counts from it, the next launch opens on it — and a
+    /// rider who wants to look at the wash over one of their spots for a
+    /// minute has not said any of that. So the map goes there, and the pin
+    /// stays where it was.
+    ///
+    /// Stamped with an id so asking for the same spot twice is two asks: the
+    /// second press has to move a map that may have been panned away since.
+    struct Glance: Equatable {
+        let coordinate: Geo.Coordinate
+        let name: String
+        let id = UUID()
+    }
+
+    private(set) var glance: Glance?
+
+    /// A glance asked for but not yet handed to the map. See `showGlance`.
+    private var pendingGlance: Glance?
+
+    /// Ask for this point on the wind map. Queued, not shown: the ask comes
+    /// from inside a full-screen report over the favourites tab, and the tab
+    /// switch it wants cannot happen while that cover is still dismissing —
+    /// the selection flipped to the map and was put straight back, so the
+    /// rider saw the board again with the map untouched. The board delivers
+    /// it from the cover's own dismissal callback instead. See `Glance`.
+    func lookAt(_ coordinate: Geo.Coordinate, named name: String) {
+        pendingGlance = Glance(coordinate: coordinate, name: name)
+    }
+
+    /// The cover is down; the map can have the glance now. Nothing pending
+    /// is nothing to do, which is what every ordinary dismissal is.
+    func showGlance() {
+        guard let pendingGlance else { return }
+        glance = pendingGlance
+        self.pendingGlance = nil
+    }
+
+    /// The look is over. Pressed on the map's own way back; also implied by
+    /// anything that names a new place — see `choose` and `useTheFix`.
+    func endGlance() {
+        glance = nil
+    }
+
     /// How the search for a fix has gone. Not the same question as `here`:
     /// a refused fix with a chosen place is a working screen, and this is
     /// only what the "use my location" button has to say for itself.
@@ -132,7 +178,12 @@ final class TVLocation: NSObject {
     }
 
     /// A place from the search, or a spot the rider picked off the guide.
+    ///
+    /// Naming a place ends any glance: the pin dropped where the rider was
+    /// looking makes the look the place, and a typed place is somewhere else
+    /// on purpose. Either way "back to the pin" no longer means anything.
     func choose(name: String, at coordinate: Geo.Coordinate) {
+        glance = nil
         chosen = Chosen(name: name,
                         latitude: coordinate.latitude,
                         longitude: coordinate.longitude)
@@ -150,6 +201,7 @@ final class TVLocation: NSObject {
     /// Give the box its own answer back. Asks for a fresh fix if there is
     /// none, so "use my location" is one press whatever state it is in.
     func useTheFix() {
+        glance = nil
         chosen = nil
         if fix == nil { locate() }
     }

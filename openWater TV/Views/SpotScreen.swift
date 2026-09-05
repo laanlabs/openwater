@@ -13,7 +13,8 @@ import SwiftUI
 /// measured stations and the cameras — while a point picked on the map got
 /// the rain chance, the long-range charts and the model picker. A saved spot
 /// is if anything the place a rider cares *most* about, so it gets the same
-/// report; `ConditionsScreen` takes the spot itself and adds its cameras.
+/// report; `ConditionsScreen` takes the spot itself, and is told it came from
+/// the board so it can offer the way back out to the map.
 struct SpotScreen: View {
 
     let spot: GuideSpot
@@ -22,7 +23,8 @@ struct SpotScreen: View {
         ConditionsScreen(here: Geo.Coordinate(latitude: spot.latitude,
                                               longitude: spot.longitude),
                          placeName: spot.name,
-                         spot: spot)
+                         spot: spot,
+                         openedFromBoard: true)
     }
 }
 
@@ -152,31 +154,6 @@ struct MeasuredStations: View {
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-// MARK: - Cams at this spot
-
-/// Shared with the conditions report, which shows a starred spot's cameras.
-struct SpotCams: View {
-
-    let cams: [SpotGuideStore.GuideResource]
-    let spotName: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("CAMERAS")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.secondary)
-            ScrollView(.horizontal) {
-                HStack(spacing: 28) {
-                    ForEach(cams) { cam in
-                        CamCard(cam: cam)
-                    }
-                }
-                .padding(.vertical, 8)
             }
         }
     }

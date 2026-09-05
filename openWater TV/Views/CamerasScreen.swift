@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import MapKit
 import OpenWaterCore
 import UIKit
@@ -466,6 +467,13 @@ struct CamCard: View {
 // MARK: - Watching one
 
 /// Full screen, and whichever of the two things it is.
+///
+/// **Menu always leaves.** Said explicitly here rather than left to the
+/// cover, because the system player inside `LiveStream` has its own ideas
+/// about the Menu button — it hides its transport bar first, and a failed
+/// item leaves it showing a small error with nothing obviously pressable.
+/// The phone had the same trap in a different coat: a stream that would not
+/// play and no way out. One press, one exit, whatever the player is doing.
 struct CamPlayer: View {
 
     /// Already resolved by the caller. The card knows whether this came from
@@ -476,6 +484,8 @@ struct CamPlayer: View {
     let isStill: Bool
     let name: String
 
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         Group {
             if isStill {
@@ -484,34 +494,81 @@ struct CamPlayer: View {
                 // No custom headers. Surfline's CDN refuses a browser user
                 // agent and accepts AVPlayer's own, which is exactly what
                 // this sends; a YouTube manifest is happy either way.
-                LiveStream(url: url)
+                LiveStream(url: url, name: name)
             }
         }
         .ignoresSafeArea()
         .menuBackHint()
+        .onExitCommand { dismiss() }
     }
 }
 
 private struct LiveStream: View {
 
     let url: URL
+    let name: String
 
     @State private var player: AVPlayer?
+    /// The item reported failure — see `watch`. The system player shows its
+    /// own error for this, small and grey in the middle of a black screen;
+    /// this screen says it at television size and says how to leave.
+    @State private var didFail = false
 
     var body: some View {
-        VideoPlayer(player: player)
-            .onAppear {
-                let player = AVPlayer(url: url)
-                // A live cam has no sound worth hearing and a living room has
-                // somebody else in it.
-                player.isMuted = true
-                player.play()
-                self.player = player
+        ZStack {
+            VideoPlayer(player: player)
+            if didFail { StreamFailed(name: name) }
+        }
+        .task {
+            let player = AVPlayer(url: url)
+            // A live cam has no sound worth hearing and a living room has
+            // somebody else in it.
+            player.isMuted = true
+            player.play()
+            self.player = player
+            guard let item = player.currentItem else { return }
+            for await status in item.publisher(for: \.status).values {
+                if status == .failed { didFail = true; return }
+                if status == .readyToPlay { return }
             }
-            .onDisappear {
-                player?.pause()
-                player = nil
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
+    }
+}
+
+/// What a stream that will not play looks like from a sofa: the camera's
+/// name, one sentence about what happened, and the way out — because the
+/// system player's own error is a line of grey text nobody can act on.
+struct StreamFailed: View {
+
+    let name: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            VStack(spacing: 22) {
+                Image(systemName: "video.slash")
+                    .font(.system(size: 72))
+                    .foregroundStyle(.secondary)
+                Text("\(name) isn't playing")
+                    .font(.system(size: 44, weight: .bold))
+                Text("The stream didn't come through — it may be off air, or only playable in a browser.")
+                    .font(.system(size: 26))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 900)
+                Label("Press Menu to go back", systemImage: "chevron.backward")
+                    .font(.system(size: 26, weight: .semibold))
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 14)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(.top, 12)
             }
+            .foregroundStyle(.white)
+        }
     }
 }
 
@@ -530,10 +587,17 @@ private struct RefreshingStill: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             Color.black
-            AsyncImage(url: bust(url, tick)) { image in
-                image.resizable().aspectRatio(contentMode: .fit)
-            } placeholder: {
-                ProgressView()
+            AsyncImage(url: bust(url, tick)) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fit)
+                case .failure:
+                    // A still that did not arrive is the same dead end a
+                    // stream that did not play is, and gets the same sign.
+                    StreamFailed(name: name)
+                default:
+                    ProgressView()
+                }
             }
             .id(tick)
             Text(name)

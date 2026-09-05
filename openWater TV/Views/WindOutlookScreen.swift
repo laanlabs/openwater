@@ -136,6 +136,20 @@ struct WindOutlookScreen: View {
     /// One line per model, the consensus heavier, and the day boundaries
     /// marked — because "Saturday afternoon" is how a decision is actually
     /// phrased, and an unlabelled 120-hour axis is not.
+    ///
+    /// **The arrows under the lines.** Speed is half a forecast. Twenty knots
+    /// is a session from the south-west and a wasted drive from the north at
+    /// most of this app's launches, and a chart of speeds alone made a rider
+    /// go back to the phone for the half that decides it. So under the zero
+    /// line there is a row of arrows every three hours — the blend in white,
+    /// like its line, then one row per model switched on, in that model's
+    /// colour — the way iKitesurf lays its model table out. They live inside
+    /// the chart rather than in a strip beneath it so every arrow is exactly
+    /// under its hour; a separate view would drift from the plot by the
+    /// width of the axis labels.
+    ///
+    /// Rows go below zero on the knots axis on purpose: the axis is told to
+    /// label only the positive ticks, and the negative space is simply room.
     private var chart: some View {
         Chart {
             ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
@@ -171,6 +185,33 @@ struct WindOutlookScreen: View {
                     .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round))
                 }
             }
+            // The floor of the plot, drawn: below it are directions, not
+            // speeds, and the eye needs telling where one stops.
+            RuleMark(y: .value("Knots", 0))
+                .foregroundStyle(.white.opacity(0.35))
+                .lineStyle(StrokeStyle(lineWidth: 2))
+
+            ForEach(Array(directionRows.enumerated()), id: \.element.id) { row, series in
+                ForEach(Array(stride(from: 0, to: outlook.hours.count, by: Self.arrowEveryHours)),
+                        id: \.self) { hour in
+                    if let direction = series.directions[safe: hour] ?? nil {
+                        PointMark(
+                            x: .value("Hour", outlook.hours[hour]),
+                            y: .value("Knots", rowY(row))
+                        )
+                        .symbol {
+                            // `arrow.down` turned by the "from" bearing points
+                            // where the air is going — the twelve-hour strip's
+                            // convention, and the map's comets'.
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 21, weight: .bold))
+                                .rotationEffect(.degrees(direction))
+                                .foregroundStyle(series.colour)
+                        }
+                    }
+                }
+            }
+
             // Fifteen knots: this app's own "firing" line, and the only
             // horizontal a rider is really reading against.
             RuleMark(y: .value("Firing", 15))
@@ -182,8 +223,10 @@ struct WindOutlookScreen: View {
                         .foregroundStyle(Color.accentColor)
                 }
         }
+        .chartYScale(domain: rowY(directionRows.count) ... yMax)
         .chartYAxis {
-            AxisMarks(values: .automatic(desiredCount: 5)) { value in
+            // Only the speeds get ticks. The rows below zero are not knots.
+            AxisMarks(values: Array(stride(from: 0.0, through: yMax, by: yMax > 30 ? 10 : 5))) { value in
                 AxisGridLine().foregroundStyle(.white.opacity(0.12))
                 AxisValueLabel {
                     if let knots = value.as(Double.self) {
@@ -206,7 +249,51 @@ struct WindOutlookScreen: View {
                 }
             }
         }
-        .frame(height: 460)
+        .frame(height: Self.plotHeight + Self.rowHeight * CGFloat(directionRows.count + 1))
+    }
+
+    /// The speed plot's own height, before the arrow rows are added under it.
+    private static let plotHeight: CGFloat = 460
+    /// One row of arrows, in points — large enough to read the bearing of a
+    /// glyph from a sofa, which is what sets the every-three-hours spacing.
+    private static let rowHeight: CGFloat = 44
+    private static let arrowEveryHours = 3
+
+    /// The top of the knots axis: the strongest thing drawn, to a round
+    /// number, and never below twenty so a calm week still has a firing
+    /// line with room above it.
+    private var yMax: Double {
+        let strongest = outlook.models
+            .filter { enabled.contains($0.id) }
+            .flatMap(\.speeds)
+            .compactMap { $0 }
+            .max() ?? 0
+        return max(20, (strongest / 5).rounded(.up) * 5)
+    }
+
+    /// Where row `index` sits on the knots axis — below zero, one row height
+    /// down per row. The conversion uses the plot's own scale so a row is
+    /// the same height in points whatever the week's top speed is.
+    private func rowY(_ index: Int) -> Double {
+        -yMax * Double(Self.rowHeight) / Double(Self.plotHeight) * (Double(index) + 1)
+    }
+
+    /// The rows of arrows: the blend first, in white, then each model that is
+    /// switched on, in the colour its line is drawn in.
+    private struct DirectionRow: Identifiable {
+        let id: String
+        let colour: Color
+        let directions: [Double?]
+    }
+
+    private var directionRows: [DirectionRow] {
+        var rows = [DirectionRow(id: "average", colour: .white,
+                                 directions: outlook.blendDirections(of: enabled))]
+        for (index, model) in outlook.models.enumerated() where enabled.contains(model.id) {
+            rows.append(DirectionRow(id: model.id, colour: Self.colour(index),
+                                     directions: model.directions))
+        }
+        return rows
     }
 
     /// The heavy white line: the mean of whatever is switched on.
@@ -256,6 +343,13 @@ struct WindOutlookScreen: View {
                      : "Average of the \(enabled.count) switched on")
                     .font(.system(size: 24))
             }
+            // The arrows explained once, here beside the swatches they share
+            // colours with, rather than labelled row by row inside the plot
+            // where a label would sit on top of the first arrows.
+            Label("Arrows point where the wind is going, every three hours — the average in white, then each model in its colour.",
+                  systemImage: "arrow.down.right")
+                .font(.system(size: 22))
+                .foregroundStyle(.secondary)
         }
     }
 

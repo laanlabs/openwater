@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import OpenWaterSpots
 import SwiftUI
 
@@ -20,9 +21,13 @@ struct CamAnglePlayer: View {
     let streams: [WebcamStream.Stream]
     let name: String
 
+    @Environment(\.dismiss) private var dismiss
+
     @State private var index = 0
     @State private var player: AVQueuePlayer?
     @State private var isShowingChrome = true
+    /// The current angle's item reported failure — see `start`.
+    @State private var didFail = false
     @FocusState private var isDriving: Bool
 
     private var current: WebcamStream.Stream { streams[min(index, streams.count - 1)] }
@@ -32,9 +37,14 @@ struct CamAnglePlayer: View {
             Color.black
             PlayerLayer(player: player)
             keys
+            if didFail { StreamFailed(name: current.label.isEmpty ? name : current.label) }
             if isShowingChrome { chrome }
         }
         .ignoresSafeArea()
+        // Menu leaves, said here rather than trusted to the cover: the
+        // full-screen button below owns every other key on this screen, and
+        // a screen that owns the remote has to give Menu back itself.
+        .onExitCommand { dismiss() }
         .onAppear { isDriving = true }
         .task(id: index) { await start() }
         // The chrome goes after a few seconds so the water has the screen,
@@ -58,12 +68,21 @@ struct CamAnglePlayer: View {
 
     private func start() async {
         player?.pause()
-        let queue = AVQueuePlayer(items: [AVPlayerItem(url: current.url)])
+        didFail = false
+        let item = AVPlayerItem(url: current.url)
+        let queue = AVQueuePlayer(items: [item])
         // A cam has no sound worth hearing and a living room has somebody
         // else in it.
         queue.isMuted = true
         queue.play()
         player = queue
+        // Wait for the item's verdict. This runs inside the `task(id: index)`
+        // that called it, so stepping to another angle retires the watch
+        // along with the player it was watching.
+        for await status in item.publisher(for: \.status).values {
+            if status == .failed { didFail = true; return }
+            if status == .readyToPlay { return }
+        }
     }
 
     /// The whole glass, listening.

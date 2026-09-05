@@ -68,8 +68,14 @@ struct WindMapScreen: View {
     @State private var isShowingConditions = false
     @State private var isShowingOptions = false
     /// Set when the pin was just dropped from this map, so the camera move
-    /// that follows does not also re-frame the map — see `placeKey`.
+    /// that follows does not also re-frame the map — see `frameKey`.
     @State private var justPinned = false
+    /// What `frame()` has already acted on — the last glance it centred on,
+    /// and the place it last recentred for — so it can be called on every
+    /// appearance and every key change and only move the camera when one of
+    /// the two is genuinely new. See `frame()` for why it has to be that way.
+    @State private var framedGlance: UUID?
+    @State private var framedPlace: String?
 
     /// The wind and the weather under the crosshairs. Held here rather than
     /// read from the store so the old point's answer cannot flash on the new
@@ -112,6 +118,8 @@ struct WindMapScreen: View {
     /// keeps the D-pad out of the tab bar's hands while a rider is panning.
     private enum Control: Hashable {
         case map, hourBack, hourForward, conditions, move, options, optWind, optNames, setPin, reset, locate, place
+        /// The way back from a glance — see `backToPin`.
+        case back
     }
 
     /// How far the clock will travel. The field carries seventy-two hours,
@@ -147,7 +155,10 @@ struct WindMapScreen: View {
 
     var body: some View {
         Group {
-            if location.here != nil {
+            // A glance is enough to draw on. A box with no fix and no typed
+            // place, asked to show a starred spot, should show it rather
+            // than ask where the living room is.
+            if location.here != nil || location.glance != nil {
                 mapScreen
             } else {
                 NoPlaceYet(isTrying: !location.needsAPlace) { isSearching = true }
@@ -176,15 +187,13 @@ struct WindMapScreen: View {
         .onChange(of: isActive, initial: true) { _, active in
             if active { wash.wake() } else { wash.sleep() }
         }
-        // A place arriving — the first fix, or one typed in — is the only
-        // thing that moves the camera without somebody pressing a key.
-        .onChange(of: placeKey, initial: true) { _, _ in
-            // A pin dropped from this map is already in frame; re-centring
-            // would snap the zoom back and throw away the view the rider
-            // just chose. Anything else — a fix arriving, a typed place — is
-            // somewhere new and does move the camera.
-            if justPinned { justPinned = false } else { recentre() }
-        }
+        // A place arriving — the first fix, or one typed in — and a spot
+        // asking to be looked at are the only things that move the camera
+        // without somebody pressing a key. One key for both, on purpose:
+        // two `onChange`s firing on the same appearance would each commit a
+        // region, and which one the map ended up on would come down to the
+        // order the modifiers happened to be declared in.
+        .onChange(of: frameKey, initial: true) { _, _ in frame() }
     }
 
     // MARK: - The screen
@@ -219,6 +228,7 @@ struct WindMapScreen: View {
             }
         }
         .overlay(alignment: .topTrailing) { statusChip }
+        .overlay(alignment: .topLeading) { backToPin }
         // The tab bar goes away while the map has the D-pad.
         //
         // `onMoveCommand` hears an Up press, but hearing it does not stop
@@ -522,6 +532,42 @@ struct WindMapScreen: View {
         location.choose(name: name, at: centre)
     }
 
+    /// The way back from looking at a starred spot.
+    ///
+    /// A glance moves the map somewhere the pin is not, and until now the
+    /// only ways home were the location button — which also throws away a
+    /// typed place — or finding it by hand. This is the one control on the
+    /// glass besides the bar: top left, where a back button lives on every
+    /// other screen of this box, named after the place it returns to so it
+    /// is not mistaken for Menu. Up from the bar reaches it, because it is
+    /// the nearest focusable thing in that direction; Up again is the tab
+    /// bar as before.
+    ///
+    /// Only while a glance is showing, and never while driving — while the
+    /// map has the D-pad the tab bar is hidden for exactly the reason a
+    /// focusable button above the map would be a place for Up to land.
+    @ViewBuilder private var backToPin: some View {
+        if location.glance != nil, location.here != nil, !isDriving {
+            ControlButton(title: location.isChosen ? "Back to \(location.name)" : "Back to my location",
+                          systemImage: "arrow.uturn.backward", action: leaveGlance)
+                .focused($focus, equals: .back)
+                .padding(6)
+                .background(.thinMaterial, in: Capsule())
+                .padding(.top, 40)
+                .padding(.leading, 60)
+        }
+    }
+
+    /// End the glance and go back to the pin at the opening span. Focus is
+    /// handed to the bar explicitly: the button this was pressed on is about
+    /// to disappear, and a focus engine left to choose lands on whatever is
+    /// nearest, which from the top of the screen is the tab bar.
+    private func leaveGlance() {
+        location.endGlance()
+        recentre()
+        focus = .conditions
+    }
+
     /// Back to the opening span, without moving the centre.
     ///
     /// Separate from `goHome` on purpose. Zooming in four times to look at a
@@ -552,10 +598,51 @@ struct WindMapScreen: View {
         commit(region)
     }
 
+    /// Move the camera for whatever has changed, and only for that.
+    ///
+    /// Called on appearance and whenever `frameKey` changes, which means it
+    /// runs more often than anything actually moves, so it keeps a record of
+    /// what it has done and compares.
+    ///
+    /// **A glance waits for the screen.** The request arrives while the
+    /// favourites tab is the one showing, and this map is off the hierarchy.
+    /// A camera committed to it then did not stick: the tab came back at its
+    /// old rectangle, the appearance ran this again, and — with the glance
+    /// already marked as done — it fell through to recentring on the pin.
+    /// Which is exactly how it was reported: press "see it on the map" and
+    /// the map opens where it was. So an off-screen glance is left pending,
+    /// and the appearance that follows the tab switch is what frames it.
+    private func frame() {
+        if let glance = location.glance, glance.id != framedGlance {
+            guard isActive else { return }
+            framedGlance = glance.id
+            framedPlace = placeKey
+            justPinned = false
+            // A glance is a look, not a move of the pin. The zoom goes back
+            // to the opening span for the same reason a typed place does:
+            // the rider is arriving somewhere, not adjusting.
+            commit(region(around: glance.coordinate))
+        } else if placeKey != framedPlace {
+            framedPlace = placeKey
+            // A pin dropped from this map is already in frame; re-centring
+            // would snap the zoom back and throw away the view the rider
+            // just chose. Anything else — a fix arriving, a typed place —
+            // is somewhere new and does move the camera.
+            if justPinned { justPinned = false } else { recentre() }
+        }
+    }
+
+    /// Where the map opens with nothing else to go on: the place, or failing
+    /// that the spot it was last asked to look at — which is the only case a
+    /// box with no place at all has a map to draw.
     private var openingRegion: MKCoordinateRegion? {
-        guard let here = location.here else { return nil }
-        return MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: here.latitude, longitude: here.longitude),
+        guard let here = location.here ?? location.glance?.coordinate else { return nil }
+        return region(around: here)
+    }
+
+    private func region(around point: Geo.Coordinate) -> MKCoordinateRegion {
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude),
             span: MKCoordinateSpan(latitudeDelta: Self.openingSpan,
                                    longitudeDelta: Self.openingSpan))
     }
@@ -855,6 +942,12 @@ struct WindMapScreen: View {
     private var placeKey: String {
         guard let here = location.here else { return "-" }
         return String(format: "%.3f,%.3f", here.latitude, here.longitude)
+    }
+
+    /// `placeKey`, plus the stamp of any glance — so the same spot asked for
+    /// twice is still two asks. What `frame()` listens on.
+    private var frameKey: String {
+        placeKey + "|" + (location.glance?.id.uuidString ?? "-")
     }
 }
 

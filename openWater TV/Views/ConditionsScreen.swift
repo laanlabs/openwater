@@ -34,11 +34,20 @@ struct ConditionsScreen: View {
     /// same wind and stations, but none of the long-range charts, the rain
     /// chance or the model picker. There is no reason a saved spot deserves
     /// less than a point on the map, so the board pushes this instead and
-    /// passes its spot, which adds the one thing a spot has that a bare
-    /// coordinate does not: its cameras.
+    /// passes its spot, which anchors the camera search on the spot's own
+    /// region rather than on whichever one is nearest a bare coordinate.
     var spot: GuideSpot?
+    /// Opened from the favourites board rather than from the map.
+    ///
+    /// Decides whether the report offers a way *to* the map. From the map's
+    /// own "Conditions here" the offer would point at the screen directly
+    /// behind this one; from the board it is the one thing a rider cannot
+    /// otherwise do without moving the pin — look at the wash over a spot
+    /// they have starred.
+    var openedFromBoard = false
 
     @Environment(SpotGuideStore.self) private var guide
+    @Environment(TVLocation.self) private var location
     @Environment(\.dismiss) private var dismiss
 
     /// Where in the stack we are, so Menu can be answered explicitly — see
@@ -82,12 +91,18 @@ struct ConditionsScreen: View {
     /// engine happens to find something pressable.
     @Namespace private var page
 
-    /// The three subjects that earn a screen of their own.
-    private enum Detail: Hashable { case wind, waves, tide, weather, current }
+    /// The subjects that earn a screen of their own.
+    private enum Detail: Hashable { case wind, waves, tide, weather, current, cameras }
 
     private var model: ForecastModel {
         ForecastModel(rawValue: modelRaw) ?? .automatic
     }
+
+    /// How far out a spot's cameras reach. Sixty kilometres, as the board's
+    /// report always had it: a spot is a launch, and the cameras a rider
+    /// checks before driving to one are along its own stretch of coast, not
+    /// the eighty the cameras tab sweeps for a whole area.
+    private static let cameraRadius: Double = 60_000
 
     /// The guide's nearest launch, when there is one close enough to be what
     /// somebody means by "here". Ten kilometres: past that the name would be
@@ -141,9 +156,7 @@ struct ConditionsScreen: View {
                     if !reportingStations.isEmpty {
                         MeasuredStations(rows: reportingStations)
                     }
-                    if !cams.isEmpty {
-                        SpotCams(cams: cams, spotName: title)
-                    }
+                    aroundHere
                     modelPicker
                 }
                 .padding(.horizontal, 90)
@@ -166,6 +179,7 @@ struct ConditionsScreen: View {
                 case .tide:  TideDetailScreen(here: here, placeName: title)
                 case .weather: WeatherDetailScreen(here: here, placeName: title)
                 case .current: CurrentFlowScreen(here: here, placeName: title)
+                case .cameras: SpotCamerasScreen(cams: cams, placeName: title)
                 }
             }
         }
@@ -229,14 +243,24 @@ struct ConditionsScreen: View {
         tide = await water
         forecast = await sky
         current = await running
-        if let spot {
-            cams = await guide.nearbyResources(to: spot, radius: 60_000)
-                .filter { $0.kind == .camera }
-                .sorted {
-                    if ($0.playback != nil) != ($1.playback != nil) { return $0.playback != nil }
-                    return $0.metres < $1.metres
-                }
+        // The cameras around this point, for every caller. They were fetched
+        // only when a spot was passed, which left a pin's report — and the
+        // map's — with no cameras at all for water that has plenty. A spot
+        // still anchors the search on its own region; a bare coordinate
+        // borrows the nearest one, which is what the cameras tab does.
+        let around = if let spot {
+            await guide.nearbyResources(to: spot, radius: Self.cameraRadius)
+        } else {
+            await guide.nearbyResources(near: here, radius: Self.cameraRadius)
         }
+        // Playable first, then nearest — the cameras tab's order, because the
+        // point of a camera on this screen is watching it on this screen.
+        cams = around
+            .filter { $0.kind == .camera }
+            .sorted {
+                if ($0.playback != nil) != ($1.playback != nil) { return $0.playback != nil }
+                return $0.metres < $1.metres
+            }
 
         // Readings come after the list, the way the phone's sheet does it:
         // each one is its own request, and the names are useful before the
@@ -405,6 +429,68 @@ struct ConditionsScreen: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// What is around this point rather than above it: the cameras, and the
+    /// map itself.
+    ///
+    /// Its own block rather than two more rows under "the long view". Those
+    /// rows are forecasts with a graph behind them; these are places to go.
+    /// The map row is only offered from the board — see `openedFromBoard`.
+    private var aroundHere: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("AROUND HERE")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 24)
+
+            NavigationLink(value: Detail.cameras) {
+                DetailRow(symbol: "video", title: "Cameras",
+                          value: cameraSummary,
+                          detail: cameraDetail)
+            }
+            .buttonStyle(.plain)
+            .disabled(cams.isEmpty)
+
+            if openedFromBoard {
+                Button(action: seeOnTheMap) {
+                    DetailRow(symbol: "map", title: "See it on the map",
+                              value: "",
+                              detail: "The wind map, centred here. Your pin stays where it is.")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Counted, and honest about how many of them this box can actually show.
+    private var cameraSummary: String {
+        guard !cams.isEmpty else { return isLoading ? "…" : "0" }
+        return "\(cams.count)"
+    }
+
+    private var cameraDetail: String {
+        guard !cams.isEmpty else {
+            return isLoading ? "Looking…" : "No cameras near here"
+        }
+        let playable = cams.filter { $0.playback != nil }.count
+        return switch playable {
+        case 0: "All hand off to your phone"
+        case cams.count: "All play on this Apple TV"
+        default: "\(playable) play on this Apple TV, the rest hand off to your phone"
+        }
+    }
+
+    /// Close the report and put the wind map on this point.
+    ///
+    /// Through `lookAt`, not `choose`: this is a look, and the pin — where
+    /// the cameras tab counts from, where the next launch opens — is not
+    /// moved by looking. The map's own "set the pin here" is a press away if
+    /// the rider decides they want that. The ask is queued; the board hands
+    /// it on once this cover has gone — see `TVLocation.lookAt`.
+    private func seeOnTheMap() {
+        location.lookAt(here, named: title)
+        dismiss()
     }
 
     /// Set and rate, in the arrows' own convention — *toward*.

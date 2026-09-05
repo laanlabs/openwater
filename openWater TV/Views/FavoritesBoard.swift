@@ -15,6 +15,7 @@ import SwiftUI
 struct FavoritesBoard: View {
 
     @Environment(SpotGuideStore.self) private var guide
+    @Environment(TVLocation.self) private var location
 
     @State private var isEditing = false
 
@@ -119,7 +120,10 @@ struct FavoritesBoard: View {
         // `TabView` tab never presented what it had built. Every other detail
         // in this app is a cover for the same reason: the cameras list, the
         // map's search, the map's own conditions report.
-        .fullScreenCover(item: $route) { entry in
+        // `onDismiss` is where a report's "see it on the map" actually goes
+        // to the map: switching tabs underneath a cover that is still on its
+        // way out does not take. See `TVLocation.lookAt`.
+        .fullScreenCover(item: $route, onDismiss: location.showGlance) { entry in
             // Its own stack, so the report's sub-screens — the wind outlook,
             // the tide, the buoys — still push the way they do from the map.
             NavigationStack {
@@ -127,7 +131,8 @@ struct FavoritesBoard: View {
                 case .spot(let spot):
                     SpotScreen(spot: spot)
                 case .pin(let pin):
-                    ConditionsScreen(here: pin.coordinate, placeName: pin.name)
+                    ConditionsScreen(here: pin.coordinate, placeName: pin.name,
+                                     openedFromBoard: true)
                 }
             }
         }

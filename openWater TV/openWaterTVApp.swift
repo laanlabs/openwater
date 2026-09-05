@@ -82,6 +82,25 @@ struct RootView: View {
                 .tag(Tab.settings)
         }
         .environment(location)
+        // A spot asking to be looked at is the one thing that changes tabs
+        // without a press on the bar. The map does the framing itself; this
+        // only makes sure it is the tab on screen when it does.
+        //
+        // Not on this tick. The glance is already held back until the
+        // report's cover has finished dismissing — see `TVLocation.lookAt` —
+        // and even then the selection did not hold: traced on the simulator
+        // as `map` then `favorites` in consecutive updates, tvOS putting it
+        // straight back while it restored focus to the board's row under the
+        // closing cover. Half a second later it holds. There is no callback
+        // for "focus has settled", so this waits for it the only way there
+        // is, and says so.
+        .onChange(of: location.glance) { _, glance in
+            guard glance != nil else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(500))
+                tab = .map
+            }
+        }
         // A live memory-and-FPS readout, behind a bug button in the corner —
         // the only window into a television that has no console in the room.
         // See `DebugHUD`.

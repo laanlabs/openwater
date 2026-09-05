@@ -373,6 +373,16 @@ seen two real jumping sessions (test-9 with 4, test-11 with 10). Tuning advice i
 the notes is educated guesswork until more sessions with motion data go
 through.
 
+**Some camera families still cannot play on the television.** Measured
+2026-09-05 against the live `cameras` collection: Ozolio (~23 cams) only
+yields a playlist after a session handshake its own player script performs;
+rtsp.me embeds load their URL from an external script; Nest public pages
+need the dropcam token API; skylinewebcams rewrites its relative playlist
+onto an auth host. `WebcamStream` now reads ipcamlive (~60), Angelcam SDK
+embeds, twice-escaped JSON and bare playlist links, each pinned by a fixture
+in `WebcamStreamTests`. The rest hand off to the phone by QR code, which is
+the honest answer until a shape rather than a site can be written for them.
+
 **RainViewer publishes no forecast frames.** The loop is history only;
 `radar.nowcast` returns an empty array on the free tier. The code already
 carries forecast frames when there are any, so if that changes the loop

@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import OpenWaterCore
 import OpenWaterSpots
 import SafariServices
@@ -46,26 +47,81 @@ struct CamViewerSheet: View {
 /// the many cams that turn out to be plain web pages, that is one second
 /// before Safari opens, which is a fair price for the ones that turn out to
 /// be watchable in place.
+///
+/// **A way out from the first frame.** This used to be a bare black screen
+/// with a spinner until the read came back, inside a full-screen cover that
+/// nothing could dismiss. A page that hangs — and a webcam page hosted on a
+/// box in a beach hut hangs more often than most — kept a rider staring at
+/// the spinner with no Done, no swipe and no timeout, which is exactly how
+/// it was reported. So the bar and its Done are there before anything is
+/// known, the read is given a bounded wait, and past that wait the page
+/// opens in the browser instead.
 private struct CamResolver: View {
 
     let name: String
     let url: URL
 
+    @Environment(\.dismiss) private var dismiss
+
     /// Nil while reading; then the streams found, empty if none.
     @State private var streams: [WebcamStream.Stream]?
+
+    /// How long the read may take before the browser is the better answer.
+    /// Long enough for a slow operator page and one embedded player; short
+    /// enough that nobody wonders whether the app has stopped.
+    private static let patience: Duration = .seconds(12)
 
     var body: some View {
         Group {
             switch streams {
             case .none:
-                ZStack { Color.black; ProgressView().tint(.white) }
-                    .ignoresSafeArea()
-                    .task { streams = await WebcamStream.find(at: url) }
+                NavigationStack {
+                    ZStack {
+                        Color.black.ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            ProgressView().tint(.white)
+                            Text("Looking for the stream…")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                    .navigationTitle(name)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { dismiss() }
+                        }
+                        ToolbarItem(placement: .bottomBar) {
+                            // Offered during the wait, not only after it: a
+                            // rider who knows this page opens fine in a
+                            // browser should not have to sit out the read.
+                            Button("Open the page instead") { streams = [] }
+                        }
+                    }
+                }
+                .task { streams = await Self.read(url) }
             case .some(let found) where found.isEmpty:
                 SafariView(url: url).ignoresSafeArea()
             case .some(let found):
-                CamStreamPlayer(streams: found, name: name)
+                CamStreamPlayer(streams: found, name: name, page: url)
             }
+        }
+    }
+
+    /// The read, bounded. Whichever finishes first wins — the streams, or the
+    /// clock saying "enough" — and the loser is cancelled so a hung fetch is
+    /// not left running behind the browser.
+    private static func read(_ url: URL) async -> [WebcamStream.Stream] {
+        await withTaskGroup(of: [WebcamStream.Stream].self) { group in
+            group.addTask { await WebcamStream.find(at: url) }
+            group.addTask {
+                try? await Task.sleep(for: patience)
+                return []
+            }
+            let first = await group.next() ?? []
+            group.cancelAll()
+            return first
         }
     }
 }
@@ -76,45 +132,65 @@ private struct CamResolver: View {
 /// Lighthouse publishes five angles; playing only the first throws the rest
 /// away. So the chevrons — and a horizontal swipe — step through them, the
 /// way the television does it with the remote's arrows.
+///
+/// **When the stream will not play, say so, and keep the door.** A playlist
+/// the page advertised can be signed, expired, geo-fenced or simply off air,
+/// and `AVPlayer` reports that as a failed item behind the system player's
+/// own small error. The Done button in the bar was the only way out, and
+/// the system player's chrome sits over that bar. So a failed item puts up
+/// this screen's own notice — what happened, the page as the alternative,
+/// and Done — on top of everything.
 private struct CamStreamPlayer: View {
 
     let streams: [WebcamStream.Stream]
     let name: String
+    /// The operator's page, for when the stream it advertised will not play.
+    let page: URL
 
     @Environment(\.dismiss) private var dismiss
     @State private var index = 0
     @State private var player: AVPlayer?
     /// Held so a looping clip's looper is not deallocated mid-play.
     @State private var looper: AVPlayerLooper?
+    /// The current item reported failure — see `watch`.
+    @State private var didFail = false
+    /// The rider gave up on the stream and asked for the page.
+    @State private var wantsPage = false
 
     private var current: WebcamStream.Stream { streams[min(index, streams.count - 1)] }
 
     var body: some View {
-        NavigationStack {
-            VideoPlayer(player: player)
-                .ignoresSafeArea(edges: .bottom)
-                .background(Color.black)
-                .overlay(alignment: .bottom) { pager }
-                .navigationTitle(current.label.isEmpty ? name : current.label)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
-                    }
-                }
-                .gesture(
-                    DragGesture(minimumDistance: 40)
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                            step(value.translation.width < 0 ? 1 : -1)
+        if wantsPage {
+            SafariView(url: page).ignoresSafeArea()
+        } else {
+            NavigationStack {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea(edges: .bottom)
+                    .background(Color.black)
+                    .overlay(alignment: .bottom) { if !didFail { pager } }
+                    .overlay { if didFail { failure } }
+                    .navigationTitle(current.label.isEmpty ? name : current.label)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { dismiss() }
                         }
-                )
-        }
-        .task(id: index) { load() }
-        .onDisappear {
-            player?.pause()
-            player = nil
-            looper = nil
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 40)
+                            .onEnded { value in
+                                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                                step(value.translation.width < 0 ? 1 : -1)
+                            }
+                    )
+            }
+            .task(id: index) { await load() }
+            .onDisappear {
+                player?.pause()
+                player = nil
+                looper = nil
+            }
         }
     }
 
@@ -141,13 +217,51 @@ private struct CamStreamPlayer: View {
         }
     }
 
+    /// The stream did not play. Not an apology and not a dead end: the next
+    /// angle if there is one, the page if there is not, and Done regardless.
+    private var failure: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image(systemName: "video.slash")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.secondary)
+                Text("This stream isn't playing")
+                    .font(.title3.weight(.semibold))
+                Text("The page pointed here, but the video didn't come through — it may be off air or need a browser.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                VStack(spacing: 12) {
+                    if streams.count > 1 {
+                        Button("Try the next camera") { step(1) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    if streams.count > 1 {
+                        Button("Open the page instead") { wantsPage = true }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Open the page instead") { wantsPage = true }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button("Done") { dismiss() }
+                        .buttonStyle(.bordered)
+                }
+                .padding(.top, 8)
+            }
+            .foregroundStyle(.white)
+        }
+    }
+
     private func step(_ delta: Int) {
         guard streams.count > 1 else { return }
         index = (index + delta + streams.count) % streams.count
     }
 
-    private func load() {
+    private func load() async {
         player?.pause()
+        didFail = false
         let item = AVPlayerItem(url: current.url)
         if current.isClip {
             // A recorded clip loops seamlessly, so an angle keeps playing
@@ -160,6 +274,16 @@ private struct CamStreamPlayer: View {
             player = AVPlayer(playerItem: item)
         }
         player?.play()
+        await watch(item)
+    }
+
+    /// Wait for the item to say whether it will play. Lives with `load`'s
+    /// task, so stepping to another angle retires it along with the player.
+    private func watch(_ item: AVPlayerItem) async {
+        for await status in item.publisher(for: \.status).values {
+            if status == .failed { didFail = true; return }
+            if status == .readyToPlay { return }
+        }
     }
 }
 

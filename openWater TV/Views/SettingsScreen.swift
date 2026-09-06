@@ -25,8 +25,33 @@ struct SettingsScreen: View {
     @AppStorage(TVSettings.cameraRadiusKey) private var cameraRadiusKm = TVSettings.defaultCameraRadiusKm
 
     var body: some View {
-        NavigationStack {
-            List {
+        // No navigation title. On tvOS a `navigationTitle` is drawn once at
+        // the top and the list scrolls underneath it, so "Settings" sat in
+        // the background with rows sliding over it — reported exactly so.
+        // A row of its own scrolls away like everything else on the page.
+        List {
+            Text("Settings")
+                .font(.system(size: 56, weight: .bold))
+                .listRowBackground(Color.clear)
+                .padding(.bottom, 8)
+
+            // The place first. It is the one thing on this screen that says
+            // what every other tab is about, and the answer a rider comes
+            // here to check.
+            Section("Location") {
+                LabeledContent {
+                    Text(location.name.isEmpty ? "Not set" : location.name)
+                        .font(.system(size: 28))
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Text("The coast this app is about")
+                        .font(.system(size: 30))
+                }
+                Text("Change it on the Map tab.")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+            }
+
                 Section {
                     // Segmented, because a television picker that pushes a
                     // list is three presses and a page for a two-way choice.
@@ -103,7 +128,7 @@ struct SettingsScreen: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Stream debugging")
                                 .font(.system(size: 32, weight: .medium))
-                            Text("Resolve embedded players' HLS manifests directly. Off by default.")
+                            Text("Enable stream debugging.")
                                 .font(.system(size: 22))
                                 .foregroundStyle(.secondary)
                         }
@@ -111,23 +136,6 @@ struct SettingsScreen: View {
                 } header: {
                     Text("Diagnostics")
                 }
-
-                Section("Location") {
-                    LabeledContent {
-                        Text(location.name.isEmpty ? "Not set" : location.name)
-                            .font(.system(size: 28))
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        Text("The coast this app is about")
-                            .font(.system(size: 30))
-                    }
-                    Text("Change it on the Map tab.")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
-                }
-
-            }
-            .navigationTitle("Settings")
         }
     }
 }

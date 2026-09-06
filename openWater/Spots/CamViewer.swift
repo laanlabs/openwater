@@ -164,7 +164,15 @@ private struct CamStreamPlayer: View {
             SafariView(url: page).ignoresSafeArea()
         } else {
             NavigationStack {
-                VideoPlayer(player: player)
+                // Not `VideoPlayer`. AVKit's player has no pinch: the YouTube
+                // cams zoomed because they sit in a web view and the page
+                // cams because Safari does, and the ones that play natively
+                // — Montauk Lighthouse's five angles among them — were the
+                // only cameras in the app a rider could not lean into. This
+                // is the same picture on a scroll view, which is what pinch
+                // and pan are made of. The swipe between angles lives in it
+                // too, so it never fights the pan.
+                ZoomableVideo(player: player, resetKey: index) { delta in step(delta) }
                     .ignoresSafeArea(edges: .bottom)
                     .background(Color.black)
                     .overlay(alignment: .bottom) { if !didFail { pager } }
@@ -177,13 +185,6 @@ private struct CamStreamPlayer: View {
                             Button("Done") { dismiss() }
                         }
                     }
-                    .gesture(
-                        DragGesture(minimumDistance: 40)
-                            .onEnded { value in
-                                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                                step(value.translation.width < 0 ? 1 : -1)
-                            }
-                    )
             }
             .task(id: index) { await load() }
             .onDisappear {
@@ -283,6 +284,141 @@ private struct CamStreamPlayer: View {
         for await status in item.publisher(for: \.status).values {
             if status == .failed { didFail = true; return }
             if status == .readyToPlay { return }
+        }
+    }
+}
+
+/// A video that can be pinched.
+///
+/// A `UIScrollView` whose one subview is an `AVPlayerLayer`. The scroll view
+/// supplies the whole gesture vocabulary a rider already knows from photos
+/// — pinch to zoom, drag to pan while zoomed, double-tap to jump in and
+/// back out — and bounces at the edges the way everything else on the phone
+/// does. Five times is the ceiling: past that a 720p cam is blocks, and a
+/// rider zooming to read a flag on a mast has what they need by three.
+///
+/// Swiping between a site's angles is a UIKit swipe on the same view, only
+/// honoured at 1×. Kept in here rather than as a SwiftUI drag over the top
+/// because two systems both wanting a horizontal drag settle it
+/// unpredictably, and "the swipe sometimes pans instead" is exactly the
+/// kind of thing a rider stops trusting.
+private struct ZoomableVideo: UIViewRepresentable {
+
+    let player: AVPlayer?
+    /// Changes when the stream does, and puts the zoom back to 1×: a new
+    /// angle framed at wherever the last one was zoomed is a new angle you
+    /// cannot see.
+    let resetKey: Int
+    let onSwipe: (Int) -> Void
+
+    func makeUIView(context: Context) -> UIScrollView {
+        let scroll = UIScrollView()
+        scroll.backgroundColor = .black
+        scroll.minimumZoomScale = 1
+        scroll.maximumZoomScale = 5
+        scroll.bouncesZoom = true
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.showsVerticalScrollIndicator = false
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.delegate = context.coordinator
+
+        let video = PlayerView()
+        video.backgroundColor = .black
+        scroll.addSubview(video)
+        context.coordinator.video = video
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator,
+                                               action: #selector(Coordinator.doubleTapped(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        scroll.addGestureRecognizer(doubleTap)
+        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: context.coordinator,
+                                                 action: #selector(Coordinator.swiped(_:)))
+            swipe.direction = direction
+            scroll.addGestureRecognizer(swipe)
+        }
+        return scroll
+    }
+
+    func updateUIView(_ scroll: UIScrollView, context: Context) {
+        context.coordinator.onSwipe = onSwipe
+        if let video = context.coordinator.video {
+            video.playerLayer.player = player
+            // The video fills the scroll view at 1×; the scroll view is what
+            // grows it. Laid out here because the representable has no other
+            // moment at which it knows its size.
+            if video.frame != scroll.bounds, scroll.zoomScale == 1 {
+                video.frame = scroll.bounds
+                scroll.contentSize = scroll.bounds.size
+            }
+        }
+        if context.coordinator.resetKey != resetKey {
+            context.coordinator.resetKey = resetKey
+            scroll.setZoomScale(1, animated: false)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(resetKey: resetKey) }
+
+    /// The layer host: a plain view whose backing layer is the player's, so
+    /// the picture is drawn by AVFoundation and scaled by the scroll view
+    /// like any other content.
+    final class PlayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            playerLayer.videoGravity = .resizeAspect
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // The picture must fill the scroll view before any zoom, whatever
+            // size the view settles at after rotation or the bar appearing.
+            if let scroll = superview as? UIScrollView, scroll.zoomScale == 1, frame != scroll.bounds {
+                frame = scroll.bounds
+                scroll.contentSize = scroll.bounds.size
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var video: PlayerView?
+        var onSwipe: (Int) -> Void = { _ in }
+        var resetKey: Int
+
+        init(resetKey: Int) { self.resetKey = resetKey }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? { video }
+
+        /// Centre the picture while it is smaller than the view in either
+        /// axis — the scroll view's own default pins it to the top-left,
+        /// which is where a photo app would never leave it.
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            guard let video else { return }
+            let offsetX = max((scrollView.bounds.width - scrollView.contentSize.width) / 2, 0)
+            let offsetY = max((scrollView.bounds.height - scrollView.contentSize.height) / 2, 0)
+            video.center = CGPoint(x: scrollView.contentSize.width / 2 + offsetX,
+                                   y: scrollView.contentSize.height / 2 + offsetY)
+        }
+
+        @objc func doubleTapped(_ tap: UITapGestureRecognizer) {
+            guard let scroll = tap.view as? UIScrollView else { return }
+            if scroll.zoomScale > 1.01 {
+                scroll.setZoomScale(1, animated: true)
+            } else {
+                // Zoom in on the spot under the finger, not the centre.
+                let scale: CGFloat = 2.5
+                let point = tap.location(in: video)
+                let size = CGSize(width: scroll.bounds.width / scale, height: scroll.bounds.height / scale)
+                scroll.zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
+                                       width: size.width, height: size.height), animated: true)
+            }
+        }
+
+        @objc func swiped(_ swipe: UISwipeGestureRecognizer) {
+            guard let scroll = swipe.view as? UIScrollView, scroll.zoomScale <= 1.01 else { return }
+            onSwipe(swipe.direction == .left ? 1 : -1)
         }
     }
 }

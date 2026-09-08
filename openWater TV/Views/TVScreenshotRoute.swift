@@ -17,6 +17,8 @@ enum TVScreenshotRoute: String {
     case camerasMap
     case radar
     case favorites
+    /// The cycling board of favourite maps, which starts itself on arrival.
+    case screensaver
     case settings
     /// The full report for the point under the map's crosshairs.
     case conditions
@@ -39,6 +41,7 @@ enum TVScreenshotRoute: String {
         case .cameras, .camerasMap: .cameras
         case .radar: .radar
         case .favorites: .favorites
+        case .screensaver: .screensaver
         case .settings: .settings
         case .map, .conditions, .windOutlook: .map
         }
@@ -52,6 +55,9 @@ enum TVScreenshotRoute: String {
     var settleSeconds: Double {
         switch self {
         case .settings, .favorites: 12
+        // The reel flies to the first spot, then waits on a wash and a
+        // week of model wind for every spot at once.
+        case .screensaver: 30
         case .cameras, .camerasMap: 20
         case .map, .radar: 26
         case .conditions, .windOutlook: 30

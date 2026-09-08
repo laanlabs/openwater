@@ -57,7 +57,7 @@ struct RootView: View {
 
     @State private var tab = TVScreenshotRoute.requested?.tab ?? Tab.map
 
-    enum Tab: Hashable { case map, cameras, radar, favorites, settings }
+    enum Tab: Hashable { case map, cameras, radar, favorites, screensaver, settings }
 
     var body: some View {
         TabView(selection: $tab) {
@@ -80,6 +80,13 @@ struct RootView: View {
             FavoritesBoard()
                 .tabItem { Label("Favourites", systemImage: "star") }
                 .tag(Tab.favorites)
+            // Next to the board it is built out of, and told whether it is
+            // the tab on screen for the same reason the map is: it runs a
+            // wash and a field of comets, and neither is worth a frame while
+            // somebody is reading Settings.
+            ScreensaverScreen(isActive: tab == .screensaver)
+                .tabItem { Label("Screensaver", systemImage: "sparkles.tv") }
+                .tag(Tab.screensaver)
             SettingsScreen()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)

@@ -117,7 +117,7 @@ struct WindMapScreen: View {
     /// list because driving it is a focus state like any other — that is what
     /// keeps the D-pad out of the tab bar's hands while a rider is panning.
     private enum Control: Hashable {
-        case map, hourBack, hourForward, conditions, move, options, optWind, optNames, setPin, reset, locate, place
+        case map, hourBack, hourForward, now, conditions, move, options, optWind, optNames, setPin, locate, place
         /// The way back from a glance — see `backToPin`.
         case back
     }
@@ -228,7 +228,7 @@ struct WindMapScreen: View {
             }
         }
         .overlay(alignment: .topTrailing) { statusChip }
-        .overlay(alignment: .topLeading) { backToPin }
+        .overlay(alignment: .topLeading) { waysBack }
         // The tab bar goes away while the map has the D-pad.
         //
         // `onMoveCommand` hears an Up press, but hearing it does not stop
@@ -553,9 +553,45 @@ struct WindMapScreen: View {
                 .focused($focus, equals: .back)
                 .padding(6)
                 .background(.thinMaterial, in: Capsule())
-                .padding(.top, 40)
-                .padding(.leading, 60)
         }
+    }
+
+    /// The way back from a scrubbed hour.
+    ///
+    /// The clock is the one control on the bar that leaves the whole screen
+    /// in a state: press the forward chevron six times and every number on
+    /// the map — the crosshairs, the wash, the pill — is about five o'clock
+    /// on Tuesday, and the only way out was pressing the back chevron
+    /// exactly six times. Nobody counts.
+    ///
+    /// It is not on the bar because the bar has no room for it. Tried there
+    /// first and measured: eight controls and a clock already fill 1730 of a
+    /// 1920-point row, and a ninth squeezed the pill's own label to nothing
+    /// — a capsule with a glyph and no words, which is not the button that
+    /// was asked for. Up here it can say what it does at full size, and this
+    /// corner is already where this screen puts the way back from a glance.
+    @ViewBuilder private var backToNowButton: some View {
+        if offsetHours != 0, !isDriving {
+            ControlButton(title: "Back to now", systemImage: "clock.arrow.circlepath",
+                          action: backToNow)
+                .focused($focus, equals: .now)
+                .padding(6)
+                .background(.thinMaterial, in: Capsule())
+        }
+    }
+
+    /// Both ways back, stacked. They are separate wishes — one leaves a spot
+    /// you went to look at, the other leaves an hour you went to look at —
+    /// and a rider can be in both at once, so neither may take the corner
+    /// from the other.
+    private var waysBack: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            backToPin
+            backToNowButton
+        }
+        .focusSection()
+        .padding(.top, 40)
+        .padding(.leading, 60)
     }
 
     /// End the glance and go back to the pin at the opening span. Focus is
@@ -566,21 +602,6 @@ struct WindMapScreen: View {
         location.endGlance()
         recentre()
         focus = .conditions
-    }
-
-    /// Back to the opening span, without moving the centre.
-    ///
-    /// Separate from `goHome` on purpose. Zooming in four times to look at a
-    /// harbour mouth and wanting the coastline back is not the same wish as
-    /// wanting to leave the coast you are looking at — and a single button
-    /// that did both would take the second wish away from anyone who only had
-    /// the first.
-    private func resetZoom() {
-        guard let region = visible else { return recentre() }
-        commit(MKCoordinateRegion(
-            center: region.center,
-            span: MKCoordinateSpan(latitudeDelta: Self.openingSpan,
-                                   longitudeDelta: Self.openingSpan)))
     }
 
     /// Back to wherever the box thinks it is, at the opening span.
@@ -747,9 +768,6 @@ struct WindMapScreen: View {
                         label: "Set the pin here",
                         isOn: isPinnedHere, action: setPin)
                 .focused($focus, equals: .setPin)
-            ControlIcon(systemImage: "arrow.up.left.and.arrow.down.right",
-                        label: "Reset the zoom", action: resetZoom)
-                .focused($focus, equals: .reset)
             ControlIcon(systemImage: "location.fill",
                         label: "Back to my location", action: goHome)
                 .focused($focus, equals: .locate)
@@ -800,6 +818,17 @@ struct WindMapScreen: View {
             }
             .focused($focus, equals: .hourForward)
         }
+    }
+
+    /// Put the clock back, and hand the focus somewhere that still exists.
+    ///
+    /// The button this was pressed on disappears the moment it works, and a
+    /// focus engine left to choose from the top left of the screen lands on
+    /// the tab bar — which is a rider pressing "now" and leaving the map. The
+    /// forward chevron is where the clock they were just moving lives.
+    private func backToNow() {
+        offsetHours = 0
+        focus = .hourForward
     }
 
     /// What the map is not saying out loud: whose model this is, and that a

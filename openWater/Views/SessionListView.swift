@@ -82,6 +82,7 @@ struct SessionListView: View {
     @State private var showingBests = false
     @State private var showingTrends = false
     @State private var showingBulkExport = false
+    @State private var showingWatchCheck = false
 
     /// Room to leave at the bottom for the floating tab bar. Applied as a
     /// content margin so the list draws through the glass rather than stopping
@@ -347,6 +348,8 @@ struct SessionListView: View {
                 BulkExportView(sessions: filtered)
             }
             .sheet(isPresented: $showingBests) { RecordsView() }
+            // The sheet sizes itself — see `WatchCheckSheet.detent`.
+            .sheet(isPresented: $showingWatchCheck) { WatchCheckSheet() }
             // At screen level with its siblings, not down on the search
             // row — a sheet presented from inside a `List` row is dropped
             // whenever the row happens to be mid-rebuild.
@@ -701,6 +704,9 @@ struct SessionListView: View {
             }
             .accessibilityLabel(isSearching ? "Close search" : "Search sessions")
         }
+        if sync.isPaired {
+            ToolbarItem(placement: .topBarLeading) { watchButton }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button("Import…", systemImage: "square.and.arrow.down") {
@@ -726,11 +732,41 @@ struct SessionListView: View {
         }
     }
 
-    /// Watch state, always visible and always tappable.
+    /// Watch state, next to the search it sits beside, and it does something.
     ///
-    /// It was a passive icon that appeared only once everything already worked
-    /// — which is precisely when nobody needs it. The case that matters is the
-    /// rider who has a watch and no app on it yet, so the icon is now there in
+    /// This icon has been here before and was taken away for a good reason: as
+    /// a passive badge it was a nag, telling a rider who had already decided
+    /// not to install the watch app about it again on every launch. What comes
+    /// back is not the badge. It is the door to a check that runs itself —
+    /// "has my watch got a session I cannot see?" — which is a question the
+    /// library screen is exactly the right place to ask, because the library
+    /// is where the missing session is missing from.
+    ///
+    /// Only when a watch is actually paired. A rider with no watch has nothing
+    /// to be connected to, and an icon offering to connect them to a device
+    /// they do not own is the nag all over again. Settings keeps its Apple
+    /// Watch row for anyone curious.
+    private var watchButton: some View {
+        Button {
+            showingWatchCheck = true
+        } label: {
+            Image(systemName: watchState.symbol)
+                .foregroundStyle(watchState.colour)
+        }
+        .accessibilityLabel("Apple Watch")
+        .accessibilityValue(watchState.title)
+        .accessibilityHint("Checks your watch for sessions it has not sent yet")
+    }
+
+    /// The same four states the Settings screen names, read from the same
+    /// three booleans — one vocabulary, so a green watch here and a green
+    /// watch there mean the same thing.
+    private var watchState: WatchStatusView.State {
+        if !sync.isPaired { return .noWatch }
+        if !sync.isWatchAppInstalled { return .notInstalled }
+        return sync.isReachable ? .connected : .installedNotReachable
+    }
+
     // MARK: - Actions
 
     private func toggleFavorite(_ session: StoredSession) {

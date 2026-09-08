@@ -101,7 +101,7 @@ struct WatchStatusView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if state == .notInstalled {
-                installSteps
+                WatchInstallSteps()
             }
 
             if state == .connected || state == .installedNotReachable {
@@ -207,34 +207,6 @@ struct WatchStatusView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// The actual steps, because "install it from the Watch app" is not enough
-    /// detail for somebody who has never scrolled that list to the bottom.
-    private var installSteps: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            step(1, "Open the **Watch** app on this iPhone")
-            step(2, "Tap **My Watch**, then scroll to **Available Apps**")
-            step(3, "Find **openWater** and tap **Install**")
-
-            Text("Already installed? Give it a moment — the watch reports in when it next connects.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func step(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("\(number)")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
-                .background(.tint, in: Circle())
-            Text(.init(text))
-                .font(.subheadline)
-        }
-    }
 }
 
 /// The same state as a single tappable pill, for the Record tab.

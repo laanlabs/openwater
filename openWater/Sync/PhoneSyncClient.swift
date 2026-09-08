@@ -58,6 +58,16 @@ final class PhoneSyncClient: NSObject {
     /// Result of the last manual sync, for the panel to show.
     var lastSyncMessage: String?
 
+    /// How many sessions the watch said it was holding, from its last answer,
+    /// and nil while nobody has asked or the asking failed.
+    ///
+    /// Kept apart from the message because a count is something a progress
+    /// row can count *against*: the watch answers immediately with a number,
+    /// and the files themselves land one at a time over the following
+    /// seconds. Without this, the rider gets "sending 3 sessions…" and then a
+    /// still screen while all three are actually in flight.
+    private(set) var queuedOnWatch: Int?
+
     /// Ask the watch to send anything it is still holding.
     ///
     /// Transfers queued out of range are retried by the system eventually, but
@@ -68,6 +78,11 @@ final class PhoneSyncClient: NSObject {
     /// one spinner cannot speak for the other.
     private(set) var isCheckingHeartRate = false
     var heartRateMessage: String?
+
+    /// The same answer with its shape kept, so a screen can do more than
+    /// print it — offer the walk-through for the one case that has steps,
+    /// and a tick for the one that does not.
+    private(set) var heartRate: HeartRateState?
 
     func requestSync() {
         guard let session, session.activationState == .activated else {
@@ -81,11 +96,13 @@ final class PhoneSyncClient: NSObject {
 
         isSyncing = true
         lastSyncMessage = nil
+        queuedOnWatch = nil
         session.sendMessage(["request": "sync"]) { [weak self] reply in
             Task { @MainActor in
                 guard let self else { return }
                 self.isSyncing = false
                 let queued = reply["queued"] as? Int ?? 0
+                self.queuedOnWatch = queued
                 self.lastSyncMessage = queued > 0
                     ? "Sending \(queued) session\(queued == 1 ? "" : "s") from your watch…"
                     : "Your watch has nothing waiting."
@@ -126,32 +143,86 @@ final class PhoneSyncClient: NSObject {
 
         isCheckingHeartRate = true
         heartRateMessage = nil
+        heartRate = nil
         session.sendMessage(["request": "heartRate"]) { [weak self] reply in
             Task { @MainActor in
                 guard let self else { return }
                 self.isCheckingHeartRate = false
-                self.heartRateMessage = Self.heartRateVerdict(from: reply)
+                let state = Self.heartRateState(from: reply)
+                self.heartRate = state
+                self.heartRateMessage = state.message
             }
         } errorHandler: { [weak self] error in
             Task { @MainActor in
                 self?.isCheckingHeartRate = false
+                self?.heartRate = nil
                 self?.heartRateMessage = error.localizedDescription
             }
         }
     }
 
+    /// The four things the watch's two booleans can mean.
+    ///
+    /// A shape rather than a sentence, because only one of the four has
+    /// somewhere for the rider to go, and a screen that cannot tell which one
+    /// it is holding has to print the route every time — including to the
+    /// rider whose heart rate is already working.
+    enum HeartRateState: Equatable, Sendable {
+        /// No sensor, or no HealthKit on this watch.
+        case unavailable
+        /// Never prompted. The prompt only appears at the start of a session,
+        /// so there is no switch to go and find yet.
+        case notAsked
+        case on
+        /// Asked, and refused. The only case with steps.
+        case off
+
+        var message: String {
+            switch self {
+            case .unavailable:
+                "This watch cannot record heart rate."
+            case .notAsked:
+                "openWater has not asked for heart rate yet. Start a session on the watch and tap Review when Health asks."
+            case .on:
+                "Heart rate is on — the watch can read it, and your sessions will carry it."
+            case .off:
+                "Heart rate is off. On this iPhone: Health app ▸ your profile ▸ Privacy ▸ Apps ▸ openWater, and turn on Heart Rate. It applies to the next session."
+            }
+        }
+
+        /// The diagnosis without the route to fix it.
+        ///
+        /// Two strings for one answer, deliberately. `message` is
+        /// self-contained, for a screen that prints a line and offers nothing
+        /// else — Settings. This one is the finding alone, for a screen that
+        /// draws the three steps underneath it, where the full sentence would
+        /// say "Health app ▸ your profile ▸ Privacy ▸ Apps" immediately above
+        /// a numbered list saying the same thing again.
+        var headline: String {
+            switch self {
+            case .unavailable: message
+            case .notAsked: "openWater has not asked for heart rate yet."
+            case .on: message
+            case .off: "Heart rate is off. openWater asked and was refused, so sessions arrive with no beat in them."
+            }
+        }
+
+        /// Whether this is the answer a rider wants and can stop reading at.
+        var isGood: Bool { self == .on }
+
+        /// Whether this answer comes with steps the screen should draw.
+        var hasSteps: Bool { self == .off }
+    }
+
+    static func heartRateState(from reply: [String: Any]) -> HeartRateState {
+        guard reply["available"] as? Bool == true else { return .unavailable }
+        guard reply["asked"] as? Bool == true else { return .notAsked }
+        return reply["canRead"] as? Bool == true ? .on : .off
+    }
+
     /// What the watch's answer means, in a sentence a rider can act on.
     static func heartRateVerdict(from reply: [String: Any]) -> String {
-        guard reply["available"] as? Bool == true else {
-            return "This watch cannot record heart rate."
-        }
-        guard reply["asked"] as? Bool == true else {
-            return "openWater has not asked for heart rate yet. Start a session on the watch and tap Review when Health asks."
-        }
-        if reply["canRead"] as? Bool == true {
-            return "Heart rate is on — the watch can read it, and your sessions will carry it."
-        }
-        return "Heart rate is off. On this iPhone: Health app ▸ your profile ▸ Privacy ▸ Apps ▸ openWater, and turn on Heart Rate. It applies to the next session."
+        heartRateState(from: reply).message
     }
 
     /// Everything the watch is told about, sent as one payload.

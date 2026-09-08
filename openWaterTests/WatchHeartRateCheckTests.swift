@@ -61,4 +61,48 @@ struct WatchHeartRateCheckTests {
         let verdict = PhoneSyncClient.heartRateVerdict(from: [:])
         #expect(!verdict.contains("Heart rate is on"))
     }
+
+    // MARK: - The shape behind the sentence
+
+    // The watch check sheet does more than print the verdict: it draws a tick
+    // for one answer and a three-step walk-through to the Health app for
+    // another, so it needs the answer's shape rather than its words. These pin
+    // the mapping, and that the sentence is still derived from it — one source
+    // of truth, so a reworded verdict can never disagree with the icon beside
+    // it.
+
+    @Test("Each reply maps to the state the sheet branches on")
+    func states() {
+        #expect(PhoneSyncClient.heartRateState(
+            from: ["available": false, "asked": false, "canRead": false]) == .unavailable)
+        #expect(PhoneSyncClient.heartRateState(
+            from: ["available": true, "asked": false, "canRead": false]) == .notAsked)
+        #expect(PhoneSyncClient.heartRateState(
+            from: ["available": true, "asked": true, "canRead": true]) == .on)
+        #expect(PhoneSyncClient.heartRateState(
+            from: ["available": true, "asked": true, "canRead": false]) == .off)
+        #expect(PhoneSyncClient.heartRateState(from: [:]) == .unavailable)
+    }
+
+    @Test("Only a real sample counts as good news")
+    func onlyOnIsGood() {
+        // What gates the green tick. `.notAsked` is the trap: nothing is
+        // wrong yet, but nothing is working either, and a tick against it
+        // would tell a rider their heartbeat is being recorded when no
+        // session has ever asked for it.
+        #expect(PhoneSyncClient.HeartRateState.on.isGood)
+        #expect(!PhoneSyncClient.HeartRateState.notAsked.isGood)
+        #expect(!PhoneSyncClient.HeartRateState.off.isGood)
+        #expect(!PhoneSyncClient.HeartRateState.unavailable.isGood)
+    }
+
+    @Test("The sentence still comes from the state")
+    func verdictFollowsState() {
+        for reply in [["available": false], ["available": true, "asked": false],
+                      ["available": true, "asked": true, "canRead": true],
+                      ["available": true, "asked": true, "canRead": false]] {
+            #expect(PhoneSyncClient.heartRateVerdict(from: reply)
+                    == PhoneSyncClient.heartRateState(from: reply).message)
+        }
+    }
 }

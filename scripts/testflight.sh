@@ -63,6 +63,17 @@ case "${1:-}" in
     -*)     echo "Unknown option: $1. See the usage notes at the top." >&2; exit 1 ;;
 esac
 
+# Nothing licensed for our eyes only goes to Apple.
+#
+# WeatherNext's real-time terms permit internal use and forbid showing its
+# forecasts to App Store customers, so the work lives in scripts/ and must
+# never appear in a compiled target. That is easy to believe and easy to
+# break, so it is checked here rather than remembered — this script is the
+# only path to the store, which makes it the only place the check has to be.
+# See docs/WEATHERNEXT.md.
+echo "==> Checking WeatherNext containment"
+scripts/check-weathernext-containment.py
+
 # Build number: the argument, or one past whatever the project says now.
 CURRENT=$(grep -m1 -o 'CURRENT_PROJECT_VERSION = [0-9]*' openWater.xcodeproj/project.pbxproj | grep -o '[0-9]*')
 BUILD=${1:-$((CURRENT + 1))}

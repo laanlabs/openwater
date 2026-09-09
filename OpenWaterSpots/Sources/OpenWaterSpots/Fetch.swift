@@ -54,9 +54,15 @@ enum Fetch {
             // 0.4s, then 0.8s. Short enough that a rider reads it as the page
             // loading rather than as the page being broken.
             if attempt < attempts - 1 {
+                // A second rate limit means the window is not going to open
+                // in the time this card has. Give up before the wait rather
+                // than after it: sleeping out a `Retry-After` and *then*
+                // returning nil held the view blank for up to ten seconds to
+                // learn nothing, which is the one thing a television cannot
+                // recover from — there is nobody to pull-to-refresh.
+                if retryAfter != nil, attempt >= 1 { return nil }
                 let wait = retryAfter ?? Double(400 << attempt) / 1000
                 try? await Task.sleep(for: .seconds(wait))
-                if retryAfter != nil, attempt >= 1 { return nil }
             }
         }
         return nil

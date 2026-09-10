@@ -25,6 +25,17 @@ struct WatchStatusView: View {
         )
     }
 
+    /// Same write-through as the display switch: set it, push it, done.
+    private var startWaterLocked: Binding<Bool> {
+        Binding(
+            get: { settings.watchStartWaterLocked },
+            set: { newValue in
+                settings.watchStartWaterLocked = newValue
+                sync.pushContext(settings: settings)
+            }
+        )
+    }
+
     enum State: Equatable {
         case noWatch
         case notInstalled
@@ -160,6 +171,36 @@ struct WatchStatusView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                // The check above asks Health for a permission. This one asks
+                // the watch to collect a beat, which is the only proof that a
+                // session will carry one.
+                Button {
+                    sync.takeHeartRateReading()
+                } label: {
+                    HStack(spacing: 6) {
+                        if sync.isTakingReading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "waveform.path.ecg")
+                        }
+                        Text(sync.isTakingReading ? "Reading — keep the watch on…" : "Take a live reading")
+                    }
+                    .font(.subheadline)
+                }
+                .disabled(sync.isTakingReading)
+
+                if let result = sync.liveHeartRate, !sync.isTakingReading {
+                    Label {
+                        Text(result.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: result.symbol)
+                            .foregroundStyle(result.isGood ? .green : .orange)
+                    }
+                }
+
                 Button {
                     sync.pushContext(settings: settings)
                 } label: {
@@ -179,6 +220,16 @@ struct WatchStatusView: View {
                 }
 
                 Text("Off, the watch shows two live screens: the controls and your speed. On, it adds splits, totals, angles and the countdown. Takes effect the next time the watch hears from this phone.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle(isOn: startWaterLocked) {
+                    Text("Watch starts water locked")
+                        .font(.subheadline)
+                }
+
+                Text("The watch app locks its screen as it opens, so spray on the way out can't tap anything — turn the Digital Crown to unlock. Starting a session locks the screen either way. Same switch as the one on the watch; the last one changed wins.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

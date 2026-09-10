@@ -287,6 +287,57 @@ struct WatchCheckSheet: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            liveReading
+        }
+    }
+
+    /// The check above proves openWater may read heart rate. This one proves
+    /// the watch will collect it — which is the question, and not the same
+    /// question, because a workout session that will not start passes the
+    /// first and fails the second.
+    ///
+    /// Asked for rather than automatic: it holds a workout session open on the
+    /// wrist for up to fifteen seconds, which is not something to do to a
+    /// rider's battery every time a sheet opens.
+    @ViewBuilder
+    private var liveReading: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let result = sync.liveHeartRate, !sync.isTakingReading {
+                Label {
+                    Text(result.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: result.symbol)
+                        .foregroundStyle(result.isGood ? .green : .orange)
+                }
+            }
+
+            Button {
+                sync.takeHeartRateReading()
+            } label: {
+                HStack(spacing: 6) {
+                    if sync.isTakingReading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "waveform.path.ecg")
+                    }
+                    Text(sync.isTakingReading
+                         ? "Reading — keep the watch on…"
+                         : (sync.liveHeartRate == nil ? "Take a live reading" : "Read again"))
+                }
+                .font(.subheadline)
+            }
+            .disabled(sync.isTakingReading)
+
+            if sync.liveHeartRate == nil, !sync.isTakingReading {
+                Text("Collects one real beat on the watch, the same way a session does. Takes up to fifteen seconds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

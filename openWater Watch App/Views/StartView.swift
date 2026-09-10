@@ -222,6 +222,14 @@ struct WatchSettingsView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            Section("Water Lock") {
+                Toggle("Start water locked", isOn: $settings.startWaterLocked)
+            }
+            Section {
+                Text("openWater locks the screen the moment it opens, so spray on the way out can't tap anything. Turn the Digital Crown to unlock and pick your sport. Starting a session always locks, whichever way this is set.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Section("Recording") {
                 Toggle("Auto-pause", isOn: $settings.autoPause)
                 Toggle("Record haptics", isOn: $settings.recordHaptics)

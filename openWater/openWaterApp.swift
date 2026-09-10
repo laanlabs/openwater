@@ -146,6 +146,18 @@ final class AppSettings {
 
     private(set) var watchExtendedDisplayChangedAt: Date
 
+    /// Have the watch app come up already water locked. Mirrors the same
+    /// preference on the watch; the more recent change wins, so this is
+    /// stamped when it is set here.
+    var watchStartWaterLocked: Bool {
+        didSet {
+            watchStartWaterLockedChangedAt = Date()
+            persist()
+        }
+    }
+
+    private(set) var watchStartWaterLockedChangedAt: Date
+
     /// Per-sport adjustments to the detection defaults.
     ///
     /// Keyed by sport, and only sports the rider has actually changed appear —
@@ -182,6 +194,12 @@ final class AppSettings {
         watchExtendedDisplay = defaults.bool(forKey: "watchExtendedDisplay")
         watchExtendedDisplayChangedAt =
             defaults.object(forKey: "watchExtendedDisplayChangedAt") as? Date ?? .distantPast
+        // On unless the rider has said otherwise, which is the watch's default
+        // too — the two stores have to agree before either has been touched, or
+        // the first push would look like a change nobody made.
+        watchStartWaterLocked = defaults.object(forKey: "watchStartWaterLocked") as? Bool ?? true
+        watchStartWaterLockedChangedAt =
+            defaults.object(forKey: "watchStartWaterLockedChangedAt") as? Date ?? .distantPast
         sportOverrides = defaults.data(forKey: "sportOverrides")
             .flatMap { try? JSONDecoder().decode([Sport: SportThresholds.Overrides].self, from: $0) }
             ?? [:]
@@ -216,6 +234,8 @@ final class AppSettings {
         defaults.set(autoPauseWhileRecording, forKey: "autoPauseWhileRecording")
         defaults.set(watchExtendedDisplay, forKey: "watchExtendedDisplay")
         defaults.set(watchExtendedDisplayChangedAt, forKey: "watchExtendedDisplayChangedAt")
+        defaults.set(watchStartWaterLocked, forKey: "watchStartWaterLocked")
+        defaults.set(watchStartWaterLockedChangedAt, forKey: "watchStartWaterLockedChangedAt")
         if let data = try? JSONEncoder().encode(sharingPrivacy) {
             defaults.set(data, forKey: "sharingPrivacy")
         }

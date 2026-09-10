@@ -84,6 +84,9 @@ final class PhoneSyncClient: NSObject {
     /// and a tick for the one that does not.
     private(set) var heartRate: HeartRateState?
 
+    private(set) var isTakingReading = false
+    private(set) var liveHeartRate: LiveHeartRate?
+
     func requestSync() {
         guard let session, session.activationState == .activated else {
             lastSyncMessage = "The watch is not connected."
@@ -184,7 +187,7 @@ final class PhoneSyncClient: NSObject {
             case .notAsked:
                 "openWater has not asked for heart rate yet. Start a session on the watch and tap Review when Health asks."
             case .on:
-                "Heart rate is on — the watch can read it, and your sessions will carry it."
+                "Heart rate is on — openWater is allowed to read it. Take a reading to confirm the watch will actually collect one."
             case .off:
                 "Heart rate is off. On this iPhone: Health app ▸ your profile ▸ Privacy ▸ Apps ▸ openWater, and turn on Heart Rate. It applies to the next session."
             }
@@ -214,6 +217,102 @@ final class PhoneSyncClient: NSObject {
         var hasSteps: Bool { self == .off }
     }
 
+    /// Ask the watch to actually collect a beat, rather than to check a
+    /// permission.
+    ///
+    /// This is the question riders think they are asking when they check heart
+    /// rate, and the one the permission probe cannot answer: a watch that is
+    /// allowed to read heart rate still records nothing if the workout session
+    /// will not start. It takes up to fifteen seconds, because a cold sensor
+    /// takes a few seconds to produce its first beat.
+    func takeHeartRateReading() {
+        guard let session, session.activationState == .activated else {
+            liveHeartRate = .unreachable("The watch is not connected.")
+            return
+        }
+        guard session.isPaired, session.isWatchAppInstalled else {
+            liveHeartRate = .unreachable("openWater is not on your watch yet.")
+            return
+        }
+        guard session.isReachable else {
+            liveHeartRate = .unreachable("Your watch is out of range. Open openWater on it, near this iPhone.")
+            return
+        }
+
+        isTakingReading = true
+        liveHeartRate = nil
+        session.sendMessage(["request": "liveHeartRate"]) { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isTakingReading = false
+                self.liveHeartRate = Self.liveHeartRate(from: reply)
+            }
+        } errorHandler: { [weak self] error in
+            Task { @MainActor in
+                self?.isTakingReading = false
+                self?.liveHeartRate = .unreachable(error.localizedDescription)
+            }
+        }
+    }
+
+    static func liveHeartRate(from reply: [String: Any]) -> LiveHeartRate {
+        if reply["started"] as? Bool != true {
+            return .couldNotStart(reply["failure"] as? String
+                ?? "The watch could not start a workout session.")
+        }
+        guard let beat = reply["beat"] as? Double else { return .noBeat }
+        return .measured(beat, duringSession: reply["source"] as? String == "session")
+    }
+
+    /// What came back when the watch was asked to collect a beat.
+    ///
+    /// Deliberately separate from `HeartRateState`. That one is about
+    /// permission and has a settings route to offer; this one is about the
+    /// collection path and its bad cases have no switch to go and find — a
+    /// workout session that refuses to start is a fault, not a preference.
+    enum LiveHeartRate: Equatable, Sendable {
+        /// A real beat, just now. `duringSession` when it came from a session
+        /// already recording rather than from a check started for the purpose.
+        case measured(Double, duringSession: Bool)
+        /// Collection ran and nothing arrived. Usually the watch is off the
+        /// wrist; sometimes it is a read the rider declined, which HealthKit
+        /// will not admit to.
+        case noBeat
+        /// The workout session itself would not start — the failure that
+        /// leaves a rider with no heartbeat *and* a session that dies when the
+        /// wrist drops, since the same session is what keeps the sensors alive.
+        case couldNotStart(String)
+        /// Never got as far as asking.
+        case unreachable(String)
+
+        var message: String {
+            switch self {
+            case let .measured(beat, duringSession):
+                let bpm = "\(Int(beat.rounded())) BPM"
+                return duringSession
+                    ? "Reading \(bpm) from the session running on your watch now. Heart rate is working."
+                    : "Measured \(bpm) just now. The watch collected a real beat, so your sessions will carry one."
+            case .noBeat:
+                return "The watch started collecting but no beat arrived in fifteen seconds. Put the watch on, snug, above the wrist bone and try again — and if it still finds nothing, heart rate is being refused in Health."
+            case let .couldNotStart(reason):
+                return "The watch could not start a workout session, so a session recorded now would have no heart rate — and would stop recording when your wrist drops. \(reason)"
+            case let .unreachable(reason):
+                return reason
+            }
+        }
+
+        var isGood: Bool { if case .measured = self { true } else { false } }
+
+        var symbol: String {
+            switch self {
+            case .measured: "heart.fill"
+            case .noBeat: "heart.slash"
+            case .couldNotStart: "exclamationmark.triangle.fill"
+            case .unreachable: "antenna.radiowaves.left.and.right.slash"
+            }
+        }
+    }
+
     static func heartRateState(from reply: [String: Any]) -> HeartRateState {
         guard reply["available"] as? Bool == true else { return .unavailable }
         guard reply["asked"] as? Bool == true else { return .notAsked }
@@ -241,12 +340,18 @@ final class PhoneSyncClient: NSObject {
         if let settings {
             publishedExtendedDisplay = settings.watchExtendedDisplay
             publishedExtendedDisplayChangedAt = settings.watchExtendedDisplayChangedAt
+            publishedStartWaterLocked = settings.watchStartWaterLocked
+            publishedStartWaterLockedChangedAt = settings.watchStartWaterLockedChangedAt
         }
 
         var payload: [String: Any] = ["bests": library.recordsForWatch()]
         if let value = publishedExtendedDisplay, let stamp = publishedExtendedDisplayChangedAt {
             payload["extendedDisplay"] = value
             payload["extendedDisplayChangedAt"] = stamp
+        }
+        if let value = publishedStartWaterLocked, let stamp = publishedStartWaterLockedChangedAt {
+            payload["startWaterLocked"] = value
+            payload["startWaterLockedChangedAt"] = stamp
         }
 
         do {
@@ -260,6 +365,8 @@ final class PhoneSyncClient: NSObject {
     /// can carry it again rather than clearing it.
     private var publishedExtendedDisplay: Bool?
     private var publishedExtendedDisplayChangedAt: Date?
+    private var publishedStartWaterLocked: Bool?
+    private var publishedStartWaterLockedChangedAt: Date?
 }
 
 extension PhoneSyncClient: WCSessionDelegate {

@@ -1,5 +1,6 @@
 import OpenWaterCore
 import SwiftUI
+import WatchKit
 
 @main
 struct openWaterWatchApp: App {
@@ -7,6 +8,16 @@ struct openWaterWatchApp: App {
     @State private var recorder = SessionRecorder()
     @State private var settings = WatchSettings()
     @State private var sync = WatchSyncClient()
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Water Lock is asked for once per launch, not once per activation.
+    ///
+    /// Only an attempt made while the app is genuinely frontmost counts —
+    /// `enableWaterLock()` is ignored otherwise and says nothing about it, so a
+    /// try from a scene that had not yet become active would burn the one
+    /// chance and leave the wrist unlocked.
+    @State private var hasLockedForLaunch = false
 
     var body: some Scene {
         WindowGroup {
@@ -37,8 +48,41 @@ struct openWaterWatchApp: App {
                     sync.onExtendedDisplay = { value, changedAt in
                         settings.applyPushedExtendedDisplay(value, changedAt: changedAt)
                     }
+                    sync.onStartWaterLocked = { value, changedAt in
+                        settings.applyPushedStartWaterLocked(value, changedAt: changedAt)
+                    }
+                    sync.recordingHeartRate = {
+                        (recorder.state != .idle, recorder.workout.heartRate)
+                    }
+
+                    // The scene is usually still becoming active when this
+                    // runs, in which case the phase change below does it.
+                    lockForLaunch(phase: scenePhase)
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    lockForLaunch(phase: phase)
                 }
         }
+    }
+
+    /// Come up already locked, so the first thing the water touches is a screen
+    /// that ignores it.
+    ///
+    /// The app is opened with a wet wrist, from a board, in spray — and until
+    /// the rider has picked a sport there is no session holding Water Lock for
+    /// them. That gap is where a stray drop finds the crown, the app leaves the
+    /// screen, and a session that was about to be recorded never is.
+    ///
+    /// The cost is honest: touch does nothing until the rider turns the Digital
+    /// Crown to unlock. That is one deliberate gesture against an accidental
+    /// one, which is the trade this screen wants — but riders who disagree turn
+    /// it off in Settings.
+    private func lockForLaunch(phase: ScenePhase) {
+        guard !hasLockedForLaunch, phase == .active else { return }
+        hasLockedForLaunch = true
+        // A capture run drives the app by taps; locking would end the run.
+        guard settings.startWaterLocked, !WatchScreenshotRoute.shouldAutoStart else { return }
+        WKInterfaceDevice.current().enableWaterLock()
     }
 }
 
@@ -90,6 +134,24 @@ final class WatchSettings {
         }
     }
 
+    /// Engage Water Lock as soon as the app opens, before a session exists.
+    ///
+    /// On by default. Everything about this app happens on water, and the few
+    /// seconds between opening it and picking a sport are the only ones where
+    /// nothing is guarding the screen.
+    ///
+    /// Stamped when set here, like `extendedDisplay`, so a change made on the
+    /// wrist survives a later push from the phone.
+    var startWaterLocked: Bool {
+        didSet {
+            startWaterLockedChangedAt = Date()
+            persist()
+        }
+    }
+
+    /// When this watch last set `startWaterLocked` itself.
+    private(set) var startWaterLockedChangedAt: Date
+
     /// When this watch last set `extendedDisplay` itself.
     ///
     /// The phone can push the same preference, and the two can disagree — a
@@ -112,6 +174,11 @@ final class WatchSettings {
         extendedDisplay = defaults.bool(forKey: "extendedDisplay")
         extendedDisplayChangedAt =
             defaults.object(forKey: "extendedDisplayChangedAt") as? Date ?? .distantPast
+        // Defaults on, so `bool(forKey:)` and its false-when-absent is the
+        // wrong reader for it.
+        startWaterLocked = defaults.object(forKey: "startWaterLocked") as? Bool ?? true
+        startWaterLockedChangedAt =
+            defaults.object(forKey: "startWaterLockedChangedAt") as? Date ?? .distantPast
     }
 
     /// Take the phone's value, if its change is newer than this watch's own.
@@ -132,6 +199,19 @@ final class WatchSettings {
         return true
     }
 
+    /// Take the phone's value, if its change is newer than this watch's own.
+    @discardableResult
+    func applyPushedStartWaterLocked(_ value: Bool, changedAt: Date) -> Bool {
+        guard SyncedPreference.accepts(incoming: changedAt,
+                                       over: startWaterLockedChangedAt) else { return false }
+        startWaterLocked = value
+        // Carry the phone's stamp rather than the one the setter just wrote,
+        // for the same reason `applyPushedExtendedDisplay` does.
+        startWaterLockedChangedAt = changedAt
+        persist()
+        return true
+    }
+
     private func persist() {
         defaults.set(units.speed.rawValue, forKey: "speedUnit")
         defaults.set(units.distance.rawValue, forKey: "distanceUnit")
@@ -141,5 +221,7 @@ final class WatchSettings {
         defaults.set(recordHaptics, forKey: "recordHaptics")
         defaults.set(extendedDisplay, forKey: "extendedDisplay")
         defaults.set(extendedDisplayChangedAt, forKey: "extendedDisplayChangedAt")
+        defaults.set(startWaterLocked, forKey: "startWaterLocked")
+        defaults.set(startWaterLockedChangedAt, forKey: "startWaterLockedChangedAt")
     }
 }

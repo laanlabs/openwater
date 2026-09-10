@@ -36,6 +36,16 @@ final class WatchSyncClient: NSObject {
     /// than its own.
     var onExtendedDisplay: ((Bool, Date) -> Void)?
 
+    var onStartWaterLocked: ((Bool, Date) -> Void)?
+
+    /// What the recorder is doing, for the live heart-rate check.
+    ///
+    /// A session already running is a better answer than any test could be —
+    /// it is the real collection path, working or not working right now — so
+    /// the check asks the recorder first and only starts its own workout when
+    /// there is nothing to look at.
+    var recordingHeartRate: (() -> (recording: Bool, beat: Double?))?
+
     private var session: WCSession? {
         WCSession.isSupported() ? WCSession.default : nil
     }
@@ -216,6 +226,25 @@ extension WatchSyncClient: WCSessionDelegate {
                     "outstanding": self.pendingTransfers,
                 ])
             }
+        case "liveHeartRate":
+            // "Can this watch collect a heartbeat" answered by collecting one.
+            // The permission probe below cannot answer it: it reads a sample
+            // the watch wrote on its own, which says openWater is allowed to
+            // read heart rate and nothing at all about whether a session will
+            // record one.
+            Task { @MainActor in
+                if let live = self.recordingHeartRate?(), live.recording {
+                    var reply: [String: Any] = ["started": true, "source": "session"]
+                    if let beat = live.beat { reply["beat"] = beat }
+                    replyHandler(reply)
+                    return
+                }
+                let result = await HeartRateCheck.run()
+                var reply: [String: Any] = ["started": result.started, "source": "check"]
+                if let beat = result.beat { reply["beat"] = beat }
+                if let failure = result.failure { reply["failure"] = failure }
+                replyHandler(reply)
+            }
         case "heartRate":
             // Settings on the phone asking whether this watch can actually
             // read a heartbeat. Only the watch can answer: HealthKit
@@ -240,10 +269,15 @@ extension WatchSyncClient: WCSessionDelegate {
         let bests = Self.decodeBests(from: applicationContext)
         let extended = applicationContext["extendedDisplay"] as? Bool
         let changedAt = applicationContext["extendedDisplayChangedAt"] as? Date
+        let waterLocked = applicationContext["startWaterLocked"] as? Bool
+        let waterLockedChangedAt = applicationContext["startWaterLockedChangedAt"] as? Date
         Task { @MainActor in
             if !bests.isEmpty { self.bestsHandler?(bests) }
             if let extended, let changedAt {
                 self.onExtendedDisplay?(extended, changedAt)
+            }
+            if let waterLocked, let waterLockedChangedAt {
+                self.onStartWaterLocked?(waterLocked, waterLockedChangedAt)
             }
         }
     }

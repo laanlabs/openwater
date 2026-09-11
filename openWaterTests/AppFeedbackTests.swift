@@ -92,6 +92,37 @@ final class AppFeedbackTests: XCTestCase {
                        "Over 4000 the rules reject the whole report rather than truncating")
     }
 
+    /// The camera reports send the cam's name and URL with the note. They
+    /// ride in `details` because the rule's key list is closed, which means
+    /// they spend the rider's 4000 characters — so the cap has to be taken on
+    /// the two together. Taken separately, a long note and a long URL would
+    /// add up to over 4000 and the rule would refuse the whole report.
+    func testContextAndWordsShareTheDetailsLimit() {
+        var long = report(text: String(repeating: "a", count: 3900))
+        long.context = String(repeating: "c", count: 300)
+        let details = AppFeedback.fields(for: long)["details"]?["stringValue"] as? String
+
+        XCTAssertEqual(details?.count, 4000,
+                       "Context and words must be capped together, not one after the other")
+    }
+
+    func testContextLeadsTheDetailsSoATicketSaysWhatItIsAbout() {
+        var withCam = report(text: "Black rectangle, no picture.")
+        withCam.context = "Camera: Ditch Plains\nSource: https://example.com/cam"
+        let details = AppFeedback.fields(for: withCam)["details"]?["stringValue"] as? String
+
+        XCTAssertEqual(details,
+                       "Camera: Ditch Plains\nSource: https://example.com/cam"
+                       + "\n\nBlack rectangle, no picture.")
+    }
+
+    func testNoContextLeavesTheDetailsExactlyAsTheRiderTypedThem() {
+        let details = AppFeedback.fields(for: report(text: "Hard to read."))["details"]?["stringValue"] as? String
+
+        XCTAssertEqual(details, "Hard to read.",
+                       "A report with no context must not gain leading whitespace")
+    }
+
     func testALongScreenNameIsCutToTheTitleLimit() {
         let fields = AppFeedback.fields(for: report(screen: String(repeating: "s", count: 400)))
         let title = fields["title"]?["stringValue"] as? String

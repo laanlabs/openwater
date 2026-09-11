@@ -142,7 +142,7 @@ struct NearbyConditionsSheet: View {
         }
         .presentationDetents([.large])
         .fullScreenCover(item: $watchingCam) { cam in
-            CamViewerSheet(name: cam.displayName, url: cam.url)
+            CamViewerSheet(name: cam.displayName, url: cam.url, cam: cam)
         }
         .task(id: taskKey) { await search() }
     }

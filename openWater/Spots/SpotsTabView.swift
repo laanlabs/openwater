@@ -436,7 +436,7 @@ struct SpotsTabView: View {
                                   shoreFacingDeg: spot.shoreFacingDeg)
         }
         .fullScreenCover(item: $watchingCam) { cam in
-            CamViewerSheet(name: cam.displayName, url: cam.url)
+            CamViewerSheet(name: cam.displayName, url: cam.url, cam: cam)
         }
         .sheet(item: $editingFacingSpot) { spot in
             ShoreFacingSheet(spot: spot)
@@ -3232,7 +3232,7 @@ struct SpotSearchOverlay: View {
             }.value
         }
         .fullScreenCover(item: $watchingCam) { cam in
-            CamViewerSheet(name: cam.displayName, url: cam.url)
+            CamViewerSheet(name: cam.displayName, url: cam.url, cam: cam)
         }
     }
 

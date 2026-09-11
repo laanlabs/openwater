@@ -275,9 +275,9 @@ struct CamCard: View {
         .fullScreenCover(item: $route) { route in
             switch route {
             case .play(let url, let isStill):
-                CamPlayer(url: url, isStill: isStill, name: cam.displayName)
+                CamStage(start: .play(url, isStill: isStill), cam: cam)
             case .angles(let streams):
-                CamAnglePlayer(streams: streams, name: cam.displayName)
+                CamStage(start: .angles(streams), cam: cam)
             case .handoff(let whyNoStream):
                 CamHandoff(cam: cam, whyNoStream: whyNoStream)
             }
@@ -502,8 +502,11 @@ struct CamPlayer: View {
     let url: URL
     let isStill: Bool
     let name: String
+    var here: SpotGuideStore.GuideResource?
+    var onStep: (SpotGuideStore.GuideResource) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var isOnJoystick: Bool
 
     var body: some View {
         Group {
@@ -514,6 +517,13 @@ struct CamPlayer: View {
                 // agent and accepts AVPlayer's own, which is exactly what
                 // this sends; a YouTube manifest is happy either way.
                 LiveStream(url: url, name: name)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let here {
+                CamJoystick(origin: here, onPick: onStep, isDriving: $isOnJoystick)
+                    .padding(.trailing, 70)
+                    .padding(.bottom, 60)
             }
         }
         .ignoresSafeArea()

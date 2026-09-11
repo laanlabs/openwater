@@ -20,6 +20,9 @@ struct CamAnglePlayer: View {
 
     let streams: [WebcamStream.Stream]
     let name: String
+    /// The camera as the guide knows it, when the compass is available.
+    var here: SpotGuideStore.GuideResource?
+    var onStep: (SpotGuideStore.GuideResource) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
 
@@ -29,6 +32,7 @@ struct CamAnglePlayer: View {
     /// The current angle's item reported failure — see `start`.
     @State private var didFail = false
     @FocusState private var isDriving: Bool
+    @FocusState private var isOnJoystick: Bool
 
     private var current: WebcamStream.Stream { streams[min(index, streams.count - 1)] }
 
@@ -39,6 +43,15 @@ struct CamAnglePlayer: View {
             keys
             if didFail { StreamFailed(name: current.label.isEmpty ? name : current.label) }
             if isShowingChrome { chrome }
+            if let here {
+                CamJoystick(origin: here, onPick: onStep,
+                            onExit: { isDriving = true },
+                            isDriving: $isOnJoystick)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: .bottomTrailing)
+                    .padding(.trailing, 70)
+                    .padding(.bottom, 60)
+            }
         }
         .ignoresSafeArea()
         // Menu leaves, said here rather than trusted to the cover: the
@@ -101,6 +114,12 @@ struct CamAnglePlayer: View {
             switch direction {
             case .left:  step(-1)
             case .right: step(1)
+            case .down:
+                // The one key that leaves the picture. Without this the glass
+                // swallows every direction and the compass below could never
+                // be reached at all.
+                isShowingChrome = true
+                if here != nil { isOnJoystick = true }
             default:     isShowingChrome = true
             }
         }

@@ -73,6 +73,11 @@ public final class MotionProvider {
 
     // MARK: - Control
 
+    /// Whether this device has the sensor at all, answerable before or after
+    /// a session — the recorder uses it to say which of two things a blank
+    /// motion channel means.
+    public static var isAvailable: Bool { CMMotionManager().isDeviceMotionAvailable }
+
     public func start() {
         guard manager.isDeviceMotionAvailable, !isRunning else {
             if !manager.isDeviceMotionAvailable {

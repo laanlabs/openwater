@@ -14,6 +14,11 @@ struct StartView: View {
 
     @State private var showingSettings = false
 
+    /// A Health failure from the last session, which happened after that
+    /// session was already saved and so could not ride on it. Shown once,
+    /// dismissed with a tap. See `WorkoutController.lastNoticeKey`.
+    @AppStorage(WorkoutController.lastNoticeKey) private var lastRecordingNotice = ""
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -38,6 +43,20 @@ struct StartView: View {
 
                     if sync.pendingTransfers > 0 || !sync.queuedSessions.isEmpty {
                         pendingBadge
+                    }
+
+                    if !lastRecordingNotice.isEmpty {
+                        Button { lastRecordingNotice = "" } label: {
+                            HStack(alignment: .top, spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle")
+                                Text(lastRecordingNotice)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.leading)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 4)
                     }
                 }
                 .padding(.horizontal, 2)

@@ -118,6 +118,7 @@ public final class RecordingEngine {
         self.analyzer = analyzer
         self.metrics = analyzer.metrics
 
+        recordingIssues = []
         do {
             log = try TrackLog(
                 sessionID: sessionID,
@@ -129,7 +130,10 @@ public final class RecordingEngine {
         } catch {
             // Losing the crash log is bad, but it is not a reason to refuse to
             // record — the session still works, it just is not recoverable.
+            // It is a reason to say so, though: a rider whose watch dies an
+            // hour in should not find out then that nothing was being kept.
             log = nil
+            noteIssue("The crash log could not be created (\(error.localizedDescription)), so this session was not protected against the app stopping.")
         }
 
         state = .recording
@@ -184,6 +188,9 @@ public final class RecordingEngine {
         state = .finishing
 
         log?.finish()
+        if let dropped = log?.droppedFixes, dropped > 0 {
+            noteIssue("\(dropped) fixes could not be written to the crash log.")
+        }
         let logURL = log?.url
         log = nil
 

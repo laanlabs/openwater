@@ -24,6 +24,11 @@ final class SessionRecorder {
     let location = LocationProvider()
     let motion = MotionProvider()
     let barometer = BarometerProvider()
+
+    /// How many fixes each channel actually reached, so a channel that
+    /// produced nothing can be named at the end.
+    private var motionSamples = 0
+    private var altimeterSamples = 0
     let workout = WorkoutController()
 
     /// Mirrors the engine so views can switch on it without reaching through.
@@ -96,6 +101,8 @@ final class SessionRecorder {
     func start(sport: Sport) {
         guard engine.state == .idle else { return }
         routeLocations.removeAll()
+        motionSamples = 0
+        altimeterSamples = 0
 
         // Before the receiver is asked for anything, so the first fixes of the
         // session already come at the rate this sport needs.
@@ -176,6 +183,21 @@ final class SessionRecorder {
         barometer.stop()
 
         let end = Date()
+
+        // Everything the session should carry about how it was recorded, said
+        // before it is built. A channel that recorded nothing is the kind of
+        // fault that otherwise shows up as an analysis screen full of "none
+        // found" and a rider wondering what they did wrong.
+        workout.report(endDate: end)
+        if motionSamples == 0 {
+            engine.noteIssue(motion.isRunning || MotionProvider.isAvailable
+                ? "No motion data was recorded, so foiling, jumps and pumping had nothing to be read from."
+                : "This watch reported no motion sensor, so foiling, jumps and pumping could not be read.")
+        }
+        if altimeterSamples == 0 {
+            engine.noteIssue("The altimeter recorded nothing, so jump height comes from GPS and is under-read.")
+        }
+
         let session = await engine.finish(at: end, save: save)
 
         await workout.finish(endDate: end, route: routeLocations)
@@ -212,6 +234,7 @@ final class SessionRecorder {
             point.verticalAccelSD = motion.latest.verticalAccelSD
             point.verticalAccelPeak = motion.latest.verticalAccelPeak
             point.cadence = motion.latest.cadence
+            motionSamples += 1
         }
         // The *highest* reading since the last fix, not the reading at this
         // one. A jump's apex falls between fixes as often as on one, and the
@@ -219,6 +242,7 @@ final class SessionRecorder {
         // and asking it for the instant throws the jump away.
         point.baroAltitude = barometer.takePeak()
         point.absoluteAltitude = barometer.takeAbsolutePeak()
+        if point.absoluteAltitude != nil { altimeterSamples += 1 }
         point.heartRate = workout.heartRate
 
         engine.ingest(point)

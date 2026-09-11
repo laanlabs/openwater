@@ -197,6 +197,8 @@ public final class RecordingEngine {
         let (id, sport, points, wind) = (sessionID, sport, points, wind)
         let (deviceModel, appVersion) = (deviceModel, appVersion)
         let (title, spotName, swellHeight, swellDirection) = (title, spotName, swellHeight, swellDirection)
+        let issues: [String]? = recordingIssues.isEmpty ? nil : recordingIssues
+        recordingIssues = []
         let session = await Task.detached(priority: .userInitiated) {
             Self.buildSession(
                 id: id,
@@ -207,6 +209,7 @@ public final class RecordingEngine {
                 wind: wind,
                 deviceModel: deviceModel,
                 appVersion: appVersion,
+                recordingIssues: issues,
                 title: title,
                 spotName: spotName,
                 swellHeight: swellHeight,
@@ -372,6 +375,7 @@ public final class RecordingEngine {
         deviceModel: String?,
         appVersion: String?,
         endBattery: Double? = nil,
+        recordingIssues: [String]? = nil,
         title: String? = nil,
         spotName: String? = nil,
         swellHeight: Double? = nil,
@@ -395,10 +399,25 @@ public final class RecordingEngine {
             deviceModel: deviceModel,
             appVersion: appVersion,
             endBattery: endBattery,
+            recordingIssues: recordingIssues,
             swellHeight: swellHeight,
             swellDirection: swellDirection,
             timeZone: timeZone,
             summary: summary
         )
+    }
+
+    /// Faults the recorder saw, to be written onto the session at the end.
+    ///
+    /// Not persisted in the crash log, so a recovered session loses them —
+    /// the recovery prompt is already its own explanation of what went wrong.
+    public private(set) var recordingIssues: [String] = []
+
+    /// Something went wrong that the rider will want explained on the phone
+    /// afterwards. Said once per distinct message; a delegate that fails
+    /// every second would otherwise fill the session with one sentence.
+    public func noteIssue(_ text: String) {
+        guard !recordingIssues.contains(text) else { return }
+        recordingIssues.append(text)
     }
 }

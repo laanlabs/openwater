@@ -52,6 +52,31 @@ final class WorkoutController: NSObject {
     private(set) var activeEnergyKilocalories: Double = 0
     private(set) var isAuthorized = false
 
+    /// Where a fault goes so it reaches the rider, not just the log.
+    ///
+    /// Three failures were caught in this file and written to os_log, and a
+    /// rider's session then arrived on the phone with no heart rate and a
+    /// guess about permissions. The recorder wires this to the engine, which
+    /// writes it onto the session — see `Session.recordingIssues`.
+    var onIssue: ((String) -> Void)?
+
+    /// Fired once, the moment HealthKit reports the session `.running`.
+    ///
+    /// This is the only moment watchOS will grant Water Lock for a workout,
+    /// and it is *not* the moment `startActivity` returns — the transition is
+    /// asynchronous, and asking before it has happened is asking for nothing.
+    var onRunning: (() -> Void)?
+
+    /// Whether the session ever got there. A session that never does costs
+    /// heart rate, Water Lock, and the Health entry, and used to cost them
+    /// silently.
+    private(set) var hasEverRun = false
+
+    nonisolated private func report(_ text: String) {
+        Self.logger.error("\(text, privacy: .public)")
+        Task { @MainActor in self.onIssue?(text) }
+    }
+
     /// Health is unavailable on some configurations; recording must still work.
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -126,7 +151,18 @@ final class WorkoutController: NSObject {
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = sport.healthKitActivityType
         configuration.locationType = .outdoor
-        configuration.swimmingLocationType = .openWater
+        // Only for a swim. Set on anything else, HealthKit refuses to create
+        // the session at all — "Swimming location should not be set for non
+        // swimming activities" — and this was set on every session. The
+        // failure was caught and logged and nothing else, so every watch
+        // recording this app ever made ran without a workout session: no
+        // heart rate, no Water Lock, no entry in Health, and the sensors kept
+        // alive only by background location. A rider's own phone reported it
+        // the first time the error was written onto the session instead of
+        // the log.
+        if configuration.activityType == .swimming {
+            configuration.swimmingLocationType = .openWater
+        }
 
         let session = try HKWorkoutSession(healthStore: store, configuration: configuration)
         let builder = session.associatedWorkoutBuilder()
@@ -144,13 +180,16 @@ final class WorkoutController: NSObject {
 
         collectionStartedAt = startDate
         hasEverReadHeartRate = false
+        hasEverRun = false
         session.startActivity(with: startDate)
         // Same hazard as MotionProvider: HealthKit's completion handler is not
         // Sendable in the SDK, so a closure written inside this class inherits
         // main-actor isolation and then gets called on HealthKit's own queue.
-        builder.beginCollection(withStart: startDate) { @Sendable success, error in
+        builder.beginCollection(withStart: startDate) { @Sendable [weak self] success, error in
             if let error {
-                Self.logger.error("beginCollection failed: \(error.localizedDescription)")
+                self?.report("Health would not start collecting: \(error.localizedDescription)")
+            } else if !success {
+                self?.report("Health declined to start collecting, and gave no reason.")
             }
         }
     }
@@ -170,6 +209,20 @@ final class WorkoutController: NSObject {
     /// track. Health is a destination, never the source of truth.
     func finish(endDate: Date, route: [CLLocation]) async {
         guard let session, let builder else { return }
+
+        if !hasEverRun {
+            // The one that explains everything at once. Not a permission
+            // problem and not a sensor problem: HealthKit was asked to start
+            // and never said it had.
+            onIssue?("The workout session never became active (last state: \(state.rawValue)). Without it there is no heart rate, Water Lock cannot be enabled, and no workout is written to Health.")
+        } else if !hasEverReadHeartRate, let started = collectionStartedAt,
+           endDate.timeIntervalSince(started) > 40 {
+            // Not a permission problem — that is refused earlier and reported
+            // as such. The session started, collection started, the watch was
+            // worn, and Health handed over no beat. Said plainly so the phone
+            // does not have to guess.
+            onIssue?("The workout ran for the whole session and Health delivered no heart rate. Permission was granted; the sensor or the workout never produced a reading.")
+        }
 
         session.stopActivity(with: endDate)
         session.end()
@@ -213,11 +266,15 @@ extension WorkoutController: HKWorkoutSessionDelegate {
     ) {
         Task { @MainActor in
             self.state = toState
+            if toState == .running, !self.hasEverRun {
+                self.hasEverRun = true
+                self.onRunning?()
+            }
         }
     }
 
     nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
-        Self.logger.error("workout session failed: \(error.localizedDescription)")
+        report("The workout session failed: \(error.localizedDescription)")
     }
 }
 
@@ -236,11 +293,11 @@ extension WorkoutController: HKLiveWorkoutBuilderDelegate {
             guard let quantityType = type as? HKQuantityType,
                   let statistics = workoutBuilder.statistics(for: quantityType) else { continue }
 
-            switch quantityType {
-            case HKQuantityType(.heartRate):
+            switch HKQuantityTypeIdentifier(rawValue: quantityType.identifier) {
+            case .heartRate:
                 let unit = HKUnit.count().unitDivided(by: .minute())
                 newHeartRate = statistics.mostRecentQuantity()?.doubleValue(for: unit)
-            case HKQuantityType(.activeEnergyBurned):
+            case .activeEnergyBurned:
                 newEnergy = statistics.sumQuantity()?.doubleValue(for: .kilocalorie())
             default:
                 break

@@ -269,8 +269,9 @@ struct JumpDetectorTests {
         var raw = SyntheticTrack.generate(legs: [.init(speed: 9, heading: 90, duration: 60)])
         for i in raw.indices { raw[i].baroAltitude = Double(i) * 0.1; raw[i].absoluteAltitude = 100 + Double(i) * 0.1 }
         let track = TrackBuilder().build(from: raw)
-        let session = Session(sport: .wingfoil, startDate: .now, endDate: .now.addingTimeInterval(60),
+        var session = Session(sport: .wingfoil, startDate: .now, endDate: .now.addingTimeInterval(60),
                               track: track)
+        session.recordingIssues = ["Health would not start collecting: test"]
 
         let data = try SessionArchive.encoder().encode(SessionArchive(session: session))
         let back = try SessionArchive.decode(data)
@@ -279,6 +280,8 @@ struct JumpDetectorTests {
         #expect(heights.count == raw.count, "baroAltitude was dropped in the archive")
         let absolute: [Double] = back.session.track.points.compactMap { $0.absoluteAltitude }
         #expect(absolute.count == raw.count, "absoluteAltitude was dropped in the archive")
+        #expect(back.session.recordingIssues == ["Health would not start collecting: test"],
+                "the watch's account of a fault was dropped in the archive")
         #expect(abs((heights.last ?? 0) - Double(raw.count - 1) * 0.1) < 0.001)
     }
 

@@ -439,6 +439,16 @@ struct SessionAnalysisTab: View {
         return !session.track.points.contains { $0.heartRate != nil }
     }
 
+    /// The watch's own account when it has one; the old guess only when it
+    /// does not. "Not given permission" was wrong on a phone with every switch
+    /// on, and a wrong reason sends a rider to the wrong screen.
+    private var heartRateWarning: String {
+        if let issues = session.recordingIssues, !issues.isEmpty {
+            return issues.joined(separator: " ")
+        }
+        return "No heart rate arrived from the watch. Check Health ▸ Privacy ▸ Apps ▸ openWater, or use Check heart rate under Settings ▸ Apple Watch."
+    }
+
     private var sessionSection: some View {
         Section("Session") {
             if hasHealthData || heartRateMissing {
@@ -446,7 +456,7 @@ struct SessionAnalysisTab: View {
                     symbol: "heart",
                     title: "Heart rate",
                     value: heartRateMissing ? "none" : heartValue,
-                    warning: heartRateMissing ? "The watch was not given permission to read it" : nil
+                    warning: heartRateMissing ? heartRateWarning : nil
                 ) {
                     AnalysisDetail(title: "Health") {
                         HealthCard(session: session, summary: summary)

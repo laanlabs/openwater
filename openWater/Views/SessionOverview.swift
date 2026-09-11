@@ -605,18 +605,33 @@ struct HealthCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("No heart rate in this recording", systemImage: "heart.slash")
                     .font(.headline)
-                Text("The watch reads it only with permission.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                // Body size and full contrast: this is a route somebody is
-                // meant to follow, not a footnote to be skimmed past.
-                Text("Health app ▸ your profile picture ▸ Privacy ▸ Apps ▸ openWater ▸ Heart Rate")
-                    .font(.body.weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("It applies to your next session — this one cannot be recovered.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let issues = session.recordingIssues, !issues.isEmpty {
+                    // The watch's own account. Sending a rider to the Health
+                    // app for a fault in the workout configuration cost days,
+                    // and every switch they found there was already on.
+                    ForEach(issues, id: \.self) { issue in
+                        Text(issue)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("This is a fault in the app, not a setting. It is recorded here so it can be fixed.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("The watch reads it only with permission.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    // Body size and full contrast: this is a route somebody is
+                    // meant to follow, not a footnote to be skimmed past.
+                    Text("Health app ▸ your profile picture ▸ Privacy ▸ Apps ▸ openWater ▸ Heart Rate")
+                        .font(.body.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("It applies to your next session — this one cannot be recovered.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)

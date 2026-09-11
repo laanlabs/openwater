@@ -82,7 +82,16 @@ struct openWaterWatchApp: App {
         hasLockedForLaunch = true
         // A capture run drives the app by taps; locking would end the run.
         guard settings.startWaterLocked, !WatchScreenshotRoute.shouldAutoStart else { return }
-        WKInterfaceDevice.current().enableWaterLock()
+
+        // Best effort, and honestly so. watchOS grants Water Lock only during
+        // an active workout or location session; before a sport is tapped the
+        // only candidate is the GPS warm-up the start screen runs, and whether
+        // the system counts that is not documented. So this asks over ten
+        // seconds, checking each time, and the session's own lock — engaged
+        // the moment the workout is running — is the one that is guaranteed.
+        Task { @MainActor in
+            await WaterLock.engage(after: [0.5, 1, 2, 3, 4])
+        }
     }
 }
 

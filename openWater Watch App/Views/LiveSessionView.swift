@@ -323,12 +323,19 @@ struct SpeedPage: View {
                         }
                         .buttonStyle(.plain)
                     } else {
+                        // Three states, told apart at a glance: a number and a
+                        // still heart is a reading; a dash and a beating heart
+                        // is the sensor still looking; "Off" above is the
+                        // verdict after forty seconds of silence. Before this
+                        // the first two were the same "0", and a rider could
+                        // not tell a slow sensor from a dead one.
                         HStack(spacing: 3) {
                             Text(heartRateText)
                                 .monospacedDigit()
                             Image(systemName: "heart.fill")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.pink)
+                                .symbolEffect(.pulse, options: .repeating, isActive: isMeasuringHeartRate)
                         }
                     }
                     Spacer()
@@ -376,8 +383,13 @@ struct SpeedPage: View {
         return "\(Format.bearing(course, includeCardinal: false))\(Format.cardinal(course))"
     }
 
+    /// No reading yet, and not yet given up on.
+    private var isMeasuringHeartRate: Bool {
+        (recorder.metrics.heartRate ?? 0) <= 0 && !recorder.workout.heartRateUnavailable
+    }
+
     private var heartRateText: String {
-        guard let bpm = recorder.metrics.heartRate, bpm > 0 else { return "0" }
+        guard let bpm = recorder.metrics.heartRate, bpm > 0 else { return "—" }
         return String(Int(bpm.rounded()))
     }
 }

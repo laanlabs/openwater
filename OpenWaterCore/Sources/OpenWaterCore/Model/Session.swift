@@ -183,6 +183,20 @@ public struct Session: Sendable, Codable, Identifiable {
     public var startBattery: Double?
     public var endBattery: Double?
 
+    /// What went wrong while recording, in the recorder's own words.
+    ///
+    /// A watch session with no heart rate used to be explained on the phone
+    /// as "the watch was not given permission" — a guess, and on a measured
+    /// rider's phone a wrong one: every Health switch was on and three
+    /// recordings still carried no beat. The recorder knew why at the time.
+    /// `HKWorkoutSession` failing to start, `beginCollection` refusing, the
+    /// session failing mid-run — each was caught and written to a log nobody
+    /// reads. Now they are written here, and the phone says what the watch
+    /// saw. Nil when nothing was reported, which is not the same as nothing
+    /// going wrong; empty is the case where the workout ran and Health still
+    /// sent nothing, and that is reported too.
+    public var recordingIssues: [String]?
+
     /// Which part of the recording counts as the session.
     ///
     /// Recording never stops for a break — see `SessionTrim`. The boundaries are
@@ -260,6 +274,7 @@ public struct Session: Sendable, Codable, Identifiable {
         appVersion: String? = nil,
         startBattery: Double? = nil,
         endBattery: Double? = nil,
+        recordingIssues: [String]? = nil,
         trim: SessionTrim = .none,
         untrimmedPoints: [TrackPoint]? = nil,
         purpose: String? = nil,
@@ -292,6 +307,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.appVersion = appVersion
         self.startBattery = startBattery
         self.endBattery = endBattery
+        self.recordingIssues = recordingIssues
         self.trim = trim
         self.untrimmedPoints = untrimmedPoints
         self.purpose = purpose

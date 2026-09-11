@@ -228,6 +228,15 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// air the only force on it is gravity, so the acceleration the device
     /// reports — gravity already removed — collapses toward zero. Raising this
     /// finds more jumps and more things that were not jumps.
+    /// Smallest rise above the local water worth calling a jump, metres.
+    ///
+    /// Replaces the free-fall bar, which the detector no longer reads: jumps
+    /// are found from height now, because the accelerometer *spikes* at the
+    /// apex rather than falling quiet. See `JumpDetector`.
+    public var jumpMinimumRise: Double = 0.5
+
+    /// Kept so recordings and overrides written before the rewrite still
+    /// decode. Nothing reads it.
     public var jumpFreeFall: Double = 2.5
 
     /// How hard the landing spike has to be, m/s². A kite lands softly under
@@ -392,6 +401,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         /// What counts as a jump — see the matching fields on
         /// `SportThresholds`.
         public var jumpMinimumAirtime: TimeInterval?
+        public var jumpMinimumRise: Double?
         public var jumpFreeFall: Double?
         public var jumpLandingSpike: Double?
         public var jumpMinimumTakeoffSpeed: Double?
@@ -418,6 +428,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             upwindLegMinimumDistance: Double? = nil,
             upwindLegMinimumDuration: TimeInterval? = nil,
             jumpMinimumAirtime: TimeInterval? = nil,
+            jumpMinimumRise: Double? = nil,
             jumpFreeFall: Double? = nil,
             jumpLandingSpike: Double? = nil,
             jumpMinimumTakeoffSpeed: Double? = nil,
@@ -441,6 +452,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.upwindLegMinimumDistance = upwindLegMinimumDistance
             self.upwindLegMinimumDuration = upwindLegMinimumDuration
             self.jumpMinimumAirtime = jumpMinimumAirtime
+            self.jumpMinimumRise = jumpMinimumRise
             self.jumpFreeFall = jumpFreeFall
             self.jumpLandingSpike = jumpLandingSpike
             self.jumpMinimumTakeoffSpeed = jumpMinimumTakeoffSpeed
@@ -458,6 +470,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
                 && upwindLegAngle == nil && upwindLegMinimumDistance == nil
                 && upwindLegMinimumDuration == nil
                 && jumpMinimumAirtime == nil && jumpFreeFall == nil
+                && jumpMinimumRise == nil
                 && jumpLandingSpike == nil && jumpMinimumTakeoffSpeed == nil
                 && pumpEnergyFraction == nil && foilSmoothnessFraction == nil
         }
@@ -483,6 +496,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = upwindLegMinimumDistance, v > 0 { t.upwindLegMinimumDistance = v }
             if let v = upwindLegMinimumDuration, v > 0 { t.upwindLegMinimumDuration = v }
             if let v = jumpMinimumAirtime, v > 0 { t.jumpMinimumAirtime = v }
+            if let v = jumpMinimumRise, v > 0 { t.jumpMinimumRise = v }
             if let v = jumpFreeFall, v > 0 { t.jumpFreeFall = v }
             if let v = jumpLandingSpike, v > 0 { t.jumpLandingSpike = v }
             if let v = jumpMinimumTakeoffSpeed, v > 0 { t.jumpMinimumTakeoffSpeed = v }

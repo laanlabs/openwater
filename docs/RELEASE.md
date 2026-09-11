@@ -21,10 +21,11 @@ got past everything else.
 
 Install a Release build on a paired watch and phone. Outdoors, open sky.
 
-1. **Open the watch app.** Note whether it comes up water-locked. This is
-   best effort — watchOS grants Water Lock only during a workout or location
-   session, and whether it counts the GPS warm-up is undocumented. A no is
-   information, not a failure.
+1. **Open the watch app.** It should come up water-locked within a few
+   seconds. watchOS grants Water Lock only during a workout or location
+   session; the start screen's GPS warm-up is one, which Apple does not
+   document and a wrist confirmed on 2026-09-11. If it does not lock, the
+   warm-up did not start — check the GPS line on the start screen.
 2. **Tap a sport.** Within a few seconds the Water Lock drop should appear
    beside the clock. This one is guaranteed: it is asked for the moment
    HealthKit reports the workout running, and checked. If it does not appear,

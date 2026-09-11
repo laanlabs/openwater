@@ -18,6 +18,10 @@ public final class TrackLog {
     nonisolated private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "TrackLog")
 
     /// Metadata written as the first line, so a recovered log knows what it is.
+    /// Fixes that could not be written. Counted rather than logged one by
+    /// one, so the session can say "12 fixes were not protected" once.
+    public private(set) var droppedFixes = 0
+
     public struct Header: Codable, Sendable {
         public var sessionID: UUID
         public var sport: Sport
@@ -94,6 +98,7 @@ public final class TrackLog {
             if pendingCount >= flushEvery { try flush() }
         } catch {
             Self.logger.error("failed to encode fix: \(error.localizedDescription)")
+            droppedFixes += 1
         }
     }
 

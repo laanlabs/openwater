@@ -72,6 +72,19 @@ final class WorkoutController: NSObject {
     /// silently.
     private(set) var hasEverRun = false
 
+    /// Why Health said no at launch, kept until a session can carry it —
+    /// authorization is asked for before any session exists.
+    private(set) var authorizationFailure: String?
+
+    /// Where a failure that happens *after* the session is saved goes.
+    ///
+    /// The Health save is deliberately settled after the session is written,
+    /// so a stalled HealthKit cannot lose a track — which also means its
+    /// failures cannot ride on that session. They wait here, on the wrist,
+    /// and the start screen shows them next time it is opened.
+    static let lastNoticeKey = "lastRecordingNotice"
+
+
     nonisolated private func report(_ text: String) {
         Self.logger.error("\(text, privacy: .public)")
         Task { @MainActor in self.onIssue?(text) }
@@ -104,6 +117,7 @@ final class WorkoutController: NSObject {
             // entry, not their track.
             Self.logger.notice("health authorization declined: \(error.localizedDescription)")
             isAuthorized = false
+            authorizationFailure = error.localizedDescription
         }
     }
 
@@ -202,14 +216,20 @@ final class WorkoutController: NSObject {
         session?.resume()
     }
 
-    /// Finish the workout and save it with its route.
+    /// What the recorder should know before the session is built.
     ///
-    /// Deliberately tolerant: if saving the route fails the workout is still
-    /// saved, and if the whole Health write fails the caller still has the
-    /// track. Health is a destination, never the source of truth.
-    func finish(endDate: Date, route: [CLLocation]) async {
-        guard let session, let builder else { return }
-
+    /// Called *before* `RecordingEngine.finish`, because that is when the
+    /// session is assembled and these have to be on it. The first version
+    /// reported them from `finish`, which runs after — so "the workout never
+    /// became active" was noted onto a session that had already been saved
+    /// and sent, and reached nobody. The one message that did arrive came
+    /// from `start`, which is the only reason the fault was found.
+    func report(endDate: Date) {
+        if let authorizationFailure {
+            onIssue?("Health refused authorization at launch: \(authorizationFailure). No heart rate and no Health entry until it is granted.")
+            return
+        }
+        guard collectionStartedAt != nil else { return }
         if !hasEverRun {
             // The one that explains everything at once. Not a permission
             // problem and not a sensor problem: HealthKit was asked to start
@@ -224,6 +244,16 @@ final class WorkoutController: NSObject {
             onIssue?("The workout ran for the whole session and Health delivered no heart rate. Permission was granted; the sensor or the workout never produced a reading.")
         }
 
+    }
+
+    /// Finish the workout and save it with its route.
+    ///
+    /// Deliberately tolerant: if saving the route fails the workout is still
+    /// saved, and if the whole Health write fails the caller still has the
+    /// track. Health is a destination, never the source of truth.
+    func finish(endDate: Date, route: [CLLocation]) async {
+        guard let session, let builder else { return }
+
         session.stopActivity(with: endDate)
         session.end()
 
@@ -232,11 +262,22 @@ final class WorkoutController: NSObject {
             let workout = try await builder.finishWorkout()
 
             if let workout, !route.isEmpty, let routeBuilder {
-                try? await routeBuilder.insertRouteData(route)
-                try? await routeBuilder.finishRoute(with: workout, metadata: nil)
+                do {
+                    try await routeBuilder.insertRouteData(route)
+                    try await routeBuilder.finishRoute(with: workout, metadata: nil)
+                } catch {
+                    // The workout is in Health without its map. Worth a word,
+                    // not a failure of the save.
+                    Self.logger.error("failed to attach route: \(error.localizedDescription)")
+                    UserDefaults.standard.set("Last session: the workout was saved to Health, but its route could not be attached (\(error.localizedDescription)).", forKey: Self.lastNoticeKey)
+                }
             }
         } catch {
+            // This code was unreachable until the day the workout session
+            // first started; it is live now, and it fails after the session
+            // is already safe on the phone. The wrist says so next time.
             Self.logger.error("failed to save workout: \(error.localizedDescription)")
+            UserDefaults.standard.set("Last session: the workout could not be saved to Health (\(error.localizedDescription)). The session itself is on your phone.", forKey: Self.lastNoticeKey)
         }
 
         self.session = nil

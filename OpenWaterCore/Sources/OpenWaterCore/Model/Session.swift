@@ -345,7 +345,7 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// bar every few seconds — an ocean downwinder with eight swims in it
     /// read as two runs instead of nine. With that, a leg never splits
     /// inside a joined flight, and a leg that never flew is not a leg.
-    public static let currentVersion = 15
+    public static let currentVersion = 16
 
     public let analysisVersion: Int
 

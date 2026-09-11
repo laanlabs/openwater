@@ -44,6 +44,31 @@ public struct TrackPoint: Hashable, Sendable, Codable {
     /// Peak vertical acceleration in the window, m/s². Used for jump detection.
     public var verticalAccelPeak: Double?
 
+    /// Height above where the barometer was zeroed at the start of the
+    /// session, metres. Nil on a recording made before the watch read it, and
+    /// on any device without the sensor.
+    ///
+    /// This is the channel jumps are actually visible in. GPS altitude on a
+    /// wrist is filtered to the point of uselessness for a hop — a measured
+    /// wingfoil session whose rider counted about fifteen jumps of three to
+    /// ten feet showed a *largest* excursion of 1.27 m, with vertical accuracy
+    /// reported as 3 m, and most jumps compressed into a single sample that
+    /// cannot be told from a receiver glitch. The barometer has none of those
+    /// problems: it resolves to roughly a tenth of a metre, it samples on its
+    /// own schedule rather than the receiver's, and it does not care whether
+    /// the sky is visible.
+    ///
+    /// Relative, not absolute. `CMAltimeter` reports height against wherever
+    /// it started, which is exactly what a jump needs and saves having to know
+    /// the sea-level pressure. Weather moves it over hours; a jump is over in
+    /// two seconds, so the drift never enters the measurement.
+    public var baroAltitude: Double?
+
+    /// The newer absolute-altitude API, recorded beside `baroAltitude` so the
+    /// two can be compared on one recording. Metres above sea level. See
+    /// `BarometerProvider.absoluteAltitude` for why both exist.
+    public var absoluteAltitude: Double?
+
     public var heartRate: Double?
 
     /// Pumps or strokes per minute, if estimated live.
@@ -61,6 +86,8 @@ public struct TrackPoint: Hashable, Sendable, Codable {
         speedAccuracy: Double? = nil,
         verticalAccelSD: Double? = nil,
         verticalAccelPeak: Double? = nil,
+        baroAltitude: Double? = nil,
+        absoluteAltitude: Double? = nil,
         heartRate: Double? = nil,
         cadence: Double? = nil
     ) {
@@ -75,6 +102,8 @@ public struct TrackPoint: Hashable, Sendable, Codable {
         self.speedAccuracy = speedAccuracy
         self.verticalAccelSD = verticalAccelSD
         self.verticalAccelPeak = verticalAccelPeak
+        self.baroAltitude = baroAltitude
+        self.absoluteAltitude = absoluteAltitude
         self.heartRate = heartRate
         self.cadence = cadence
     }

@@ -23,6 +23,7 @@ final class SessionRecorder {
     let engine: RecordingEngine
     let location = LocationProvider()
     let motion = MotionProvider()
+    let barometer = BarometerProvider()
     let workout = WorkoutController()
 
     /// Mirrors the engine so views can switch on it without reaching through.
@@ -112,6 +113,7 @@ final class SessionRecorder {
         }
 
         motion.start()
+        barometer.start()
         location.start()
 
         // Water Lock stops spray triggering taps, and ejects water from the
@@ -125,6 +127,9 @@ final class SessionRecorder {
         engine.pause()
         location.stop()
         motion.stop()
+        // Left running through a pause would be wrong in the other direction:
+        // the rider walks up the beach and the baseline moves with them.
+        barometer.stop()
         workout.pause()
         WKInterfaceDevice.current().play(.stop)
     }
@@ -134,6 +139,7 @@ final class SessionRecorder {
         engine.resume()
         location.start()
         motion.start()
+        barometer.start()
         workout.resume()
         WKInterfaceDevice.current().play(.start)
     }
@@ -153,6 +159,7 @@ final class SessionRecorder {
     func finish(save: (Session) -> Bool) async -> Session? {
         location.stop()
         motion.stop()
+        barometer.stop()
 
         let end = Date()
         let session = await engine.finish(at: end, save: save)
@@ -166,6 +173,7 @@ final class SessionRecorder {
     func discard() {
         location.stop()
         motion.stop()
+        barometer.stop()
         workout.discard()
         engine.discard()
         routeLocations.removeAll()
@@ -191,6 +199,12 @@ final class SessionRecorder {
             point.verticalAccelPeak = motion.latest.verticalAccelPeak
             point.cadence = motion.latest.cadence
         }
+        // The *highest* reading since the last fix, not the reading at this
+        // one. A jump's apex falls between fixes as often as on one, and the
+        // barometer is sampling throughout — so asking it for the peak is free
+        // and asking it for the instant throws the jump away.
+        point.baroAltitude = barometer.takePeak()
+        point.absoluteAltitude = barometer.takeAbsolutePeak()
         point.heartRate = workout.heartRate
 
         engine.ingest(point)

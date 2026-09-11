@@ -32,6 +32,7 @@ final class PhoneRecorder {
     let engine: RecordingEngine
     let location = LocationProvider()
     let motion = MotionProvider()
+    let barometer = BarometerProvider()
 
     var state: RecordingEngine.State { engine.state }
     var metrics: LiveMetrics { engine.metrics }
@@ -144,6 +145,7 @@ final class PhoneRecorder {
         location.configure(for: sport)
         engine.start(sport: sport)
         motion.start()
+        barometer.start()
         location.start()
 
         // Only while actually recording — a phone strapped to a mast is not
@@ -161,6 +163,7 @@ final class PhoneRecorder {
         engine.pause()
         location.stop()
         motion.stop()
+        barometer.stop()
         impactHaptics.impactOccurred()
     }
 
@@ -169,6 +172,7 @@ final class PhoneRecorder {
         engine.resume()
         location.start()
         motion.start()
+        barometer.start()
         impactHaptics.impactOccurred()
     }
 
@@ -181,6 +185,7 @@ final class PhoneRecorder {
     func finish(save: (Session) -> Bool) async -> Session? {
         location.stop()
         motion.stop()
+        barometer.stop()
         UIApplication.shared.isIdleTimerDisabled = false
 
         let session = await engine.finish(save: save)
@@ -191,6 +196,7 @@ final class PhoneRecorder {
     func discard() {
         location.stop()
         motion.stop()
+        barometer.stop()
         UIApplication.shared.isIdleTimerDisabled = false
         engine.discard()
     }
@@ -230,6 +236,13 @@ final class PhoneRecorder {
             point.verticalAccelPeak = motion.latest.verticalAccelPeak
             point.cadence = motion.latest.cadence
         }
+        // Same as the watch: the highest reading since the last fix, so a
+        // jump's apex between fixes is kept. Recorded for the comparison that
+        // will decide whether the barometer is trusted; not yet read by the
+        // detector — see `JumpDetector.trustsBarometer`. A phone in a vest
+        // pocket rides the same jump the board does.
+        point.baroAltitude = barometer.takePeak()
+        point.absoluteAltitude = barometer.takeAbsolutePeak()
         engine.ingest(point)
     }
 }

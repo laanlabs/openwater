@@ -17,27 +17,253 @@ struct CamViewerSheet: View {
 
     let name: String
     let url: URL
+    /// The camera as the guide knows it, when it came from the guide.
+    ///
+    /// Optional because not every cam does: a buoy page hands over a name and
+    /// a URL and nothing else. Without it there is no coordinate, so there is
+    /// no compass — the rest of the screen is unchanged.
+    var cam: SpotGuideStore.GuideResource?
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var wantsPage = false
+    @State private var isReporting = false
+
+    /// Where the compass has walked to, if anywhere. The sheet is opened on
+    /// one camera and can end up several hops down the beach.
+    @State private var stepped: SpotGuideStore.GuideResource?
+
+    private var here: SpotGuideStore.GuideResource? { stepped ?? cam }
+    private var currentName: String { stepped?.displayName ?? name }
+    private var currentURL: URL { stepped?.url ?? url }
+
     var body: some View {
+        // Keyed on the camera, so stepping to another one tears down the
+        // player and resolves the new page from scratch rather than trying to
+        // reuse a view that is pointed at the old URL.
+        content.id(currentURL)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        let name = currentName
+        let url = currentURL
         if let videoID = VideoLink.youTubeID(from: url) {
-            NavigationStack {
-                YouTubeEmbedView(videoID: videoID)
-                    .background(Color.black)
-                    .ignoresSafeArea(edges: .bottom)
-                    .navigationTitle(name)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { dismiss() }
+            if wantsPage {
+                SafariView(url: url).ignoresSafeArea()
+            } else {
+                NavigationStack {
+                    YouTubeEmbedView(videoID: videoID)
+                        .background(Color.black)
+                        .ignoresSafeArea(edges: .bottom)
+                        .navigationTitle(name)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbarColorScheme(.dark, for: .navigationBar)
+                        .toolbar {
+                            if let here {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    CamCompassButton(origin: here) { stepped = $0 }
+                                }
+                            }
+                            ToolbarItem(placement: .topBarTrailing) {
+                                CamMenu(name: name, page: url,
+                                        openPage: { wantsPage = true },
+                                        isReporting: $isReporting)
+                            }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { dismiss() }
+                            }
                         }
-                    }
+                }
+                .sheet(isPresented: $isReporting) {
+                    AppFeedbackSheet(screen: "Camera — \(name)", kind: .bug,
+                                     context: camContext(name: name, page: url))
+                }
             }
         } else {
-            CamResolver(name: name, url: url)
+            CamResolver(name: name, url: url, here: here) { stepped = $0 }
         }
     }
+}
+
+// MARK: - The compass
+
+/// Stepping to the next camera along the coast, without going back to a list.
+///
+/// The arrows at the foot of the player step between *angles of one camera*;
+/// this steps between *cameras*. Two different journeys that were previously
+/// the same journey — back out, scroll a grid, pick another — and the second
+/// one is the one riders make constantly: look east along the beach, then
+/// further east, to find where the line is breaking.
+///
+/// A pad rather than four toolbar buttons, because a compass is a shape people
+/// already read, and because each arm can then carry the name of the place it
+/// leads to. An arm with nothing that way is dim and does nothing, which is
+/// the honest thing for a coast that runs out.
+private struct CamCompassButton: View {
+
+    let origin: SpotGuideStore.GuideResource
+    let onPick: (SpotGuideStore.GuideResource) -> Void
+
+    @Environment(SpotGuideStore.self) private var guide
+    @Environment(AppSettings.self) private var settings
+
+    @State private var isOpen = false
+    @State private var neighbours: [CamCompass.Direction: SpotGuideStore.GuideResource] = [:]
+    @State private var isLoading = true
+
+    var body: some View {
+        Button {
+            isOpen = true
+        } label: {
+            Image(systemName: "dpad")
+        }
+        .accessibilityLabel("Cameras in each direction")
+        .popover(isPresented: $isOpen) {
+            pad
+                .padding(18)
+                // On a phone a popover becomes a sheet unless it is told
+                // otherwise, and a sheet over a playing camera covers the
+                // water this control exists to keep you looking at.
+                .presentationCompactAdaptation(.popover)
+        }
+        // Re-read whenever the camera changes, so a chain of hops keeps
+        // measuring from where the rider actually is.
+        .task(id: origin.id) { await load() }
+    }
+
+    private func load() async {
+        isLoading = true
+        let pool = await guide.nearbyResources(near: origin.coordinate)
+        neighbours = CamCompass.neighbours(from: origin.coordinate, among: pool,
+                                           excluding: [origin.id])
+        isLoading = false
+    }
+
+    private var pad: some View {
+        VStack(spacing: 10) {
+            arm(.north)
+            HStack(spacing: 10) {
+                arm(.west)
+                Image(systemName: "location.north.line.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                arm(.east)
+            }
+            arm(.south)
+
+            if isLoading {
+                ProgressView().padding(.top, 4)
+            } else if neighbours.isEmpty {
+                Text("No other cameras within reach of this one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 220)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(minWidth: 320)
+    }
+
+    @ViewBuilder
+    private func arm(_ direction: CamCompass.Direction) -> some View {
+        let destination = neighbours[direction]
+        Button {
+            if let destination {
+                isOpen = false
+                onPick(destination)
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: direction.symbol)
+                    .font(.system(size: 20, weight: .semibold))
+                if let destination {
+                    // Two lines and a shrink: these are place names — "Atlantic
+                    // Beach in Lido Beach", "South Ferry Waterfront" — and one
+                    // truncated line turns four different beaches into four
+                    // rows reading "Atlantic Beach in L…".
+                    Text(destination.displayName)
+                        .font(.caption2)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .multilineTextAlignment(.center)
+                        .frame(height: 26)
+                    Text(Format.distance(destination.metres, unit: settings.units.distance))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(direction.letter)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 132)
+            .padding(.vertical, 8)
+            .background(.quaternary.opacity(destination == nil ? 0.2 : 0.5),
+                        in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(destination == nil)
+        .opacity(destination == nil ? 0.4 : 1)
+        .accessibilityLabel(destination.map { "\(direction.rawValue), \($0.displayName)" }
+                            ?? "No camera \(direction.rawValue)")
+    }
+}
+
+/// The overflow menu every cam screen carries.
+///
+/// Two things belong behind it, and they are the same thing from two sides.
+/// **The source page**, because the app's read of a cam is a best effort — it
+/// finds the stream a page advertises, and a page can advertise one angle of
+/// five, or a still that updates once a minute, or a stream that plays only in
+/// a browser. A rider who suspects there is more at the source should be able
+/// to go and look without waiting for the stream to fail first, which is the
+/// only way there was.
+///
+/// **And a way to say the cam is wrong**, because the operators change these
+/// URLs without telling anybody and the app cannot tell a camera that moved
+/// from a camera that is merely dark tonight. The rider looking at the black
+/// rectangle is the only sensor there is for that, and until now they had
+/// nowhere to put it: the bug button on other screens reports *the app*, and
+/// "the app is broken" is the wrong ticket for "Ditch Plains moved to a new
+/// host". The report carries the cam's name and URL so it is actionable
+/// without a reply.
+private struct CamMenu: View {
+
+    let name: String
+    let page: URL
+    /// Leaving the player for the page, which each screen does its own way.
+    let openPage: () -> Void
+    @Binding var isReporting: Bool
+
+    var body: some View {
+        Menu {
+            Button {
+                openPage()
+            } label: {
+                Label("Open the source page", systemImage: "safari")
+            }
+            Button {
+                isReporting = true
+            } label: {
+                Label("Report a problem with this camera", systemImage: "ladybug")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("More options for \(name)")
+    }
+}
+
+/// What the ticket carries besides the rider's words.
+///
+/// The name as the app shows it and the URL as the app holds it — which is
+/// the pair needed to tell "this cam is off air" from "this cam is not this
+/// cam any more", and neither of which a rider should have to transcribe off
+/// a screen they are complaining about.
+private func camContext(name: String, page: URL) -> String {
+    "Camera: \(name)\nSource: \(page.absoluteString)"
 }
 
 /// Read the page for a playable stream; play it if there is one, otherwise
@@ -60,6 +286,9 @@ private struct CamResolver: View {
 
     let name: String
     let url: URL
+    /// Passed through to the player, which is where the compass is shown.
+    var here: SpotGuideStore.GuideResource?
+    var onStep: (SpotGuideStore.GuideResource) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
 
@@ -104,7 +333,8 @@ private struct CamResolver: View {
             case .some(let found) where found.isEmpty:
                 SafariView(url: url).ignoresSafeArea()
             case .some(let found):
-                CamStreamPlayer(streams: found, name: name, page: url)
+                CamStreamPlayer(streams: found, name: name, page: url,
+                                here: here, onStep: onStep)
             }
         }
     }
@@ -146,6 +376,8 @@ private struct CamStreamPlayer: View {
     let name: String
     /// The operator's page, for when the stream it advertised will not play.
     let page: URL
+    var here: SpotGuideStore.GuideResource?
+    var onStep: (SpotGuideStore.GuideResource) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
     @State private var index = 0
@@ -156,6 +388,7 @@ private struct CamStreamPlayer: View {
     @State private var didFail = false
     /// The rider gave up on the stream and asked for the page.
     @State private var wantsPage = false
+    @State private var isReporting = false
 
     private var current: WebcamStream.Stream { streams[min(index, streams.count - 1)] }
 
@@ -181,10 +414,29 @@ private struct CamStreamPlayer: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarColorScheme(.dark, for: .navigationBar)
                     .toolbar {
+                        if let here {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                CamCompassButton(origin: here, onPick: onStep)
+                            }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            CamMenu(name: name, page: page,
+                                    openPage: { wantsPage = true },
+                                    isReporting: $isReporting)
+                        }
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Done") { dismiss() }
                         }
                     }
+            }
+            .sheet(isPresented: $isReporting) {
+                // The angle on screen, not the sheet's name for the place: a
+                // site with five cameras gets five different reports, and
+                // "camera 3 is black" is the useful one.
+                AppFeedbackSheet(screen: "Camera — \(current.label.isEmpty ? name : current.label)",
+                                 kind: .bug,
+                                 context: camContext(name: current.label.isEmpty ? name : current.label,
+                                                     page: page))
             }
             .task(id: index) { await load() }
             .onDisappear {

@@ -14,10 +14,20 @@ import SwiftUI
 struct AppFeedbackSheet: View {
 
     let screen: String
+    /// Facts about what the rider was looking at, sent with the note so they
+    /// do not have to describe it. Shown to them before it is sent — nothing
+    /// leaves this app that the rider has not seen.
+    var context: String = ""
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var kind: AppFeedback.Kind = .improvement
+    @State private var kind: AppFeedback.Kind
+
+    init(screen: String, kind: AppFeedback.Kind = .improvement, context: String = "") {
+        self.screen = screen
+        self.context = context
+        _kind = State(initialValue: kind)
+    }
     @State private var text = ""
     @State private var contact = ""
     @State private var isSending = false
@@ -39,13 +49,33 @@ struct AppFeedbackSheet: View {
                 } header: {
                     Text("About \(screen)")
                 } footer: {
-                    Text("This goes to whoever builds the app, with the name of "
-                         + "the screen you were on and nothing else about you.")
+                    // The promise has to match what is actually sent. A camera
+                    // report carries the cam's URL as well, which is shown
+                    // below under "Sent with your note" — so the sentence that
+                    // ends "and nothing else about you" would be a smaller
+                    // truth than the screen is telling.
+                    Text(context.isEmpty
+                         ? "This goes to whoever builds the app, with the name of "
+                           + "the screen you were on and nothing else about you."
+                         : "This goes to whoever builds the app, with the name of "
+                           + "the screen you were on and what is shown below — "
+                           + "and nothing else about you.")
                 }
 
                 Section {
                     TextField(kind.prompt, text: $text, axis: .vertical)
                         .lineLimit(4...12)
+                }
+
+                if !context.isEmpty {
+                    Section {
+                        Text(context)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    } header: {
+                        Text("Sent with your note")
+                    }
                 }
 
                 Section {
@@ -83,7 +113,8 @@ struct AppFeedbackSheet: View {
     private func send() {
         isSending = true
         failure = nil
-        let report = AppFeedback.Report(kind: kind, screen: screen, text: text, contact: contact)
+        let report = AppFeedback.Report(kind: kind, screen: screen, text: text,
+                                        contact: contact, context: context)
         Task {
             do {
                 try await AppFeedback.submit(report)

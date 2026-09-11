@@ -76,6 +76,14 @@ enum AppFeedback {
         var text: String
         /// Left empty unless the rider wants a reply.
         var contact: String = ""
+        /// What the rider was looking at, in facts they should not have to
+        /// type — a camera's name and the page it came from, say.
+        ///
+        /// Prepended to `details` rather than given a field of its own,
+        /// because the deployed rule accepts a fixed set of keys and a new one
+        /// is a 403. It reads first in the ticket, which is where it is wanted:
+        /// "this cam is black" is unactionable without the cam.
+        var context: String = ""
     }
 
     static func submit(_ report: Report) async throws {
@@ -111,11 +119,18 @@ enum AppFeedback {
         let screen = report.screen.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = String((screen.isEmpty ? "Somewhere in the app" : screen).prefix(200))
 
+        // Context and words share one 4000-character budget, and the cap is
+        // taken on the joined string. Trimming them separately would let a
+        // long note plus a long URL past the rule, which refuses the whole
+        // report rather than trimming it.
+        let words = report.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let context = report.context.trimmingCharacters(in: .whitespacesAndNewlines)
+        let details = context.isEmpty ? words : "\(context)\n\n\(words)"
+
         var fields: [String: [String: Any]] = [
             "type": ["stringValue": report.kind.rawValue],
             "title": ["stringValue": title],
-            "details": ["stringValue": String(
-                report.text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4000))],
+            "details": ["stringValue": String(details.prefix(4000))],
             "platform": ["stringValue": String(platform.prefix(20))],
             "version": ["stringValue": String(appVersion.prefix(40))],
             "createdAt": ["stringValue": ISO8601DateFormatter().string(from: Date())],

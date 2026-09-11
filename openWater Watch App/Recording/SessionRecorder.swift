@@ -104,21 +104,35 @@ final class SessionRecorder {
         let startDate = Date()
         engine.start(sport: sport, at: startDate)
 
+        workout.onIssue = { [engine] text in engine.noteIssue(text) }
+        // Water Lock, at the moment watchOS allows it. Asking here, before
+        // the workout is active, was silently ignored on every session this
+        // app has recorded — see `WaterLock`.
+        workout.onRunning = {
+            Task { @MainActor in
+                let locked = await WaterLock.engage(after: [0, 0.5, 1.5, 3])
+                if !locked {
+                    Self.logger.error("water lock did not engage at session start")
+                }
+            }
+        }
         do {
             try workout.start(sport: sport, startDate: startDate)
         } catch {
             // No Health authorization costs heart rate and the Health entry,
-            // not the track.
+            // not the track — and it costs the sensors staying alive when the
+            // wrist drops, which is the part a rider notices. Said on the
+            // session, not just here.
             Self.logger.error("workout session failed to start: \(error.localizedDescription)")
+            engine.noteIssue("The workout session could not start: \(error.localizedDescription). Without it there is no heart rate, and recording stops when the wrist drops.")
         }
 
         motion.start()
         barometer.start()
         location.start()
 
-        // Water Lock stops spray triggering taps, and ejects water from the
-        // speaker afterwards. On the water it is not optional.
-        WKInterfaceDevice.current().enableWaterLock()
+        // Water Lock is engaged from `workout.onRunning`, above — the only
+        // moment watchOS will grant it. Asking here never worked.
         WKInterfaceDevice.current().play(.start)
     }
 

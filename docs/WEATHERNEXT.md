@@ -8,8 +8,9 @@ grid, 360 hours out from the 00/06/12/18 UTC runs, and a genuine 64-member
 ensemble whose spread arrives pre-reduced to six percentiles — mean, p10, p25,
 p50, p75, p90.
 
-We have applied for access. We are not putting it in the app, and the reason is
-the licence rather than the engineering. This document is the record of both,
+We applied for access and it was granted on 13 September 2026. We are not
+putting it in the app, and the reason is the licence rather than the
+engineering. This document is the record of both,
 so the decision does not have to be rediscovered by whoever next reads the
 model spec and gets excited.
 
@@ -105,6 +106,52 @@ Planned, once access lands:
 Budget: under $50, one-off. The data is free, the statistics bucket is free to
 read, and BigQuery's first 1 TiB each month is free. Earth Engine is ruled out on
 sight — its commercial plans start at $2,000/month.
+
+### What access actually looked like (2026-09-13)
+
+Access was granted on 2026-09-13, by the standard acceptance email — no answer
+to the consumer-use question above, which therefore still stands. What the
+grant turned out to cover, and what it costs, measured rather than read:
+
+**BigQuery works; Cloud Storage does not.** The Analytics Hub listing
+(`projects/gcp-public-data-weathernext/locations/us/dataExchanges/weathernext_19397e1bcb7/listings/weathernext_3_1a067c1e929`)
+is subscribed into `openwaterapp-2e0f7` as the linked dataset `weathernext_3`,
+with two views, `weathernext_3_0_0_0p1deg` and `weathernext_3_0_0_0p05deg`.
+Both Cloud Storage buckets — including the statistics one this plan was built
+on — return 403 for jason@laan.com, with and without a billing project.
+`gs://weathernext-public/` (the terms and the Colabs) reads fine, so it is the
+grant, not the tooling. Asked about at weathernext@google.com.
+
+**A one-cell query is not small.** The table is partitioned by *day*, and a day
+is 24 runs of the whole globe out to 360 hours — some fifteen billion forecast
+rows. Every query scans its day's columns whether it asks for one cell or a
+coastline (dry-run, exact bytes):
+
+| Query | Estimate |
+|---|---|
+| One cell, one init, one wind column | 252 GiB |
+| One cell, one init, the seven wind columns the harness wants | 832 GiB |
+| A 600-cell region, one init, same columns | 838 GiB |
+| One cell, one init, `SELECT *` | 13 TiB |
+| One cell, no `init_time` filter | 34 TiB (≈ $210) |
+
+The table is also clustered by `geography`, and cluster pruning may bill far
+less than the estimate — but BigQuery refuses to start a query unless its byte
+budget covers the *estimate*, so the only way to learn the real cost is to let
+one query run with a 400 GiB ceiling. Unpruned, the 90-day plan is ≥ 22 TiB,
+about $140; pruned, it is inside the free tier. One experiment decides it.
+
+**And that experiment cannot run yet.** Every project on the laan-labs billing
+account carries a BigQuery `QueryUsagePerDay` default of 200 MiB, and a
+consumer override cannot exceed the default ("can only be set between 0 and
+209715200"). The cap is why nothing here can be billed by accident, and also
+why nothing can run: a quota-increase request to 1 TiB/day is filed via Cloud
+Quotas and waits on Google. Until it is granted, or the statistics bucket
+opens, the harness is blocked and nothing in this section has been built.
+
+Rules for whoever runs the first real query: `--maximum_bytes_billed` on every
+query, always filter `init_time`, select named `forecast.*` fields and never
+`*`, and read `totalBytesBilled` off the job before running a second one.
 
 ## How "not shipped" is enforced
 

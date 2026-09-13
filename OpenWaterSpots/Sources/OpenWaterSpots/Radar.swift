@@ -328,7 +328,7 @@ public final class RadarTileOverlay: MKTileOverlay, @unchecked Sendable {
     /// The one frame this overlay serves. Fixed for its life — the loop
     /// swaps whole overlays rather than mutating one, so each frame has a
     /// stable identity and MapKit never confuses one frame's tiles for
-    /// another's. See `RadarTileMap.Coordinator.apply`.
+    /// another's. See `RadarImageMap`, which composes each frame's tiles once.
     nonisolated private let source: RadarSource
 
     /// Identifies which frame a cropped tile belongs to, so the cache can

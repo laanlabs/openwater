@@ -221,7 +221,7 @@ struct NearbyConditionsSheet: View {
                     Text("Radar")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
-                    Text("NOAA reflectivity over the map")
+                    Text("The last two hours, and the next two")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

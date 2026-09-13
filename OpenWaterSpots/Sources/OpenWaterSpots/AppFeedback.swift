@@ -1,8 +1,6 @@
 import Foundation
 import OpenWaterCore
 import OSLog
-import OpenWaterSpots
-import UIKit
 
 /// "This screen is confusing" / "it should do X" — from the rider, about the
 /// app rather than about one session.
@@ -21,10 +19,16 @@ import UIKit
 /// screen the rider was looking at**, which goes in the title, because that is
 /// the difference between "the forecast is hard to read" and a ticket.
 ///
+/// **In the package, not the phone app,** because the Apple TV files camera
+/// reports too, and the deployed rule is one contract. A second copy of these
+/// fields in the TV target would be a second place for a key to drift out of
+/// the `hasOnly` list — and a drift there is a 403 on every report, not a
+/// degraded one.
+///
 /// Same posture as everything else that leaves this app: create-only, never
 /// readable, listable or deletable by the app — including its own
 /// submissions — and nothing sent that the rider did not type.
-enum AppFeedback {
+public enum AppFeedback {
 
     /// Visible in Console.app filtered to `subsystem:com.laan.labs.openWater
     /// category:feedback`, alongside the session reports. The rider's words
@@ -34,13 +38,13 @@ enum AppFeedback {
     /// The four the deployed rule accepts. Not a suggestion — `type in [...]`
     /// means anything else is a 403, so this enum's raw values and that list
     /// are one contract, pinned by `AppFeedbackTests`.
-    enum Kind: String, CaseIterable, Identifiable, Codable {
+    public enum Kind: String, CaseIterable, Identifiable, Codable, Sendable {
         case feature, improvement, bug, other
 
-        var id: String { rawValue }
+        public var id: String { rawValue }
 
         /// What a rider would call it, which is not what the rule calls it.
-        var label: String {
+        public var label: String {
             switch self {
             case .feature: "Missing something"
             case .improvement: "Could be better"
@@ -49,7 +53,7 @@ enum AppFeedback {
             }
         }
 
-        var icon: String {
+        public var icon: String {
             switch self {
             case .feature: "plus.circle"
             case .improvement: "wand.and.sparkles"
@@ -58,7 +62,7 @@ enum AppFeedback {
             }
         }
 
-        var prompt: String {
+        public var prompt: String {
             switch self {
             case .feature: "What should this screen let you do that it doesn't?"
             case .improvement: "What would make this easier to read or quicker to use?"
@@ -68,14 +72,14 @@ enum AppFeedback {
         }
     }
 
-    struct Report {
-        var kind: Kind
+    public struct Report: Sendable {
+        public var kind: Kind
         /// Where the rider was — "Spots", "Models", "Tide". Carried because a
         /// note without it is a note somebody has to guess the context of.
-        var screen: String
-        var text: String
+        public var screen: String
+        public var text: String
         /// Left empty unless the rider wants a reply.
-        var contact: String = ""
+        public var contact: String
         /// What the rider was looking at, in facts they should not have to
         /// type — a camera's name and the page it came from, say.
         ///
@@ -83,12 +87,37 @@ enum AppFeedback {
         /// because the deployed rule accepts a fixed set of keys and a new one
         /// is a 403. It reads first in the ticket, which is where it is wanted:
         /// "this cam is black" is unactionable without the cam.
-        var context: String = ""
+        public var context: String
+
+        public init(kind: Kind, screen: String, text: String,
+                    contact: String = "", context: String = "") {
+            self.kind = kind
+            self.screen = screen
+            self.text = text
+            self.contact = contact
+            self.context = context
+        }
     }
 
-    static func submit(_ report: Report) async throws {
+    public enum SubmissionError: LocalizedError {
+        case save(Int)
+
+        public var errorDescription: String? {
+            switch self {
+            case .save(403):
+                "The server refused it. If this build is new, the feedback rules may not be deployed yet."
+            case .save(let code):
+                "Could not send that (HTTP \(code)). Try again in a minute."
+            }
+        }
+    }
+
+    /// On the main actor for `SpotGuideStore`'s address; the request itself
+    /// suspends rather than blocking it.
+    @MainActor
+    public static func submit(_ report: Report) async throws {
         let id = identifier()
-        let fields = self.fields(for: report, platform: await platform)
+        let fields = self.fields(for: report, platform: platform)
 
         var request = URLRequest(url: URL(string:
             "\(SpotGuideStore.firestoreBase)/appFeatureFeedback?documentId=\(id)&key=\(SpotGuideStore.apiKey)")!)
@@ -103,7 +132,7 @@ enum AppFeedback {
         guard (200..<300).contains(code) else {
             let body = String(data: data, encoding: .utf8) ?? "<no body>"
             log.error("rejected \(code, privacy: .public): \(body, privacy: .public)")
-            throw SessionFeedback.SubmissionError.save(code)
+            throw SubmissionError.save(code)
         }
         log.notice("accepted \(id, privacy: .public)")
     }
@@ -113,7 +142,7 @@ enum AppFeedback {
     /// Separate from sending so the contract can be held to the deployed rule
     /// in a test. Every bound here is one the rule enforces: over any of them
     /// and the whole report is refused rather than trimmed.
-    static func fields(for report: Report, platform: String = "") -> [String: [String: Any]] {
+    public static func fields(for report: Report, platform: String = "") -> [String: [String: Any]] {
         // `title` is what a sweep reads first, so it leads with the screen.
         // Non-empty is a rule requirement, not a nicety.
         let screen = report.screen.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,12 +173,13 @@ enum AppFeedback {
 
     /// Exposed for the tests, which hold this to the same shape the session
     /// reports use.
-    static func testIdentifier() -> String { identifier() }
+    public static func testIdentifier() -> String { identifier() }
 
     private static func identifier() -> String {
         UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(20).description
     }
 
+    /// The app's, not the package's — `Bundle.main` is the app that linked it.
     private static var appVersion: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
@@ -157,11 +187,23 @@ enum AppFeedback {
         return "\(short) (\(build))"
     }
 
-    /// Twenty characters is the rule's ceiling, which is the system version
-    /// and nothing else. `UIDevice.model` is "iPhone" on every iPhone ever
-    /// made, so spending the room on it would buy nothing.
-    @MainActor
-    private static var platform: String {
-        "iOS \(UIDevice.current.systemVersion)"
+    /// Twenty characters is the rule's ceiling, which is the system and its
+    /// version and nothing else. The system name matters now that two
+    /// platforms file here: "the cam is black" on a TV and on a phone are two
+    /// different players, and the ticket has to say which.
+    ///
+    /// Read from `ProcessInfo` rather than `UIDevice`, which keeps UIKit out
+    /// of the package and answers the same "18.5.1" `systemVersion` did.
+    static var platform: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        #if os(tvOS)
+        let system = "tvOS"
+        #elseif os(visionOS)
+        let system = "visionOS"
+        #else
+        let system = ProcessInfo.processInfo.isiOSAppOnMac ? "macOS" : "iOS"
+        #endif
+        let patch = version.patchVersion > 0 ? ".\(version.patchVersion)" : ""
+        return "\(system) \(version.majorVersion).\(version.minorVersion)\(patch)"
     }
 }

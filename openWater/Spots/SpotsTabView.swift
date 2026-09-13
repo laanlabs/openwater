@@ -100,6 +100,10 @@ struct SpotsTabView: View {
     /// under this map's own pins: the flow map's wind, or the ocean
     /// model's current.
     @AppStorage("spots.washLayer") private var washLayerRaw = WashLayer.off.rawValue
+    /// The wash drawn as one smooth picture rather than as tiles — see
+    /// `WashImageLayer`. On by default; the switch keeps the old tiles one
+    /// tap away while the picture proves itself on real phones.
+    @AppStorage("spots.smoothWash") private var smoothWash = true
     /// The current wash cut to the coastline — on by default, now that the
     /// coastline is one the app carries rather than one it has to buy a
     /// sample at a time. See `Coastline` for the two versions this took.
@@ -786,6 +790,72 @@ struct SpotsTabView: View {
         }
     }
 
+    /// Every pin the map is standing on the wash, as the hole it needs.
+    ///
+    /// Mirrors the map's own content, pin for pin — the same conditions, the
+    /// same anchors — and sizes each from its view: a spot capsule grows with
+    /// its digits, a station's with its label, everything else is a circle.
+    private func washHoles(readings: [String: WindReading]) -> [WashHole] {
+        var holes: [WashHole] = []
+        if routeMode?.isEditing != true {
+            for spot in pins {
+                if let reading = readings[spot.spotId] {
+                    let digits = CGFloat(String(Int(reading.speedKn.rounded())).count)
+                    holes.append(WashHole(coordinate: spot.coordinate, anchor: .bottom,
+                                          shape: .capsule(width: 49 + 8 * digits, height: 26, tail: true)))
+                } else {
+                    holes.append(WashHole(coordinate: spot.coordinate, anchor: .bottom,
+                                          shape: .circle(diameter: 19)))
+                }
+            }
+            for spot in guide.privateSpots {
+                holes.append(WashHole(coordinate: spot.clCoordinate, anchor: .bottom,
+                                      shape: .circle(diameter: 28)))
+            }
+            for resource in resourcePins {
+                holes.append(WashHole(coordinate: resource.coordinate.clCoordinate, anchor: .center,
+                                      shape: .circle(diameter: 26)))
+            }
+            for buoy in buoyPins {
+                holes.append(WashHole(coordinate: buoy.coordinate.clCoordinate, anchor: .center,
+                                      shape: .circle(diameter: 26)))
+            }
+            for station in freeStationPins {
+                let at = station.coordinate.clCoordinate
+                if let observation = stationWind[station.id]?.observation,
+                   !observation.isStale, observation.reports {
+                    holes.append(WashHole(coordinate: at, anchor: .center,
+                                          shape: .capsule(width: 52, height: 20, tail: false)))
+                } else {
+                    holes.append(WashHole(coordinate: at, anchor: .center, shape: .circle(diameter: 26)))
+                }
+            }
+        }
+        if let mode = routeMode {
+            if case .editing(let draft, _) = mode {
+                for (index, point) in draft.enumerated() {
+                    let isEnd = index == 0 || index == draft.count - 1
+                    holes.append(WashHole(coordinate: CLLocationCoordinate2D(latitude: point.latitude,
+                                                                             longitude: point.longitude),
+                                          anchor: .center, shape: .circle(diameter: isEnd ? 20 : 16)))
+                }
+            } else if mode.waypoints.count >= 2 {
+                for point in [mode.waypoints.first!, mode.waypoints.last!] {
+                    holes.append(WashHole(coordinate: CLLocationCoordinate2D(latitude: point.latitude,
+                                                                             longitude: point.longitude),
+                                          anchor: .center, shape: .circle(diameter: 20)))
+                }
+                for arrow in routeDisplay.arrows {
+                    holes.append(WashHole(coordinate: arrow.at, anchor: .center, shape: .circle(diameter: 22)))
+                }
+                if let marker = routeDisplay.marker {
+                    holes.append(WashHole(coordinate: marker, anchor: .center, shape: .circle(diameter: 30)))
+                }
+            }
+        }
+        return holes
+    }
+
     private func distance(_ a: CLLocationCoordinate2D, from b: CLLocationCoordinate2D) -> Double {
         Geo.distance(.init(latitude: a.latitude, longitude: a.longitude),
                      .init(latitude: b.latitude, longitude: b.longitude))
@@ -803,10 +873,18 @@ struct SpotsTabView: View {
         let readings = scrubbedReadings
         // Hoisted for the same reason as the wind dictionary: reads inside
         // the map content builder register no observation dependency.
-        let washCells = washLayer == .off ? [] : windWash.cells
+        // With the smooth wash the cells are never read, so the body neither
+        // depends on them nor hands MapKit 1,700 polygons to resolve — only
+        // the one picture, which changes once per rebuild.
+        let smooth = smoothWash && washLayer != .off
+        let washCells = washLayer == .off || smoothWash ? [] : windWash.cells
+        let washRaster = smooth ? windWash.raster : nil
+        let holes = smooth ? washHoles(readings: readings) : []
         let washField = washLayer == .off ? nil : windWash.field
         return MapReader { proxy in
-            Map(position: $camera) {
+            // No tilt under the smooth wash: the picture is placed flat, and
+            // a pitched map would need a projection it does not have.
+            Map(position: $camera, interactionModes: smooth ? [.pan, .zoom, .rotate] : .all) {
             // The wash goes first: map content draws in order, and the
             // field belongs under every pin, handle and marker.
             // Seventeen hundred quads, and SwiftUI re-resolves every one
@@ -1042,6 +1120,13 @@ struct SpotsTabView: View {
                 editingCentre = context.region.center
             } else if editingCentre != nil {
                 editingCentre = nil
+            }
+        }
+        // The field as one picture, under the comets and with the pins cut
+        // out of it — see `WashImageLayer`.
+        .overlay {
+            if let washRaster {
+                WashImageLayer(raster: washRaster, proxy: proxy, holes: holes)
             }
         }
         // The living streaks over the wash: the reference apps' particle
@@ -1676,6 +1761,11 @@ struct SpotsTabView: View {
                 Label("No wash", systemImage: "square.slash").tag(WashLayer.off.rawValue)
                 Label("Wind", systemImage: "wind").tag(WashLayer.wind.rawValue)
                 Label("Current", systemImage: "water.waves").tag(WashLayer.currents.rawValue)
+            }
+            if washLayer != .off {
+                Toggle(isOn: $smoothWash) {
+                    Label("Smooth wash", systemImage: "drop.halffull")
+                }
             }
             if washLayer == .currents {
                 Section("Current wash") {

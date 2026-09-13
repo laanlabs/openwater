@@ -45,6 +45,15 @@ public enum WebcamStream {
         /// or the picture stops and reads as a broken camera.
         public let isClip: Bool
         public var id: String { url.absoluteString }
+
+        /// Public so a stream the guide already holds can play in the same
+        /// player as one read off an operator's page, rather than in a second
+        /// player that handles the remote differently.
+        public init(url: URL, label: String, isClip: Bool) {
+            self.url = url
+            self.label = label
+            self.isClip = isClip
+        }
     }
 
     private struct Cached {

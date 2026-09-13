@@ -295,18 +295,49 @@ struct WindMapScreen: View {
     /// — the map settled on Montauk, the key changed, and the Kansas task ran
     /// on to completion. So the settle now asks directly, and anything that
     /// comes back for somewhere the map has left is dropped.
+    ///
+    /// **An empty first answer is not a verdict.** The map's first load is
+    /// the moment the network is least ready — a box just woken, a radio still
+    /// joining — and `Fetch`'s own retries are over inside a second. Taking
+    /// that first nothing as final put "Wind didn't load" and "Temp didn't
+    /// load" on the centre on first launch, over a coast that answered fine a
+    /// few seconds later. So a missing reading is asked for again on a
+    /// widening interval, the readout keeps its waiting pulse throughout, and
+    /// "didn't load" is said only once the whole allowance has run out.
     private func refreshCentre() async {
         guard let here = centreCoordinate else { return }
         centreLoaded = false
         centreWind = nil
         centreWeather = nil
-        async let air = guide.weather(at: here)
-        async let blowing = guide.currentWind(at: here)
-        let (weather, wind) = await (air, blowing)
-        guard isStillCentre(here) else { return }
-        centreWeather = weather
-        centreWind = wind
+        for attempt in 0...Self.centreRetryDelays.count {
+            if attempt > 0 {
+                try? await Task.sleep(for: Self.centreRetryDelays[attempt - 1])
+            }
+            guard !Task.isCancelled, isStillCentre(here) else { return }
+            // Only what is still missing: a wind that landed first time is
+            // not asked for again while the temperature catches up.
+            async let air = centreWeather(at: here, needed: centreWeather == nil)
+            async let blowing = centreWind(at: here, needed: centreWind == nil)
+            let (weather, wind) = await (air, blowing)
+            guard !Task.isCancelled, isStillCentre(here) else { return }
+            if let weather { centreWeather = weather }
+            if let wind { centreWind = wind }
+            if centreWeather != nil, centreWind != nil { break }
+        }
         centreLoaded = true
+    }
+
+    /// About half a minute in all, on top of `Fetch`'s own quick retries —
+    /// long enough to outlast a network coming up, short enough that a real
+    /// failure is still said while a rider is looking.
+    private static let centreRetryDelays: [Duration] = [.seconds(2), .seconds(4), .seconds(8), .seconds(15)]
+
+    private func centreWeather(at here: Geo.Coordinate, needed: Bool) async -> SpotWeather? {
+        needed ? await guide.weather(at: here) : nil
+    }
+
+    private func centreWind(at here: Geo.Coordinate, needed: Bool) async -> WindReading? {
+        needed ? await guide.currentWind(at: here) : nil
     }
 
     /// Whether the map is still looking at the point a request was made for,

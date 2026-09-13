@@ -11,28 +11,29 @@ import SwiftUI
 /// television the list is the point: this is somebody on a sofa looking at
 /// the water from several sides, which is a thing a phone is bad at.
 ///
+/// Also the player for a single stream, which is the one-angle case of the
+/// same thing. See `CamStage`.
+///
 /// **No system transport bar.** `VideoPlayer` brings tvOS's own controls,
 /// and those eat the D-pad — left and right would scrub rather than change
-/// camera. So the picture is a bare `AVPlayerLayer` and every key is this
-/// screen's own. Nothing is lost: there is nothing to scrub on a live camera,
-/// and the recorded clips loop.
+/// camera, and Up could never reach the stage's corner. So the picture is a
+/// bare `AVPlayerLayer` and every key is this screen's own. Nothing is lost:
+/// there is nothing to scrub on a live camera, and the recorded clips loop.
 struct CamAnglePlayer: View {
 
     let streams: [WebcamStream.Stream]
     let name: String
-    /// The camera as the guide knows it, when the compass is available.
-    var here: SpotGuideStore.GuideResource?
-    var onStep: (SpotGuideStore.GuideResource) -> Void = { _ in }
-
-    @Environment(\.dismiss) private var dismiss
+    /// The stage's focus, so Up can hand the remote to the corner.
+    var focus: FocusState<CamStage.Focus?>.Binding
+    /// False while the compass is open. The glass stops listening then, so
+    /// the arrows drive the compass and nothing else.
+    var isListening = true
 
     @State private var index = 0
     @State private var player: AVQueuePlayer?
     @State private var isShowingChrome = true
     /// The current angle's item reported failure — see `start`.
     @State private var didFail = false
-    @FocusState private var isDriving: Bool
-    @FocusState private var isOnJoystick: Bool
 
     private var current: WebcamStream.Stream { streams[min(index, streams.count - 1)] }
 
@@ -43,22 +44,8 @@ struct CamAnglePlayer: View {
             keys
             if didFail { StreamFailed(name: current.label.isEmpty ? name : current.label) }
             if isShowingChrome { chrome }
-            if let here {
-                CamJoystick(origin: here, onPick: onStep,
-                            onExit: { isDriving = true },
-                            isDriving: $isOnJoystick)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity,
-                           alignment: .bottomTrailing)
-                    .padding(.trailing, 70)
-                    .padding(.bottom, 60)
-            }
         }
         .ignoresSafeArea()
-        // Menu leaves, said here rather than trusted to the cover: the
-        // full-screen button below owns every other key on this screen, and
-        // a screen that owns the remote has to give Menu back itself.
-        .onExitCommand { dismiss() }
-        .onAppear { isDriving = true }
         .task(id: index) { await start() }
         // The chrome goes after a few seconds so the water has the screen,
         // and any key brings it back — the convention every television player
@@ -77,7 +64,7 @@ struct CamAnglePlayer: View {
 
     /// Bumped by anything that should re-show the chrome and restart its
     /// countdown.
-    private var chromeKey: String { "\(index)|\(isDriving)" }
+    private var chromeKey: String { "\(index)|\(focus.wrappedValue == .picture)" }
 
     private func start() async {
         player?.pause()
@@ -109,17 +96,18 @@ struct CamAnglePlayer: View {
         }
         .buttonStyle(NoChrome())
         .focusEffectDisabled()
-        .focused($isDriving)
+        .focused(focus, equals: .picture)
+        .disabled(!isListening)
         .onMoveCommand { direction in
             switch direction {
             case .left:  step(-1)
             case .right: step(1)
-            case .down:
+            case .up:
                 // The one key that leaves the picture. Without this the glass
-                // swallows every direction and the compass below could never
+                // swallows every direction and the corner above could never
                 // be reached at all.
                 isShowingChrome = true
-                if here != nil { isOnJoystick = true }
+                focus.wrappedValue = .compass
             default:     isShowingChrome = true
             }
         }
@@ -144,7 +132,7 @@ struct CamAnglePlayer: View {
                 .foregroundStyle(.white.opacity(0.7))
                 Text(name)
                     .font(.system(size: 32, weight: .semibold))
-                Spacer()
+                    .lineLimit(1)
                 if current.isClip {
                     // Said plainly: these are the operator's recordings on a
                     // loop, not a live picture, and a rider watching for a
@@ -153,8 +141,11 @@ struct CamAnglePlayer: View {
                         .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
             }
-            .padding(.horizontal, 60)
+            .padding(.leading, 60)
+            // Clear of the stage's corner buttons, which share this row.
+            .padding(.trailing, 220)
             .padding(.top, 50)
 
             Spacer()
@@ -177,7 +168,7 @@ struct CamAnglePlayer: View {
                 .padding(.vertical, 20)
                 .background(.thinMaterial, in: Capsule())
                 .padding(.bottom, 60)
-            } else {
+            } else if !current.label.isEmpty {
                 Text(current.label)
                     .font(.system(size: 30, weight: .medium))
                     .padding(.horizontal, 34)

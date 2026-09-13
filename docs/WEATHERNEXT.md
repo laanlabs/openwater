@@ -135,23 +135,27 @@ coastline (dry-run, exact bytes):
 | One cell, one init, `SELECT *` | 13 TiB |
 | One cell, no `init_time` filter | 34 TiB (≈ $210) |
 
-The table is also clustered by `geography`, and cluster pruning may bill far
-less than the estimate — but BigQuery refuses to start a query unless its byte
-budget covers the *estimate*, so the only way to learn the real cost is to let
-one query run with a 400 GiB ceiling. Unpruned, the 90-day plan is ≥ 22 TiB,
-about $140; pruned, it is inside the free tier. One experiment decides it.
+**But the estimate is not the bill.** The table is clustered by `geography`,
+and a real run of the one-cell query — `ST_DWITHIN(t.geography, …)` on the
+clustered column, `--maximum_bytes_billed` at 400 GiB — billed **0.01 GiB**:
+BigQuery's 10 MiB minimum, against a 355 GiB estimate. A whole north-east US
+box — 1,682 cells, one day's four main runs, 120 hours, 807,000 rows — billed
+0.11 GiB. Cluster pruning does its job: the harness's ninety days, batched one
+region-day per query, is on the order of 10 GiB, inside the free tier by two
+orders of magnitude.
 
-**And that experiment cannot run yet.** Every project on the laan-labs billing
-account carries a BigQuery `QueryUsagePerDay` default of 200 MiB, and a
-consumer override cannot exceed the default ("can only be set between 0 and
-209715200"). The cap is why nothing here can be billed by accident, and also
-why nothing can run: a quota-increase request to 1 TiB/day is filed via Cloud
-Quotas and waits on Google. Until it is granted, or the statistics bucket
-opens, the harness is blocked and nothing in this section has been built.
+Two traps on the way to that number, recorded so they are not re-fallen into.
+The `QueryUsagePerDay` quota reads `209715200` from the API, which is
+**MiB**, not bytes — 200 TiB a day, a ceiling nobody will meet, not the 200 MiB
+wall it looks like. And BigQuery refuses to *start* a query whose
+`--maximum_bytes_billed` is under the unpruned estimate ("380924592128 or
+higher required"), so a per-query cap must cover the estimate; the daily
+quota is the real backstop against a mistake.
 
-Rules for whoever runs the first real query: `--maximum_bytes_billed` on every
-query, always filter `init_time`, select named `forecast.*` fields and never
-`*`, and read `totalBytesBilled` off the job before running a second one.
+Rules for every query: `--maximum_bytes_billed` set, always filter
+`init_time`, filter on `t.geography` (the clustered column) rather than
+`geography_polygon`, select named `forecast.*` fields and never `*`, and read
+`totalBytesBilled` off the job before running the next one.
 
 ## How "not shipped" is enforced
 

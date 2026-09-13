@@ -1,4 +1,5 @@
 import OpenWaterCore
+import OpenWaterSpots
 import SwiftUI
 
 /// Tell us about this screen.

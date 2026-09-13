@@ -1084,82 +1084,17 @@ public final class WindWashModel {
             // scrub the wash through these rows, and the depth costs the
             // same one request either way. Unscrubbed, the shown hour is
             // simply the one nearest now.
-            var axis: [Date] = []
-            var day: [(speeds: [Double?], directions: [Double?])] = []
-            switch layer {
-            case .wind:
-                let field = await OpenMeteo.windAlong(
-                    coords, hours: SpotGuideStore.scrubForecastHours,
-                    pastHours: SpotGuideStore.scrubPastHours)
+            var (axis, day) = await Self.fetchField(coords, layer: layer, count: count)
+            // An empty first answer is not a verdict for the layers that
+            // cover every coordinate — see `reloadRetryDelays`. Asked again
+            // while `isLoading` holds, so the hud keeps its spinner rather
+            // than saying "didn't load" over a network still coming up.
+            for delay in Self.reloadRetryDelays where axis.isEmpty && (layer == .wind || layer == .rain) {
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
-                // Laying the answer onto a shared axis is ~4,500 rows of
-                // pure arithmetic over values, and it lands mid-pan — so it
-                // goes to another thread rather than into the frame the map
-                // was about to draw.
-                (axis, day) = await Task.detached(priority: .userInitiated) {
-                    let axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
-                    // A hash of the axis, not a linear search per row: three
-                    // days across sixty-three points is ~4,500 rows, and
-                    // `firstIndex(of:)` would walk seventy-two dates for each
-                    // of them — a third of a million comparisons where a
-                    // dictionary costs one.
-                    let slots = Self.slotIndex(of: axis)
-                    var day = Self.blankDay(hours: axis.count, points: count)
-                    for (coordIndex, rows) in field.enumerated() where coordIndex < count {
-                        for row in rows {
-                            guard let slot = slots[row.date] else { continue }
-                            day[slot].speeds[coordIndex] = row.speedKn
-                            day[slot].directions[coordIndex] = row.directionDeg
-                        }
-                    }
-                    return (axis, day)
-                }.value
-            case .currents:
-                // The ocean model answers nil over land, so the current
-                // wash paints only the water — the field's own honesty,
-                // no land mask needed.
-                let field = await OpenMeteo.marineAlong(
-                    coords, hours: SpotGuideStore.scrubForecastHours,
-                    pastHours: SpotGuideStore.scrubPastHours)
-                guard !Task.isCancelled else { return }
-                (axis, day) = await Task.detached(priority: .userInitiated) {
-                    let axis = field.map(\.currents).max { $0.count < $1.count }?.map(\.at) ?? []
-                    let slots = Self.slotIndex(of: axis)
-                    var day = Self.blankDay(hours: axis.count, points: count)
-                    for (coordIndex, point) in field.enumerated() where coordIndex < count {
-                        for row in point.currents {
-                            guard let slot = slots[row.at] else { continue }
-                            day[slot].speeds[coordIndex] = row.speedKn
-                            day[slot].directions[coordIndex] = row.directionDeg
-                        }
-                    }
-                    return (axis, day)
-                }.value
-            case .rain:
-                // The same grid, the same three days, one variable: how
-                // much falls in each hour. No direction — rain has none the
-                // wash can use — so the field's vectors stay nil and no
-                // comets are seeded over it.
-                let field = await OpenMeteo.rainAlong(
-                    coords, hours: SpotGuideStore.scrubForecastHours,
-                    pastHours: SpotGuideStore.scrubPastHours)
-                guard !Task.isCancelled else { return }
-                (axis, day) = await Task.detached(priority: .userInitiated) {
-                    let axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
-                    let slots = Self.slotIndex(of: axis)
-                    var day = Self.blankDay(hours: axis.count, points: count)
-                    for (coordIndex, rows) in field.enumerated() where coordIndex < count {
-                        for row in rows {
-                            guard let slot = slots[row.date] else { continue }
-                            day[slot].speeds[coordIndex] = row.millimetres
-                        }
-                    }
-                    return (axis, day)
-                }.value
-            case .off:
-                return
+                (axis, day) = await Self.fetchField(coords, layer: layer, count: count)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, layer != .off else { return }
             // Whatever the old field's rebuild was working towards, it is
             // about to be answering for the wrong rectangle — retired here,
             // in the same breath as the field it belonged to.
@@ -1186,7 +1121,7 @@ public final class WindWashModel {
                 // the ocean model. The old region's cells must go with it,
                 // or the wash keeps painting water that isn't there.
                 cells = []
-        raster = nil
+                raster = nil
                 field = nil
                 // For the wind and rain layers this is not a fact about the
                 // place — the atmospheric model covers every coordinate a
@@ -1197,6 +1132,95 @@ public final class WindWashModel {
                 apply()
             }
         }
+    }
+
+    /// About half a minute of asking again, on top of `Fetch`'s own quick
+    /// retries. The map's first load is the moment the network is least ready
+    /// — a box just woken — and the wind and rain models cover every
+    /// coordinate, so an empty answer from them is a network that has not
+    /// come up yet, not a fact about the place.
+    private static let reloadRetryDelays: [Duration] = [.seconds(2), .seconds(4), .seconds(8), .seconds(15)]
+
+    /// One answer for the whole grid, laid onto a shared hour axis. Empty on
+    /// cancellation, or when the layer answered nothing.
+    private static func fetchField(_ coords: [Geo.Coordinate], layer: WashLayer, count: Int) async
+    -> (axis: [Date], day: [(speeds: [Double?], directions: [Double?])]) {
+        var axis: [Date] = []
+        var day: [(speeds: [Double?], directions: [Double?])] = []
+        switch layer {
+        case .wind:
+            let field = await OpenMeteo.windAlong(
+                coords, hours: SpotGuideStore.scrubForecastHours,
+                pastHours: SpotGuideStore.scrubPastHours)
+            guard !Task.isCancelled else { return ([], []) }
+            // Laying the answer onto a shared axis is ~4,500 rows of
+            // pure arithmetic over values, and it lands mid-pan — so it
+            // goes to another thread rather than into the frame the map
+            // was about to draw.
+            (axis, day) = await Task.detached(priority: .userInitiated) {
+                let axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
+                // A hash of the axis, not a linear search per row: three
+                // days across sixty-three points is ~4,500 rows, and
+                // `firstIndex(of:)` would walk seventy-two dates for each
+                // of them — a third of a million comparisons where a
+                // dictionary costs one.
+                let slots = Self.slotIndex(of: axis)
+                var day = Self.blankDay(hours: axis.count, points: count)
+                for (coordIndex, rows) in field.enumerated() where coordIndex < count {
+                    for row in rows {
+                        guard let slot = slots[row.date] else { continue }
+                        day[slot].speeds[coordIndex] = row.speedKn
+                        day[slot].directions[coordIndex] = row.directionDeg
+                    }
+                }
+                return (axis, day)
+            }.value
+        case .currents:
+            // The ocean model answers nil over land, so the current
+            // wash paints only the water — the field's own honesty,
+            // no land mask needed.
+            let field = await OpenMeteo.marineAlong(
+                coords, hours: SpotGuideStore.scrubForecastHours,
+                pastHours: SpotGuideStore.scrubPastHours)
+            guard !Task.isCancelled else { return ([], []) }
+            (axis, day) = await Task.detached(priority: .userInitiated) {
+                let axis = field.map(\.currents).max { $0.count < $1.count }?.map(\.at) ?? []
+                let slots = Self.slotIndex(of: axis)
+                var day = Self.blankDay(hours: axis.count, points: count)
+                for (coordIndex, point) in field.enumerated() where coordIndex < count {
+                    for row in point.currents {
+                        guard let slot = slots[row.at] else { continue }
+                        day[slot].speeds[coordIndex] = row.speedKn
+                        day[slot].directions[coordIndex] = row.directionDeg
+                    }
+                }
+                return (axis, day)
+            }.value
+        case .rain:
+            // The same grid, the same three days, one variable: how
+            // much falls in each hour. No direction — rain has none the
+            // wash can use — so the field's vectors stay nil and no
+            // comets are seeded over it.
+            let field = await OpenMeteo.rainAlong(
+                coords, hours: SpotGuideStore.scrubForecastHours,
+                pastHours: SpotGuideStore.scrubPastHours)
+            guard !Task.isCancelled else { return ([], []) }
+            (axis, day) = await Task.detached(priority: .userInitiated) {
+                let axis = (field.max { $0.count < $1.count })?.map(\.date) ?? []
+                let slots = Self.slotIndex(of: axis)
+                var day = Self.blankDay(hours: axis.count, points: count)
+                for (coordIndex, rows) in field.enumerated() where coordIndex < count {
+                    for row in rows {
+                        guard let slot = slots[row.date] else { continue }
+                        day[slot].speeds[coordIndex] = row.millimetres
+                    }
+                }
+                return (axis, day)
+            }.value
+        case .off:
+            return ([], [])
+        }
+        return (axis, day)
     }
 
     /// An empty day, one row per hour and one slot per grid point.

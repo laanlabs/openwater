@@ -227,7 +227,7 @@ struct CamCard: View {
     /// Where pressing this card went. One optional rather than three Bools:
     /// a YouTube cam only learns which of these it is *after* a round trip,
     /// and three flags would let it be two things at once.
-    @State private var route: Route?
+    @State private var route: CamRoute?
     @State private var isResolving = false
 
     /// Only meaningful for `.pin`: a map pin wears its name while focused.
@@ -235,26 +235,6 @@ struct CamCard: View {
 
     /// Only meaningful for `.card`: the grid tile draws its own ring.
     @FocusState private var isCardFocused: Bool
-
-    private enum Route: Identifiable {
-        /// Something `AVPlayer` can open — the guide's own stream or still,
-        /// or a manifest resolved a moment ago.
-        case play(URL, isStill: Bool)
-        /// What an operator's own page turned out to be showing — one
-        /// camera or several, live or looping. See `WebcamStream`.
-        case angles([WebcamStream.Stream])
-        /// A code for a phone. Carries why the stream was not available, when
-        /// one was actually asked for; nil when nothing was ever tried.
-        case handoff(String?)
-
-        var id: String {
-            switch self {
-            case .play(let url, _): url.absoluteString
-            case .angles(let streams): streams.first?.id ?? "angles"
-            case .handoff: "handoff"
-            }
-        }
-    }
 
     private var isPlayable: Bool { cam.playback != nil }
 
@@ -272,15 +252,10 @@ struct CamCard: View {
             case .bar: barLabel
             }
         }
+        // Every route opens on the stage, the code for the phone included,
+        // so the compass and the menu are there whatever this camera is.
         .fullScreenCover(item: $route) { route in
-            switch route {
-            case .play(let url, let isStill):
-                CamStage(start: .play(url, isStill: isStill), cam: cam)
-            case .angles(let streams):
-                CamStage(start: .angles(streams), cam: cam)
-            case .handoff(let whyNoStream):
-                CamHandoff(cam: cam, whyNoStream: whyNoStream)
-            }
+            CamStage(start: route, cam: cam)
         }
     }
 
@@ -411,46 +386,18 @@ struct CamCard: View {
         }
     }
 
-    /// What a press does, in the order the answers are cheap.
-    ///
-    /// The guide's own stream or still needs nothing asked of anybody. A
-    /// YouTube cam with the switch on costs one request, and a failure is
-    /// not an error state — it is the code, which always works.
+    /// What a press does — see `CamRoute.resolve`, which the compass shares,
+    /// so a step along the coast lands wherever a press here would.
     private func open() {
-        switch cam.playback {
-        case .stream(let url): route = .play(url, isStill: false)
-        case .still(let url):  route = .play(url, isStill: true)
-        case nil:
-            // Not YouTube: read the operator's own page for whatever it hands
-            // its own player. Costs one request and needs no switch — see
-            // `WebcamStream` for why this is a different question entirely.
-            guard VideoLink.youTubeID(from: cam.url) != nil else {
-                isResolving = true
-                Task {
-                    let streams = await WebcamStream.find(at: cam.url)
-                    isResolving = false
-                    route = streams.isEmpty ? .handoff(nil) : .angles(streams)
-                }
-                return
-            }
-            guard willTryYouTube, let id = VideoLink.youTubeID(from: cam.url) else {
-                route = .handoff(nil)
-                return
-            }
-            isResolving = true
-            Task {
-                let manifest = await YouTubeStream.manifest(for: id)
-                isResolving = false
-                if let manifest {
-                    route = .play(manifest, isStill: false)
-                } else {
-                    // The reason travels to the screen the rider is about to
-                    // be looking at. A switch that silently does nothing is
-                    // indistinguishable from a switch that is not wired up,
-                    // which is exactly how this was first reported.
-                    route = .handoff(YouTubeStream.lastFailure)
-                }
-            }
+        guard CamRoute.needsRoundTrip(cam, playsYouTube: playsYouTube) else {
+            route = CamRoute.immediate(for: cam) ?? .handoff(nil)
+            return
+        }
+        isResolving = true
+        Task {
+            let resolved = await CamRoute.resolve(cam, playsYouTube: playsYouTube)
+            isResolving = false
+            route = resolved
         }
     }
 
@@ -485,88 +432,8 @@ struct CamCard: View {
 
 // MARK: - Watching one
 
-/// Full screen, and whichever of the two things it is.
-///
-/// **Menu always leaves.** Said explicitly here rather than left to the
-/// cover, because the system player inside `LiveStream` has its own ideas
-/// about the Menu button — it hides its transport bar first, and a failed
-/// item leaves it showing a small error with nothing obviously pressable.
-/// The phone had the same trap in a different coat: a stream that would not
-/// play and no way out. One press, one exit, whatever the player is doing.
-struct CamPlayer: View {
-
-    /// Already resolved by the caller. The card knows whether this came from
-    /// the guide or from a manifest fetched a moment ago; the player does not
-    /// need to, and asking `cam.playback` again here would have missed the
-    /// YouTube case entirely.
-    let url: URL
-    let isStill: Bool
-    let name: String
-    var here: SpotGuideStore.GuideResource?
-    var onStep: (SpotGuideStore.GuideResource) -> Void = { _ in }
-
-    @Environment(\.dismiss) private var dismiss
-    @FocusState private var isOnJoystick: Bool
-
-    var body: some View {
-        Group {
-            if isStill {
-                RefreshingStill(url: url, name: name)
-            } else {
-                // No custom headers. Surfline's CDN refuses a browser user
-                // agent and accepts AVPlayer's own, which is exactly what
-                // this sends; a YouTube manifest is happy either way.
-                LiveStream(url: url, name: name)
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if let here {
-                CamJoystick(origin: here, onPick: onStep, isDriving: $isOnJoystick)
-                    .padding(.trailing, 70)
-                    .padding(.bottom, 60)
-            }
-        }
-        .ignoresSafeArea()
-        .menuBackHint()
-        .onExitCommand { dismiss() }
-    }
-}
-
-private struct LiveStream: View {
-
-    let url: URL
-    let name: String
-
-    @State private var player: AVPlayer?
-    /// The item reported failure — see `watch`. The system player shows its
-    /// own error for this, small and grey in the middle of a black screen;
-    /// this screen says it at television size and says how to leave.
-    @State private var didFail = false
-
-    var body: some View {
-        ZStack {
-            VideoPlayer(player: player)
-            if didFail { StreamFailed(name: name) }
-        }
-        .task {
-            let player = AVPlayer(url: url)
-            // A live cam has no sound worth hearing and a living room has
-            // somebody else in it.
-            player.isMuted = true
-            player.play()
-            self.player = player
-            guard let item = player.currentItem else { return }
-            for await status in item.publisher(for: \.status).values {
-                if status == .failed { didFail = true; return }
-                if status == .readyToPlay { return }
-            }
-        }
-        .onDisappear {
-            player?.pause()
-            player = nil
-        }
-    }
-}
+// Streams play in `CamAnglePlayer` and everything plays on `CamStage`; what
+// is left here are the two pieces they share.
 
 /// What a stream that will not play looks like from a sofa: the camera's
 /// name, one sentence about what happened, and the way out — because the
@@ -606,7 +473,7 @@ struct StreamFailed: View {
 /// Cache-busted per pass: these are served with generous cache headers by
 /// hosts that never expected anybody to watch them, and without this the
 /// picture is a still life.
-private struct RefreshingStill: View {
+struct RefreshingStill: View {
 
     let url: URL
     let name: String
@@ -657,7 +524,7 @@ private struct RefreshingStill: View {
 /// provider's page — and gives the one thing that actually opens it. The URL
 /// is printed under the code as well: a code that will not scan in a bright
 /// room is still a thing somebody can type.
-private struct CamHandoff: View {
+struct CamHandoff: View {
 
     @Environment(TVUnits.self) private var units
 

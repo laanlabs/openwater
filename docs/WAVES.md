@@ -241,38 +241,57 @@ a half in two seconds and the next section gives it back; the
 deceleration gate fired on every one. `ridesSlowAndRecover` drops it. What
 still ends a ride is the floor and the turn back out.
 
-**Direction is not consulted at all.** A first version kept a cone —
-widened to 120°, with cutbacks bridged whatever they pointed at — and it
-found test-12's waves only because the inferred swell happened to point
-along them. The moment the rider set the real swell, from the
-south-south-east, the same two long waves came out as four pieces of five
-to seven seconds: a surfer rides *across* the face, down the line, and
-cuts back through every point of the compass. The rider's own rule is the
-right one — *"we're just trying to measure the rides they have while
-they're on foil with the increased speed"* — so `ignoresDirection` drops
-the per-sample cone, the bridge angle and the net-bearing test. The swell,
-set or inferred, only labels how far off each ride was. (`bridgesAnyTurn`
-stays for the gap-bridging inside the carve tolerance.)
+**Direction does not decide what a ride is.** A first version kept a cone
+— widened to 120°, with cutbacks bridged — and it found test-12's waves
+only because the inferred swell happened to point along them. The moment
+the rider set the real swell, from the south-south-east, the same two
+long waves came out as four pieces of five to seven seconds: a surfer
+rides *across* the face, down the line, and cuts back through every point
+of the compass. The rider's own rule is the right one — *"we're just
+trying to measure the rides they have while they're on foil with the
+increased speed"* — so `ignoresDirection` drops the per-sample cone, the
+bridge angle and the net-bearing test as conditions for riding.
+(`bridgesAnyTurn` stays for the gap-bridging inside the carve tolerance.)
 
-**What separates two waves in one flight is the pump.** With direction
-gone, a rider who kicks out, pumps back through the trough and drops onto
-the next face without touching down is one long stretch on the foil.
-`splitsAtPumps` cuts it where a five-sample median of speed sits below
-`pumpFraction` (0.7) of the wave's own typical speed for at least
-`minimumPump` (4 s); the next rise is the next catch, measured against the
-pump as its lull by the ordinary catch rule, and linked. A bottom turn
-scrubs speed for a second or two and is left alone by the duration.
-Written from the rider's description and **pinned by no recording yet** —
-test-12 has no linked waves, and the first session that strings waves
-together is the one that will set these two numbers.
+**Direction has one job: telling the pump from the ride.** The rider's
+map of test-12's first wave showed what a link looks like on this foil:
+a catch ridden north for four seconds, a turn, **fifteen seconds
+south-south-east at six metres a second — straight back into a swell from
+the south-south-east — and a second wave ridden north**. The pump never
+slowed down, so no speed rule could see it; its heading is the whole tell.
+`splitsAtPumps` therefore cuts a riding run in two places: where a
+five-sample median of speed sits below `pumpFraction` (0.7) of the wave's
+own typical speed for `minimumPump` (4 s), and where the course sits
+within `againstSwellAngle` (60°) of the swell's *from* bearing for
+`minimumPumpAgainst` (8 s), two-second wobbles allowed. A cutback swings
+through the same arc for two or three seconds and is left as the wave.
+What comes out of a pump is the next ride, **linked**, and its catch is
+measured against the lull the previous wave rose out of — on a paddled
+foil the carry lasts as long as the flight, because a wave caught off a
+fifteen-second pump at ride speed shows no rise over the pump. The
+shortest named ride is three seconds on these sports, because that first
+catch was ridden for four, and every wave is a row on the Runs tab
+however short (the ribbon's fifty-metre lane floor is off for them).
 
-**Linked means never touched down.** The rise-window rule marks a wave
-linked when it was caught within seconds of the last one's kick-out — a
-downwinder's meaning. A SUP foiler kicks out, pumps back through the trough
-for twenty or thirty seconds, and drops onto the next face without the board
-touching the water; that is the thing the sport is judged by, and by the
-old rule none of it counted. `linksAcrossFlight`: a wave caught in the same
-flight as the last one is linked, however long the pump took.
+With the rider's swell (from 157°) test-12 reads: wave 1 → ride 974–978,
+pump 979–995 (105 m), ride 996–1038 linked; wave 3 → ride, a nine-second
+pump east-south-east, ride, a twelve-second pump south, ride — 6 rides, 3
+linked, 3 pumps, 35 s / 230 m pumping. The rider confirmed the first
+wave's shape; the second pump in wave 3 is the one to ask about. With the
+swell inferred (see below) it reads 5 rides, 2 linked, 2 pumps, and that
+is what the expectation record pins.
+
+**So the swell direction matters again, and the inference had to get
+better.** The old reading — every fast flying sample, speed-weighted —
+said the swell came from 240° on test-12, eighty degrees off the truth,
+because the rides ran along the beach. `inferredSwell` now reads the
+**drop-ins**: the first four seconds of each ride found by a direction-free
+pass, when the board is going with the wave before the rider turns down
+the line, weighted by each ride's length. On test-12 that says 199°, and
+finds the first wave's pump on its own. The old reading stands in when
+there are no rides. The Wave Rides footer says the swell was "read from
+the way you dropped in" and tells the rider to set it if the pumping
+looks wrong.
 
 **Pumping is drawn and added up.** Every stretch on the foil that was not
 a wave — between two linked waves, or out to one that never came, up to

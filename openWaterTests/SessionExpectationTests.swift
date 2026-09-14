@@ -93,6 +93,9 @@ final class SessionExpectationTests: XCTestCase {
         /// measure them against — nil otherwise, so a session without one
         /// pins nothing. Found through `WaveRideFinder.forSport` with the
         /// sport's stock rules, exactly as a fresh install reads them.
+        /// Seconds pumping between waves on a paddled foil; nil where there
+        /// were none, so older records read as they did.
+        var pumpTime: Double?
         var waves: Int?
         var waveTime: Double?
         var wavesLinked: Int?
@@ -201,6 +204,7 @@ final class SessionExpectationTests: XCTestCase {
             legsUpwind: legsByKind[.upwind] ?? 0,
             windDirection: summary.wind?.directionFrom,
             windSource: summary.wind?.source.rawValue,
+            pumpTime: (waves?.timePumping ?? 0) > 0 ? waves?.timePumping : nil,
             waves: waves?.count,
             waveTime: waves?.timeOnWaves,
             wavesLinked: waves?.linkedCount
@@ -589,6 +593,7 @@ final class SessionExpectationTests: XCTestCase {
         check("upwind legs", actual.legsUpwind, expected.legsUpwind)
 
         XCTAssertEqual(actual.waves, expected.waves, "\(key) (\(file)): waves")
+        XCTAssertEqual(actual.pumpTime, expected.pumpTime, "\(key) (\(file)): pumping")
         XCTAssertEqual(actual.wavesLinked, expected.wavesLinked, "\(key) (\(file)): linked waves")
         if let a = actual.waveTime, let b = expected.waveTime {
             check("wave time", a, b, 0.5)

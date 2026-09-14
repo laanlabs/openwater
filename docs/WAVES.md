@@ -274,6 +274,15 @@ touching the water; that is the thing the sport is judged by, and by the
 old rule none of it counted. `linksAcrossFlight`: a wave caught in the same
 flight as the last one is linked, however long the pump took.
 
+**Pumping is drawn and added up.** Every stretch on the foil that was not
+a wave — between two linked waves, or out to one that never came, up to
+the touchdown — is a `PumpStretch` on the summary, only for these sports
+(on a wing, flying without a wave is sailing). The Wave Rides map draws
+them in orange under the teal rides; they run the opposite way, which is
+what makes the two read apart. The summary card adds them up as distance
+and time on the foil between waves, and the expectation record carries
+`pumpTime` where there was any. Two seconds is the shortest pump named.
+
 **And on these sports a run is a wave.** `SessionAnalyzer.waveRuns` replaces
 the heading segmenter — which had cut each long wave into five "runs" at the
 carves — with one `Run` per wave, marked `isWave`, so the ribbon, the map

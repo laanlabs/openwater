@@ -48,6 +48,19 @@ struct PaddledWaveTests {
         #expect(waves.rides.last?.linked == true)
         // Neither ride swallowed the pump.
         for ride in waves.rides { #expect(ride.duration < 36) }
+        // And the pump is measured: the twelve seconds at 3.6 m/s, give or
+        // take the catch either side of it.
+        #expect(waves.pumps.count == 1, "\(waves.pumps.count) pumps")
+        #expect(waves.timePumping >= 8 && waves.timePumping <= 16, "\(waves.timePumping) s pumping")
+        #expect(waves.distancePumping > 25 && waves.distancePumping < 60, "\(waves.distancePumping) m pumped")
+    }
+
+    @Test("A wing has no pumps")
+    func wingHasNoPumps() {
+        let track = TrackBuilder().build(from: SyntheticTrack.generate(legs: linkedDay))
+        let flights = FoilDetector.forSport(.wingfoil).detect(in: track)
+        let waves = WaveRideFinder.forSport(.wingfoil).rides(in: track, flights: flights, swellFrom: 0)
+        #expect(waves.pumps.isEmpty)
     }
 
     @Test("A bottom turn is not a pump")

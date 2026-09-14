@@ -99,21 +99,37 @@ struct SportRow: View {
 
     var body: some View {
         NavigationLink {
-            Form {
-                Section {
-                    SportPicker(selection: $selection)
-                        .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
-                } footer: {
-                    Text("The sport sets the thresholds openWater uses to detect flights, gybes and falls. Changing it recalculates this session.")
-                }
-            }
-            .navigationTitle("Sport")
-            .navigationBarTitleDisplayMode(.inline)
-            .feedbackButton("Sport picker")
+            SportPickerPage(selection: $selection)
         } label: {
             HStack {
                 Label(selection.displayName, systemImage: selection.symbolName)
             }
         }
+    }
+}
+
+/// The pushed picker. Choosing a sport pops it: the page has one question,
+/// and a screen that answers it and then sits there behind a Back button
+/// reads as if nothing happened — "there's no save, only a back button"
+/// was the report. The change is not saved here; it lands in the form
+/// underneath, whose Save button says "Save & Recalculate" the moment the
+/// sport differs from the stored one.
+private struct SportPickerPage: View {
+    @Binding var selection: Sport
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Form {
+            Section {
+                SportPicker(selection: $selection)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+            } footer: {
+                Text("Tap a sport to choose it. The sport sets the thresholds openWater uses to detect flights, gybes and falls; changing it recalculates this session when you save.")
+            }
+        }
+        .navigationTitle("Sport")
+        .navigationBarTitleDisplayMode(.inline)
+        .feedbackButton("Sport picker")
+        .onChange(of: selection) { _, _ in dismiss() }
     }
 }

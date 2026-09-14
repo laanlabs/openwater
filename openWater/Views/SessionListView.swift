@@ -32,6 +32,7 @@ struct SessionListView: View {
     @State private var period: Period = .allTime
     @State private var sort: SortOrder = .newest
     @State private var isImporting = false
+    @State private var isImportingFromClipboard = false
     @State private var importMessage: String?
 
     /// The search, folded away until the magnifier is tapped. One plain
@@ -255,7 +256,8 @@ struct SessionListView: View {
         NavigationStack(path: $path) {
             Group {
                 if sessions.isEmpty {
-                    EmptyLibraryView(isImporting: $isImporting)
+                    EmptyLibraryView(isImporting: $isImporting,
+                                     isImportingFromClipboard: $isImportingFromClipboard)
                 } else {
                     // Filtered once per body pass and handed down, not read
                     // three times as a computed property.
@@ -316,6 +318,9 @@ struct SessionListView: View {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 handleImport(.success([url]))
+            }
+            .sheet(isPresented: $isImportingFromClipboard) {
+                ClipboardImportSheet { data, format in importFromClipboard(data, format: format) }
             }
             .sheet(item: $currentImport, onDismiss: advanceImportQueue) { track in
                 ImportView(imported: track) { sport in
@@ -709,8 +714,16 @@ struct SessionListView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Button("Import…", systemImage: "square.and.arrow.down") {
-                    isImporting = true
+                // Two doors, because a lot of files never reach the picker:
+                // a GPX in an email, an archive pasted into a message, a
+                // share the Files app cannot see. See `ClipboardImportSheet`.
+                Menu("Import…", systemImage: "square.and.arrow.down") {
+                    Button("From Files…", systemImage: "folder") {
+                        isImporting = true
+                    }
+                    Button("From Clipboard…", systemImage: "doc.on.clipboard") {
+                        isImportingFromClipboard = true
+                    }
                 }
                 Button("Add Sample Session", systemImage: "wand.and.stars") {
                     addSampleSession()
@@ -821,6 +834,26 @@ struct SessionListView: View {
             }
 
         case .failure(let error):
+            importMessage = error.localizedDescription
+        }
+    }
+
+    /// A track off the clipboard goes through the file path, as a file.
+    ///
+    /// Written to the app's temporary directory rather than handed to the
+    /// library as bytes, so archives, bundles and the confirmation queue all
+    /// behave exactly as they do for a picked file — one import path, not a
+    /// second one that drifts. The name is what the alert and the Import
+    /// screen will show, so it says where the file came from.
+    private func importFromClipboard(_ data: Data, format: FileFormat) {
+        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
+            .replacingOccurrences(of: ":", with: "-")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Clipboard \(stamp).\(format.fileExtension)")
+        do {
+            try data.write(to: url)
+            handleImport(.success([url]))
+        } catch {
             importMessage = error.localizedDescription
         }
     }
@@ -1071,6 +1104,7 @@ struct StatColumn: View {
 struct EmptyLibraryView: View {
 
     @Binding var isImporting: Bool
+    @Binding var isImportingFromClipboard: Bool
     @Environment(PhoneSyncClient.self) private var sync
 
     var body: some View {
@@ -1089,6 +1123,8 @@ struct EmptyLibraryView: View {
                     .foregroundStyle(.secondary)
                 Button("Import a file") { isImporting = true }
                     .buttonStyle(.borderedProminent)
+                Button("Paste from clipboard") { isImportingFromClipboard = true }
+                    .buttonStyle(.bordered)
             }
         }
     }

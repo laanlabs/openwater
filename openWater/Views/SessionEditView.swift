@@ -181,6 +181,14 @@ struct SessionEditView: View {
                     fresh.title = edits.title
                     fresh.spotName = edits.spotName
                     fresh.notes = edits.notes
+                    // And the sport, which the row seeds too and the rider
+                    // can reach before the archive lands: a session big
+                    // enough to decode slowly is exactly the one somebody
+                    // opens, goes straight into Sport, and changes — and this
+                    // used to put the old sport back under them, with no
+                    // "Save & Recalculate" ever appearing. Only a value that
+                    // differs from the seed can be the rider's.
+                    if edits.sport != stored.sport { fresh.sport = edits.sport }
                     edits = fresh
                     if let direction = edits.windDirection {
                         windDirectionText = String(Int(direction.rounded()))

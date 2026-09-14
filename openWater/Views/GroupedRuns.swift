@@ -166,6 +166,13 @@ struct GroupedRun: Identifiable {
     var startElapsed: TimeInterval { lanes.first?.startElapsed ?? 0 }
     var endElapsed: TimeInterval { lanes.last?.endElapsed ?? 0 }
 
+    /// Seconds between this run's stretches — on a wave ride, the pumping
+    /// between its waves. Zero for anything with one stretch.
+    var pumpSeconds: TimeInterval {
+        guard lanes.count > 1 else { return 0 }
+        return zip(lanes.dropFirst(), lanes).reduce(0) { $0 + max(0, $1.0.startElapsed - $1.1.endElapsed) }
+    }
+
     /// Runs of this session, in time order.
     ///
     /// A stretch shorter than `absorb` never starts a new run — the brief
@@ -186,12 +193,17 @@ struct GroupedRun: Identifiable {
     ///   same event: those headings sit maybe forty degrees either side of
     ///   dead downwind, where a genuine reversal is nearer a hundred and
     ///   eighty. The default leaves room on both sides of that gap.
+    /// - Parameter wavesTogether: on a paddled foil, whether the waves of
+    ///   one stay on the foil are one row — "caught a wave, pumped back
+    ///   out, caught another" — or one row each. Together is what a rider
+    ///   counts; apart is how they look inside it.
     static func group(
         _ lanes: [SessionRibbon.Lane],
         flights: [Flight] = [],
         absorb: Double = 60,
         touchdown: Double = 3,
-        reversal: Double = 120
+        reversal: Double = 120,
+        wavesTogether: Bool = true
     ) -> [GroupedRun] {
         let flown = rides(from: flights, touchdown: touchdown)
 
@@ -235,14 +247,15 @@ struct GroupedRun: Identifiable {
             let tacked = kind == .upwind && !brief
                 && sides.last.flatMap { $0 }.map { $0 != lane.tack && lane.tack != nil } ?? false
 
-            // A wave is never merged into the run before it. Two waves in one
-            // flight are the thing a paddled foiler is counting — the second
-            // was caught by pumping out from the first — and folding them
-            // into one row because they share a kind and a ride would erase
-            // exactly that.
-            if let current = kinds.last, ride == rides[rides.count - 1],
-               !(reversed && !brief), !tacked, kind != .wave,
-               kind == current || brief {
+            // Waves in one flight merge into one ride only when asked to
+            // (`wavesTogether`), and never on heading: a wave is a wave
+            // whichever way its cutbacks pointed, and the reversal rule is
+            // for reaches. Apart, each wave is its own row and the pump
+            // between them shows as a break.
+            let joinable = kind == .wave
+                ? (wavesTogether && kinds.last == .wave)
+                : (!(reversed && !brief) && !tacked && (kinds.last.map { kind == $0 } ?? false || brief))
+            if kinds.last != nil, ride == rides[rides.count - 1], joinable {
                 groups[groups.count - 1].append(lane)
                 if !brief {
                     let radians = lane.heading * .pi / 180

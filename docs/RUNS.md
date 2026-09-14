@@ -216,8 +216,9 @@ are in `openWaterTests/Expectations/`.
 | test-11 | parawing | 45:19 | 10.79 | Downwinder | **2** | 13 | 3 | 0 | 10 | 67% | 1 | 71 |
 | test-12 | SUP foil | 42:20 | 3.51 | At one spot | 3 | — | — | — | 3 | 17% | 0 | 5 |
 
-test-12's five rows are **waves**, not points of sail — `runsWave: 5` in
-its JSON, and the downwind/reaching/upwind columns do not apply.
+test-12's three rows are **rides** — stays on the foil holding five waves
+between them — not points of sail: `runsWave: 3`, `waves: 5` in its JSON,
+and the downwind/reaching/upwind columns do not apply.
 
 ### What each session is, and what it proves
 
@@ -225,10 +226,13 @@ its JSON, and the downwind/reaching/upwind columns do not apply.
 minutes: paddling around, two long flights and one short catch. The rider
 first said "approximately two long waves", then drew the first flight's
 shape: a catch, a fifteen-second pump straight back out into the swell at
-ride speed, and a second wave. The tab reads five waves — 45 m · 0:06,
-330 m · 0:44 *linked*, 55 m · 0:09, 321 m · 0:44, 211 m · 0:33 *linked* —
-with the paddle-outs between (16:14, 9:02, 11:47, 2:37). The heading
-segmenter had made twelve "runs" of the same water, cut at every carve.
+ride speed, and a second wave — and said the *ride* is the unit: "we
+should probably only really have two waves and maybe a third short wave".
+The tab reads three rides — 376 m · 1:04 with 2 waves and 14 s pumping,
+55 m · 0:09, 533 m · 1:28 with 2 waves and 11 s pumping — with the
+paddle-outs between (16:14, 9:02, 11:47, 2:37); the Waves toggle breaks
+them into the five waves. The heading segmenter had made twelve "runs" of
+the same water, cut at every carve.
 What it proves: that a run on a paddled foil is a wave and nothing else,
 that a cutback is not the end of a wave, that the pump between two waves
 is told by its heading and not its speed, and that the swell can be read

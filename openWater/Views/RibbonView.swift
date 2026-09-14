@@ -108,6 +108,12 @@ struct RibbonView: View {
     @State private var showingKey = false
     @State private var filter: Leg = .all
     @State private var showsControls = false
+
+    /// On a paddled foil, whether one stay on the foil is one row — its
+    /// waves and the pumping between them together — or each wave is a
+    /// row with the pump shown as a break. Shared with the Wave Rides
+    /// screen, so the two never count the same water differently.
+    @AppStorage("waves.together") private var wavesTogether = true
     @State private var expandedLeg: Int?
     @State private var expandedCluster: Int?
 
@@ -321,9 +327,11 @@ struct RibbonView: View {
         let lanes = ribbon.lanes
         let flights = flights
         let track = track
+        let together = wavesTogether
         let built = await Task.detached(priority: .userInitiated) { () -> ([GroupedRun], SpeedScale, [HeatBand]) in
             let scale = track.map { SpeedScale(speeds: $0.speed) } ?? .fallback
-            return (GroupedRun.group(lanes, flights: flights), scale, Self.buildHeat(track: track, scale: scale))
+            return (GroupedRun.group(lanes, flights: flights, wavesTogether: together),
+                    scale, Self.buildHeat(track: track, scale: scale))
         }.value
         groupedRuns = built.0
         speedScale = built.1
@@ -717,6 +725,7 @@ struct RibbonView: View {
             // left and re-entered.
             .task(id: RegroupKey(revision: revision, lanes: ribbon.lanes.count)) { await regroup() }
             .onChange(of: flights.count) { _, _ in Task { await regroup() } }
+            .onChange(of: wavesTogether) { _, _ in Task { await regroup() } }
             // The draw list and the off-foil stretches, rebuilt only when
             // one of their inputs changes rather than on every body pass —
             // and read per row through `selection`, where they used to be
@@ -1152,6 +1161,17 @@ struct RibbonView: View {
             .disabled(order != .time)
             .accessibilityLabel(showsManeuvers ? "Hide maneuvers" : "Show maneuvers")
 
+            // Only where there are waves to join: one row per stay on the
+            // foil, or one per wave with the pumping shown between.
+            if ribbon.lanes.contains(where: { $0.isWave == true }) {
+                Toggle(isOn: $wavesTogether) {
+                    Label(wavesTogether ? "Rides" : "Waves", systemImage: "link")
+                        .font(.caption.weight(.medium))
+                }
+                .toggleStyle(.button)
+                .accessibilityLabel(wavesTogether ? "Showing rides; tap for each wave separately"
+                                                  : "Showing each wave; tap for rides")
+            }
         }
         .padding(.horizontal)
         .padding(.bottom, 8)
@@ -1308,7 +1328,13 @@ struct RibbonView: View {
             guard n > 0 else { return nil }
             // "3 downwind" reads as a count of downwind runs; "3 wave" reads
             // as a typo.
-            if kind == .wave { return n == 1 ? "1 wave" : "\(n) waves" }
+            if kind == .wave {
+                let waves = ribbon.lanes.filter { $0.isWave == true }.count
+                if wavesTogether, waves != n {
+                    return "\(n) ride\(n == 1 ? "" : "s") · \(waves) waves"
+                }
+                return n == 1 ? "1 wave" : "\(n) waves"
+            }
             return "\(n) \(kind.title.lowercased())"
         }
         return counts.joined(separator: " · ")
@@ -1435,7 +1461,9 @@ struct RibbonView: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(run.kind.colour)
                             Text("· \(Format.speed(run.averageSpeed, unit: units.speed, decimals: 1)) avg · \(Format.speed(run.maxSpeed, unit: units.speed, decimals: 1)) max"
-                                 + (tacks > 1 ? " · \(tacks) tacks" : ""))
+                                 + (tacks > 1 ? " · \(tacks) tacks" : "")
+                                 + (run.kind == .wave && run.lanes.count > 1
+                                    ? " · \(run.lanes.count) waves · pumped \(Int(run.pumpSeconds.rounded()))s" : ""))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()

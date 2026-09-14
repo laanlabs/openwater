@@ -82,6 +82,9 @@ struct WaveDetailView: View {
     /// The swell's colour everywhere in the app, so the arrow on the
     /// conditions dial and the rides on this map read as one thing.
     private static let waveColour = Color.teal
+    /// Pumping between waves, on a paddled foil. Orange against teal: the
+    /// two run opposite ways and should never read as one line.
+    private static let pumpColour = Color.orange
 
     /// A height under five centimetres is the slider never having moved.
     private var missingHeight: Bool { (session.swellHeight ?? 0) <= 0.05 }
@@ -300,6 +303,17 @@ struct WaveDetailView: View {
                                                     unit: units.speed, decimals: 1))
                     measure("Typical", Format.shortDuration(waves.averageDuration))
                 }
+                // The other half of a paddled session: the work between the
+                // waves, in the colour the map draws it.
+                if !waves.pumps.isEmpty {
+                    HStack(spacing: 6) {
+                        Circle().fill(Self.pumpColour).frame(width: 8, height: 8)
+                        Text("Pumped \(Format.distance(waves.distancePumping, unit: units.distance)) · \(Format.shortDuration(waves.timePumping)) on the foil between waves")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
             }
 
             rulesButton
@@ -455,6 +469,16 @@ struct WaveDetailView: View {
             MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
                 .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
 
+            // Pumping, in its own colour, under the rides: on a paddled foil
+            // the stretch back out between two waves is the work of the
+            // sport, and it runs the opposite way to the rides, so the two
+            // read apart at a glance.
+            ForEach(waves.pumps) { pump in
+                MapPolyline(coordinates: coordinates(of: pump))
+                    .stroke(focusedRide == nil ? Self.pumpColour : Self.pumpColour.opacity(0.35),
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+            }
+
             // The others first, the chosen one last — same as every map that
             // draws runs, and for the same reason.
             ForEach(waves.rides.filter { $0.id != focusedRide }) { ride in
@@ -568,6 +592,12 @@ struct WaveDetailView: View {
         guard ride.startIndex <= ride.endIndex,
               ride.endIndex < session.track.points.count else { return [] }
         return session.track.points[ride.startIndex...ride.endIndex].map(\.clCoordinate)
+    }
+
+    private func coordinates(of pump: PumpStretch) -> [CLLocationCoordinate2D] {
+        guard pump.startIndex <= pump.endIndex,
+              pump.endIndex < session.track.points.count else { return [] }
+        return session.track.points[pump.startIndex...pump.endIndex].map(\.clCoordinate)
     }
 
     private func midpoint(of ride: WaveRide) -> CLLocationCoordinate2D {
@@ -893,6 +923,8 @@ struct WaveDetailView: View {
             out += "a stretch well below the wave's own pace for a few seconds is the pump "
             out += "to the next wave, and what rises out of it is the next ride. "
             out += "The swell direction only says how far off each ride was. "
+            out += "Orange on the map is pumping — on the foil, not on a wave — and the "
+            out += "card above adds it up. "
             out += linkedSentence
             out += "Press play under the map to watch them in the order they came."
             return out

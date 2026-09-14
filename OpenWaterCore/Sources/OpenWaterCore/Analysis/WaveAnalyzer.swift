@@ -39,6 +39,21 @@ public struct WaveRide: Hashable, Sendable, Identifiable {
     public var midIndex: Int { (startIndex + endIndex) / 2 }
 }
 
+/// A stretch on the foil that was not a wave: the pump between one wave
+/// and the next, or out to a wave that never came. Only the sports that
+/// paddle into waves have these — on a wing, flying without a wave is
+/// sailing.
+public struct PumpStretch: Hashable, Sendable, Identifiable {
+    public let id: Int
+    public let startElapsed: TimeInterval
+    public let endElapsed: TimeInterval
+    public let startIndex: Int
+    public let endIndex: Int
+    public let distance: Double
+
+    public var duration: TimeInterval { endElapsed - startElapsed }
+}
+
 /// A session's wave riding, taken as a whole.
 public struct WaveRideSummary: Sendable {
 
@@ -75,6 +90,15 @@ public struct WaveRideSummary: Sendable {
     /// admission per glide; here the inputs do not vary ride to ride, so
     /// neither does the answer.
     public let usedMotionData: Bool
+
+    /// Every stretch on the foil that was not a wave — see `PumpStretch`.
+    /// Empty except on the sports that paddle into waves.
+    public var pumps: [PumpStretch] = []
+
+    /// Seconds and metres spent pumping: the work between the waves, which
+    /// on a paddled foil is the half of the sport the wave count leaves out.
+    public var timePumping: TimeInterval { pumps.reduce(0) { $0 + $1.duration } }
+    public var distancePumping: Double { pumps.reduce(0) { $0 + $1.distance } }
 
     public var count: Int { rides.count }
 
@@ -807,24 +831,59 @@ public struct WaveRideFinder {
         // Nothing found still answers with the floor it was looking for and
         // whether the accelerometer had a say. A rider on an empty screen is
         // owed the reason more than a rider looking at thirty rides is.
-        guard !out.isEmpty else {
-            return WaveRideSummary(
+        var summary: WaveRideSummary
+        if out.isEmpty {
+            summary = WaveRideSummary(
                 rides: [], timeOnWaves: timeOnWaves, distance: distanceOnWaves,
                 longest: nil, fastest: nil, averageDuration: 0, swellFrom: swellFrom,
                 speedFloor: floor, usedMotionData: hasMotion
             )
+        } else {
+            let named = out.reduce(0.0) { $0 + $1.duration }
+            summary = WaveRideSummary(
+                rides: out,
+                timeOnWaves: timeOnWaves,
+                distance: distanceOnWaves,
+                longest: out.max { $0.duration < $1.duration },
+                fastest: out.max { $0.peakSpeed < $1.peakSpeed },
+                averageDuration: named / Double(out.count),
+                swellFrom: swellFrom,
+                speedFloor: floor,
+                usedMotionData: hasMotion
+            )
         }
-        let named = out.reduce(0.0) { $0 + $1.duration }
-        return WaveRideSummary(
-            rides: out,
-            timeOnWaves: timeOnWaves,
-            distance: distanceOnWaves,
-            longest: out.max { $0.duration < $1.duration },
-            fastest: out.max { $0.peakSpeed < $1.peakSpeed },
-            averageDuration: named / Double(out.count),
-            swellFrom: swellFrom,
-            speedFloor: floor,
-            usedMotionData: hasMotion
-        )
+        if splitsAtPumps, requiresFlight {
+            summary.pumps = pumps(in: track, flying: flyingMask, riding: riding, breaks: breaksRide)
+        }
+        return summary
+    }
+
+    /// Shortest stretch worth calling a pump. A second of not-yet-riding
+    /// at the very start of a catch is the catch, not a pump.
+    static let shortestPump: TimeInterval = 2
+
+    /// Every stretch on the foil that was not riding a wave, for the sports
+    /// where that can only be pumping: between two linked waves, or out to
+    /// a wave that never came, up to the moment the board touched down.
+    private func pumps(in track: Track, flying: [Bool], riding: [Bool], breaks: [Bool]) -> [PumpStretch] {
+        var out: [PumpStretch] = []
+        var index = 0
+        while index < track.count {
+            guard flying[index], !riding[index] else { index += 1; continue }
+            var end = index
+            while end + 1 < track.count, flying[end + 1], !riding[end + 1], !breaks[end + 1] { end += 1 }
+            defer { index = end + 1 }
+            let duration = track.elapsed[end] - track.elapsed[index]
+            guard duration >= Self.shortestPump else { continue }
+            out.append(PumpStretch(
+                id: out.count,
+                startElapsed: track.elapsed[index],
+                endElapsed: track.elapsed[end],
+                startIndex: index,
+                endIndex: end,
+                distance: track.cumulativeDistance[end] - track.cumulativeDistance[index]
+            ))
+        }
+        return out
     }
 }

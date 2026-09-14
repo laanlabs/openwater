@@ -4,7 +4,7 @@ SUP Foil · 42:20 · 3.51 km · 14.7 kn max
 
 ## The session
 
-- Shape: **At one spot**, in 3 legs (split where the rider stopped or was carried)
+- Shape: **At one spot**, in 2 legs (split where the rider stopped or was carried)
 - Net displacement 0.09 km, straightness 0.03 _(0 = back where you started, 1 = a straight line)_
 - Average moving speed 7.3 kn
 
@@ -22,19 +22,18 @@ SUP Foil · 42:20 · 3.51 km · 14.7 kn max
 | Falls | 0 |
 | Jumps | 0 |
 | Glides | 1 · 0:22 gliding |
-| Waves | 5 · 2:16 riding · 2 linked |
+| Waves | 4 · 2:07 riding · 2 linked |
 
 ## Runs
 
-The segmenter found **5 stretches**, which group into **3 runs**, **0 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **4 stretches**, which group into **2 runs**, **0 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
-### Wave · 3
+### Wave · 2
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
 | 1 | 376 m | 1:04 | 11.4 kn | 14.3 kn | — | 2 |
-| 2 | 55 m | 0:09 | 12.0 kn | 13.3 kn | — | 1 |
-| 3 | 533 m | 1:28 | 11.8 kn | 14.7 kn | — | 2 |
+| 2 | 533 m | 1:28 | 11.8 kn | 14.7 kn | — | 2 |
 
 <!-- Anything below this line is yours. Re-recording will not touch it. -->
 

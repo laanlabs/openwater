@@ -325,18 +325,21 @@ struct WaveDetailView: View {
                 HStack(alignment: .firstTextBaseline) {
                     // Rides first when they differ from the waves: "3 rides
                     // · 5 waves" is the sentence a paddled foiler says.
-                    Text(wavesTogether && waves.chains.count != waves.count
-                         ? "\(waves.chains.count) ride\(waves.chains.count == 1 ? "" : "s") · \(waves.count) waves"
-                         : waves.count == 1 ? "1 wave" : "\(waves.count) waves")
-                        .font(.subheadline.weight(.bold))
+                    // One Text, so a narrow screen wraps it as a sentence
+                    // — as two it broke after the "·" and put the linked
+                    // count's own "·" right beside it.
+                    let counts = wavesTogether && waves.chains.count != waves.count
+                        ? "\(waves.chains.count) ride\(waves.chains.count == 1 ? "" : "s") · \(waves.count) waves"
+                        : waves.count == 1 ? "1 wave" : "\(waves.count) waves"
                     // Caught straight off the back of the one before — the
                     // thing a rider is trying to do, and until now the
                     // thing the finder could not see.
-                    if waves.linkedCount > 0 {
-                        Text("· \(waves.linkedCount) linked")
+                    let linked = waves.linkedCount > 0
+                        ? Text(" · \(waves.linkedCount) linked")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Self.waveColour)
-                    }
+                        : Text("")
+                    (Text(counts).font(.subheadline.weight(.bold)) + linked)
                     Spacer(minLength: 8)
                     Text("\(Format.distance(waves.distance, unit: units.distance)) · \(Format.shortDuration(waves.timeOnWaves)) riding")
                         .font(.caption)

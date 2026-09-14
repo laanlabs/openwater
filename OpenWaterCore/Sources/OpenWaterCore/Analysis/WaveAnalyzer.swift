@@ -357,6 +357,19 @@ public struct WaveRideFinder {
     /// to pump for the next, and the rider counts it as a wave.
     public var defaultShortestRide: TimeInterval?
 
+    /// Shortest stay on the foil worth calling a ride, first catch to last
+    /// kick-out, pumping included — on the sports where the ride is the
+    /// unit. Nil elsewhere.
+    ///
+    /// The per-wave floor above has to stay low, because the first wave of
+    /// a ride can be a four-second catch before the turn out to the next.
+    /// But a stay that short *on its own* is not a ride: the rider looked
+    /// at the nine-second one on the first SUP-foil recording and said
+    /// "failed catch" — the board came up, the wave went, the board came
+    /// down. Twelve seconds, three past that one. A failed catch is not a
+    /// wave and not counted as time on one; the flight it made still stands.
+    public var shortestStay: TimeInterval?
+
     /// How long a carve out of the cone a ride survives.
     public var bridgeSeconds: TimeInterval {
         thresholds.waveBridgeSeconds ?? Self.bridgeSeconds
@@ -441,6 +454,7 @@ public struct WaveRideFinder {
             finder.ignoresDirection = true
             finder.splitsAtPumps = true
             finder.defaultShortestRide = 3
+            finder.shortestStay = 12
         }
         return finder
     }
@@ -989,6 +1003,40 @@ public struct WaveRideFinder {
                 netBearing: net,
                 linked: linked
             ))
+        }
+
+        // See `shortestStay`: a stay on the foil too short to be a ride is
+        // a failed catch, and goes — waves, time and distance — while the
+        // rest keep their order and are numbered again.
+        if let shortestStay {
+            var kept: [WaveRide] = []
+            var stay: [WaveRide] = []
+            func settle() {
+                guard let first = stay.first, let last = stay.last else { return }
+                if last.endElapsed - first.startElapsed >= shortestStay {
+                    kept.append(contentsOf: stay)
+                } else {
+                    timeOnWaves -= stay.reduce(0) { $0 + $1.duration }
+                    distanceOnWaves -= stay.reduce(0) { $0 + $1.distance }
+                }
+                stay = []
+            }
+            for ride in out {
+                if !ride.linked { settle() }
+                stay.append(ride)
+            }
+            settle()
+            out = kept.enumerated().map { number, ride in
+                WaveRide(
+                    id: number,
+                    startElapsed: ride.startElapsed, endElapsed: ride.endElapsed,
+                    startIndex: ride.startIndex, endIndex: ride.endIndex,
+                    distance: ride.distance, entrySpeed: ride.entrySpeed,
+                    peakSpeed: ride.peakSpeed, averageSpeed: ride.averageSpeed,
+                    offSwell: ride.offSwell, netBearing: ride.netBearing,
+                    linked: ride.linked
+                )
+            }
         }
 
         // Nothing found still answers with the floor it was looking for and

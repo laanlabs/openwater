@@ -269,17 +269,22 @@ What comes out of a pump is the next ride, **linked**, and its catch is
 measured against the lull the previous wave rose out of — on a paddled
 foil the carry lasts as long as the flight, because a wave caught off a
 fifteen-second pump at ride speed shows no rise over the pump. The
-shortest named ride is three seconds on these sports, because that first
+shortest named wave is three seconds on these sports, because that first
 catch was ridden for four, and every wave is a row on the Runs tab
-however short (the ribbon's fifty-metre lane floor is off for them).
+however short (the ribbon's fifty-metre lane floor is off for them). But
+the shortest *ride* — first catch to last kick-out, pumping included —
+is twelve (`shortestStay`): the rider looked at a nine-second stay on
+its own and said "failed catch, raise the floor". A stay under it is
+dropped whole, waves, time and distance; its flight still stands.
 
 With the rider's swell (from 157°) test-12 reads: wave 1 → ride 974–978,
 pump 979–995 (105 m), ride 996–1038 linked; wave 3 → ride, a nine-second
 pump east-south-east, ride, a twelve-second pump south, ride — 6 rides, 3
 linked, 3 pumps, 35 s / 230 m pumping. The rider confirmed the first
 wave's shape; the second pump in wave 3 is the one to ask about. With the
-swell inferred (see below) it reads 5 rides, 2 linked, 2 pumps, and that
-is what the expectation record pins.
+swell inferred (see below) it reads 5 waves, 2 linked, 2 pumps — 4 waves
+once the failed catch is out — and that is what the expectation record
+pins.
 
 **So the swell direction matters again, and the inference had to get
 better.** The old reading — every fast flying sample, speed-weighted —
@@ -297,7 +302,7 @@ looks wrong.
 user wants to see that they caught a wave, pumped back out to another
 wave, and then caught another one" — as *one* thing. `WaveChain` groups
 each wave with the linked waves after it and the pumps between; the Runs
-tab and the Wave Rides screen show chains by default ("3 rides · 5
+tab and the Wave Rides screen show chains by default ("2 rides · 4
 waves") and a shared toggle (`waves.together`, Rides / Waves) breaks them
 into the waves, with the pumping shown as an orange break between two
 waves of one ride. On the Runs tab a ride row says "2 waves · pumped
@@ -319,8 +324,8 @@ the heading segmenter — which had cut each long wave into five "runs" at the
 carves — with one `Run` per wave, marked `isWave`, so the ribbon, the map
 and the Runs tab describe the same water as this screen. The Runs tab lists
 them as **Wave · n**, never merges two waves that share a flight, and the
-expectation record carries `runsWave`. test-12 pins it: 3 waves, 3 runs,
-2:41 riding. Sign-off from the rider is pending in `testdata/test-12.md`.
+expectation record carries `runsWave`. test-12 pins it: 2 rides, 4 waves,
+2:07 riding. Signed off by the rider in `testdata/test-12.md`.
 
 ## 8. What was fixed on 4 September 2026
 

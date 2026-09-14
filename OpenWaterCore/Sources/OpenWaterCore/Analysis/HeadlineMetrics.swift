@@ -81,13 +81,15 @@ extension Sport {
     /// ones a rider describes by how much of the session they spent gliding.
     public var ridesSwell: Bool {
         switch self {
-        case .downwindSUP, .sup, .prone:
+        case .downwindSUP, .sup:
             true
-        // A SUP foil in the surf catches swell too, but its riding is its
-        // flying: every second on the foil is a wave, so the on-foil tile
-        // already says how much of the session was ridden, and the glide
-        // detector's wind-anchored number would say less than the truth.
-        case .supFoil:
+        // A foil in the surf catches swell too, but its riding is its
+        // flying: every second on the foil is a wave or the pump to the
+        // next, so the on-foil tile already says how much of the session
+        // was ridden, and the glide detector's wind-anchored number would
+        // say less than the truth. Prone sat with the downwinders until the
+        // SUP foil's rules were written; it is the same sport lying down.
+        case .prone, .supFoil:
             false
         case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil,
              .sail, .kayak, .efoil, .tow, .other:

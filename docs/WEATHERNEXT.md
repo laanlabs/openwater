@@ -17,13 +17,18 @@ below, not an exception to them, and the terms still do not permit showing
 real-time forecasts to App Store users (see "Why it could not ship"). A
 reply asking that exact yes/no question is with weathernext@google.com.
 
-So the feature is **built on a branch and not merged**. Everything below
-runs today under Section 2(a), "any internal purpose": the publisher is
-live, and the branch installs on our own devices from Xcode. The day Google
-says yes, its reply is pasted here verbatim, the containment guard in
-`scripts/` is retired, and the branch merges — the three in one commit. If
-Google says no, the branch stays the internal build this document always
-allowed for, and the bucket goes private.
+So the feature is **built on a branch and not merged**, and as of the
+evening of 13 September 2026 **nothing of it exists in the Cloud project**:
+the bucket, the Analytics Hub subscription and its linked dataset were
+torn down the same day, so that nothing could cost anything while the
+question is open. The branch's app code 404s harmlessly — no file, no
+line. Everything here was exercised once, under Section 2(a), "any
+internal purpose", with the publisher run from a laptop. To test again:
+re-subscribe the listing (a linked dataset, free), create the bucket, run
+`main.py`. The day Google says yes, its reply is pasted here verbatim, the
+containment guard in `scripts/` is retired, `deploy.sh` is run, and the
+branch merges — the first three in one commit. If Google says no, the
+branch stays the internal build this document always allowed for.
 
 What the branch does: WeatherNext is the fifth independent line on the model
 compare screen at guide spots, with its p10–p90 fan under it, on iPhone and

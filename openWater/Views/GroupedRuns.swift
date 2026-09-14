@@ -272,7 +272,9 @@ struct GroupedRun: Identifiable {
         // ends in a swim is short *because* of the swim, and folding it into
         // the next flight would span the touchdown this method exists to
         // respect.
-        if groups.count > 1, rides[0] == rides[1],
+        // Never a wave, though: a four-second first catch before the pump
+        // to the next wave is a wave of its own, however short.
+        if groups.count > 1, rides[0] == rides[1], kinds[0] != .wave,
            groups[0].reduce(0, { $0 + $1.distance }) < absorb {
             groups[1].insert(contentsOf: groups[0], at: 0)
             groups.removeFirst()

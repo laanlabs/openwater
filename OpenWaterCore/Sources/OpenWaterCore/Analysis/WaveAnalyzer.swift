@@ -244,6 +244,25 @@ public struct WaveRideFinder {
     /// How long a slow stretch has to last to be a pump rather than a turn.
     public static let minimumPump: TimeInterval = 4
 
+    /// Degrees either side of the swell's *from* bearing that count as
+    /// heading back out into it.
+    ///
+    /// On the first SUP-foil recording the pump between two waves did not
+    /// slow down at all — six metres a second out to sea, the same as the
+    /// ride — so speed alone never saw it. What it did was turn: fifteen
+    /// seconds south-south-east, straight into a swell from the
+    /// south-south-east, between two waves ridden north. So a sustained
+    /// stretch pointed into the swell is a pump whatever its speed. Sixty
+    /// degrees either side, because a rider pumping back out is not
+    /// steering precisely, and riding down the line sits at eighty to a
+    /// hundred degrees off the swell's travel — well outside it.
+    public static let againstSwellAngle: Double = 60
+
+    /// How long a stretch into the swell has to last to be a pump. A
+    /// cutback swings the board through the same arc for two or three
+    /// seconds; the real pump on the first recording was fifteen.
+    public static let minimumPumpAgainst: TimeInterval = 8
+
     /// The cone this finder falls back to when the rider has not set one.
     public var defaultConeAngle: Double = WaveRideFinder.halfAngle
 
@@ -284,8 +303,14 @@ public struct WaveRideFinder {
 
     /// Shortest stretch worth naming a ride.
     public var shortestRide: TimeInterval {
-        thresholds.waveMinimumDuration ?? thresholds.glideMinimumDuration
+        thresholds.waveMinimumDuration ?? defaultShortestRide ?? thresholds.glideMinimumDuration
     }
+
+    /// The shortest ride for this sport when the rider has not set one.
+    /// Three seconds on a paddled foil: the first catch on the first
+    /// SUP-foil recording was ridden for four before the rider turned out
+    /// to pump for the next, and the rider counts it as a wave.
+    public var defaultShortestRide: TimeInterval?
 
     /// How long a carve out of the cone a ride survives.
     public var bridgeSeconds: TimeInterval {
@@ -370,6 +395,7 @@ public struct WaveRideFinder {
             finder.bridgesAnyTurn = true
             finder.ignoresDirection = true
             finder.splitsAtPumps = true
+            finder.defaultShortestRide = 3
         }
         return finder
     }
@@ -383,19 +409,56 @@ public struct WaveRideFinder {
     /// The swell's *from* bearing, read off the rides themselves.
     ///
     /// Only for the sports that paddle into waves, where it is safe: a
-    /// paddled board reaches riding speed on a wave face and nowhere else,
-    /// so the direction the fast, flying samples travelled *is* the way the
-    /// waves were going, and pumping back out — slower, and the other way —
-    /// is outvoted by the rides it sits between. Speed-weighted so the
-    /// riding does the voting. A wing rider's fast samples point wherever
-    /// the wind sent them, which is why this is never used for one.
+    /// paddled board reaches riding speed on a wave face and nowhere else.
+    /// Read from the **catches**: the first few seconds of each ride, when
+    /// the board is dropping in with the wave before the rider turns down
+    /// the line. The whole ride would not do — on the first SUP-foil
+    /// recording the rides ran along the beach, and their mean pointed
+    /// eighty degrees off the real swell, which was fine while direction
+    /// was only a label and useless the moment it had to tell a pump from
+    /// a ride. The catches pointed within twenty degrees of the swell the
+    /// rider then set. Weighted by each ride's length, so a long wave's
+    /// drop-in outvotes a short catch's.
     ///
-    /// Nil with too little evidence, and then the screen asks the rider,
-    /// as it always did.
+    /// With no rides to read from, the older reading — every fast flying
+    /// sample, speed-weighted — stands in. Nil with too little evidence,
+    /// and then the screen asks the rider, as it always did. A wing's fast
+    /// samples point wherever the wind sent them; never used for one.
     public static func inferredSwell(
         in track: Track, flights: [Flight], thresholds: SportThresholds
     ) -> Double? {
         guard track.count > 1 else { return nil }
+
+        // A direction-free pass, only to find where the catches were.
+        var probe = WaveRideFinder(thresholds: thresholds)
+        probe.ridesAreRough = true
+        probe.ridesSlowAndRecover = true
+        probe.bridgesAnyTurn = true
+        probe.ignoresDirection = true
+        probe.defaultShortestRide = 3
+        probe.minimumRideSpeed = 2.5
+        let rides = probe.rides(in: track, flights: flights, swellFrom: 0).rides
+        var x = 0.0, y = 0.0, seconds = 0.0
+        for ride in rides {
+            let limit = ride.startElapsed + catchWindow
+            for k in ride.startIndex...ride.endIndex where track.elapsed[k] <= limit {
+                let radians = track.course[k] * .pi / 180
+                x += sin(radians) * ride.duration
+                y += cos(radians) * ride.duration
+                seconds += 1
+            }
+        }
+        if seconds >= 6, x != 0 || y != 0 {
+            let travel = Geo.normalizeDegrees(atan2(x, y) * 180 / .pi)
+            return Geo.normalizeDegrees(travel + 180)
+        }
+        return inferredSwellFromFlying(in: track, flights: flights, thresholds: thresholds)
+    }
+
+    /// The older reading: every fast flying sample, speed-weighted.
+    private static func inferredSwellFromFlying(
+        in track: Track, flights: [Flight], thresholds: SportThresholds
+    ) -> Double? {
         let flyingMask = FoilDetector(thresholds: thresholds)
             .flyingMask(flights: flights, count: track.count)
         let floor = max(thresholds.movingSpeed * 2, thresholds.foilTakeoffSpeed * 0.8)
@@ -573,6 +636,48 @@ public struct WaveRideFinder {
         }
     }
 
+    /// End a riding run wherever the rider turned back into the swell for
+    /// long enough to be pumping out — see `againstSwellAngle`.
+    ///
+    /// A sample points *against* the swell when its course is within
+    /// `againstSwellAngle` of the swell's from bearing. A run of them at
+    /// least `minimumPumpAgainst` long, allowing two-second wobbles out of
+    /// the arc, is cut out of the riding. Shorter excursions — cutbacks —
+    /// are left as part of the wave.
+    private func breakWhereHeadingOut(_ riding: inout [Bool], in track: Track,
+                                      swellFrom: Double, breaks: [Bool]) {
+        let count = track.count
+        let wobble: TimeInterval = 2
+        var index = 0
+        while index < count {
+            guard riding[index] else { index += 1; continue }
+            var end = index
+            while end + 1 < count, riding[end + 1], !breaks[end + 1] { end += 1 }
+            defer { index = end + 1 }
+
+            var runStart: Int?
+            var lastAgainst: Int?
+            func close(at k: Int) {
+                if let start = runStart, let last = lastAgainst,
+                   track.elapsed[last] - track.elapsed[start] >= Self.minimumPumpAgainst {
+                    for cut in start...last { riding[cut] = false }
+                }
+                runStart = nil
+                lastAgainst = nil
+            }
+            for k in index...end {
+                let against = Geo.angleSeparation(track.course[k], swellFrom) <= Self.againstSwellAngle
+                if against {
+                    if runStart == nil { runStart = k }
+                    lastAgainst = k
+                } else if let last = lastAgainst, track.elapsed[k] - track.elapsed[last] > wobble {
+                    close(at: k)
+                }
+            }
+            close(at: end)
+        }
+    }
+
     // MARK: - Find
 
     /// The waves ridden, measured against `swellFrom` — degrees the swell
@@ -699,9 +804,11 @@ public struct WaveRideFinder {
         }
 
         // See `splitsAtPumps`: a stretch well below the wave's own pace for
-        // long enough is the pump to the next wave, not part of this one.
+        // long enough is the pump to the next wave, not part of this one —
+        // and so is a stretch pointed back into the swell, at any speed.
         if splitsAtPumps {
             breakAtPumps(&riding, in: track, breaks: breaksRide)
+            breakWhereHeadingOut(&riding, in: track, swellFrom: swellFrom, breaks: breaksRide)
         }
 
         // Extract the rides.
@@ -759,6 +866,17 @@ public struct WaveRideFinder {
                 if let previous,
                    track.elapsed[k] - track.elapsed[previous.endIndex] <= DownwindAnalyzer.riseWindow,
                    !((previous.endIndex + 1)...k).contains(where: { breaksRide[$0] }) {
+                    carried = previous.lull
+                    carriedHere = true
+                }
+                // On a paddled foil the carry lasts as long as the flight:
+                // a wave caught off a fifteen-second pump at ride speed shows
+                // no rise over the pump, and the speed was still the last
+                // wave's gift. See `linksAcrossFlight`.
+                if carried == nil, linksAcrossFlight, requiresFlight, let previous,
+                   previous.endIndex < k,
+                   !((previous.endIndex + 1)...k).contains(where: { breaksRide[$0] }),
+                   (previous.endIndex...k).allSatisfy({ flyingMask[$0] }) {
                     carried = previous.lull
                     carriedHere = true
                 }

@@ -174,7 +174,11 @@ public struct SessionAnalyzer: Sendable {
         let fallSummary = sport.isFoiling
             ? classifier.falls(track: track, states: states, flights: flights)
             : .none
-        let ribbon = SessionRibbonBuilder().build(
+        // Every wave is a row on a paddled foil, however short: the four-
+        // second first catch on the first SUP-foil recording is a wave the
+        // rider counts, and the fifty-metre floor that keeps a wing's
+        // stray stretches off the list had dropped it.
+        let ribbon = SessionRibbonBuilder(minimumLaneDistance: sport.paddlesIntoWaves ? 0 : 50).build(
             track: track,
             runs: runs,
             segments: segments,

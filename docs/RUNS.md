@@ -214,24 +214,26 @@ are in `openWaterTests/Expectations/`.
 | test-9 | parawing | 8:50 | 3.24 | Downwinder | **1** | 1 | 0 | 0 | 1 | 100% | 0 | 18 |
 | test-10 | wingfoil | 1:01:18 | 16.94 | At one spot | 7 | 1 | 19 | 21 | 7 | 91% | 3 | 43 |
 | test-11 | parawing | 45:19 | 10.79 | Downwinder | **2** | 13 | 3 | 0 | 10 | 67% | 1 | 71 |
-| test-12 | SUP foil | 42:20 | 3.51 | At one spot | 3 | — | — | — | 3 | 17% | 0 | 3 |
+| test-12 | SUP foil | 42:20 | 3.51 | At one spot | 3 | — | — | — | 3 | 17% | 0 | 5 |
 
-test-12's three rows are **waves**, not points of sail — `runsWave: 3` in
+test-12's five rows are **waves**, not points of sail — `runsWave: 5` in
 its JSON, and the downwind/reaching/upwind columns do not apply.
 
 ### What each session is, and what it proves
 
 **test-12** — *The first surf session.* Montauk, a SUP foil, forty-two
-minutes: paddling around, two long waves and one short one. The rider's own
-account was "approximately two long waves", and the tab reads 468 m · 1:04,
-55 m · 0:09 and 609 m · 1:28, one row each with the paddle back out between
-them (16:14, 9:02, 11:47, 2:37 — and the rows sum to the session). The
-heading segmenter had made twelve "runs" of the same water, five per wave,
-cut at every carve. What it proves: that a run on a paddled foil is a wave
-and nothing else, that the swell can be read off the rides when nobody set
-it, and that a cutback is not the end of a wave. **Pending the rider's
-sign-off** in `testdata/test-12.md`; the second wave is the one to ask
-about, since eight seconds is short enough to be a failed catch.
+minutes: paddling around, two long flights and one short catch. The rider
+first said "approximately two long waves", then drew the first flight's
+shape: a catch, a fifteen-second pump straight back out into the swell at
+ride speed, and a second wave. The tab reads five waves — 45 m · 0:06,
+330 m · 0:44 *linked*, 55 m · 0:09, 321 m · 0:44, 211 m · 0:33 *linked* —
+with the paddle-outs between (16:14, 9:02, 11:47, 2:37). The heading
+segmenter had made twelve "runs" of the same water, cut at every carve.
+What it proves: that a run on a paddled foil is a wave and nothing else,
+that a cutback is not the end of a wave, that the pump between two waves
+is told by its heading and not its speed, and that the swell can be read
+off the drop-ins when nobody set it. **Pending the rider's sign-off** in
+`testdata/test-12.md`; wave 3, nine seconds, is the one to ask about.
 
 **test-1** — *The ocean reference.* A downwinder in nine rides — seven
 downwind rows and two brief reaches on the tab — with a swim between every

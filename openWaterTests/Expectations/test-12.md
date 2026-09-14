@@ -22,19 +22,21 @@ SUP Foil · 42:20 · 3.51 km · 14.7 kn max
 | Falls | 0 |
 | Jumps | 0 |
 | Glides | 1 · 0:22 gliding |
-| Waves | 3 · 2:41 riding |
+| Waves | 5 · 2:16 riding · 2 linked |
 
 ## Runs
 
-The segmenter found **3 stretches**, which group into **3 runs**, **0 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
+The segmenter found **5 stretches**, which group into **5 runs**, **2 of them linked** — entered without touching down. A run ends at a change of point of sail or a touchdown; stretches sailed off the foil are not runs.
 
-### Wave · 3
+### Wave · 5
 
 | # | Distance | Duration | Avg | Max | Off downwind | Stretches |
 |--:|---:|---:|---:|---:|---:|---:|
-| 1 | 468 m | 1:04 | 14.2 kn | 14.3 kn | — | 1 |
-| 2 | 55 m | 0:09 | 12.0 kn | 13.3 kn | — | 1 |
-| 3 | 609 m | 1:28 | 13.4 kn | 14.7 kn | — | 1 |
+| 1 | 46 m | 0:06 | 14.9 kn | 13.7 kn | — | 1 |
+| 2 | 330 m | 0:44 | 14.6 kn | 14.3 kn | — | 1 |
+| 3 | 55 m | 0:09 | 12.0 kn | 13.3 kn | — | 1 |
+| 4 | 321 m | 0:44 | 14.2 kn | 14.7 kn | — | 1 |
+| 5 | 212 m | 0:33 | 12.5 kn | 13.7 kn | — | 1 |
 
 <!-- Anything below this line is yours. Re-recording will not touch it. -->
 

@@ -906,7 +906,7 @@ struct WaveDetailView: View {
             sentence += " · \(Format.height(height, unit: units.distance))"
         }
         sentence += swellInferred
-            ? ", read from the way your rides went. Set the swell yourself to override it."
+            ? ", read from the way you dropped in. Set the swell yourself to override it."
             : ", as you set it."
         return sentence
     }
@@ -919,12 +919,14 @@ struct WaveDetailView: View {
             out += "your own pace for the day, where the speed *rose* when you caught it — "
             out += "whichever way it pointed, because nothing but a wave gets a paddled "
             out += "board to that speed and a ride goes along the face, cutbacks and all. "
-            out += "A ride ends where you came off the foil, or where you slowed to pump: "
-            out += "a stretch well below the wave's own pace for a few seconds is the pump "
-            out += "to the next wave, and what rises out of it is the next ride. "
-            out += "The swell direction only says how far off each ride was. "
+            out += "A ride ends where you came off the foil, or where you turned to pump: "
+            out += "a stretch heading back into the swell for eight seconds or more, at any "
+            out += "speed — or well below the wave's own pace for a few seconds — is the pump "
+            out += "to the next wave, and what comes out of it is the next ride. A cutback "
+            out += "through that arc for a second or two is still the wave. "
             out += "Orange on the map is pumping — on the foil, not on a wave — and the "
-            out += "card above adds it up. "
+            out += "card above adds it up. The swell direction is what tells the two apart, "
+            out += "so if the pumping looks wrong, set it yourself. "
             out += linkedSentence
             out += "Press play under the map to watch them in the order they came."
             return out

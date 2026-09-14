@@ -39,6 +39,12 @@ public struct SessionAnalyzer: Sendable {
         /// are still angles to the wind. See `Session.courseDirection`.
         public var courseDirection: Double?
 
+        /// Degrees the swell comes from, as the rider set it. Only the
+        /// sports that paddle into waves read it here — their runs *are*
+        /// their waves — and without it they read the direction off the
+        /// rides themselves. See `WaveRideFinder.swellFrom(for:)`.
+        public var swellFrom: Double?
+
         public init(
             sport: Sport,
             categories: [SpeedCategory] = SpeedCategory.standard,
@@ -46,7 +52,8 @@ public struct SessionAnalyzer: Sendable {
             quickMode: Bool = false,
             foilTakeoffSpeed: Double? = nil,
             overrides: SportThresholds.Overrides? = nil,
-            courseDirection: Double? = nil
+            courseDirection: Double? = nil,
+            swellFrom: Double? = nil
         ) {
             self.sport = sport
             self.categories = categories
@@ -55,6 +62,7 @@ public struct SessionAnalyzer: Sendable {
             self.foilTakeoffSpeed = foilTakeoffSpeed
             self.overrides = overrides
             self.courseDirection = courseDirection
+            self.swellFrom = swellFrom
         }
     }
 
@@ -87,11 +95,6 @@ public struct SessionAnalyzer: Sendable {
         let speedAnalyzer = SpeedAnalyzer()
         let speedResults = speedAnalyzer.evaluate(configuration.categories, on: track)
 
-        // --- Runs
-        var segmenter = RunSegmenter.forSport(sport)
-        segmenter.minimumSpeed = max(1.0, thresholds.movingSpeed)
-        var runs = segmenter.segment(track)
-
         // --- Flights. Non-foiling sports return an empty list rather than a
         // pile of false positives.
         var foilDetector = FoilDetector.forSport(sport)
@@ -101,6 +104,24 @@ public struct SessionAnalyzer: Sendable {
         foilDetector.thresholds = thresholds
         let flights = sport.isFoiling ? foilDetector.detect(in: track) : []
         let foilSummary = foilDetector.summarise(flights: flights, track: track, movingTime: movingTime)
+
+        // --- Runs.
+        //
+        // For the sports that paddle into waves, a run is a wave. The heading
+        // segmenter's unit is a change of direction, and a wave is nothing
+        // but changes of direction — on the first SUP-foil recording it cut
+        // each of two long waves into five "runs" at the carves. What a
+        // surfer counts is waves caught, so that is what the runs are, found
+        // by the same finder the Wave Rides screen uses and against the same
+        // swell: the rider's, or the one the rides themselves point at.
+        var runs: [Run]
+        if sport.paddlesIntoWaves {
+            runs = waveRuns(in: track, flights: flights, thresholds: thresholds)
+        } else {
+            var segmenter = RunSegmenter.forSport(sport)
+            segmenter.minimumSpeed = max(1.0, thresholds.movingSpeed)
+            runs = segmenter.segment(track)
+        }
 
         // --- Wind: the rider's value wins; otherwise infer it.
         let wind: Wind? = configuration.wind
@@ -204,6 +225,63 @@ public struct SessionAnalyzer: Sendable {
     }
 
     // MARK: - Helpers
+
+    /// The waves a paddled foil caught, as runs — see `analyse`.
+    ///
+    /// Each wave becomes one `Run` over the same track indices the wave
+    /// finder named, so the ribbon, the map and the Runs tab all describe
+    /// the same stretch of water as the Wave Rides screen. `isWave` is the
+    /// mark downstream reads: it is what stops the run list calling a wave
+    /// a reach, and what stops two waves linked in one flight being merged
+    /// into one row.
+    ///
+    /// No waves — not enough riding to read a swell from, or none caught —
+    /// is an empty list, honestly: there is no other unit this sport's runs
+    /// could mean.
+    private func waveRuns(in track: Track, flights: [Flight], thresholds: SportThresholds) -> [Run] {
+        guard let swellFrom = configuration.swellFrom
+                ?? WaveRideFinder.inferredSwell(in: track, flights: flights, thresholds: thresholds)
+        else { return [] }
+        let finder = WaveRideFinder.forSport(configuration.sport, thresholds: thresholds)
+        let waves = finder.rides(in: track, flights: flights, swellFrom: swellFrom)
+        let flying = FoilDetector(thresholds: thresholds).flyingMask(flights: flights, count: track.count)
+        return waves.rides.enumerated().map { index, wave in
+            var x = 0.0, y = 0.0, straight = 0.0
+            var flown = 0
+            for k in wave.startIndex...wave.endIndex {
+                let radians = track.course[k] * .pi / 180
+                let step = k > wave.startIndex
+                    ? track.cumulativeDistance[k] - track.cumulativeDistance[k - 1] : 0
+                x += sin(radians) * step
+                y += cos(radians) * step
+                if flying[k] { flown += 1 }
+            }
+            let first = track.points[wave.startIndex].coordinate
+            let last = track.points[wave.endIndex].coordinate
+            let start = Geo.Coordinate(latitude: first.latitude, longitude: first.longitude)
+            let end = Geo.Coordinate(latitude: last.latitude, longitude: last.longitude)
+            let chord = Geo.distance(start, end)
+            straight = wave.distance > 0 ? min(1, chord / wave.distance) : 0
+            let heading = Geo.normalizeDegrees(atan2(x, y) * 180 / .pi)
+            let flownFraction = Double(flown) / Double(wave.endIndex - wave.startIndex + 1)
+            return Run(
+                index: index,
+                startIndex: wave.startIndex,
+                endIndex: wave.endIndex,
+                startElapsed: wave.startElapsed,
+                endElapsed: wave.endElapsed,
+                distance: wave.distance,
+                averageSpeed: wave.averageSpeed,
+                maxSpeed: wave.peakSpeed,
+                meanHeading: heading,
+                straightness: straight,
+                startCoordinate: start,
+                endCoordinate: end,
+                foilingFraction: flownFraction,
+                isWave: true
+            )
+        }
+    }
 
     /// Seconds spent above the moving threshold.
     ///

@@ -226,6 +226,24 @@ public struct FoilDetector: Sendable {
     /// `Flight.dips` and is not touched.
     public var minimumRecovery: TimeInterval
 
+    /// Whether a rough deck can stop a flight from being called at all.
+    ///
+    /// The roughness veto is the displacement-riding safeguard: a windsurf
+    /// board planing at flying speed rattles, a foil at flying speed does
+    /// not, and without the veto every fast sample on a board that never
+    /// left the water would be a flight. That holds for a wing. It does not
+    /// hold for a paddled foil in the surf, where the ride *is* the rough
+    /// part — the face, the carve, the pump — and the only quiet moments
+    /// are sitting on the board between sets. On the first SUP-foil
+    /// recording the second wave ran twenty seconds at six and seven
+    /// metres a second before a single smooth sample let the flight begin,
+    /// and everything measured from flights lost those seconds. A paddled
+    /// foil has no displacement-planing case to guard against: nothing but
+    /// a wave gets it to takeoff speed, and once there it is flying. So for
+    /// those sports speed decides on its own, and the accelerometer is
+    /// still what the confidence is read from.
+    public var motionVetoesFlight = true
+
     public init(
         thresholds: SportThresholds = SportThresholds.forSport(.wingfoil),
         entryFactor: Double = 1.0,
@@ -247,11 +265,14 @@ public struct FoilDetector: Sendable {
     }
 
     public static func forSport(_ sport: Sport) -> FoilDetector {
-        FoilDetector(
+        var detector = FoilDetector(
             thresholds: sport.thresholds,
             minimumDuration: sport.thresholds.minFlightDuration,
             minimumRecovery: sport.thresholds.foilMinimumRecovery
         )
+        // See `motionVetoesFlight`: in the surf the ride is the rough part.
+        detector.motionVetoesFlight = !sport.paddlesIntoWaves
+        return detector
     }
 
     // MARK: - Detect
@@ -268,7 +289,9 @@ public struct FoilDetector: Sendable {
 
         for i in 0..<track.count {
             let speed = track.speed[i]
-            let smooth = track.points[i].verticalAccelSD.map { $0 <= smoothnessBar }
+            let smooth = motionVetoesFlight
+                ? track.points[i].verticalAccelSD.map { $0 <= smoothnessBar }
+                : nil
 
             if state {
                 // Stay up until speed drops through the lower band, or the ride

@@ -365,7 +365,7 @@ extension Sport {
     /// wave sports and gives the right energy model.
     var healthKitActivityType: HKWorkoutActivityType {
         switch self {
-        case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil, .prone:
+        case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil, .prone, .supFoil:
             .surfingSports
         case .sail:
             .sailing

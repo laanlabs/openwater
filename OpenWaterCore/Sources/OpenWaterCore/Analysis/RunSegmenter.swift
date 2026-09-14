@@ -40,6 +40,11 @@ public struct Run: Hashable, Sendable, Codable, Identifiable {
     /// Velocity made good along the wind axis, m/s. Positive is upwind.
     public var vmg: Double?
 
+    /// Set on the sports that paddle into waves, where a run *is* a wave —
+    /// see `SessionAnalyzer.waveRuns`. Optional so archives written before
+    /// it existed still decode; absent means the heading segmenter's unit.
+    public var isWave: Bool?
+
     public var id: Int { index }
 
     public var duration: TimeInterval { endElapsed - startElapsed }
@@ -71,8 +76,10 @@ public struct Run: Hashable, Sendable, Codable, Identifiable {
         endCoordinate: Geo.Coordinate,
         foilingFraction: Double = 0,
         trueWindAngle: Double? = nil,
-        vmg: Double? = nil
+        vmg: Double? = nil,
+        isWave: Bool? = nil
     ) {
+        self.isWave = isWave
         self.index = index
         self.startIndex = startIndex
         self.endIndex = endIndex
@@ -186,7 +193,7 @@ public struct RunSegmenter: Sendable {
         case .sup, .kayak:
             s.splitAngle = 60
             s.minimumDistance = 25
-        case .downwindSUP, .prone:
+        case .downwindSUP, .prone, .supFoil:
             // Bumps mean constant small course changes; only a real direction
             // change should count.
             s.splitAngle = 60

@@ -143,6 +143,61 @@ public struct WaveRideFinder {
     /// `DownwindAnalyzer.forSport` does for glides.
     public var minimumRideSpeed: Double = 3.0
 
+    /// Whether a wave caught without touching down since the last one is
+    /// *linked*, however long the pump between them took.
+    ///
+    /// The rise-window rule above marks a wave linked when it was caught
+    /// within seconds of the last one's kick-out, which is what linking
+    /// means on a downwinder: the next bump is under you or it is not. On a
+    /// paddled foil in the surf the join is different in kind — the rider
+    /// kicks out, turns, pumps back *out* through the trough for twenty or
+    /// thirty seconds, and drops onto the next face without the board ever
+    /// touching the water. That is the thing a SUP foiler is trying to do,
+    /// and the whole session is judged by how many waves were strung
+    /// together that way; by the rise-window rule not one of them counts.
+    /// So for the sports that paddle into waves, staying on the foil is the
+    /// link, and the pump is part of the ride between two waves.
+    public var linksAcrossFlight = false
+
+    /// Whether the deck is expected to be *rougher* on a wave than off it.
+    ///
+    /// The quiet-board rule was written for a wing: on the foil the chop
+    /// stops, and a rattling deck at speed means the board is back on the
+    /// water. A paddled foil in the surf reads the other way round. Paddling
+    /// out is the quiet part — sitting on the board over a lull — and the
+    /// ride is the rough part: the face, the carve, the pump. Measured on
+    /// the first SUP-foil recording, the deck's vertical spread was 2–5
+    /// m/s² paddling and 6–13 riding, so the rule, applied as written, threw
+    /// out every wave in the session. Set, the accelerometer is not
+    /// consulted here at all — the flights already used it to say where the
+    /// foil was, which is the question it answers well.
+    public var ridesAreRough = false
+
+    /// Whether slowing down ends a ride.
+    ///
+    /// For a wing, decelerating through the cone means the wave has let go
+    /// and the rider is cruising to a stop. On a wave face the speed is
+    /// never steady: a bottom turn scrubs a knot and a half in two seconds
+    /// and the next section gives it back, and a gate at a third of a metre
+    /// per second per second fires on every one. What ends a paddled ride is
+    /// the speed dropping below the floor, or the rider turning back out —
+    /// both still tested.
+    public var ridesSlowAndRecover = false
+
+    /// The cone for the sports that paddle into waves, where the rider's own
+    /// setting is absent.
+    ///
+    /// A wing rider going with the swell points along it. A surfer rides
+    /// *across* the face — down the line is the whole point — and on the
+    /// first SUP-foil recording the course sat 60° to 105° off the swell's
+    /// travel for most of every wave. Wider than that and the rider has
+    /// turned back out to sea, which is exactly the edge that should end the
+    /// ride and start the pump to the next one.
+    public static let paddledHalfAngle: Double = 120
+
+    /// The cone this finder falls back to when the rider has not set one.
+    public var defaultConeAngle: Double = WaveRideFinder.halfAngle
+
     /// The longest step between two fixes that can still be inside one ride.
     ///
     /// Widened to four sample intervals for a receiver reporting slowly; see
@@ -166,7 +221,7 @@ public struct WaveRideFinder {
     /// exactly what it was.
 
     /// Degrees either side of the swell's travel a ride may point.
-    public var coneAngle: Double { thresholds.waveConeAngle ?? Self.halfAngle }
+    public var coneAngle: Double { thresholds.waveConeAngle ?? defaultConeAngle }
 
     /// The fraction of the rider's own with-the-swell pace a ride must hold.
     public var speedFraction: Double {
@@ -195,7 +250,7 @@ public struct WaveRideFinder {
 
     /// Whether the accelerometer is consulted at all.
     public var consultsMotion: Bool {
-        quietFraction < SportThresholds.waveChopIgnored
+        !ridesAreRough && quietFraction < SportThresholds.waveChopIgnored
     }
 
     /// How hard the rider may be slowing and still be counted as carried,
@@ -212,7 +267,25 @@ public struct WaveRideFinder {
     /// rider who widened the cone all the way silently lost bridging
     /// altogether, at the setting most likely to have been reached for
     /// because rides were being cut in half.
-    public var bridgeAngle: Double { min(120, max(90, coneAngle + 25)) }
+    public var bridgeAngle: Double {
+        bridgesAnyTurn ? 180 : min(120, max(90, coneAngle + 25))
+    }
+
+    /// Whether a carve may point *anywhere* and still be bridged.
+    ///
+    /// A wing rider who turns past a right angle to the swell has left it.
+    /// A surfer turns past it on purpose several times a wave — the cutback
+    /// swings the board back toward the breaking section and through the
+    /// reverse of the swell's travel for two or three seconds — and on the
+    /// first SUP-foil recording every long wave came out in three pieces,
+    /// cut at each cutback. Set, a gap inside the carve tolerance is bridged
+    /// whatever it pointed at, provided the rider stayed on the foil. What
+    /// still ends a ride is a gap *longer* than that tolerance: pumping back
+    /// out to the next wave takes far more than eight seconds, so it is the
+    /// length of the excursion that tells a cutback from a kick-out, not its
+    /// angle. A kick-out and re-catch inside eight seconds would read as one
+    /// wave; it has not been seen in a real recording yet.
+    public var bridgesAnyTurn = false
 
     public init(thresholds: SportThresholds = SportThresholds.forSport(.wingfoil)) {
         self.thresholds = thresholds
@@ -231,7 +304,7 @@ public struct WaveRideFinder {
         var finder = WaveRideFinder(thresholds: rules)
         finder.glides = DownwindAnalyzer.forSport(sport, thresholds: rules)
         switch sport {
-        case .downwindSUP, .prone, .sup:
+        case .downwindSUP, .prone, .sup, .supFoil:
             // Paddled sports catch waves at speeds a wing rider would call
             // stopped. `DownwindAnalyzer` lowers its glide floor for the
             // first two; a SUP in the surf is the slowest thing this app
@@ -240,7 +313,68 @@ public struct WaveRideFinder {
         default:
             break
         }
+        if sport.paddlesIntoWaves {
+            // See each flag for what the surf does differently from a wing.
+            finder.linksAcrossFlight = true
+            finder.ridesAreRough = true
+            finder.ridesSlowAndRecover = true
+            finder.bridgesAnyTurn = true
+            finder.defaultConeAngle = Self.paddledHalfAngle
+        }
         return finder
+    }
+
+    // MARK: - Which way the waves went, when nobody said
+
+    /// Fewest seconds of riding the direction can be read from. Less than
+    /// this and one wave, or one gust of jitter, is the whole vote.
+    static let leastEvidenceForSwell: TimeInterval = 20
+
+    /// The swell's *from* bearing, read off the rides themselves.
+    ///
+    /// Only for the sports that paddle into waves, where it is safe: a
+    /// paddled board reaches riding speed on a wave face and nowhere else,
+    /// so the direction the fast, flying samples travelled *is* the way the
+    /// waves were going, and pumping back out — slower, and the other way —
+    /// is outvoted by the rides it sits between. Speed-weighted so the
+    /// riding does the voting. A wing rider's fast samples point wherever
+    /// the wind sent them, which is why this is never used for one.
+    ///
+    /// Nil with too little evidence, and then the screen asks the rider,
+    /// as it always did.
+    public static func inferredSwell(
+        in track: Track, flights: [Flight], thresholds: SportThresholds
+    ) -> Double? {
+        guard track.count > 1 else { return nil }
+        let flyingMask = FoilDetector(thresholds: thresholds)
+            .flyingMask(flights: flights, count: track.count)
+        let floor = max(thresholds.movingSpeed * 2, thresholds.foilTakeoffSpeed * 0.8)
+        var x = 0.0, y = 0.0, seconds = 0.0
+        for i in 1..<track.count {
+            let speed = track.speed[i]
+            guard speed >= floor, flights.isEmpty || flyingMask[i] else { continue }
+            let dt = min(track.elapsed[i] - track.elapsed[i - 1], 4 * track.sampleInterval)
+            guard dt > 0 else { continue }
+            let radians = track.course[i] * .pi / 180
+            x += sin(radians) * speed * dt
+            y += cos(radians) * speed * dt
+            seconds += dt
+        }
+        guard seconds >= leastEvidenceForSwell, x != 0 || y != 0 else { return nil }
+        let travel = Geo.normalizeDegrees(atan2(x, y) * 180 / .pi)
+        return Geo.normalizeDegrees(travel + 180)
+    }
+
+    /// The swell a session's waves are measured against: the rider's own
+    /// setting where there is one, and otherwise — for a sport that paddles
+    /// into waves — the direction read off the rides.
+    public static func swellFrom(
+        for session: Session, flights: [Flight], thresholds: SportThresholds? = nil
+    ) -> Double? {
+        if let set = session.swellDirection { return set }
+        guard session.sport.paddlesIntoWaves else { return nil }
+        return inferredSwell(in: session.track, flights: flights,
+                             thresholds: thresholds ?? session.sport.thresholds)
     }
 
     // MARK: - The rise
@@ -428,7 +562,7 @@ public struct WaveRideFinder {
         for i in 0..<track.count {
             guard track.speed[i] >= floor else { continue }
             guard !requiresFlight || flyingMask[i] else { continue }
-            guard acceleration[i] >= -maximumDeceleration else { continue }
+            guard ridesSlowAndRecover || acceleration[i] >= -maximumDeceleration else { continue }
             guard Geo.angleSeparation(track.course[i], travel) <= coneAngle else { continue }
             if hasMotion, let energy = track.points[i].verticalAccelSD {
                 guard energy <= quietEnergy else { continue }
@@ -535,6 +669,15 @@ public struct WaveRideFinder {
             }
             guard let start = caughtAt, start < j else { continue }
             index = start
+
+            // See `linksAcrossFlight`: on a paddled foil the link is never
+            // having touched down, whatever the pump between took.
+            if linksAcrossFlight, !linked, let previous, requiresFlight,
+               previous.endIndex < start,
+               !((previous.endIndex + 1)...start).contains(where: { breaksRide[$0] }),
+               (previous.endIndex...start).allSatisfy({ flyingMask[$0] }) {
+                linked = true
+            }
 
             let duration = track.elapsed[j] - track.elapsed[index]
             var peak = 0.0

@@ -183,7 +183,8 @@ extension Session {
                 wind: wind,
                 foilTakeoffSpeed: edits.foilTakeoffSpeed,
                 overrides: overrides,
-                courseDirection: result.courseDirection
+                courseDirection: result.courseDirection,
+                swellFrom: edits.swellDirection
             )
         ).analyse(track)
 

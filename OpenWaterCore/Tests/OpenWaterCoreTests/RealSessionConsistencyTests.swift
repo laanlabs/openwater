@@ -42,6 +42,7 @@ struct RealSessionConsistencyTests {
     private func sport(for url: URL) -> Sport {
         let name = url.lastPathComponent.lowercased()
         if name.contains("parawing") { return .parawing }
+        if name.contains("supfoil") { return .supFoil }
         if name.contains("sup") { return .downwindSUP }
         return .wingfoil
     }

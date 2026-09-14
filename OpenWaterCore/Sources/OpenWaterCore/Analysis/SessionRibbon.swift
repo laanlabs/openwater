@@ -73,6 +73,10 @@ public struct SessionRibbon: Hashable, Sendable, Codable {
         /// The cells that make up the lane, in order.
         public let cells: [Cell]
 
+        /// The run was a wave — see `Run.isWave`. Optional for the archives
+        /// written before it existed.
+        public var isWave: Bool?
+
         public var duration: TimeInterval { endElapsed - startElapsed }
     }
 
@@ -222,7 +226,8 @@ public struct SessionRibbonBuilder: Sendable {
                 pointOfSail: run.point,
                 trueWindAngle: run.trueWindAngle,
                 foilingFraction: run.distance > 0 ? foilingDistance / run.distance : 0,
-                cells: cells.sorted { $0.start < $1.start }
+                cells: cells.sorted { $0.start < $1.start },
+                isWave: run.isWave
             ))
         }
 

@@ -37,7 +37,7 @@ struct LocationProfileTests {
         // window; this is also the mode that keeps Doppler speed flowing, which
         // every speed number in the app is built on.
         let flying: [Sport] = [.wingfoil, .parawing, .windfoil, .kitefoil,
-                               .downwindSUP, .prone, .efoil, .tow]
+                               .downwindSUP, .prone, .supFoil, .efoil, .tow]
         for sport in flying {
             #expect(sport.locationProfile.accuracy == .navigation, "\(sport)")
             #expect(sport.thresholds.liveAccuracyLimit >= 50, "\(sport)")

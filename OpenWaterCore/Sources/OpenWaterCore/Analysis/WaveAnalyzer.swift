@@ -184,16 +184,41 @@ public struct WaveRideFinder {
     /// both still tested.
     public var ridesSlowAndRecover = false
 
-    /// The cone for the sports that paddle into waves, where the rider's own
-    /// setting is absent.
+    /// Whether the direction of travel is consulted at all.
     ///
-    /// A wing rider going with the swell points along it. A surfer rides
-    /// *across* the face — down the line is the whole point — and on the
-    /// first SUP-foil recording the course sat 60° to 105° off the swell's
-    /// travel for most of every wave. Wider than that and the rider has
-    /// turned back out to sea, which is exactly the edge that should end the
-    /// ride and start the pump to the next one.
-    public static let paddledHalfAngle: Double = 120
+    /// For a wing the cone is the whole test: fast and pointed with the
+    /// swell is a wave, fast and pointed anywhere else is the wind. A paddled
+    /// foil has no wind to confuse it with — nothing but a wave gets it to
+    /// riding speed — and a surfer rides *across* the face, down the line,
+    /// with cutbacks through every point of the compass. A cone of any width
+    /// was tried first: at 120° it found the first SUP-foil recording's
+    /// waves only because the swell it inferred happened to point along
+    /// them, and the moment the rider set the real swell, from the
+    /// south-south-east, the same waves came out as five-second pieces.
+    /// Set, a ride is a stretch on the foil at or above the floor, whatever
+    /// it pointed at; the swell — the rider's or the inferred one — only
+    /// labels how far off it each ride was.
+    public var ignoresDirection = false
+
+    /// Whether a ride is split where the rider pumped between two waves.
+    ///
+    /// With direction out of the rule, what separates two waves caught in
+    /// one flight is the pump between them: the rider kicks out, turns, and
+    /// works back through the trough well below the speed the wave gave,
+    /// then drops onto the next face and the speed comes back. A stretch
+    /// slower than `pumpFraction` of the wave's own typical speed for at
+    /// least `minimumPump` ends the wave; the next rise is the next catch,
+    /// and it is linked — same flight, never touched down. A bottom turn
+    /// scrubs speed for a second or two and is left alone by the duration.
+    /// Written from the rider's description of linking and pinned by no
+    /// recording yet — the first SUP-foil recording has no linked waves.
+    public var splitsAtPumps = false
+
+    /// How far below the wave's own typical speed a pump sits.
+    public static let pumpFraction: Double = 0.7
+
+    /// How long a slow stretch has to last to be a pump rather than a turn.
+    public static let minimumPump: TimeInterval = 4
 
     /// The cone this finder falls back to when the rider has not set one.
     public var defaultConeAngle: Double = WaveRideFinder.halfAngle
@@ -319,7 +344,8 @@ public struct WaveRideFinder {
             finder.ridesAreRough = true
             finder.ridesSlowAndRecover = true
             finder.bridgesAnyTurn = true
-            finder.defaultConeAngle = Self.paddledHalfAngle
+            finder.ignoresDirection = true
+            finder.splitsAtPumps = true
         }
         return finder
     }
@@ -471,6 +497,58 @@ public struct WaveRideFinder {
         return conservative ? sorted[sorted.count / 4] : sorted[sorted.count / 2]
     }
 
+    // MARK: - Pumps
+
+    /// End a riding run wherever the rider pumped between waves — see
+    /// `splitsAtPumps`.
+    ///
+    /// Each contiguous run is walked with a five-sample median of speed,
+    /// against the median speed of the wave so far. A stretch below
+    /// `pumpFraction` of that for at least `minimumPump` is cut out of the
+    /// run; whatever rises out of it afterwards is a new wave, measured
+    /// against the pump as its lull by the ordinary catch rule.
+    private func breakAtPumps(_ riding: inout [Bool], in track: Track, breaks: [Bool]) {
+        let count = track.count
+        var index = 0
+        while index < count {
+            guard riding[index] else { index += 1; continue }
+            var end = index
+            while end + 1 < count, riding[end + 1], !breaks[end + 1] { end += 1 }
+            defer { index = end + 1 }
+            guard end > index else { continue }
+
+            var waveSpeeds: [Double] = []
+            var pumpStart: Int?
+            var k = index
+            while k <= end {
+                let lo = max(index, k - 2), hi = min(end, k + 2)
+                let local = track.speed[lo...hi].sorted()[(hi - lo) / 2]
+                if waveSpeeds.count >= 3 {
+                    let typical = waveSpeeds.sorted()[waveSpeeds.count / 2]
+                    if local < typical * Self.pumpFraction {
+                        if pumpStart == nil { pumpStart = k }
+                        k += 1
+                        continue
+                    }
+                }
+                if let start = pumpStart {
+                    if track.elapsed[k] - track.elapsed[start] >= Self.minimumPump {
+                        // A pump: this wave ended where it began, and the
+                        // rest of the run is judged as a wave of its own.
+                        for cut in start..<k { riding[cut] = false }
+                        waveSpeeds = []
+                    }
+                    pumpStart = nil
+                }
+                waveSpeeds.append(local)
+                k += 1
+            }
+            if let start = pumpStart, track.elapsed[end] - track.elapsed[start] >= Self.minimumPump {
+                for cut in start...end { riding[cut] = false }
+            }
+        }
+    }
+
     // MARK: - Find
 
     /// The waves ridden, measured against `swellFrom` — degrees the swell
@@ -544,7 +622,7 @@ public struct WaveRideFinder {
         var all: [Double] = []
         for i in 0..<track.count where track.speed[i] >= thresholds.movingSpeed {
             all.append(track.speed[i])
-            if Geo.angleSeparation(track.course[i], travel) <= coneAngle {
+            if ignoresDirection || Geo.angleSeparation(track.course[i], travel) <= coneAngle {
                 withSwell.append(track.speed[i])
             }
         }
@@ -563,7 +641,7 @@ public struct WaveRideFinder {
             guard track.speed[i] >= floor else { continue }
             guard !requiresFlight || flyingMask[i] else { continue }
             guard ridesSlowAndRecover || acceleration[i] >= -maximumDeceleration else { continue }
-            guard Geo.angleSeparation(track.course[i], travel) <= coneAngle else { continue }
+            guard ignoresDirection || Geo.angleSeparation(track.course[i], travel) <= coneAngle else { continue }
             if hasMotion, let energy = track.points[i].verticalAccelSD {
                 guard energy <= quietEnergy else { continue }
             }
@@ -587,13 +665,19 @@ public struct WaveRideFinder {
                 && ((end + 1)...next).allSatisfy { !breaksRide[$0] }
                 && ((end + 1)..<next).allSatisfy { k in
                     (!requiresFlight || flyingMask[k])
-                        && Geo.angleSeparation(track.course[k], travel) <= bridgeAngle
+                        && (ignoresDirection || Geo.angleSeparation(track.course[k], travel) <= bridgeAngle)
                 }
             if bridgeable {
                 for k in (end + 1)..<next { riding[k] = true }
             } else {
                 index = next
             }
+        }
+
+        // See `splitsAtPumps`: a stretch well below the wave's own pace for
+        // long enough is the pump to the next wave, not part of this one.
+        if splitsAtPumps {
+            breakAtPumps(&riding, in: track, breaks: breaksRide)
         }
 
         // Extract the rides.
@@ -688,10 +772,11 @@ public struct WaveRideFinder {
             // cone nearly guarantees this, but the bridges tolerate a carve
             // up to a right angle off, and enough of them could add up to a
             // ride that wandered sideways. A wave carries you where it is
-            // going; a ride that netted anywhere else was not one.
+            // going; a ride that netted anywhere else was not one. Not asked
+            // of a paddled foil, whose rides go along the face.
             let net = Geo.bearing(from: track.points[index].coordinate,
                                   to: track.points[j].coordinate)
-            guard Geo.angleSeparation(net, travel) <= coneAngle else { continue }
+            guard ignoresDirection || Geo.angleSeparation(net, travel) <= coneAngle else { continue }
 
             let distance = track.cumulativeDistance[j] - track.cumulativeDistance[index]
             timeOnWaves += duration

@@ -884,6 +884,19 @@ struct WaveDetailView: View {
     /// The rule, in one paragraph. Assembled here rather than inline in the
     /// view: as one expression it was long enough to stall the type-checker.
     private var ruleSentence: String {
+        if session.sport.paddlesIntoWaves {
+            var out = "On a paddled foil a wave ride is a stretch on the foil at or above "
+            out += "your own pace for the day, where the speed *rose* when you caught it — "
+            out += "whichever way it pointed, because nothing but a wave gets a paddled "
+            out += "board to that speed and a ride goes along the face, cutbacks and all. "
+            out += "A ride ends where you came off the foil, or where you slowed to pump: "
+            out += "a stretch well below the wave's own pace for a few seconds is the pump "
+            out += "to the next wave, and what rises out of it is the next ride. "
+            out += "The swell direction only says how far off each ride was. "
+            out += linkedSentence
+            out += "Press play under the map to watch them in the order they came."
+            return out
+        }
         let flying = summary.flights.isEmpty ? "" : "on the foil, "
         let cone = Int(WaveRideFinder(thresholds: thresholds).coneAngle)
         var out = "A wave ride is a stretch \(flying)at or above your own "

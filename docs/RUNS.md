@@ -224,7 +224,7 @@ its JSON, and the downwind/reaching/upwind columns do not apply.
 **test-12** — *The first surf session.* Montauk, a SUP foil, forty-two
 minutes: paddling around, two long waves and one short one. The rider's own
 account was "approximately two long waves", and the tab reads 468 m · 1:04,
-50 m · 0:08 and 609 m · 1:28, one row each with the paddle back out between
+55 m · 0:09 and 609 m · 1:28, one row each with the paddle back out between
 them (16:14, 9:02, 11:47, 2:37 — and the rows sum to the session). The
 heading segmenter had made twelve "runs" of the same water, five per wave,
 cut at every carve. What it proves: that a run on a paddled foil is a wave

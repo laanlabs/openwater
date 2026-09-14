@@ -241,13 +241,30 @@ a half in two seconds and the next section gives it back; the
 deceleration gate fired on every one. `ridesSlowAndRecover` drops it. What
 still ends a ride is the floor and the turn back out.
 
-**Cutbacks.** The cone is 120° for these sports (`paddledHalfAngle`) because
-riding down the line sits 60°–105° off the swell's travel — and a cutback
-swings past 150° for two or three seconds, which is not leaving the wave.
-`bridgesAnyTurn` lets a gap inside the carve tolerance be bridged whatever
-it pointed at, provided the rider stayed on the foil. Test-12's long waves
-came out in three pieces each before this and whole after it. A kick-out
-and re-catch inside eight seconds would read as one wave; not seen yet.
+**Direction is not consulted at all.** A first version kept a cone —
+widened to 120°, with cutbacks bridged whatever they pointed at — and it
+found test-12's waves only because the inferred swell happened to point
+along them. The moment the rider set the real swell, from the
+south-south-east, the same two long waves came out as four pieces of five
+to seven seconds: a surfer rides *across* the face, down the line, and
+cuts back through every point of the compass. The rider's own rule is the
+right one — *"we're just trying to measure the rides they have while
+they're on foil with the increased speed"* — so `ignoresDirection` drops
+the per-sample cone, the bridge angle and the net-bearing test. The swell,
+set or inferred, only labels how far off each ride was. (`bridgesAnyTurn`
+stays for the gap-bridging inside the carve tolerance.)
+
+**What separates two waves in one flight is the pump.** With direction
+gone, a rider who kicks out, pumps back through the trough and drops onto
+the next face without touching down is one long stretch on the foil.
+`splitsAtPumps` cuts it where a five-sample median of speed sits below
+`pumpFraction` (0.7) of the wave's own typical speed for at least
+`minimumPump` (4 s); the next rise is the next catch, measured against the
+pump as its lull by the ordinary catch rule, and linked. A bottom turn
+scrubs speed for a second or two and is left alone by the duration.
+Written from the rider's description and **pinned by no recording yet** —
+test-12 has no linked waves, and the first session that strings waves
+together is the one that will set these two numbers.
 
 **Linked means never touched down.** The rise-window rule marks a wave
 linked when it was caught within seconds of the last one's kick-out — a
@@ -263,7 +280,7 @@ carves — with one `Run` per wave, marked `isWave`, so the ribbon, the map
 and the Runs tab describe the same water as this screen. The Runs tab lists
 them as **Wave · n**, never merges two waves that share a flight, and the
 expectation record carries `runsWave`. test-12 pins it: 3 waves, 3 runs,
-2:40 riding. Sign-off from the rider is pending in `testdata/test-12.md`.
+2:41 riding. Sign-off from the rider is pending in `testdata/test-12.md`.
 
 ## 8. What was fixed on 4 September 2026
 

@@ -108,28 +108,63 @@ struct SportRow: View {
     }
 }
 
-/// The pushed picker. Choosing a sport pops it: the page has one question,
-/// and a screen that answers it and then sits there behind a Back button
-/// reads as if nothing happened — "there's no save, only a back button"
-/// was the report. The change is not saved here; it lands in the form
-/// underneath, whose Save button says "Save & Recalculate" the moment the
-/// sport differs from the stored one.
+/// The pushed picker, with a draft and a Done button.
+///
+/// This has been both other things. Behind a plain Back button the page
+/// read as if a tap did nothing — "there's no save, only a back button".
+/// Popping on the first tap fixed that and was abrupt in its own way: a
+/// rider comparing two sports wants to tap around, and the page vanished
+/// under the first tap. So the tap picks a *draft*, the page says what
+/// choosing it will do, and Done commits it to the form underneath — whose
+/// Save button says "Save & Recalculate" from that moment. Back discards
+/// the draft; nothing is saved from here.
 private struct SportPickerPage: View {
     @Binding var selection: Sport
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppSettings.self) private var settings
+    @State private var draft: Sport
+
+    init(selection: Binding<Sport>) {
+        _selection = selection
+        _draft = State(initialValue: selection.wrappedValue)
+    }
+
+    private var changed: Bool { draft != selection }
 
     var body: some View {
         Form {
             Section {
-                SportPicker(selection: $selection)
+                SportPicker(selection: $draft)
                     .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
             } footer: {
-                Text("Tap a sport to choose it. The sport sets the thresholds openWater uses to detect flights, gybes and falls; changing it recalculates this session when you save.")
+                if changed {
+                    Label(
+                        "Choosing \(draft.displayName) will recalculate this session when you save: "
+                        + "flights, turns, falls and every speed category are detected with "
+                        + "\(draft.displayName)'s thresholds"
+                        + (draft.isFoiling
+                           ? ", flying above \(Format.speed(draft.thresholds.foilTakeoffSpeed, unit: settings.units.speed, decimals: 1))"
+                           : "")
+                        + ". Tap Done to choose it, or Back to keep \(selection.displayName).",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    .foregroundStyle(.orange)
+                } else {
+                    Text("The sport sets the thresholds openWater uses to detect flights, gybes and falls. Tap one to see what changes; Done chooses it.")
+                }
             }
         }
         .navigationTitle("Sport")
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Sport picker")
-        .onChange(of: selection) { _, _ in dismiss() }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(changed ? "Done" : "Keep") {
+                    selection = draft
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
     }
 }

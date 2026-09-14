@@ -83,6 +83,12 @@ extension Sport {
         switch self {
         case .downwindSUP, .sup, .prone:
             true
+        // A SUP foil in the surf catches swell too, but its riding is its
+        // flying: every second on the foil is a wave, so the on-foil tile
+        // already says how much of the session was ridden, and the glide
+        // detector's wind-anchored number would say less than the truth.
+        case .supFoil:
+            false
         case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil,
              .sail, .kayak, .efoil, .tow, .other:
             false

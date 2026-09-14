@@ -148,8 +148,10 @@ Ordered by what I would do next, not by size.
 `openWaterTests/SessionExpectationTests.swift` now carries `waves`,
 `waveTime` and `wavesLinked`, filled when a recording has a swell direction
 and left nil otherwise — so a session with one pins its wave count in CI the
-way it pins its glides. **No recording in `testdata/` carries a swell
-direction yet**, so every one is still nil. The recipe: set a swell direction
+way it pins its glides. **No wind-sport recording in `testdata/` carries a
+swell direction yet**, so those are still nil; test-12, the SUP-foil session,
+pins its three waves through the inferred swell (§7). The recipe for the
+rest: set a swell direction
 on a real wave session in the app — or tap *Bumps with the wind* on a
 downwinder — export it as `.openwater` into `testdata/`, run
 `scripts/record-expectations.sh`, and read the diff. A wave session from the
@@ -205,7 +207,65 @@ is local to this phone's settings.
 
 ---
 
-## 7. What was fixed on 4 September 2026
+## 7. SUP foil — 13 September 2026
+
+The first paddle-in sport, `Sport.supFoil` ("SUP Foil"), and with it the
+first real surf recording in `testdata/` — test-12, Montauk, forty-two
+minutes, two long waves and one short one, recorded by the rider as plain
+"SUP" because the sport did not exist yet. The finder above found **nothing**
+in it. Four of its rules are written for a wing, and each is the wrong way
+round for a surfer. They are now sport-aware through `Sport.paddlesIntoWaves`
+(`.supFoil` and `.prone`), and every one still reads exactly as it did for
+everything else:
+
+**The swell is read off the rides.** A paddled board reaches riding speed on
+a wave face and nowhere else, so the direction the fast, flying samples went
+*is* the way the waves were going. `WaveRideFinder.inferredSwell` takes the
+speed-weighted circular mean of course over flying samples and needs twenty
+seconds of evidence; `swellFrom(for:)` prefers the rider's arrow when there
+is one. Every screen that needed the arrow now takes the inferred value on
+these sports and says so in its footer. Never for a wing: a wing's fast
+samples point wherever the wind sent them.
+
+**The deck is rougher on a wave than off it.** Measured on test-12, the
+vertical-acceleration spread was 2–5 m/s² paddling and 6–13 riding — the
+quiet-board rule threw out every wave. `ridesAreRough` turns the rule off for
+these sports; the flights already used the accelerometer where it answers
+well. The same fact reached the foil detector: its roughness veto stopped
+the second wave's flight from *starting* for twenty seconds at six and seven
+metres a second. `FoilDetector.motionVetoesFlight` is off for these sports,
+because a paddled foil has no displacement-planing case to guard against.
+
+**Slowing down is not the wave letting go.** A bottom turn scrubs a knot and
+a half in two seconds and the next section gives it back; the
+deceleration gate fired on every one. `ridesSlowAndRecover` drops it. What
+still ends a ride is the floor and the turn back out.
+
+**Cutbacks.** The cone is 120° for these sports (`paddledHalfAngle`) because
+riding down the line sits 60°–105° off the swell's travel — and a cutback
+swings past 150° for two or three seconds, which is not leaving the wave.
+`bridgesAnyTurn` lets a gap inside the carve tolerance be bridged whatever
+it pointed at, provided the rider stayed on the foil. Test-12's long waves
+came out in three pieces each before this and whole after it. A kick-out
+and re-catch inside eight seconds would read as one wave; not seen yet.
+
+**Linked means never touched down.** The rise-window rule marks a wave
+linked when it was caught within seconds of the last one's kick-out — a
+downwinder's meaning. A SUP foiler kicks out, pumps back through the trough
+for twenty or thirty seconds, and drops onto the next face without the board
+touching the water; that is the thing the sport is judged by, and by the
+old rule none of it counted. `linksAcrossFlight`: a wave caught in the same
+flight as the last one is linked, however long the pump took.
+
+**And on these sports a run is a wave.** `SessionAnalyzer.waveRuns` replaces
+the heading segmenter — which had cut each long wave into five "runs" at the
+carves — with one `Run` per wave, marked `isWave`, so the ribbon, the map
+and the Runs tab describe the same water as this screen. The Runs tab lists
+them as **Wave · n**, never merges two waves that share a flight, and the
+expectation record carries `runsWave`. test-12 pins it: 3 waves, 3 runs,
+2:40 riding. Sign-off from the rider is pending in `testdata/test-12.md`.
+
+## 8. What was fixed on 4 September 2026
 
 - **Back-to-back waves were lost.** A wave caught inside the rise window of
   the last one's kick-out is now measured against the lull that wave rose out
@@ -225,7 +285,7 @@ is local to this phone's settings.
 - **The expectation harness** records wave counts for any recording with a
   swell direction. Six tests added.
 
-## 8. What was fixed on 3 September 2026
+## 9. What was fixed on 3 September 2026
 
 For the record, since several of these were invisible from the screen:
 

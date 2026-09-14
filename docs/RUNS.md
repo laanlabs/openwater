@@ -31,6 +31,16 @@ are stretches grouped back up by the rules below.
 `GroupedRun.group(_:flights:absorb:touchdown:reversal:)` in
 `openWater/Views/GroupedRuns.swift`.
 
+**Except on a paddled foil, where a run is a wave.** For the sports that
+paddle into waves (`Sport.paddlesIntoWaves`: SUP foil and prone) the
+segmenter is not used at all — its unit is a change of direction, and a
+wave is nothing but changes of direction. `SessionAnalyzer.waveRuns` makes
+one `Run` per wave the wave finder named, marked `isWave`; the ribbon, the
+map and this tab read that mark and call the row **Wave**. Two waves in one
+flight are never merged and never folded into a set: the second was caught
+by pumping out from the first, and that is the thing the rider is counting.
+Nothing about which way the wind was applies. See `docs/WAVES.md` §7.
+
 ---
 
 ## 2. Which way you were going
@@ -204,8 +214,24 @@ are in `openWaterTests/Expectations/`.
 | test-9 | parawing | 8:50 | 3.24 | Downwinder | **1** | 1 | 0 | 0 | 1 | 100% | 0 | 18 |
 | test-10 | wingfoil | 1:01:18 | 16.94 | At one spot | 7 | 1 | 19 | 21 | 7 | 91% | 3 | 43 |
 | test-11 | parawing | 45:19 | 10.79 | Downwinder | **2** | 13 | 3 | 0 | 10 | 67% | 1 | 71 |
+| test-12 | SUP foil | 42:20 | 3.51 | At one spot | 3 | — | — | — | 3 | 17% | 0 | 3 |
+
+test-12's three rows are **waves**, not points of sail — `runsWave: 3` in
+its JSON, and the downwind/reaching/upwind columns do not apply.
 
 ### What each session is, and what it proves
+
+**test-12** — *The first surf session.* Montauk, a SUP foil, forty-two
+minutes: paddling around, two long waves and one short one. The rider's own
+account was "approximately two long waves", and the tab reads 468 m · 1:04,
+50 m · 0:08 and 609 m · 1:28, one row each with the paddle back out between
+them (16:14, 9:02, 11:47, 2:37 — and the rows sum to the session). The
+heading segmenter had made twelve "runs" of the same water, five per wave,
+cut at every carve. What it proves: that a run on a paddled foil is a wave
+and nothing else, that the swell can be read off the rides when nobody set
+it, and that a cutback is not the end of a wave. **Pending the rider's
+sign-off** in `testdata/test-12.md`; the second wave is the one to ask
+about, since eight seconds is short enough to be a failed catch.
 
 **test-1** — *The ocean reference.* A downwinder in nine rides — seven
 downwind rows and two brief reaches on the tab — with a swim between every
@@ -283,6 +309,8 @@ Legs 14 to 18, sailed back to back, read as 4.9 kn toward 240°.
 | Upwind / reaching / downwind bands | `UpwindLegFinder.upwindLimit`, `.downwindLimit` |
 | Run grouping, tack split, absorb, reversal | `GroupedRun.group` |
 | Flying, touchdowns, dips, recovery | `FoilDetector` |
+| A run is a wave, on paddled foils | `SessionAnalyzer.waveRuns`, `Run.isWave`, `GroupedRun.Kind.wave` |
+| What a wave is, and what links two | `WaveRideFinder.forSport` — `docs/WAVES.md` §7 |
 | Legs, stops, transport jumps | `SessionShapeAnalyzer` |
 | Per-sport speeds and floors | `SportThresholds.forSport` |
 | Best beat, and a chosen stretch measured the same way | `BothTacksVMGFinder`, `PolarAnalysis.BothTacksVMG.measured` |

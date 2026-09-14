@@ -185,7 +185,7 @@ struct RibbonView: View {
         /// sailboat number: a wing working 50°–80° off the wind was "reaching"
         /// in the leg row and "upwind" in every run under it.
         func matches(_ lane: SessionRibbon.Lane) -> Bool {
-            matchesKind(GroupedRun.Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail))
+            matchesKind(GroupedRun.Kind(lane))
         }
 
         /// Legs take their colour from the run kind they are, so a downwind
@@ -359,7 +359,11 @@ struct RibbonView: View {
     }
 
     private var showsGrouped: Bool {
-        !showsLegs && groupedRuns.count < ribbon.lanes.count
+        // Grouping earns its rows by merging stretches — except on a paddled
+        // foil, where every stretch is already a whole wave and the grouped
+        // row is the one that says so, with its off-foil gaps between.
+        !showsLegs && (groupedRuns.count < ribbon.lanes.count
+                       || groupedRuns.contains { $0.kind == .wave })
     }
 
     /// The runs as the list shows them.
@@ -495,7 +499,9 @@ struct RibbonView: View {
         switch leg.kind(in: ribbon) {
         case .downwind: .downwind
         case .upwind: .upwind
-        case .reaching: .reaching
+        // Legs are a point-to-point idea and a wave session is not one; if
+        // a leg ever is made of waves, the filter has no better word.
+        case .reaching, .wave: .reaching
         }
     }
 
@@ -924,7 +930,10 @@ struct RibbonView: View {
         }
         var out: [RunCluster] = []
         for run in orderedRuns {
-            if let last = out.last, last.kind == run.kind,
+            // Waves are never folded into a set: the question a surfer asks
+            // of this list is "which waves did I get", one row each, with
+            // the paddle back out between them.
+            if let last = out.last, last.kind == run.kind, run.kind != .wave,
                let previous = last.runs.last, run.id == previous.id + 1 {
                 out[out.count - 1] = RunCluster(id: last.id, kind: last.kind,
                                                 runs: last.runs + [run])
@@ -1288,7 +1297,11 @@ struct RibbonView: View {
     private var summaryLine: String {
         let counts = GroupedRun.Kind.allCases.compactMap { kind -> String? in
             let n = groupedRuns.filter { $0.kind == kind }.count
-            return n > 0 ? "\(n) \(kind.title.lowercased())" : nil
+            guard n > 0 else { return nil }
+            // "3 downwind" reads as a count of downwind runs; "3 wave" reads
+            // as a typo.
+            if kind == .wave { return n == 1 ? "1 wave" : "\(n) waves" }
+            return "\(n) \(kind.title.lowercased())"
         }
         return counts.joined(separator: " · ")
     }
@@ -1476,7 +1489,7 @@ struct RibbonView: View {
     /// and distance.
     static func accessibilityLabel(for lane: SessionRibbon.Lane, units: UnitPreferences) -> String {
         var parts = ["Stretch \(lane.runIndex + 1)"]
-        parts.append(GroupedRun.Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail).title)
+        parts.append(GroupedRun.Kind(lane).title)
         if let tack = lane.tack { parts.append(tack == .port ? "port tack" : "starboard tack") }
         parts.append(Format.speed(lane.averageSpeed, unit: units.speed, decimals: 1))
         parts.append(Format.distance(lane.distance, unit: units.distance))

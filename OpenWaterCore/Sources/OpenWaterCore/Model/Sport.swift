@@ -14,6 +14,11 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     case downwindSUP
     case sup
     case prone
+    /// Paddle-in foiling in the surf: paddle out, catch a wave, ride it on
+    /// the foil, pump back out and catch the next. Not `downwindSUP`, whose
+    /// waves are open-ocean bumps ridden one way with the wind, and not
+    /// `sup`, which never leaves the water.
+    case supFoil
     case sail
     case kayak
     case efoil
@@ -33,6 +38,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         case .downwindSUP: "Downwind SUP"
         case .sup: "SUP"
         case .prone: "Prone Foil"
+        case .supFoil: "SUP Foil"
         case .sail: "Sailing"
         case .kayak: "Kayak"
         case .efoil: "eFoil"
@@ -67,6 +73,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         case .downwindSUP: "water.waves"
         case .sup: "figure.surfing"
         case .prone: "surfboard"
+        case .supFoil: "oar.2.crossed"
         case .kayak: "figure.outdoor.rowing"
         // Powered.
         case .efoil: "bolt.horizontal"
@@ -81,7 +88,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         switch self {
         case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil, .sail:
             true
-        case .downwindSUP, .sup, .prone, .kayak, .efoil, .tow, .other:
+        case .downwindSUP, .sup, .prone, .supFoil, .kayak, .efoil, .tow, .other:
             false
         }
     }
@@ -89,7 +96,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// Sports ridden on a hydrofoil, where flight detection applies.
     public var isFoiling: Bool {
         switch self {
-        case .wingfoil, .parawing, .windfoil, .kitefoil, .prone, .efoil, .downwindSUP:
+        case .wingfoil, .parawing, .windfoil, .kitefoil, .prone, .supFoil, .efoil, .downwindSUP:
             true
         case .windsurf, .kitesurf, .sup, .sail, .kayak, .tow, .other:
             false
@@ -99,7 +106,18 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// Sports where a rhythmic pump or stroke is worth counting.
     public var hasCadence: Bool {
         switch self {
-        case .wingfoil, .parawing, .downwindSUP, .sup, .prone, .kayak: true
+        case .wingfoil, .parawing, .downwindSUP, .sup, .prone, .supFoil, .kayak: true
+        default: false
+        }
+    }
+
+    /// Sports where every fast stretch *is* a wave: nothing but a wave face
+    /// gets a paddled board to riding speed, so the waves' direction can be
+    /// read off the rides themselves rather than typed in, and linking means
+    /// pumping from one wave to the next without touching down.
+    public var paddlesIntoWaves: Bool {
+        switch self {
+        case .prone, .supFoil: true
         default: false
         }
     }
@@ -112,7 +130,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// `allCases` is declaration order, which is not the order anyone wants to
     /// choose from. This is the list every picker uses.
     public static let recordable: [Sport] = [
-        .wingfoil, .parawing, .downwindSUP, .prone,
+        .wingfoil, .parawing, .downwindSUP, .prone, .supFoil,
         .windfoil, .windsurf, .kitefoil, .kitesurf,
         .sail, .sup, .kayak, .efoil, .tow, .other,
     ]
@@ -540,7 +558,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             t.foilTakeoffSpeed = .infinity
             t.movingSpeed = 1.5
             t.maxPlausibleSpeed = 35
-        case .downwindSUP, .prone:
+        case .downwindSUP, .prone, .supFoil:
             t.foilTakeoffSpeed = 3.5
             t.movingSpeed = 0.8
             t.maxPlausibleSpeed = 15
@@ -578,7 +596,7 @@ extension Sport {
     /// at a slightly lower power draw, which matters over a four-hour crossing.
     public var locationProfile: SportThresholds.LocationProfile {
         switch self {
-        case .wingfoil, .parawing, .windfoil, .kitefoil, .downwindSUP, .prone, .efoil, .tow,
+        case .wingfoil, .parawing, .windfoil, .kitefoil, .downwindSUP, .prone, .supFoil, .efoil, .tow,
              .windsurf, .kitesurf:
             SportThresholds.LocationProfile(accuracy: .navigation, activity: .otherNavigation)
         case .sup, .kayak, .sail, .other:

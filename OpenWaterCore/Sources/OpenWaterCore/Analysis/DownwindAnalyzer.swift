@@ -273,7 +273,7 @@ public struct DownwindAnalyzer: Sendable {
     public static func forSport(_ sport: Sport, thresholds: SportThresholds? = nil) -> DownwindAnalyzer {
         var a = DownwindAnalyzer(thresholds: thresholds ?? sport.thresholds)
         switch sport {
-        case .downwindSUP, .prone:
+        case .downwindSUP, .prone, .supFoil:
             a.minimumGlideSpeed = 2.5
         case .wingfoil, .parawing:
             // A wing used to need a fixed 6 m/s, then a stricter fraction than

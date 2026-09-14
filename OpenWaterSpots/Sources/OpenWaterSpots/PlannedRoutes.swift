@@ -69,6 +69,7 @@ public struct PlannedRoute: Codable, Identifiable, Hashable, Sendable {
         case .downwindSUP: 8
         case .sup: 4
         case .prone: 10
+        case .supFoil: 10
         case .efoil: 15
         case .sail: 6
         case .tow: 15

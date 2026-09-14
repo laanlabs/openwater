@@ -18,12 +18,26 @@ struct GroupedRun: Identifiable {
 
     enum Kind: String, CaseIterable {
         case downwind, reaching, upwind
+        /// A wave caught on a paddled foil — the whole unit on those sports,
+        /// where the wind says nothing about which way a run went.
+        case wave
 
         var title: String {
             switch self {
             case .downwind: "Downwind"
             case .reaching: "Reaching"
             case .upwind: "Upwind"
+            case .wave: "Wave"
+            }
+        }
+
+        /// The kind of a stretch, wave first: a wave lane is a wave whatever
+        /// its angle to a wind that was never consulted.
+        init(_ lane: SessionRibbon.Lane) {
+            if lane.isWave == true {
+                self = .wave
+            } else {
+                self.init(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail)
             }
         }
 
@@ -42,6 +56,7 @@ struct GroupedRun: Identifiable {
             case .downwind: Color(red: 0.043, green: 0.420, blue: 0.796)
             case .reaching: .teal
             case .upwind: .indigo
+            case .wave: .cyan
             }
         }
 
@@ -51,6 +66,7 @@ struct GroupedRun: Identifiable {
             case .downwind: "Downwind run"
             case .reaching: "Reach"
             case .upwind: "Upwind run"
+            case .wave: "Wave"
             }
         }
 
@@ -194,7 +210,7 @@ struct GroupedRun: Identifiable {
         var sides: [Tack?] = []
 
         for lane in lanes.sorted(by: { $0.startElapsed < $1.startElapsed }) {
-            let kind = Kind(trueWindAngle: lane.trueWindAngle, fallback: lane.pointOfSail)
+            let kind = Kind(lane)
             let ride = ride(of: lane, in: flown)
             let brief = lane.distance < absorb
             let reversed = bearings.last.map {
@@ -219,8 +235,13 @@ struct GroupedRun: Identifiable {
             let tacked = kind == .upwind && !brief
                 && sides.last.flatMap { $0 }.map { $0 != lane.tack && lane.tack != nil } ?? false
 
+            // A wave is never merged into the run before it. Two waves in one
+            // flight are the thing a paddled foiler is counting — the second
+            // was caught by pumping out from the first — and folding them
+            // into one row because they share a kind and a ride would erase
+            // exactly that.
             if let current = kinds.last, ride == rides[rides.count - 1],
-               !(reversed && !brief), !tacked,
+               !(reversed && !brief), !tacked, kind != .wave,
                kind == current || brief {
                 groups[groups.count - 1].append(lane)
                 if !brief {
@@ -285,8 +306,7 @@ struct GroupedRun: Identifiable {
             let (group, ride) = entry
             var byKind: [Kind: Double] = [:]
             for lane in group {
-                byKind[Kind(trueWindAngle: lane.trueWindAngle,
-                            fallback: lane.pointOfSail), default: 0] += lane.distance
+                byKind[Kind(lane), default: 0] += lane.distance
             }
             let kind = byKind.max { $0.value < $1.value }?.key ?? .reaching
             seen[kind, default: 0] += 1

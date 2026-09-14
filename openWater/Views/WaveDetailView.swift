@@ -89,7 +89,7 @@ struct WaveDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if session.swellDirection == nil {
+                if swellFrom == nil {
                     needsSwellCard
                 } else if let waves, waves.count > 0 {
                     if missingHeight { needsHeightCard }
@@ -113,7 +113,7 @@ struct WaveDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .feedbackButton("Session · Waves")
         .sheet(isPresented: $isEditingRules) {
-            if let swellFrom = session.swellDirection {
+            if let swellFrom {
                 WaveRulesSheet(session: session, summary: summary, swellFrom: swellFrom)
             }
         }
@@ -125,7 +125,7 @@ struct WaveDetailView: View {
         .task(id: FindingRules(swell: session.swellDirection, thresholds: thresholds)) {
             isPlaying = false
             elapsed = 0
-            guard let swellFrom = session.swellDirection else {
+            guard let swellFrom else {
                 waves = nil
                 timeline = RideTimeline(rides: [])
                 return
@@ -147,6 +147,16 @@ struct WaveDetailView: View {
     }
 
     // MARK: - Nothing to measure from
+
+    /// The swell every ride here is measured against: the rider's arrow, or
+    /// — on a paddled foil, where a fast stretch can only be a wave — the
+    /// direction the rides themselves went. See `WaveRideFinder.swellFrom`.
+    private var swellFrom: Double? {
+        WaveRideFinder.swellFrom(for: session, flights: summary.flights, thresholds: thresholds)
+    }
+
+    /// True when the swell was read off the rides rather than set.
+    private var swellInferred: Bool { session.swellDirection == nil && swellFrom != nil }
 
     /// The one thing this screen cannot do without, asked for with the same
     /// card-and-button shape the Runs tab uses for a missing wind.
@@ -191,6 +201,11 @@ struct WaveDetailView: View {
             }
             if session.sport.isWindPowered, session.effectiveWind != nil {
                 Text("On a downwinder the bumps travel with the wind, and the wind is the swell. On a groundswell day, point the swell arrow yourself — that is the day the two disagree.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if session.sport.paddlesIntoWaves {
+                Text("On a paddled foil this usually fills in by itself — a fast stretch can only be a wave, so the rides say which way the waves went. There was not enough riding here to read it from, so point the arrow.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -845,30 +860,61 @@ struct WaveDetailView: View {
 
     // MARK: - Footer
 
+    /// Where the anchor came from: the rider, or the rides.
+    private var anchorSentence: String? {
+        guard let swellFrom else { return nil }
+        var sentence = "Measured against swell from \(Format.cardinal(swellFrom)) \(Int(swellFrom.rounded()))°"
+        if let height = session.swellHeight, height > 0.05 {
+            sentence += " · \(Format.height(height, unit: units.distance))"
+        }
+        sentence += swellInferred
+            ? ", read from the way your rides went. Set the swell yourself to override it."
+            : ", as you set it."
+        return sentence
+    }
+
+    /// The rule, in one paragraph. Assembled here rather than inline in the
+    /// view: as one expression it was long enough to stall the type-checker.
+    private var ruleSentence: String {
+        let flying = summary.flights.isEmpty ? "" : "on the foil, "
+        let cone = Int(WaveRideFinder(thresholds: thresholds).coneAngle)
+        var out = "A wave ride is a stretch \(flying)at or above your own "
+        out += "pace for the day, where the speed *rose* while you pointed "
+        out += "within \(cone)° of the way the swell "
+        out += "was travelling — and the whole ride, takeoff to kick-out, "
+        out += "made ground that way. The wind is not consulted: waves keep "
+        out += "their own direction. Runs and glides are unchanged by any "
+        out += "of this. Each ride's number carries a pointer turned the "
+        out += "way that ride made ground, and the one you tap also shows "
+        out += "an arrow where it kicked out. "
+        out += linkedSentence
+        out += "Press play under the map to watch them in the order they came."
+        return out
+    }
+
+    /// What *linked* means here, which differs by sport — see
+    /// `WaveRideFinder.linksAcrossFlight`.
+    private var linkedSentence: String {
+        if session.sport.paddlesIntoWaves {
+            return "A ride marked *linked* was caught without touching down since "
+                + "the one before it — you kicked out, pumped back through, and "
+                + "dropped onto the next face still on the foil, however long that took. "
+        }
+        return "A ride marked *linked* was caught straight off the back of the "
+            + "one before it, inside \(Int(DownwindAnalyzer.riseWindow)) seconds of its kick-out, and is "
+            + "measured against the lull that first wave rose out of — you "
+            + "never gave the speed back. "
+    }
+
     /// How the rides are found, said plainly — and where the anchor is, so a
     /// wrong swell arrow gets corrected instead of distrusted.
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let swellFrom = session.swellDirection {
-                Text("Measured against swell from \(Format.cardinal(swellFrom)) \(Int(swellFrom.rounded()))°"
-                     + (session.swellHeight.map { $0 > 0.05 ? " · \(Format.height($0, unit: units.distance))" : "" } ?? "")
-                     + ", as you set it.")
+            if let anchorSentence {
+                Text(anchorSentence)
                     .font(.caption.weight(.medium))
             }
-            Text("A wave ride is a stretch \(summary.flights.isEmpty ? "" : "on the foil, ")at or above your own "
-                 + "pace for the day, where the speed *rose* while you pointed "
-                 + "within \(Int(WaveRideFinder(thresholds: thresholds).coneAngle))° of the way the swell "
-                 + "was travelling — and the whole ride, takeoff to kick-out, "
-                 + "made ground that way. The wind is not consulted: waves keep "
-                 + "their own direction. Runs and glides are unchanged by any "
-                 + "of this. Each ride's number carries a pointer turned the "
-                 + "way that ride made ground, and the one you tap also shows "
-                 + "an arrow where it kicked out. A ride marked *linked* was "
-                 + "caught straight off the back of the one before it, inside "
-                 + "\(Int(DownwindAnalyzer.riseWindow)) seconds of its kick-out, and is measured against the "
-                 + "lull that first wave rose out of — you never gave the speed "
-                 + "back. Press play under the map to "
-                 + "watch them in the order they came.")
+            Text(ruleSentence)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -64,16 +64,19 @@ struct SessionAnalysisTab: View {
         // screen behind it showed the new one.
         .task(id: WaveKey(swell: session.swellDirection,
                           thresholds: settings.thresholds(for: session.sport))) {
-            guard let swellFrom = session.swellDirection else {
+            let track = session.track
+            let flights = summary.flights
+            let sport = session.sport
+            let rules = settings.thresholds(for: sport)
+            // The rider's swell, or — on a paddled foil — the one the rides
+            // themselves point at. See `WaveRideFinder.swellFrom(for:)`.
+            guard let swellFrom = WaveRideFinder.swellFrom(for: session, flights: flights,
+                                                           thresholds: rules) else {
                 waves = nil
                 return
             }
             // Off the main actor: several linear passes over the whole track,
             // and this one runs on the way into the tab.
-            let track = session.track
-            let flights = summary.flights
-            let sport = session.sport
-            let rules = settings.thresholds(for: sport)
             waves = await Task.detached(priority: .userInitiated) {
                 WaveRideFinder.forSport(sport, thresholds: rules)
                     .rides(in: track, flights: flights, swellFrom: swellFrom)
@@ -319,7 +322,10 @@ struct SessionAnalysisTab: View {
     /// been flat. A rider cannot tell an absent row from an unwritten feature.
     /// The same reasoning already governs the no-wind and no-polar cards: say
     /// which it is, and say why.
-    private var showsDownwind: Bool { true }
+    /// Not on a paddled foil: its glides are its waves, and the row below
+    /// is the one that measures them — this one would only ever ask for a
+    /// wind the sport does not use.
+    private var showsDownwind: Bool { !session.sport.paddlesIntoWaves }
 
     @ViewBuilder
     private var techniqueSection: some View {
@@ -401,7 +407,9 @@ struct SessionAnalysisTab: View {
     /// this row asks for: the direction to find the rides at all, and the
     /// height so the day has a size.
     private var swellWarning: String? {
-        if session.swellDirection == nil {
+        // A paddled foil reads the swell off its own rides; the only thing
+        // it can be missing is the size.
+        if session.swellDirection == nil, !session.sport.paddlesIntoWaves {
             return "Set the swell direction — waves are read from it, not the wind"
         }
         if (session.swellHeight ?? 0) <= 0.05 {
@@ -411,7 +419,9 @@ struct SessionAnalysisTab: View {
     }
 
     private var waveValue: String? {
-        guard session.swellDirection != nil else { return nil }
+        // A paddled foil reads its swell off the rides; the row has a value
+        // as soon as the finder has one.
+        guard session.swellDirection != nil || session.sport.paddlesIntoWaves else { return nil }
         guard let waves else { return nil }
         guard waves.count > 0 else { return "none found" }
         return "\(waves.count) · longest \(Format.shortDuration(waves.longest?.duration ?? 0))"

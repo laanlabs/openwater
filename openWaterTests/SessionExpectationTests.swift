@@ -69,6 +69,10 @@ final class SessionExpectationTests: XCTestCase {
         var runsDownwind: Int
         var runsReaching: Int
         var runsUpwind: Int
+        /// Waves, on the sports that paddle into them — where a run is a
+        /// wave. Nil elsewhere, so the sessions recorded before it existed
+        /// read exactly as they did.
+        var runsWave: Int?
         /// Runs entered without touching down — the thing riders chase.
         var runsLinked: Int
 
@@ -160,10 +164,14 @@ final class SessionExpectationTests: XCTestCase {
             legsByKind[leg.kind(in: summary.ribbon), default: 0] += 1
         }
 
-        let waves: WaveRideSummary? = session.swellDirection.map { swellFrom in
-            WaveRideFinder.forSport(session.sport)
-                .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
-        }
+        // The rider's swell, or the one a paddled foil reads off its own
+        // rides — so a surf session pins its waves without anyone typing a
+        // direction in.
+        let waves: WaveRideSummary? = WaveRideFinder
+            .swellFrom(for: session, flights: summary.flights).map { swellFrom in
+                WaveRideFinder.forSport(session.sport)
+                    .rides(in: session.track, flights: summary.flights, swellFrom: swellFrom)
+            }
 
         let expectation = Expectation(
             sport: session.sport.rawValue,
@@ -184,6 +192,7 @@ final class SessionExpectationTests: XCTestCase {
             runsDownwind: byKind[.downwind] ?? 0,
             runsReaching: byKind[.reaching] ?? 0,
             runsUpwind: byKind[.upwind] ?? 0,
+            runsWave: byKind[.wave],
             runsLinked: runs.filter(\.isLinked).count,
             shape: summary.shape.kind.rawValue,
             legs: summary.shape.legs.count,
@@ -377,7 +386,7 @@ final class SessionExpectationTests: XCTestCase {
         out += "down. A run ends at a change of point of sail or a touchdown; stretches sailed "
         out += "off the foil are not runs.\n\n"
 
-        for kind in [GroupedRun.Kind.downwind, .reaching, .upwind] {
+        for kind in [GroupedRun.Kind.downwind, .reaching, .upwind, .wave] {
             let group = runs.filter { $0.kind == kind }
             guard !group.isEmpty else { continue }
             out += "### \(kind.title) · \(group.count)\n\n"
@@ -570,6 +579,7 @@ final class SessionExpectationTests: XCTestCase {
         check("downwind runs", actual.runsDownwind, expected.runsDownwind)
         check("reaching runs", actual.runsReaching, expected.runsReaching)
         check("upwind runs", actual.runsUpwind, expected.runsUpwind)
+        XCTAssertEqual(actual.runsWave, expected.runsWave, "\(key) (\(file)): waves as runs")
         check("linked runs", actual.runsLinked, expected.runsLinked)
 
         XCTAssertEqual(actual.shape, expected.shape, "\(key) (\(file)): shape")

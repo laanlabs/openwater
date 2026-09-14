@@ -722,7 +722,7 @@ struct NearbyConditionsSheet: View {
             if !track.isEmpty {
                 NavigationLink {
                     ForecastScreen(title: title, coordinate: coordinate, detail: full,
-                                   outlook: ahead, waves: waves)
+                                   outlook: ahead, waves: waves, spotId: spot?.spotId)
                 } label: {
                     windAheadBody(track)
                 }
@@ -1613,7 +1613,7 @@ struct NearbyConditionsSheet: View {
         // Three calendar days: the card draws 48 hours from this hour, and
         // the run opens at local midnight — so an evening rider has most of
         // day one already behind them and needs the third to reach the end.
-        async let ahead = OpenMeteo.outlook(at: here, days: 3)
+        async let ahead = OpenMeteo.outlook(at: here, days: 3, spotId: spot?.spotId)
         async let sea = OpenMeteo.waves(at: here)
         async let everything = OpenMeteo.detail(at: here)
         async let sea2 = OpenMeteo.surf(at: here)

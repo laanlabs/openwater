@@ -22,6 +22,19 @@ enum ScreenshotRoute: String {
     case record
 
     static let argumentPrefix = "-openWaterScreen"
+    /// `-openWaterSpot <slug>`: with the Spots route, push that guide spot's
+    /// page as soon as the guide has loaded. For screenshots and for driving
+    /// the simulator — a map pin is the one thing a synthesized tap cannot
+    /// reach, and the spot page is where every forecast screen starts.
+    static let spotArgumentPrefix = "-openWaterSpot"
+
+    /// The guide spot slug requested on the command line, if any.
+    static var requestedSpotSlug: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: spotArgumentPrefix),
+              index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
 
     /// The route requested on the command line, if any.
     static var requested: ScreenshotRoute? {

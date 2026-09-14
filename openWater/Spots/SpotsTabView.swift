@@ -538,7 +538,14 @@ struct SpotsTabView: View {
             guard !Task.isCancelled else { return }
             localCurrent = outlook
         }
-        .task { await guide.load() }
+        .task {
+            await guide.load()
+            // See `ScreenshotRoute.spotArgumentPrefix`.
+            if path.isEmpty, let slug = ScreenshotRoute.requestedSpotSlug,
+               let spot = guide.spots.first(where: { $0.slug == slug || $0.spotId == slug }) {
+                path.append(.spot(spot))
+            }
+        }
         .onChange(of: forecastModelRaw) { _, _ in
             // Every cached number came from the old model; the wash refetches
             // on the map's own settle rule, and the pins' live readings are

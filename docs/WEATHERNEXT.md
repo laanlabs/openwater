@@ -1,4 +1,4 @@
-# WeatherNext: applied for, and deliberately not shipped
+# WeatherNext: built, and waiting on one sentence from Google
 
 [WeatherNext 3](https://developers.google.com/weathernext/guides/models) is
 Google DeepMind's forecast model — a generative mesh transformer rather than a
@@ -8,13 +8,56 @@ grid, 360 hours out from the 00/06/12/18 UTC runs, and a genuine 64-member
 ensemble whose spread arrives pre-reduced to six percentiles — mean, p10, p25,
 p50, p75, p90.
 
-We applied for access and it was granted on 13 September 2026. We are not
-putting it in the app, and the reason is the licence rather than the
-engineering. This document is the record of both,
-so the decision does not have to be rediscovered by whoever next reads the
-model spec and gets excited.
+## Where it stands
 
-## Why it cannot ship
+Access was granted on 13 September 2026. The acceptance email says the
+request "has been accepted for use in your app … subject to your compliance
+with the applicable terms of use" — which grants access under the terms
+below, not an exception to them, and the terms still do not permit showing
+real-time forecasts to App Store users (see "Why it could not ship"). A
+reply asking that exact yes/no question is with weathernext@google.com.
+
+So the feature is **built on a branch and not merged**. Everything below
+runs today under Section 2(a), "any internal purpose": the publisher is
+live, and the branch installs on our own devices from Xcode. The day Google
+says yes, its reply is pasted here verbatim, the containment guard in
+`scripts/` is retired, and the branch merges — the three in one commit. If
+Google says no, the branch stays the internal build this document always
+allowed for, and the bucket goes private.
+
+What the branch does: WeatherNext is the fifth independent line on the model
+compare screen at guide spots, with its p10–p90 fan under it, on iPhone and
+Apple TV. How it gets there:
+
+- **`cloud/weathernext/`** — a Cloud Run job, twice a day at init + 8h35
+  for the 00Z and 12Z runs, that asks BigQuery for every guide spot's cell
+  in one query and writes one JSON per spot to the public bucket
+  `openwater-weathernext`.
+  `deploy.sh` stands the whole thing up; `main.py` is the job. The app
+  never holds a Google credential and never pays for a query.
+- **`WeatherNext.swift`** in OpenWaterSpots reads that file for a spot id
+  and lays it onto Open-Meteo's hour axis; `OpenMeteo.outlook(at:…spotId:)`
+  inserts it ahead of the composites. No spot id, no line: an arbitrary
+  point on the map has no published file.
+- **No gusts.** WeatherNext publishes none, so its `gusts` stay empty and
+  the gust band is drawn from the other models. Wind direction comes from
+  the u/v means.
+- **Attribution** on the sources screen, with Google's copyright line and
+  the experimental disclaimer the terms ask for.
+- **Cost.** 8.5 GiB billed per run, measured — bytes follow the columns
+  read, not the cells: 833 cells billed 8.5 GiB, 1,687 billed 9.3, and a
+  count-only probe 1.8. Two runs a day is ~510 GiB a month against a free
+  tier of 1 TiB; four would be the whole tier, so the 06Z and 18Z runs and
+  every hourly interim run are deliberately not fetched. Every query
+  carries a byte ceiling; the daily quota cannot be the backstop, because
+  BigQuery checks it against the unpruned estimate (tested: a 20 GiB cap
+  refused a query that bills 10 MiB). A billing budget alert is the
+  honest third guard.
+
+The sections that follow are the record of the year this could not ship,
+kept because the licence has not changed — only our permission under it.
+
+## Why it could not ship without permission
 
 The [GDM Real-Time Weather Forecasting Experimental Data Terms of
 Use](https://storage.googleapis.com/weathernext-public/terms-of-use.pdf) (last

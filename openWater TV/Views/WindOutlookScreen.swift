@@ -25,6 +25,9 @@ struct WindOutlookScreen: View {
 
     let here: Geo.Coordinate
     let placeName: String
+    /// The guide spot this is, when it is one — what earns the WeatherNext
+    /// line, which is published per spot rather than per point.
+    var spotId: String? = nil
 
     @State private var outlook = WindOutlook(hours: [], models: [])
     @State private var isLoading = true
@@ -102,7 +105,7 @@ struct WindOutlookScreen: View {
         .menuBackHint()
         .task {
             isLoading = true
-            outlook = await OpenMeteo.outlook(at: here, days: Self.days)
+            outlook = await OpenMeteo.outlook(at: here, days: Self.days, spotId: spotId)
             // Everything that is not a blend, once the models are known. NBM
             // already contains GFS and HRRR, so averaging it in beside them
             // counts the same physics twice and reads the double vote as

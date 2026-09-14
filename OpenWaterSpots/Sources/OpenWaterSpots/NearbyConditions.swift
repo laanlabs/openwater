@@ -117,6 +117,14 @@ public struct WindOutlook: Sendable {
         /// average into a blend alongside its own ingredients: that counts
         /// the same physics twice and calls the double vote agreement.
         public var isComposite: Bool = false
+        /// The model's own spread, where it is an ensemble: the tenth and
+        /// ninetieth percentiles of its members, knots, aligned to `hours`.
+        /// Empty for a deterministic model, which has one opinion.
+        public var low: [Double?] = []
+        public var high: [Double?] = []
+
+        /// Whether this model brings a spread of its own to draw.
+        public var hasBand: Bool { low.contains { $0 != nil } && high.contains { $0 != nil } }
     }
 
     public let hours: [Date]
@@ -792,8 +800,34 @@ public enum OpenMeteo: Sendable {
         ("ncep_nbm_conus", "NBM", true),
     ]
 
+    /// With a guide `spotId`, WeatherNext joins the line-up — see
+    /// `WeatherNext` for why it is the spot and not the coordinate that
+    /// earns the extra model. It arrives from its own bucket, on its own
+    /// clock, and is laid onto Open-Meteo's hour axis so every consumer
+    /// keeps indexing one shared `hours`.
     public static func outlook(at coordinate: Geo.Coordinate, days: Int = 1,
-                        pastDays: Int = 0) async -> WindOutlook {
+                        pastDays: Int = 0, spotId: String? = nil) async -> WindOutlook {
+        async let second: WeatherNext.Series? = {
+            guard let spotId else { return nil }
+            return await WeatherNext.series(spotId: spotId)
+        }()
+        var outlook = await openMeteoOutlook(at: coordinate, days: days, pastDays: pastDays)
+        if let series = await second, !outlook.hours.isEmpty {
+            let model = series.aligned(to: outlook.hours)
+            if model.speeds.contains(where: { $0 != nil }) {
+                // Ahead of the composites, so the independent opinions
+                // read together and NOAA's blend keeps the last word.
+                var models = outlook.models
+                models.insert(model, at: models.firstIndex(where: \.isComposite) ?? models.endIndex)
+                outlook = WindOutlook(hours: outlook.hours, models: models,
+                                      timeZone: outlook.timeZone, staleAge: outlook.staleAge)
+            }
+        }
+        return outlook
+    }
+
+    private static func openMeteoOutlook(at coordinate: Geo.Coordinate, days: Int,
+                                         pastDays: Int) async -> WindOutlook {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
         components.queryItems = [
             .init(name: "latitude", value: String(format: "%.4f", coordinate.latitude)),

@@ -25,6 +25,15 @@ struct WeatherSourcesView: View {
                 + "behind what a week here normally does. Free and worldwide, no account."
             )
 
+            source(
+                "Google DeepMind · WeatherNext 3",
+                "The teal line on the compare screen at guide spots, and the fan around it: "
+                + "a 64-member AI ensemble's median, tenth and ninetieth percentiles for the "
+                + "wind, on a 10 km grid, refreshed twice a day. Forecast data "
+                + "© 2024–6 Google LLC. Experimental: not an official forecast, and no "
+                + "substitute for the warnings above."
+            )
+
             apple
 
             source(

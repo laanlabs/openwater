@@ -300,6 +300,7 @@ struct ForecastScreen: View {
     let detail: WeatherDetail
     let outlook: WindOutlook
     var waves: [WaveHour] = []
+    var spotId: String? = nil
 
     @Environment(AppSettings.self) private var settings
     @State private var day = 0
@@ -373,7 +374,7 @@ struct ForecastScreen: View {
     private var modelLines: some View {
         if !outlook.isEmpty {
             NavigationLink {
-                ModelCompareScreen(title: title, coordinate: coordinate)
+                ModelCompareScreen(title: title, coordinate: coordinate, spotId: spotId)
             } label: {
                 modelLinesBody
             }
@@ -400,6 +401,12 @@ struct ForecastScreen: View {
                 }
 
                 ZStack(alignment: .bottomLeading) {
+                    ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                        if model.hasBand {
+                            ModelBand(low: model.low, high: model.high, peak: peak)
+                                .fill(Self.palette[index % Self.palette.count].opacity(0.12))
+                        }
+                    }
                     ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                         ModelTrace(speeds: model.speeds, peak: peak)
                             .stroke(Self.palette[index % Self.palette.count],
@@ -778,6 +785,41 @@ struct ChartGrid: View {
 }
 
 /// One model's wind as a line across the card.
+/// An ensemble's own spread: the region between its tenth and ninetieth
+/// percentiles, closed wherever both exist. Drawn faint under the model's
+/// median line, so the line stays the opinion and the band says how firmly
+/// it is held.
+private struct ModelBand: Shape {
+    let low: [Double?]
+    let high: [Double?]
+    let peak: Double
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let count = min(low.count, high.count)
+        guard count > 1, peak > 0 else { return path }
+        let step = rect.width / CGFloat(count - 1)
+        func y(_ value: Double) -> CGFloat { rect.maxY - rect.height * CGFloat(min(value, peak) / peak) }
+        // One closed polygon per unbroken run: along the top, back along
+        // the bottom. A gap in either percentile ends the run.
+        var run: [(x: CGFloat, top: CGFloat, bottom: CGFloat)] = []
+        func flush() {
+            guard run.count > 1 else { run = []; return }
+            path.move(to: CGPoint(x: run[0].x, y: run[0].top))
+            for point in run.dropFirst() { path.addLine(to: CGPoint(x: point.x, y: point.top)) }
+            for point in run.reversed() { path.addLine(to: CGPoint(x: point.x, y: point.bottom)) }
+            path.closeSubpath()
+            run = []
+        }
+        for index in 0..<count {
+            guard let lo = low[index], let hi = high[index] else { flush(); continue }
+            run.append((rect.minX + CGFloat(index) * step, y(hi), y(lo)))
+        }
+        flush()
+        return path
+    }
+}
+
 private struct ModelTrace: Shape {
     let speeds: [Double?]
     let peak: Double
@@ -852,6 +894,9 @@ struct ModelCompareScreen: View {
 
     let title: String
     let coordinate: Geo.Coordinate
+    /// The guide spot this is, when it is one: what earns the WeatherNext
+    /// line, which is published per spot rather than per point.
+    var spotId: String? = nil
 
     @Environment(AppSettings.self) private var settings
     @State private var outlook = WindOutlook(hours: [], models: [])
@@ -874,13 +919,16 @@ struct ModelCompareScreen: View {
     /// Lifted in the dark field, where a mid-tone on navy loses the contrast
     /// it had on white.
     ///
-    /// NBM is graphite on purpose: it is NOAA's own blend of the others
-    /// rather than a fifth opinion, so it wears no hue of its own.
+    /// WeatherNext is teal, the fifth independent opinion where the guide
+    /// has a spot for it. NBM is graphite on purpose: it is NOAA's own
+    /// blend of the others rather than an opinion, so it wears no hue of
+    /// its own — and it is always last, so the graphite is always its.
     static let palette: [Color] = [
         hue(0x6E92C4, dark: 0x8CB0E0),
         hue(0xC9924F, dark: 0xE0AC6B),
         hue(0x5FA37A, dark: 0x7CC298),
         hue(0xA277B4, dark: 0xBE96CE),
+        hue(0x4FA3A8, dark: 0x6EC3C8),
         hue(0x7A8391, dark: 0x9AA4B3),
     ]
 
@@ -947,7 +995,7 @@ struct ModelCompareScreen: View {
         .feedbackButton("Models")
         .task {
             async let members = OpenMeteo.ensemble(at: coordinate)
-            outlook = await OpenMeteo.outlook(at: coordinate, days: 16, pastDays: 1)
+            outlook = await OpenMeteo.outlook(at: coordinate, days: 16, pastDays: 1, spotId: spotId)
             // Composites start switched off: the NBM already contains the
             // other lines, and averaging it in with them counts the same
             // physics twice. Its chip is right there for anyone who wants
@@ -1217,9 +1265,15 @@ struct ModelCompareScreen: View {
         let nbm = outlook.models.contains { $0.isComposite }
             ? " NBM is NOAA's own blend of dozens of models corrected against real stations — a benchmark line, off by default so it is not averaged in beside its own ingredients."
             : ""
+        let weatherNext = outlook.models.contains { $0.id == WeatherNext.modelId }
+            ? " WeatherNext is Google DeepMind's AI model: the line is the median of 64 runs and the shaded fan around it is where eight in ten of them fall. Experimental, and it forecasts no gusts."
+            : ""
+        let sources = outlook.models.contains { $0.id == WeatherNext.modelId }
+            ? " Free from Open-Meteo and Google."
+            : " Free from Open-Meteo."
         return "The heavy line is the blend of whatever is switched on. Models run to different horizons — "
             + horizons.joined(separator: ", ")
-            + ". Free from Open-Meteo." + nbm
+            + "." + sources + weatherNext + nbm
     }
 }
 
@@ -1673,6 +1727,16 @@ private struct ChartContent: View, Equatable {
             // slab reads as a reading.
             GustBand(speeds: series.blend, gusts: series.gusts, peak: series.peak)
                 .fill(ModelChart.gust.opacity(0.14))
+
+            // An ensemble's own fan, in its own hue, under every line: how
+            // far its members disagree is a different fact from how far
+            // the agencies do, and the only one that is a probability.
+            ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
+                if enabled.contains(model.id), model.hasBand {
+                    ModelBand(low: model.low, high: model.high, peak: series.peak)
+                        .fill(palette[index % palette.count].opacity(0.12))
+                }
+            }
 
             ForEach(Array(outlook.models.enumerated()), id: \.element.id) { index, model in
                 if enabled.contains(model.id) {

@@ -175,7 +175,7 @@ struct ConditionsScreen: View {
             .menuBackHint()
             .navigationDestination(for: Detail.self) { detail in
                 switch detail {
-                case .wind:  WindOutlookScreen(here: here, placeName: title)
+                case .wind:  WindOutlookScreen(here: here, placeName: title, spotId: spot?.spotId)
                 case .waves: WaveDetailScreen(here: here, placeName: title)
                 case .tide:  TideDetailScreen(here: here, placeName: title)
                 case .weather: WeatherDetailScreen(here: here, placeName: title)

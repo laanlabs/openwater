@@ -471,9 +471,16 @@ struct RibbonView: View {
                                       endElapsed: first.start, title: "Off foil"))
         }
         for index in spans.indices.dropFirst() where spans[index].start - spans[index - 1].end >= 1 {
+            let start = spans[index - 1].end, end = spans[index].start
+            // A gap that one flight spans whole was never off the foil: it is
+            // the pump between two linked waves on a paddled foil, and the
+            // row says so. A wing's runs never leave a gap inside a flight —
+            // they split at touchdowns and reversals, and a reversal joins
+            // its rows edge to edge — so this reads "off foil" there as ever.
+            let pumped = flights.contains { $0.startElapsed <= start + 1 && $0.endElapsed >= end - 1 }
             out.append(OffFoilStretch(id: Self.offFoilIDBase + index,
-                                      startElapsed: spans[index - 1].end,
-                                      endElapsed: spans[index].start, title: "Off foil"))
+                                      startElapsed: start, endElapsed: end,
+                                      title: pumped ? "Pumping" : "Off foil"))
         }
         if duration - last.end >= 1 {
             out.append(OffFoilStretch(id: Self.offFoilIDBase + spans.count,
@@ -545,7 +552,8 @@ struct RibbonView: View {
             select([piece.id])
         } label: {
             OffFoilBreak(seconds: piece.seconds,
-                         isSelected: selection.contains(piece.id))
+                         isSelected: selection.contains(piece.id),
+                         isPumping: piece.title == "Pumping")
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

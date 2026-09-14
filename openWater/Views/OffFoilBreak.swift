@@ -17,31 +17,38 @@ struct OffFoilBreak: View {
     /// at this and be shown where it happened.
     var isSelected = false
 
-    private var text: String {
+    /// The gap was on the foil: the pump between two linked waves on a
+    /// paddled foil. The opposite of a swim — the rider never came down —
+    /// so it wears the orange the Wave Rides map draws pumping in, and
+    /// says so, rather than the swimmer and "off foil".
+    var isPumping = false
+
+    private var duration: String {
         let whole = Int(seconds.rounded())
-        return whole < 60
-            ? "off foil \(whole)s"
-            : "off foil \(whole / 60):\(String(format: "%02d", whole % 60))"
+        return whole < 60 ? "\(whole)s" : "\(whole / 60):\(String(format: "%02d", whole % 60))"
     }
+
+    private var text: String { (isPumping ? "pumping " : "off foil ") + duration }
 
     var body: some View {
         HStack(spacing: 8) {
             line
-            Label(text, systemImage: "figure.pool.swim")
+            Label(text, systemImage: isPumping ? "arrow.up.and.down" : "figure.pool.swim")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white)
+                                 : isPumping ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
                 .padding(.horizontal, isSelected ? 8 : 0)
                 .padding(.vertical, isSelected ? 3 : 0)
                 .background {
                     if isSelected {
-                        Capsule().fill(Color(red: 0.45, green: 0.48, blue: 0.53))
+                        Capsule().fill(isPumping ? Color.orange : Color(red: 0.45, green: 0.48, blue: 0.53))
                     }
                 }
             line
         }
         // Room for a thumb: this is a control now, not only a caption.
         .padding(.vertical, 7)
-        .accessibilityLabel("Off the foil for \(text)")
+        .accessibilityLabel(isPumping ? "Pumping between waves for \(duration)" : "Off the foil for \(duration)")
         .accessibilityAddTraits(.isButton)
     }
 

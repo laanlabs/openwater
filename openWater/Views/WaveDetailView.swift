@@ -268,6 +268,14 @@ struct WaveDetailView: View {
     private func summaryCard(_ waves: WaveRideSummary) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 10) {
+                // Which sport's rules these are. The rules differ by sport —
+                // a paddled foil reads its swell off the rides, bridges its
+                // cutbacks and links by staying on the foil; a wing does none
+                // of that — and a rider who has just reclassified a session
+                // should see which set they are looking at.
+                Label(session.sport.displayName + " rules", systemImage: session.sport.symbolName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Self.waveColour)
                 HStack(alignment: .firstTextBaseline) {
                     Text(waves.count == 1 ? "1 wave" : "\(waves.count) waves")
                         .font(.subheadline.weight(.bold))

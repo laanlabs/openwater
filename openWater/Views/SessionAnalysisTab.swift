@@ -393,7 +393,9 @@ struct SessionAnalysisTab: View {
     /// as a failure, and the row itself is where a rider learns the feature
     /// wants the swell direction.
     private var wavesSection: some View {
-        Section("Waves") {
+        // Named for the sport: which rules found the waves is the first
+        // thing a rider who has changed the sport wants to know.
+        Section("Waves · \(session.sport.displayName)") {
             AnalysisRow(symbol: "figure.surfing", title: "Wave rides",
                         value: waveValue, warning: swellWarning) {
                 WaveDetailView(session: session, summary: summary,

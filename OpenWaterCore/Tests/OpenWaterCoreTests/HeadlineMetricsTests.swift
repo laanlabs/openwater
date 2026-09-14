@@ -11,11 +11,11 @@ struct HeadlineMetricsTests {
 
     @Test("Swell sports lead with glides, everything else leads with flight time")
     func preferenceBySport() {
-        for sport in [Sport.downwindSUP, .sup, .prone] {
+        for sport in [Sport.downwindSUP, .sup] {
             #expect(HeadlineMetrics.preference(for: sport).first == .timeGliding,
                     "\(sport.rawValue) rides swell, so glides come first")
         }
-        for sport in [Sport.wingfoil, .parawing, .windfoil, .kitefoil, .efoil, .tow] {
+        for sport in [Sport.wingfoil, .parawing, .windfoil, .kitefoil, .efoil, .tow, .prone, .supFoil] {
             #expect(HeadlineMetrics.preference(for: sport).first == .timeOnFoil,
                     "\(sport.rawValue) foils, so flight time comes first")
         }

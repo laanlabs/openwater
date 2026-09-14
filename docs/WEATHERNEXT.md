@@ -54,6 +54,68 @@ Apple TV. How it gets there:
   refused a query that bills 10 MiB). A billing budget alert is the
   honest third guard.
 
+## How to make it real, without fetching anything by hand
+
+Written 2026-09-13, when the branch was being tested by running the
+publisher from a laptop. That is the right way to *test* and the wrong way
+to *run*: there is no version of this model in the app that does not have
+a server fetching on a schedule, because the data only exists in BigQuery,
+Cloud Storage and Earth Engine — behind credentials and billing — and a
+phone can never ask Google for it the way it asks Open-Meteo. What follows
+is what "running" looks like, in the order to do it, and what each step
+costs. The whole of it is $0 a month and needs no routine attention.
+
+**0. The gate, before any of it.** Google's yes, in writing, pasted into
+"Where it stands" above. Until then every step below is internal use and
+the branch does not merge.
+
+**1. Deploy the publisher once.** `cloud/weathernext/deploy.sh`, as
+jason@laan.com. It creates the service account, the Cloud Run job and a
+Cloud Scheduler entry at 08:35 and 20:35 UTC — the 00Z and 12Z runs, at
+init + 8h35 — and runs the job once. From then on the bucket refreshes
+itself. Free tier: Cloud Run's 180,000 vCPU-seconds a month against our
+40; Scheduler's first three jobs; BigQuery's 1 TiB against ~510 GiB.
+
+**2. Make neglect safe.** Add a staleness guard to `WeatherNext.swift`:
+each file carries its `init`, and if it is more than ~30 hours old the
+line does not draw. Then a job that dies degrades to "no WeatherNext" —
+which is what the app showed for a year — rather than to a wrong forecast
+wearing the model's name. Ten lines; do it before step 1 if there is any
+doubt about the order.
+
+**3. Two alarms, so nobody has to look.** A Cloud Monitoring alert on the
+job's failed executions (`run.googleapis.com/job/completed_execution_count`
+with `result=failed`) to jason@laan.com, and a billing budget on the
+project at $5 a month with an email at 50% — the budget is the one guard
+that catches a cost we did not think of. Both are console clicks; neither
+is scripted yet.
+
+**4. Only then, "click anywhere".** Today the line exists at guide spots
+only, because the publisher writes one file per spot. Any point on the map
+means a small Cloud Run *service*: given lat/lon it rounds to the 0.1°
+cell, serves `cells/<lat>_<lon>.json` from the bucket if that cell exists
+for the current run, and otherwise runs the one-cell query (10 MiB billed,
+~5 s), writes it, and returns it. ~100,000 cold cells a month fit in the
+free tier after the bulk runs. The app side is a coordinate variant of
+`WeatherNext.series(spotId:)` and the end of the "no spot id, no line"
+rule. Half a day. Do not pre-publish every coastal cell instead: bytes
+follow the columns read across the whole day-partition, and a global pull
+is ~800 GiB — the entire free tier in one run.
+
+**5. When the Cloud Storage grant lands, swap the inside.** The
+statistics Zarr (`gs://weathernext3_statistics_spatial/…`) is chunked,
+Requester Pays off, and a point read is a couple of range requests — free,
+no BigQuery, no partition arithmetic. The publisher and the cell service
+keep their shape and read the Zarr instead. This is almost certainly what
+Weather Lab itself does. Until the 403 clears, BigQuery is the only door.
+
+**What never to do.** Query BigQuery from the app. Scrape Weather Lab's
+own endpoint — it is login-gated, private, and using it is unauthorized
+under Google's general terms, a clearer problem than any of the above.
+Fetch the hourly interim runs on a schedule, or the 06Z/18Z runs, without
+re-measuring the bill first: four runs a day was measured at the whole
+free tier.
+
 The sections that follow are the record of the year this could not ship,
 kept because the licence has not changed — only our permission under it.
 

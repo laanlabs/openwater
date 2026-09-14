@@ -293,6 +293,18 @@ there are no rides. The Wave Rides footer says the swell was "read from
 the way you dropped in" and tells the rider to set it if the pumping
 looks wrong.
 
+**The ride is the unit; the waves are how it breaks down.** "Ideally, a
+user wants to see that they caught a wave, pumped back out to another
+wave, and then caught another one" — as *one* thing. `WaveChain` groups
+each wave with the linked waves after it and the pumps between; the Runs
+tab and the Wave Rides screen show chains by default ("3 rides · 5
+waves") and a shared toggle (`waves.together`, Rides / Waves) breaks them
+into the waves, with the pumping shown as an orange break between two
+waves of one ride. On the Runs tab a ride row says "2 waves · pumped
+14s"; on Wave Rides a ride row says what was ridden, how many waves, and
+how far and long the pumping was. The expectation record's `runsWave`
+counts rides (the default), `waves` counts waves.
+
 **Pumping is drawn and added up.** Every stretch on the foil that was not
 a wave — between two linked waves, or out to one that never came, up to
 the touchdown — is a `PumpStretch` on the summary, only for these sports

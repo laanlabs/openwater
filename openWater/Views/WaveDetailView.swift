@@ -58,6 +58,49 @@ struct WaveDetailView: View {
     /// The rules that decide what is on this screen at all.
     @State private var isEditingRules = false
 
+    /// One stay on the foil as one numbered ride — its waves and the pumps
+    /// between them — or every wave numbered on its own. Shared with the
+    /// Runs tab. See `WaveChain`.
+    @AppStorage("waves.together") private var wavesTogether = true
+
+    private func chain(containing rideID: Int, in waves: WaveRideSummary) -> WaveChain? {
+        waves.chains.first { $0.rides.contains { $0.id == rideID } }
+    }
+
+    /// Whether a ride is drawn boldly: the chosen wave, or — rides together
+    /// — every wave of the chosen ride.
+    private func isFocused(_ ride: WaveRide, in waves: WaveRideSummary) -> Bool {
+        guard let focusedRide else { return false }
+        if wavesTogether {
+            return chain(containing: focusedRide, in: waves)?.rides.contains { $0.id == ride.id } ?? false
+        }
+        return focusedRide == ride.id
+    }
+
+    /// The wave whose kick-out wears the arrow: the chosen wave, or the last
+    /// wave of the chosen ride.
+    private func kickOuts(in waves: WaveRideSummary) -> [WaveRide] {
+        guard let focusedRide else { return [] }
+        if wavesTogether { return chain(containing: focusedRide, in: waves)?.rides.last.map { [$0] } ?? [] }
+        return waves.rides.filter { $0.id == focusedRide }
+    }
+
+    private func orderedChains(_ waves: WaveRideSummary) -> [WaveChain] {
+        switch order {
+        case .time: waves.chains
+        case .longest: waves.chains.sorted { $0.duration > $1.duration }
+        case .fastest: waves.chains.sorted { $0.peakSpeed > $1.peakSpeed }
+        }
+    }
+
+    private func select(_ chain: WaveChain) {
+        guard let first = chain.rides.first else { return }
+        if let focusedRide, chain.rides.contains(where: { $0.id == focusedRide }), selectedRide != nil {
+            return showAll()
+        }
+        select(first)
+    }
+
     private func ordered(_ waves: WaveRideSummary) -> [WaveRide] {
         switch order {
         case .time: waves.rides
@@ -280,7 +323,11 @@ struct WaveDetailView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Self.waveColour)
                 HStack(alignment: .firstTextBaseline) {
-                    Text(waves.count == 1 ? "1 wave" : "\(waves.count) waves")
+                    // Rides first when they differ from the waves: "3 rides
+                    // · 5 waves" is the sentence a paddled foiler says.
+                    Text(wavesTogether && waves.chains.count != waves.count
+                         ? "\(waves.chains.count) ride\(waves.chains.count == 1 ? "" : "s") · \(waves.count) waves"
+                         : waves.count == 1 ? "1 wave" : "\(waves.count) waves")
                         .font(.subheadline.weight(.bold))
                     // Caught straight off the back of the one before — the
                     // thing a rider is trying to do, and until now the
@@ -481,33 +528,52 @@ struct WaveDetailView: View {
 
             // The others first, the chosen one last — same as every map that
             // draws runs, and for the same reason.
-            ForEach(waves.rides.filter { $0.id != focusedRide }) { ride in
+            ForEach(waves.rides.filter { !isFocused($0, in: waves) }) { ride in
                 MapPolyline(coordinates: coordinates(of: ride))
                     .stroke(focusedRide == nil ? Self.waveColour
                             : Color.secondary.opacity(0.22),
                             style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
             }
-            ForEach(waves.rides.filter { $0.id == focusedRide }) { ride in
+            ForEach(waves.rides.filter { isFocused($0, in: waves) }) { ride in
                 MapPolyline(coordinates: coordinates(of: ride))
                     .stroke(Self.waveColour,
                             style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
             }
 
             // Once one is chosen — by tap, or by the replay reaching it —
-            // only its own badge stays.
-            ForEach(waves.rides.filter { focusedRide == nil || $0.id == focusedRide }) { ride in
-                Annotation("", coordinate: midpoint(of: ride), anchor: .center) {
-                    Button { select(ride) } label: {
-                        rideBadge(ride)
+            // only its own badge stays. Rides together, the badge sits on
+            // the ride's first wave and carries the ride's number.
+            if wavesTogether {
+                ForEach(waves.chains.filter { chain in
+                    focusedRide == nil || chain.rides.contains { $0.id == focusedRide }
+                }) { chain in
+                    if let first = chain.rides.first {
+                        Annotation("", coordinate: midpoint(of: first), anchor: .center) {
+                            Button { select(chain) } label: {
+                                badge(number: chain.id + 1, bearing: first.netBearing,
+                                      lead: isFocused(first, in: waves),
+                                      label: "Ride \(chain.id + 1), \(chain.waveCount) wave\(chain.waveCount == 1 ? "" : "s")")
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .annotationTitles(.hidden)
                     }
-                    .buttonStyle(.plain)
                 }
-                .annotationTitles(.hidden)
+            } else {
+                ForEach(waves.rides.filter { focusedRide == nil || $0.id == focusedRide }) { ride in
+                    Annotation("", coordinate: midpoint(of: ride), anchor: .center) {
+                        Button { select(ride) } label: {
+                            rideBadge(ride)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .annotationTitles(.hidden)
+                }
             }
 
             // The chosen ride also wears an arrow at its kick-out, so the end
             // it finished on is visible and not just inferred from the badge.
-            ForEach(waves.rides.filter { $0.id == focusedRide }) { ride in
+            ForEach(kickOuts(in: waves)) { ride in
                 Annotation("", coordinate: endpoint(of: ride), anchor: .center) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 11, weight: .black))
@@ -560,7 +626,11 @@ struct WaveDetailView: View {
     /// corner — a second puck per ride there would bury the numbers it was
     /// meant to clarify. One marker, both facts, at the ride's midpoint.
     private func rideBadge(_ ride: WaveRide) -> some View {
-        let lead = focusedRide == ride.id
+        badge(number: ride.id + 1, bearing: ride.netBearing, lead: focusedRide == ride.id,
+              label: "Wave \(ride.id + 1), ran \(Format.cardinal(ride.netBearing))")
+    }
+
+    private func badge(number: Int, bearing: Double, lead: Bool, label: String) -> some View {
         let size: CGFloat = lead ? 24 : 18
         return ZStack {
             // White under teal, so the pointer keeps its edge over the ride
@@ -574,9 +644,9 @@ struct WaveDetailView: View {
                     .foregroundStyle(Self.waveColour)
             }
             .offset(y: -(size / 2 + (lead ? 7 : 6)))
-            .rotationEffect(.degrees(ride.netBearing - mapHeading))
+            .rotationEffect(.degrees(bearing - mapHeading))
 
-            Text("\(ride.id + 1)")
+            Text("\(number)")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
@@ -585,7 +655,7 @@ struct WaveDetailView: View {
         }
         .frame(width: size + 28, height: size + 28)
         .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-        .accessibilityLabel("Wave \(ride.id + 1), ran \(Format.cardinal(ride.netBearing))")
+        .accessibilityLabel(label)
     }
 
     private func coordinates(of ride: WaveRide) -> [CLLocationCoordinate2D] {
@@ -805,7 +875,12 @@ struct WaveDetailView: View {
         let clock = "\(Format.duration(elapsed - range.lowerBound)) / "
             + "\(Format.duration(range.upperBound - range.lowerBound))"
         guard replayEngaged else { return clock }
-        if let ride = playheadRide { return "Wave \(ride + 1) · \(clock)" }
+        if let ride = playheadRide {
+            if wavesTogether, let waves, let chain = chain(containing: ride, in: waves) {
+                return "Ride \(chain.id + 1) · \(clock)"
+            }
+            return "Wave \(ride + 1) · \(clock)"
+        }
         return "Between waves · \(clock)"
     }
 
@@ -835,6 +910,23 @@ struct WaveDetailView: View {
             .pickerStyle(.segmented)
             .padding(.bottom, 8)
 
+            // Rides or waves. A ride is one stay on the foil — catch, pump
+            // back out, catch again — which is what the rider counts; the
+            // waves are how it breaks down.
+            if waves.chains.count != waves.count {
+                Picker("Show", selection: $wavesTogether) {
+                    Text("Rides").tag(true)
+                    Text("Waves").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .padding(.bottom, 8)
+            }
+
+            if wavesTogether {
+                ForEach(orderedChains(waves)) { chain in
+                    chainRow(chain, in: waves)
+                }
+            } else {
             ForEach(ordered(waves)) { ride in
                 Button { select(ride) } label: {
                     HStack(spacing: 10) {
@@ -890,10 +982,59 @@ struct WaveDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .cardChrome()
+    }
+
+    /// One stay on the foil as a row: what was ridden, how many waves, and
+    /// how much of it was the pumping between them.
+    private func chainRow(_ chain: WaveChain, in waves: WaveRideSummary) -> some View {
+        let focused = chain.rides.contains { isFocused($0, in: waves) }
+        return Button { select(chain) } label: {
+            HStack(spacing: 10) {
+                Text("\(chain.id + 1)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(focusedRide == nil || focused ? Self.waveColour
+                                : Color.secondary.opacity(0.35), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("\(Format.distance(chain.distanceRidden, unit: units.distance)) · \(Format.shortDuration(chain.duration))")
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                        if chain.isLinked {
+                            Text("\(chain.waveCount) waves")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Self.waveColour.opacity(0.14), in: Capsule())
+                                .foregroundStyle(Self.waveColour)
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        Text("\(Format.speed(chain.peakSpeed, unit: units.speed, decimals: 1)) peak")
+                        if chain.isLinked {
+                            Text("· pumped \(Format.distance(chain.distancePumped, unit: units.distance)) · \(Format.shortDuration(chain.timePumping))")
+                                .foregroundStyle(Self.pumpColour)
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                }
+
+                Spacer(minLength: 8)
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .background(focused ? AnyShapeStyle(Self.waveColour.opacity(0.12)) : AnyShapeStyle(.clear))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Footer

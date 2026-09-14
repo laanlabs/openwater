@@ -54,6 +54,32 @@ public struct PumpStretch: Hashable, Sendable, Identifiable {
     public var duration: TimeInterval { endElapsed - startElapsed }
 }
 
+/// One stay on the foil, from the first catch to the touchdown: the waves
+/// caught in it and the pumps between them.
+///
+/// This is the unit a paddled foiler counts — "I caught a wave, pumped
+/// back out and caught another" is one ride, however many waves it held —
+/// and the Runs tab and the Wave Rides screen show it by default, with
+/// the waves as the way to break it up.
+public struct WaveChain: Hashable, Sendable, Identifiable {
+    public let id: Int
+    public let rides: [WaveRide]
+    /// The pumps that fell between this chain's waves.
+    public let pumps: [PumpStretch]
+
+    public var startElapsed: TimeInterval { rides.first?.startElapsed ?? 0 }
+    public var endElapsed: TimeInterval { rides.last?.endElapsed ?? 0 }
+    /// First catch to last kick-out, pumping included.
+    public var duration: TimeInterval { endElapsed - startElapsed }
+    public var waveCount: Int { rides.count }
+    public var distanceRidden: Double { rides.reduce(0) { $0 + $1.distance } }
+    public var distancePumped: Double { pumps.reduce(0) { $0 + $1.distance } }
+    public var timePumping: TimeInterval { pumps.reduce(0) { $0 + $1.duration } }
+    public var peakSpeed: Double { rides.map(\.peakSpeed).max() ?? 0 }
+    /// Whether the chain was more than one wave.
+    public var isLinked: Bool { rides.count > 1 }
+}
+
 /// A session's wave riding, taken as a whole.
 public struct WaveRideSummary: Sendable {
 
@@ -104,6 +130,25 @@ public struct WaveRideSummary: Sendable {
 
     /// Rides caught straight off the back of the one before.
     public var linkedCount: Int { rides.filter(\.linked).count }
+
+    /// The rides as stays on the foil: each linked wave joins the chain of
+    /// the wave before it, and the pumps between them come along.
+    public var chains: [WaveChain] {
+        var out: [WaveChain] = []
+        var current: [WaveRide] = []
+        func flush() {
+            guard let first = current.first, let last = current.last else { return }
+            let between = pumps.filter { $0.startElapsed >= first.startElapsed && $0.endElapsed <= last.endElapsed }
+            out.append(WaveChain(id: out.count, rides: current, pumps: between))
+            current = []
+        }
+        for ride in rides {
+            if !ride.linked { flush() }
+            current.append(ride)
+        }
+        flush()
+        return out
+    }
 
     public static let none = WaveRideSummary(
         rides: [], timeOnWaves: 0, distance: 0,

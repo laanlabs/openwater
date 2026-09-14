@@ -91,6 +91,29 @@ struct PaddledWaveTests {
         #expect((waves.rides.first?.duration ?? 0) >= 40)
     }
 
+    @Test("A nine-second catch on its own is a failed catch; a four-second one inside a ride is a wave")
+    func failedCatchIsNotARide() {
+        // A catch that came up and went straight back down, then a real
+        // ride that opened with a catch shorter than the failed one.
+        let (track, flights) = analyse([
+            .init(speed: 1.5, heading: 0, duration: 60),
+            .init(speed: 6.5, heading: 20, duration: 9),      // up, and down again
+            .init(speed: 1.5, heading: 0, duration: 60),
+            .init(speed: 6.5, heading: 10, duration: 4),      // a short catch —
+            .init(speed: 6.2, heading: 175, duration: 14),    // — the turn out and pump —
+            .init(speed: 6.5, heading: 340, duration: 30),    // — and the wave it was for
+            .init(speed: 1.5, heading: 0, duration: 60),
+        ])
+        #expect(flights.count == 2, "\(flights.count) flights — the failed catch still flew")
+        let waves = WaveRideFinder.forSport(.supFoil).rides(in: track, flights: flights, swellFrom: 180)
+        #expect(waves.chains.count == 1, "\(waves.chains.count) rides")
+        #expect(waves.count == 2, "\(waves.count) waves")
+        #expect(waves.rides.first?.startElapsed ?? 0 > 120, "the failed catch was named")
+        #expect(waves.rides.first?.duration ?? 0 < 9, "the short first catch was kept")
+        #expect(waves.rides.map(\.id) == [0, 1])
+        #expect(waves.timeOnWaves < 45, "\(waves.timeOnWaves) s on waves counts the failed catch")
+    }
+
     @Test("The swell is read off the drop-ins, not the rides")
     func inferredFromCatches() {
         // Rides run east and west along a beach; every catch drops in

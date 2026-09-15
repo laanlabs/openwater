@@ -433,6 +433,7 @@ struct FoilingScreen: View {
                 units: units,
                 totalDistance: summary.distance,
                 takeoffThreshold: session.effectiveFoilTakeoffSpeed,
+                averageLandingSpeed: summary.averageLandingSpeed,
                 onChangeThreshold: onEdit
             )
             .cardChrome()
@@ -496,7 +497,7 @@ struct FoilingScreen: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                Text("up at \(Format.speed(flight.takeoffSpeed, unit: units.speed, decimals: 1))")
+                Text(takeoffAndLanding(flight))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -504,6 +505,18 @@ struct FoilingScreen: View {
             ConfidenceMark(confidence: flight.confidence)
         }
         .padding(.vertical, 7)
+    }
+
+    /// "up at 9.4 · down at 7.1 kn". The landing is left off a flight the
+    /// recording stopped in the middle of: the last speed there is not one
+    /// the foil let go at.
+    private func takeoffAndLanding(_ flight: Flight) -> String {
+        guard flight.landed(within: summary.duration) else {
+            return "up at \(Format.speed(flight.takeoffSpeed, unit: units.speed, decimals: 1))"
+        }
+        let up = Format.speed(flight.takeoffSpeed, unit: units.speed, decimals: 1, includeSymbol: false)
+        let down = Format.speed(flight.landingSpeed, unit: units.speed, decimals: 1)
+        return "up at \(up) · down at \(down)"
     }
 }
 

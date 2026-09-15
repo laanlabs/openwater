@@ -67,6 +67,16 @@ public struct Flight: Hashable, Sendable, Codable, Identifiable {
         }
     }
 
+    /// Whether the rider came down, rather than the recording stopping.
+    ///
+    /// `landingSpeed` is read off the last flying sample, so a flight still
+    /// up when the rider pressed stop has one too — the speed they were
+    /// doing at that instant, which is not a landing, and averaged in with
+    /// the real ones it drags the figure up to cruising speed.
+    public func landed(within duration: TimeInterval) -> Bool {
+        endElapsed < duration
+    }
+
     // MARK: - Coding
 
     /// Hand-written for one line of it: `dips` has to be optional on the way
@@ -564,5 +574,21 @@ public struct FoilDetector: Sendable {
             }
         }
         return mask
+    }
+}
+
+extension SessionSummary {
+
+    /// Mean speed at the last flying sample before each landing — the speed
+    /// the foil let go at.
+    ///
+    /// Next to takeoff speed it is the window the foil works in, and on a
+    /// downwinder it is how slow a rider can wallow between bumps before
+    /// dropping off. A flight the recording stopped in the middle of is left
+    /// out; see `Flight.landed(within:)`. `nil` when no flight landed.
+    public var averageLandingSpeed: Double? {
+        let landings = flights.filter { $0.landed(within: duration) }.map(\.landingSpeed)
+        guard !landings.isEmpty else { return nil }
+        return landings.reduce(0, +) / Double(landings.count)
     }
 }

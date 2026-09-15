@@ -134,6 +134,30 @@ struct FoilDetectorTests {
         #expect(!flights.isEmpty)
         #expect(flights[0].confidence < 0.6, "speed-only flights must not claim high confidence")
     }
+
+    @Test("Landing speed is read where the rider came down, not where the recording stopped")
+    func landingSpeedIgnoresTheRecordingEnd() throws {
+        // A flight, thirty seconds in the water, and a second flight that is
+        // still going when the track ends.
+        let t = trackWithTouchdown(seconds: 30)
+        let detector = FoilDetector.forSport(.wingfoil)
+        let flights = detector.detect(in: t)
+        try #require(flights.count == 2)
+
+        #expect(flights[0].landed(within: t.duration))
+        #expect(!flights[1].landed(within: t.duration), "still up when the recording stopped")
+
+        // The first came down on the way through the exit band, below the
+        // speed it was cruising at.
+        #expect(flights[0].landingSpeed < flights[0].maxSpeed)
+        #expect(flights[0].landingSpeed >= detector.thresholds.foilTakeoffSpeed * detector.exitFactor)
+
+        let summary = SessionAnalyzer(sport: .wingfoil).analyse(t)
+        let landed = summary.flights.filter { $0.landed(within: summary.duration) }
+        #expect(landed.count == summary.flights.count - 1)
+        #expect(summary.averageLandingSpeed == landed.first?.landingSpeed,
+                "the flight cut off by the end of the recording must not be averaged in")
+    }
 }
 
 @Suite("Maneuver detection")

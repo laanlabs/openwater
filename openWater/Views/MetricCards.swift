@@ -711,6 +711,8 @@ struct FoilSummaryCard: View {
     let totalDistance: Double
     /// The speed above which the detector counts the board as flying.
     let takeoffThreshold: Double
+    /// Mean speed the foil let go at; `nil` when no flight landed.
+    var averageLandingSpeed: Double? = nil
     /// Set to make the threshold adjustable from here.
     var onChangeThreshold: (() -> Void)?
 
@@ -754,6 +756,13 @@ struct FoilSummaryCard: View {
                     label: "Avg takeoff",
                     value: Format.speed(foil.averageTakeoffSpeed, unit: units.speed, decimals: 1)
                 )
+                // With takeoff, the window the foil works in.
+                if let landing = averageLandingSpeed {
+                    SummaryTile(
+                        label: "Avg landing",
+                        value: Format.speed(landing, unit: units.speed, decimals: 1)
+                    )
+                }
                 if let first = foil.timeToFirstFlight {
                     SummaryTile(label: "Time to first foil", value: Format.shortDuration(first))
                 }

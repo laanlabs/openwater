@@ -1,24 +1,79 @@
 import OpenWaterCore
 import SwiftUI
 
-/// Routes between the pre-session picker and the live session.
+/// Routes between the pre-session picker, the live session, and the moment
+/// in between.
 struct RootView: View {
 
     @Environment(SessionRecorder.self) private var recorder
     @Environment(WatchSettings.self) private var settings
+    @Environment(WatchSyncClient.self) private var sync
+
+    /// Set only when stopping could not put the session anywhere safe. A rider
+    /// who pressed stop and was dropped back on the start screen has no way to
+    /// tell "saved" from "gone", so silence is not an option here.
+    @State private var saveFailure: SaveFailure?
+
+    /// Stopping is not re-entrant: the dialog can be tapped twice on a wet
+    /// screen, and the second pass would find the engine already finishing and
+    /// report a failure for a session that saved perfectly well.
+    @State private var isEnding = false
 
     var body: some View {
         Group {
-            switch recorder.state {
-            case .idle:
-                StartView()
-            case .recording, .paused, .finishing:
-                LiveSessionView()
+            // Stopping gets its own screen. It used to leave the live pages
+            // up — the controls page, with its Pause and Lock buttons, exactly
+            // where the finger had just been — for however long the analysis
+            // took, and then flip to the start screen while Health was still
+            // closing the workout. Riders read that as "the end button did
+            // nothing" and pressed it again.
+            if recorder.isFinishing || recorder.state == .finishing {
+                SavingView()
+            } else {
+                switch recorder.state {
+                case .idle:
+                    StartView()
+                case .recording, .paused, .finishing:
+                    LiveSessionView(onEnd: end)
+                }
             }
         }
         .sheet(item: recoveryBinding) { candidate in
             RecoveryView(candidate: candidate)
         }
+        .sheet(item: $saveFailure) { failure in
+            SaveFailureView(failure: failure)
+        }
+    }
+
+    private func end() {
+        Task { await finish() }
+    }
+
+    /// Stop, and say so plainly if the session did not get anywhere safe.
+    ///
+    /// Every outcome ends in either a saved session or a sheet. This lives on
+    /// the root rather than the live screen because the live screen is gone
+    /// by the time the outcome is known.
+    private func finish() async {
+        guard !isEnding else { return }
+        isEnding = true
+        defer { isEnding = false }
+
+        var saved = false
+        let session = await recorder.finish { session in
+            saved = sync.send(session)
+            return saved
+        }
+
+        guard let session else {
+            // Nothing was built. Either there were too few fixes to make a
+            // session, or this is a second press — and a second press has
+            // nothing to report.
+            if recorder.state == .idle, !saved { saveFailure = .tooShort }
+            return
+        }
+        if !saved { saveFailure = .notWritten(session) }
     }
 
     /// The recovery prompt is presented as a sheet over whatever is showing, so
@@ -94,5 +149,25 @@ struct RecoveryView: View {
             }
             .padding(.horizontal, 4)
         }
+    }
+}
+
+/// What the wrist shows between End and the start screen.
+///
+/// The work behind it is real: every fix of the session through every
+/// detector, then the workout closed in Health with its route. A quiet
+/// spinner with a word is enough; what it must not be is the screen the
+/// rider just left.
+struct SavingView: View {
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Saving session…")
+                .font(.headline)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

@@ -56,6 +56,15 @@ final class SessionRecorder {
     /// Whether personal-best haptics fire.
     var recordHaptics = true
 
+    /// True from the moment stopping is asked for until the session is saved
+    /// and Health has been settled. The engine's `.finishing` covers only the
+    /// first half: it goes back to `.idle` the instant the session is written,
+    /// while the workout is still being closed and its route attached — which
+    /// on a long session is the slower half. The screen switches on this, so
+    /// the rider sees one "saving" screen from the tap to the start screen,
+    /// not the controls page and then the start screen and then a stall.
+    private(set) var isFinishing = false
+
     private var routeLocations: [CLLocation] = []
 
     init() {
@@ -176,8 +185,15 @@ final class SessionRecorder {
     /// was built at all — so a wrist dropped at the wrong moment took the whole
     /// session with the Health entry. Losing the Health entry costs a duplicate
     /// row in Fitness. Losing the session costs the session.
+    ///
+    /// Returns once the session is safe and Health has either finished or
+    /// been given a few seconds to; `isFinishing` covers exactly that window.
     @discardableResult
     func finish(save: (Session) -> Bool) async -> Session? {
+        guard !isFinishing else { return nil }
+        isFinishing = true
+        defer { isFinishing = false }
+
         location.stop()
         motion.stop()
         barometer.stop()
@@ -199,11 +215,46 @@ final class SessionRecorder {
         }
 
         let session = await engine.finish(at: end, save: save)
-
-        await workout.finish(endDate: end, route: routeLocations)
-
+        // The moment it is safe, not the moment Health is done with it.
         if session != nil { WKInterfaceDevice.current().play(.success) }
+
+        // The saving screen waits for Health too, so the start screen does
+        // not appear while the workout is still being closed — but only for
+        // a few seconds. Closing a workout is the step most able to stall
+        // (the simulator's never returns at all), and a rider held on a
+        // spinner by Health after the session is already on its way to the
+        // phone would be worse than the controls page they used to see.
+        // Past the bound, Health finishes on its own time behind the start
+        // screen, as it always did.
+        let health = Task { await workout.finish(endDate: end, route: routeLocations) }
+        await Self.settle(health, within: 4)
         return session
+    }
+
+    /// Wait for `task`, or for `seconds`, whichever comes first. The task is
+    /// left running either way: nothing in the Health write may be cancelled
+    /// on the screen's account.
+    ///
+    /// Not a task group. A group waits for all its children before it
+    /// returns, and a child parked on `task.value` is not woken by
+    /// cancellation — so a group races nothing, it just waits for Health.
+    private static func settle(_ task: Task<Void, Never>, within seconds: Double) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = Once(continuation)
+            Task { await task.value; once.resume() }
+            Task { try? await Task.sleep(for: .seconds(seconds)); once.resume() }
+        }
+    }
+
+    /// Resumes a continuation the first time, and never again.
+    @MainActor
+    private final class Once {
+        private var continuation: CheckedContinuation<Void, Never>?
+        init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+        func resume() {
+            continuation?.resume()
+            continuation = nil
+        }
     }
 
     func discard() {

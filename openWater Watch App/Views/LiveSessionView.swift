@@ -21,22 +21,18 @@ import WatchKit
 /// thing riders have learned.
 struct LiveSessionView: View {
 
+    /// Stop and save. Owned by `RootView`, not here: the moment stopping
+    /// begins this screen is replaced by the saving screen, and any state
+    /// this view held about the outcome would go with it — which is how the
+    /// "couldn't save" sheet used to be set on a view that was no longer
+    /// there, and never appeared.
+    let onEnd: () -> Void
+
     @Environment(SessionRecorder.self) private var recorder
     @Environment(WatchSettings.self) private var settings
-    @Environment(WatchSyncClient.self) private var sync
 
     @State private var page: Page = WatchScreenshotRoute.page ?? .speed
     @State private var showingEndConfirmation = false
-
-    /// Set only when stopping could not put the session anywhere safe. A rider
-    /// who pressed stop and was dropped back on the start screen has no way to
-    /// tell "saved" from "gone", so silence is not an option here.
-    @State private var saveFailure: SaveFailure?
-
-    /// Stopping is not re-entrant: the dialog can be tapped twice on a wet
-    /// screen, and the second pass would find the engine already finishing and
-    /// report a failure for a session that saved perfectly well.
-    @State private var isEnding = false
 
     /// Where the crown is, in pages. Kept in step with `page` in both
     /// directions so a swipe and a notch never disagree about where the rider
@@ -137,40 +133,9 @@ struct LiveSessionView: View {
         // the phone, and anything unwanted is deleted there, where it lands in
         // Recently Deleted and can come back.
         .confirmationDialog("End session?", isPresented: $showingEndConfirmation) {
-            Button("End & Save") { Task { await end() } }
+            Button("End & Save", action: onEnd)
             Button("Keep Recording", role: .cancel) {}
         }
-        .sheet(item: $saveFailure) { failure in
-            SaveFailureView(failure: failure)
-        }
-    }
-
-    /// Stop, and say so plainly if the session did not get anywhere safe.
-    ///
-    /// The old version was `if let session = await recorder.finish() { send }`,
-    /// which did nothing at all when the session could not be built and nothing
-    /// when the write failed — the rider was returned to the start screen with
-    /// no session and no explanation, which is indistinguishable from having
-    /// saved. Every outcome now ends in either a saved session or a sheet.
-    private func end() async {
-        guard !isEnding else { return }
-        isEnding = true
-        defer { isEnding = false }
-
-        var saved = false
-        let session = await recorder.finish { session in
-            saved = sync.send(session)
-            return saved
-        }
-
-        guard let session else {
-            // Nothing was built. Either there were too few fixes to make a
-            // session, or this is a second press — and a second press has
-            // nothing to report.
-            if recorder.state == .idle, !saved { saveFailure = .tooShort }
-            return
-        }
-        if !saved { saveFailure = .notWritten(session) }
     }
 }
 

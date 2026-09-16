@@ -280,9 +280,14 @@ final class WorkoutController: NSObject {
             UserDefaults.standard.set("Last session: the workout could not be saved to Health (\(error.localizedDescription)). The session itself is on your phone.", forKey: Self.lastNoticeKey)
         }
 
-        self.session = nil
-        self.builder = nil
-        self.routeBuilder = nil
+        // Only if these are still ours. The recorder stops waiting on this
+        // after a few seconds, so a slow close can outlive the start of the
+        // next session — and must not take that session's workout with it.
+        if self.session === session {
+            self.session = nil
+            self.builder = nil
+            self.routeBuilder = nil
+        }
     }
 
     func discard() {

@@ -33,6 +33,12 @@ struct openWaterWatchApp: App {
                     // screens have genuine data. No-op without the argument.
                     if WatchScreenshotRoute.shouldAutoStart {
                         recorder.start(sport: WatchScreenshotRoute.sport ?? settings.lastSport)
+                        if let seconds = WatchScreenshotRoute.autoDiscardAfter {
+                            Task {
+                                try? await Task.sleep(for: .seconds(seconds))
+                                recorder.discard()
+                            }
+                        }
                     }
                     // The phone owns the record book, so the watch asks for it
                     // at launch. Without it a live "personal best" alert would

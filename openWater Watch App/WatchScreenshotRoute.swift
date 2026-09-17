@@ -15,6 +15,7 @@ enum WatchScreenshotRoute {
     static let autoStartArgument = "-openWaterAutoStart"
     static let pageArgument = "-openWaterWatchPage"
     static let sportArgument = "-openWaterWatchSport"
+    static let autoDiscardArgument = "-openWaterAutoDiscardAfter"
 
     /// Whether to begin recording as soon as the app launches.
     static var shouldAutoStart: Bool {
@@ -34,6 +35,13 @@ enum WatchScreenshotRoute {
         case "countdown": return .countdown
         default: return nil
         }
+    }
+
+    /// Seconds after an auto-started session to discard it — nothing saved,
+    /// no Health entry. For a sensor check driven from a console, on a wrist
+    /// nobody is going to tap Stop on.
+    static var autoDiscardAfter: TimeInterval? {
+        value(for: autoDiscardArgument).flatMap(TimeInterval.init)
     }
 
     static var sport: Sport? {

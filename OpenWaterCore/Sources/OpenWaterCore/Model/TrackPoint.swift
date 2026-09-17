@@ -44,6 +44,24 @@ public struct TrackPoint: Hashable, Sendable, Codable {
     /// Peak vertical acceleration in the window, m/s². Used for jump detection.
     public var verticalAccelPeak: Double?
 
+    /// Every vertical user-acceleration sample since the previous fix, m/s²,
+    /// in order, at the motion provider's 10 Hz — about ten per point.
+    ///
+    /// Recorded so airtime can be *timed* rather than computed. The two
+    /// summaries above collapse a second into a spread and a peak, and a
+    /// jump's pop and slam land in the same second or the next one — which
+    /// cannot time an event that lasts one to two seconds. Airtime is
+    /// therefore derived from height under gravity, and a wing does not
+    /// fall under gravity: it glides. A rider whose thirteen wing jumps read
+    /// 0.8–1.3 s each said every one was longer than that, and they were
+    /// right, because a metre of height under a wing is not a metre of
+    /// free fall. The interval between the takeoff impulse and the landing
+    /// impact, at a tenth of a second, is the measurement; this is the
+    /// channel it will be read from once a session has been recorded with it.
+    ///
+    /// Hundredths of a metre per second squared, to keep the archive small.
+    public var verticalAccelSamples: [Double]?
+
     /// Height above where the barometer was zeroed at the start of the
     /// session, metres. Nil on a recording made before the watch read it, and
     /// on any device without the sensor.
@@ -86,6 +104,7 @@ public struct TrackPoint: Hashable, Sendable, Codable {
         speedAccuracy: Double? = nil,
         verticalAccelSD: Double? = nil,
         verticalAccelPeak: Double? = nil,
+        verticalAccelSamples: [Double]? = nil,
         baroAltitude: Double? = nil,
         absoluteAltitude: Double? = nil,
         heartRate: Double? = nil,
@@ -102,6 +121,7 @@ public struct TrackPoint: Hashable, Sendable, Codable {
         self.speedAccuracy = speedAccuracy
         self.verticalAccelSD = verticalAccelSD
         self.verticalAccelPeak = verticalAccelPeak
+        self.verticalAccelSamples = verticalAccelSamples
         self.baroAltitude = baroAltitude
         self.absoluteAltitude = absoluteAltitude
         self.heartRate = heartRate

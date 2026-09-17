@@ -65,6 +65,20 @@ public final class MotionProvider {
     /// The most recent aggregate, refreshed continuously.
     public private(set) var latest = Sample(verticalAccelSD: 0, verticalAccelPeak: 0)
 
+    /// Every vertical sample since `takeSamples` was last called. The
+    /// recorder drains it on each fix onto `TrackPoint.verticalAccelSamples`,
+    /// so nothing between fixes is lost the way the one-second window loses
+    /// it. Bounded, in case the receiver goes quiet for a while.
+    private var sinceRead: [Double] = []
+    private let sinceReadLimit = 300   // 30 s at 10 Hz
+
+    /// The samples since the last call, rounded to hundredths, and start again.
+    public func takeSamples() -> [Double]? {
+        defer { sinceRead.removeAll(keepingCapacity: true) }
+        guard !sinceRead.isEmpty else { return nil }
+        return sinceRead.map { ($0 * 100).rounded() / 100 }
+    }
+
     public init() {
         isAvailable = manager.isDeviceMotionAvailable
         queue.maxConcurrentOperationCount = 1
@@ -136,6 +150,7 @@ public final class MotionProvider {
         manager.stopDeviceMotionUpdates()
         window.removeAll()
         cadenceWindow.removeAll()
+        sinceRead.removeAll()
     }
 
     // MARK: - Aggregation
@@ -143,6 +158,8 @@ public final class MotionProvider {
     private func ingest(vertical: Double, roll: Double, pitch: Double) {
         window.append(vertical)
         if window.count > 10 { window.removeFirst(window.count - 10) }
+        sinceRead.append(vertical)
+        if sinceRead.count > sinceReadLimit { sinceRead.removeFirst(sinceRead.count - sinceReadLimit) }
 
         cadenceWindow.append(vertical)
         if cadenceWindow.count > cadenceWindowSize {

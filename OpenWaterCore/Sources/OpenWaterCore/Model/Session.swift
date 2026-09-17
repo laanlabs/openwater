@@ -361,7 +361,14 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// bar every few seconds — an ocean downwinder with eight swims in it
     /// read as two runs instead of nine. With that, a leg never splits
     /// inside a joined flight, and a leg that never flew is not a leg.
-    public static let currentVersion = 20
+    /// 21: the receiver's height is refused for jumps only once the water is
+    /// actually moving (noise over a quarter metre a second), not the moment
+    /// its noise clears the floor — a flat-water wing session with ten jumps
+    /// in it and no altimeter had been reading zero. In between, a rise
+    /// needs the whole landing: the slam and the speed it cost.
+    /// 22: airtime allows for the wing or kite carrying the rider
+    /// (`jumpLiftFraction`), so a wing jump is no longer timed as a stone.
+    public static let currentVersion = 22
 
     public let analysisVersion: Int
 

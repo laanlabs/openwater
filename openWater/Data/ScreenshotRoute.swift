@@ -15,6 +15,7 @@ enum ScreenshotRoute: String {
     case map
     case runs
     case analysis
+    case airtime
     case playback
     case fullScreenMap
     case spots
@@ -44,7 +45,7 @@ enum ScreenshotRoute: String {
     /// Whether the route needs the first session opened.
     var opensSession: Bool {
         switch self {
-        case .map, .runs, .analysis, .playback, .fullScreenMap: true
+        case .map, .runs, .analysis, .airtime, .playback, .fullScreenMap: true
         default: false
         }
     }
@@ -54,7 +55,7 @@ enum ScreenshotRoute: String {
         switch self {
         case .map, .playback, .fullScreenMap: .map
         case .runs: .ribbon
-        case .analysis: .analysis
+        case .analysis, .airtime: .analysis
         default: nil
         }
     }

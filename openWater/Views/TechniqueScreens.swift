@@ -132,6 +132,15 @@ struct AirtimeScreen: View {
                 onReanalyse: reanalyse
             ) {
                 ThresholdSlider(
+                    title: "How much the wing carries you",
+                    value: settings.thresholdBinding(for: session.sport, \.jumpLiftFraction,
+                                                     default: session.sport.thresholds.jumpLiftFraction),
+                    range: 0...0.9, step: 0.05,
+                    format: { String(format: "%.0f%%", $0 * 100) },
+                    note: "Airtime is worked back from height, and a stone falls faster than a rider under a wing. This is the share of your weight the wing or kite holds in the air: zero times you as a stone, and 70% roughly doubles it. Set it so your best jump reads the way it felt.",
+                    onCommit: reanalyse
+                )
+                ThresholdSlider(
                     title: "Shortest jump that counts",
                     value: settings.thresholdBinding(for: session.sport, \.jumpMinimumAirtime,
                                                      default: session.sport.thresholds.jumpMinimumAirtime),

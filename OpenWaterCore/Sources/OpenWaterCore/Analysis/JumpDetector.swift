@@ -10,7 +10,8 @@ public struct Jump: Hashable, Sendable, Codable, Identifiable {
     public let startIndex: Int
     public let endIndex: Int
 
-    /// Seconds in the air.
+    /// Seconds in the air — worked back from the height under the sport's
+    /// lift (`SportThresholds.jumpLiftFraction`), not timed.
     public let airtime: TimeInterval
 
     /// Estimated height in metres, from hangtime under gravity.
@@ -155,6 +156,28 @@ public struct JumpDetector: Sendable {
     /// Height fixes worse than this are not evidence of anything.
     public var maximumVerticalAccuracy: Double
 
+    /// How much of the rider a wing or kite carries in the air, 0–1. See
+    /// `SportThresholds.jumpLiftFraction`; this is what turns a height into
+    /// an airtime, and free fall is the special case of zero.
+    public var liftFraction: Double = 0
+
+    /// Seconds a jump of `height` lasts under this sport's lift.
+    public func airtime(forHeight height: Double) -> TimeInterval {
+        let effectiveGravity = 9.80665 * (1 - min(0.95, max(0, liftFraction)))
+        return (8 * height / effectiveGravity).squareRoot()
+    }
+
+    /// Second-to-second height change, metres, above which the receiver is
+    /// refused outright: the water is moving and its height cannot tell a
+    /// trough from a jump. See `detect(in:)` for the three sessions this sits
+    /// between.
+    public var maximumReceiverNoise: Double = 0.25
+
+    /// On a receiver whose noise is off the floor, the fraction of their
+    /// speed a rider has to lose over the landing before a rise is believed.
+    /// Two-thirds: a jump costs a third of your speed, chop does not.
+    public var landingSpeedRetention: Double = 0.65
+
     public init(
         minimumRise: Double = 0.5,
         riseNoiseFactor: Double = 4,
@@ -182,6 +205,7 @@ public struct JumpDetector: Sendable {
             minimumTakeoffSpeed: t.jumpMinimumTakeoffSpeed
         )
         d.minimumAirtime = t.jumpMinimumAirtime
+        d.liftFraction = t.jumpLiftFraction
         switch sport {
         case .kitesurf, .kitefoil:
             d.maximumAirtime = 12
@@ -276,18 +300,25 @@ public struct JumpDetector: Sendable {
         return height
     }
 
-    /// The bar a rise has to clear on this track: the floor, or the session's
-    /// own height noise, whichever is higher.
-    func riseBar(for track: Track, heights: [Double?]) -> Double {
+    /// The session's own height noise: the median second-to-second change
+    /// while at speed, metres. Nil when there is too little at speed to say.
+    func heightNoise(for track: Track, heights: [Double?]) -> Double? {
         var steps: [Double] = []
         for i in 1..<max(1, track.count) {
             guard let a = heights[i], let b = heights[i - 1],
                   track.speed[i] >= minimumTakeoffSpeed else { continue }
             steps.append(abs(a - b))
         }
-        guard steps.count >= 30 else { return minimumRise }
+        guard steps.count >= 30 else { return nil }
         steps.sort()
-        return max(minimumRise, steps[steps.count / 2] * riseNoiseFactor)
+        return steps[steps.count / 2]
+    }
+
+    /// The bar a rise has to clear on this track: the floor, or the session's
+    /// own height noise, whichever is higher.
+    func riseBar(for track: Track, heights: [Double?]) -> Double {
+        guard let noise = heightNoise(for: track, heights: heights) else { return minimumRise }
+        return max(minimumRise, noise * riseNoiseFactor)
     }
 
     public func detect(in track: Track) -> [Jump] {
@@ -304,6 +335,7 @@ public struct JumpDetector: Sendable {
             }
         }
 
+        let noise = heightNoise(for: track, heights: heights) ?? 0
         let bar = riseBar(for: track, heights: heights)
 
         // **The receiver only gets to speak about flat water.**
@@ -315,12 +347,30 @@ public struct JumpDetector: Sendable {
         // session whose rider said "one single downwind run with no jumps",
         // this found fourteen of them.
         //
-        // So when the session's own height noise forces the bar up off its
-        // floor, the water is moving too much for the receiver to be read, and
+        // So when the water is moving too much for the receiver to be read,
         // the honest answer is the one this always gave: nothing. A barometer
         // has no such limit — it measures the board rather than inferring it,
         // which is the whole reason it is recorded.
-        if source == .receiver, bar > minimumRise { return [] }
+        //
+        // "Too much" used to mean any noise at all above the floor, and that
+        // threw away a whole session. A wingfoil session on flat water in
+        // fifteen knots, whose rider counted ten or more jumps and whose
+        // altimeter had recorded nothing, measured 0.18 m of second-to-second
+        // height noise while planing — not the sea, just this wrist's receiver
+        // on this day — and was refused with all its jumps in it. The three
+        // receiver sessions measured so far: a harbour at 0.10 m, that flat
+        // day at 0.18 m, the parawing downwinder at 0.32 m. The refusal sits
+        // between the last two.
+        if source == .receiver, noise > maximumReceiverNoise { return [] }
+
+        // Between the floor and the refusal the receiver is read, but not on
+        // one witness. On the flat day, noise alone put some sixty rises over
+        // the bar, and any-one-of-three accepted thirty-one of them. A jump
+        // has a whole landing: the slam, and the speed it cost — the rider
+        // came off the foil's drive for a second and put it back in the
+        // water. Asking for both found thirteen, which is the count the rider
+        // gave. Chop has the slam and keeps its speed; a glitch has neither.
+        let strict = source == .receiver && bar > minimumRise
 
         let window = 15
 
@@ -397,9 +447,19 @@ public struct JumpDetector: Sendable {
             let stopped = track.speed[apex] > 0 && slowest / track.speed[apex] <= 0.5
             let width = j - i + 1
 
-            let confirmed = spike >= landingThreshold
-                || pop >= popThreshold
-                || (stopped && width >= 2)
+            // The whole landing, for the noisy receiver: a slam either side of
+            // the apex — the receiver's height lags the board by a second or
+            // two, so the slam is as often before the apex as after it — and
+            // the speed it cost, from the fastest the rider was going into
+            // the jump to the slowest they came out of it.
+            let fastest = (max(0, start - 3)...apex).map { track.speed[$0] }.max() ?? track.speed[apex]
+            let lostSpeed = fastest > 0 && slowest / fastest <= landingSpeedRetention
+
+            let confirmed = strict
+                ? max(spike, pop) >= landingThreshold && lostSpeed
+                : spike >= landingThreshold
+                    || pop >= popThreshold
+                    || (stopped && width >= 2)
 
             // **What the jump was, not what the receiver managed to catch.**
             //
@@ -423,11 +483,18 @@ public struct JumpDetector: Sendable {
             // session read *under* that. They were not conservative, they were
             // impossible. Read from area, the same session's smallest lands at
             // 0.92 m, which is a mast, and nothing was told to put it there.
-            let measured = source == .barometer
+            //
+            // Unless the receiver is noisy. The area recovers what a filter
+            // took off a clean pulse; on the flat day the samples either side
+            // of every jump were a quarter metre of noise and a second of lag
+            // smear, and the area read them as air — thirteen jumps in
+            // fifteen knots came out at six to thirteen feet. There the peak
+            // is the smaller lie, as it is for the barometer.
+            let measured = source == .barometer || strict
                 ? height
                 : Self.heightFromArea(apex: apex, heights: heights, baseline: baseline,
                                       elapsed: track.elapsed, maximumAirtime: maximumAirtime)
-            let airtime = min(maximumAirtime, (8 * measured / 9.80665).squareRoot())
+            let airtime = min(maximumAirtime, self.airtime(forHeight: measured))
 
             if rate >= minimumRiseRate, confirmed,
                airtime >= minimumAirtime, airtime <= maximumAirtime {
@@ -452,6 +519,12 @@ public struct JumpDetector: Sendable {
                         - track.cumulativeDistance[max(0, start - 1)],
                     confidence: max(0, min(1, confidence))
                 ))
+                // One landing, one jump. The receiver smears a jump across
+                // the samples either side of it, and a second rise inside the
+                // landing window is that same jump read again — on the flat
+                // day three of them came out as pairs three seconds apart.
+                i = max(j + 1, apex + 4)
+                continue
             }
             i = j + 1
         }

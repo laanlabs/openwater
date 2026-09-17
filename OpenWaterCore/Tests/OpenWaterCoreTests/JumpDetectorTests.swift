@@ -52,6 +52,7 @@ struct JumpDetectorTests {
         landingSpike: Double = 20,
         takeoffPop: Double = 0,
         stopsAfter: Bool = false,
+        slowsAfter: Bool = false,
         noise: Double = 0.05,
         verticalAccuracy: Double = 1.5,
         baro: Bool = false
@@ -84,6 +85,11 @@ struct JumpDetectorTests {
             // A wipeout: the rider comes down in the water and stops.
             if stopsAfter, !heights.isEmpty, (offset + heights.count..<offset + heights.count + 3).contains(i) {
                 raw[i].speed = 0.8
+            }
+            // A landing that cost speed: half of it, for the three seconds
+            // after the board came down, then back up to pace.
+            if slowsAfter, !heights.isEmpty, (offset + heights.count..<offset + heights.count + 3).contains(i) {
+                raw[i].speed = 4.5
             }
         }
         return builder.build(from: raw)
@@ -177,8 +183,21 @@ struct JumpDetectorTests {
 
         #expect(abs(jump.height - height) < height * 0.3,
                 "\(height) m jumped, \(jump.height) m reported")
-        #expect(abs(jump.airtime - (8 * height / 9.80665).squareRoot()) < 0.4,
+        let detector = JumpDetector.forSport(.wingfoil)
+        #expect(abs(jump.airtime - detector.airtime(forHeight: height)) < 0.4,
                 "airtime \(jump.airtime) s for a \(height) m jump")
+    }
+
+    @Test("A wing carries you, so the same height lasts longer than on a prone foil")
+    func liftLengthensAirtime() throws {
+        // The rider's report: a best wing jump of two metres that lasted two
+        // to three seconds, where free fall gives 1.3 s. Free fall is what a
+        // prone foil gets, because nothing is holding it up.
+        let track = ride(heights: Self.parabola(height: 2.0))
+        let wing = try #require(JumpDetector.forSport(.wingfoil).detect(in: track).first)
+        let prone = try #require(JumpDetector.forSport(.prone).detect(in: track).first)
+        #expect(prone.airtime < 1.5, "free fall from 2 m is 1.3 s, got \(prone.airtime)")
+        #expect(wing.airtime > 2.0 && wing.airtime < 3.0, "a wing carried 2 m should last 2–3 s, got \(wing.airtime)")
     }
 
     @Test("A jump is never shorter than the water it left")
@@ -221,6 +240,43 @@ struct JumpDetectorTests {
         // verdict on that session was "no jumps".
         let track = ride(heights: [1.4, 2.6, 1.0], noise: 0.45)
         #expect(JumpDetector.forSport(.parawing).detect(in: track).isEmpty)
+    }
+
+    @Test("A receiver that is merely noisy is still read")
+    func noisyReceiverOnFlatWaterIsRead() {
+        // The flat-water wing session: 0.18 m of second-to-second noise
+        // from the wrist's receiver alone, ten jumps and no altimeter, and
+        // the old rule — refuse the receiver the moment its noise clears
+        // the floor — reported none of them. Noise is not swell.
+        let track = ride(heights: [1.6], slowsAfter: true, noise: 0.2)
+        let detector = JumpDetector.forSport(.wingfoil)
+        let heights: [Double?] = track.points.map { $0.altitude }
+        #expect(detector.riseBar(for: track, heights: heights) > detector.minimumRise,
+                "the fixture has to be off the floor to test anything")
+        #expect(detector.detect(in: track).count == 1)
+    }
+
+    @Test("On a noisy receiver the slam alone is not a landing")
+    func noisyReceiverNeedsTheSpeedLossToo() {
+        // Chop slams the board and keeps its speed. On the flat day, any one
+        // witness let thirty-one noise rises through; the slam and the
+        // speed it cost together let through the thirteen the rider counted.
+        let track = ride(heights: [1.6], noise: 0.2)
+        #expect(JumpDetector.forSport(.wingfoil).detect(in: track).isEmpty)
+    }
+
+    @Test("On a noisy receiver the speed loss alone is not a landing")
+    func noisyReceiverNeedsTheSlamToo() {
+        let track = ride(heights: [1.6], landingSpike: 4, slowsAfter: true, noise: 0.2)
+        #expect(JumpDetector.forSport(.wingfoil).detect(in: track).isEmpty)
+    }
+
+    @Test("One landing is one jump")
+    func aSecondRiseInsideTheLandingIsTheSameJump() {
+        // The receiver smears a jump over its neighbours, and a rise two
+        // samples after the apex with the same landing is not a second jump.
+        let track = ride(heights: [1.6, 0.3, 1.6])
+        #expect(JumpDetector.forSport(.wingfoil).detect(in: track).count == 1)
     }
 
     @Test("The altimeter is read in preference to the receiver")
@@ -267,7 +323,11 @@ struct JumpDetectorTests {
         // archive is a hand-written format in places and a new field is exactly
         // what such a format forgets.
         var raw = SyntheticTrack.generate(legs: [.init(speed: 9, heading: 90, duration: 60)])
-        for i in raw.indices { raw[i].baroAltitude = Double(i) * 0.1; raw[i].absoluteAltitude = 100 + Double(i) * 0.1 }
+        for i in raw.indices {
+            raw[i].baroAltitude = Double(i) * 0.1
+            raw[i].absoluteAltitude = 100 + Double(i) * 0.1
+            raw[i].verticalAccelSamples = (0..<10).map { Double(i * 10 + $0) * 0.01 }
+        }
         let track = TrackBuilder().build(from: raw)
         var session = Session(sport: .wingfoil, startDate: .now, endDate: .now.addingTimeInterval(60),
                               track: track)
@@ -280,6 +340,9 @@ struct JumpDetectorTests {
         #expect(heights.count == raw.count, "baroAltitude was dropped in the archive")
         let absolute: [Double] = back.session.track.points.compactMap { $0.absoluteAltitude }
         #expect(absolute.count == raw.count, "absoluteAltitude was dropped in the archive")
+        let samples = back.session.track.points.compactMap(\.verticalAccelSamples)
+        #expect(samples.count == raw.count, "verticalAccelSamples was dropped in the archive")
+        #expect(samples.last?.last == Double((raw.count - 1) * 10 + 9) * 0.01)
         #expect(back.session.recordingIssues == ["Health would not start collecting: test"],
                 "the watch's account of a fault was dropped in the archive")
         #expect(abs((heights.last ?? 0) - Double(raw.count - 1) * 0.1) < 0.001)

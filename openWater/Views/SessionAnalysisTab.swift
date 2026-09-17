@@ -46,6 +46,10 @@ struct SessionAnalysisTab: View {
     /// moment the swell does, with no analysis version to bump.
     @State private var waves: WaveRideSummary?
 
+    /// The Airtime screen, pushed on launch for the `airtime` screenshot
+    /// route. Inert otherwise — the row's own link is how a rider gets there.
+    @State private var showsAirtimeRoute = false
+
     var body: some View {
         List {
             if showsRoute { routeSection }
@@ -58,6 +62,12 @@ struct SessionAnalysisTab: View {
         .listStyle(.insetGrouped)
         .contentMargins(.bottom, tabBarHeight, for: .scrollContent)
         .readableContentColumn()
+        .navigationDestination(isPresented: $showsAirtimeRoute) {
+            AirtimeScreen(session: session, summary: summary, units: settings.units, revision: revision)
+        }
+        .onAppear {
+            if ScreenshotRoute.requested == .airtime, session.sport.isFoiling { showsAirtimeRoute = true }
+        }
         // Keyed on the rules as well as the swell, exactly as the Wave Rides
         // screen is. On the swell alone, a rider who changed a rule in the
         // wave sheet came back to a row still showing the old count while the

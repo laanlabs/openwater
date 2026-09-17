@@ -264,6 +264,19 @@ public struct SportThresholds: Hashable, Sendable, Codable {
     /// You cannot jump from a standstill, m/s.
     public var jumpMinimumTakeoffSpeed: Double = 3.0
 
+    /// How much of the rider's weight the wing or kite carries in the air,
+    /// 0–1. Airtime is worked back from height, and the free-fall formula
+    /// assumes nothing holds you up: under it a 2 m jump lasts 1.3 s, and a
+    /// rider whose best wing jump read 1.3 s said it was two to three
+    /// seconds — which under a wing it can be, because the wing carries
+    /// most of you on the way up and down. Effective gravity is
+    /// `g × (1 − this)`, so 0.7 puts that 2 m jump at 2.4 s. A prone or SUP
+    /// foil air has nothing carrying it: zero.
+    ///
+    /// Estimates, per sport, until sessions carry the 10 Hz motion stream
+    /// that can time a jump directly — see `TrackPoint.verticalAccelSamples`.
+    public var jumpLiftFraction: Double = 0
+
     /// How much quieter than the session's own median the accelerometer has to
     /// go before the rider counts as gliding rather than working.
     ///
@@ -423,6 +436,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         public var jumpFreeFall: Double?
         public var jumpLandingSpike: Double?
         public var jumpMinimumTakeoffSpeed: Double?
+        public var jumpLiftFraction: Double?
 
         /// See `SportThresholds.pumpEnergyFraction`.
         public var pumpEnergyFraction: Double?
@@ -450,6 +464,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             jumpFreeFall: Double? = nil,
             jumpLandingSpike: Double? = nil,
             jumpMinimumTakeoffSpeed: Double? = nil,
+            jumpLiftFraction: Double? = nil,
             pumpEnergyFraction: Double? = nil,
             foilSmoothnessFraction: Double? = nil
         ) {
@@ -474,6 +489,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             self.jumpFreeFall = jumpFreeFall
             self.jumpLandingSpike = jumpLandingSpike
             self.jumpMinimumTakeoffSpeed = jumpMinimumTakeoffSpeed
+            self.jumpLiftFraction = jumpLiftFraction
             self.pumpEnergyFraction = pumpEnergyFraction
             self.foilSmoothnessFraction = foilSmoothnessFraction
         }
@@ -490,6 +506,7 @@ public struct SportThresholds: Hashable, Sendable, Codable {
                 && jumpMinimumAirtime == nil && jumpFreeFall == nil
                 && jumpMinimumRise == nil
                 && jumpLandingSpike == nil && jumpMinimumTakeoffSpeed == nil
+                && jumpLiftFraction == nil
                 && pumpEnergyFraction == nil && foilSmoothnessFraction == nil
         }
 
@@ -518,6 +535,8 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             if let v = jumpFreeFall, v > 0 { t.jumpFreeFall = v }
             if let v = jumpLandingSpike, v > 0 { t.jumpLandingSpike = v }
             if let v = jumpMinimumTakeoffSpeed, v > 0 { t.jumpMinimumTakeoffSpeed = v }
+            // Zero is a valid answer here: a rider turning the lift off.
+            if let v = jumpLiftFraction, v >= 0, v < 1 { t.jumpLiftFraction = v }
             if let v = pumpEnergyFraction, v > 0 { t.pumpEnergyFraction = v }
             if let v = foilSmoothnessFraction, v > 0 { t.foilSmoothnessFraction = v }
             return t
@@ -541,6 +560,10 @@ public struct SportThresholds: Hashable, Sendable, Codable {
         case .wingfoil, .parawing:
             t.foilTakeoffSpeed = 4.5          // ~8.7 kn
             t.maxPlausibleSpeed = 25
+            // A wing carries most of you in the air; a parawing less, being
+            // smaller and on a line. Calibrated on one rider's report of
+            // their best wing jump — two to three seconds off two metres.
+            t.jumpLiftFraction = sport == .wingfoil ? 0.7 : 0.5
             // Foiling is where a lost second actually costs something: the runs
             // are short, the accelerations are sharp, and a gap in the fixes
             // lands straight in the 2-second peak. Take everything the receiver
@@ -550,14 +573,18 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             t.foilTakeoffSpeed = 5.5
             t.maxPlausibleSpeed = 32
             t.liveAccuracyLimit = 50
+            // A kite hangs you from the canopy; a sail carries far less.
+            t.jumpLiftFraction = sport == .kitefoil ? 0.8 : 0.4
         case .windsurf:
             t.foilTakeoffSpeed = .infinity    // no flight phase
             t.movingSpeed = 1.5
             t.maxPlausibleSpeed = 35          // world record territory is ~27 m/s
+            t.jumpLiftFraction = 0.4
         case .kitesurf:
             t.foilTakeoffSpeed = .infinity
             t.movingSpeed = 1.5
             t.maxPlausibleSpeed = 35
+            t.jumpLiftFraction = 0.8
         case .downwindSUP, .prone, .supFoil:
             t.foilTakeoffSpeed = 3.5
             t.movingSpeed = 0.8

@@ -234,6 +234,7 @@ final class PhoneRecorder {
         if motion.isRunning {
             point.verticalAccelSD = motion.latest.verticalAccelSD
             point.verticalAccelPeak = motion.latest.verticalAccelPeak
+            point.verticalAccelSamples = motion.takeSamples()
             point.cadence = motion.latest.cadence
         }
         // Same as the watch: the highest reading since the last fix, so a

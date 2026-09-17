@@ -70,6 +70,7 @@ struct TrackPoint            // one GNSS fix
   horizontalAccuracy: Double // metres, <0 == invalid
   speedAccuracy: Double?     // m/s, <0 == invalid
   verticalAccelSD: Double?   // CoreMotion, for foil/jump detection
+  verticalAccelSamples: [Double]?  // the 10 Hz stream since the last fix, so airtime can be timed
   heartRate: Double?
   cadence: Double?           // pumps or strokes / min
 

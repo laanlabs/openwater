@@ -90,6 +90,10 @@ final class SessionRecorder {
     func prepare() async {
         location.requestAuthorization()
         await workout.requestAuthorization()
+        // Motion & Fitness too, for the altimeter — asked now, on the beach,
+        // rather than the moment a session starts and Water Lock takes the
+        // screen. See `BarometerProvider.requestAccess`.
+        barometer.requestAccess()
         await engine.checkForRecoverableSession()
     }
 
@@ -121,6 +125,7 @@ final class SessionRecorder {
         engine.start(sport: sport, at: startDate)
 
         workout.onIssue = { [engine] text in engine.noteIssue(text) }
+        barometer.onIssue = { [engine] text in engine.noteIssue(text) }
         // Water Lock, at the moment watchOS allows it. Asking here, before
         // the workout is active, was silently ignored on every session this
         // app has recorded — see `WaterLock`.
@@ -210,8 +215,19 @@ final class SessionRecorder {
                 ? "No motion data was recorded, so foiling, jumps and pumping had nothing to be read from."
                 : "This watch reported no motion sensor, so foiling, jumps and pumping could not be read.")
         }
-        if altimeterSamples == 0 {
-            engine.noteIssue("The altimeter recorded nothing, so jump height comes from GPS and is under-read.")
+        // Only when nothing above has already named the cause: a refusal or
+        // a permission is said in its own words the moment it happens.
+        if altimeterSamples == 0, barometer.lastError == nil {
+            switch (barometer.isAvailable, barometer.authorizationDescription) {
+            case (false, _):
+                engine.noteIssue("This watch reported no barometer, so jump height comes from GPS and is under-read.")
+            case (true, "granted"):
+                engine.noteIssue("The altimeter recorded nothing, so jump height comes from GPS and is under-read. Motion & Fitness was granted and it gave no error; \(barometer.absoluteReadings) absolute and \(barometer.relativeReadings) relative readings arrived, and it was restarted \(barometer.restarts) times for silence.")
+            case (true, "never asked"):
+                engine.noteIssue("The altimeter recorded nothing: the Motion & Fitness prompt was never answered, so jump height comes from GPS and is under-read. Open the app on the watch and allow it.")
+            default:
+                break   // denied or restricted: said when the session started
+            }
         }
 
         let session = await engine.finish(at: end, save: save)
@@ -284,6 +300,7 @@ final class SessionRecorder {
         if motion.isRunning {
             point.verticalAccelSD = motion.latest.verticalAccelSD
             point.verticalAccelPeak = motion.latest.verticalAccelPeak
+            point.verticalAccelSamples = motion.takeSamples()
             point.cadence = motion.latest.cadence
             motionSamples += 1
         }
@@ -294,6 +311,7 @@ final class SessionRecorder {
         point.baroAltitude = barometer.takePeak()
         point.absoluteAltitude = barometer.takeAbsolutePeak()
         if point.absoluteAltitude != nil { altimeterSamples += 1 }
+        barometer.nudge()
         point.heartRate = workout.heartRate
 
         engine.ingest(point)

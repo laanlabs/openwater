@@ -43,7 +43,10 @@ Install a Release build on a paired watch and phone. Outdoors, open sky.
    - **GPS quality** — Excellent.
    - **Airtime → the Barometer line** — "Absolute altimeter: N new values over
      M fixes" with N close to M. The relative barometer will show about a
-     third as many; that is expected and it is not used.
+     third as many; that is expected and it is not used. "No readings" with
+     every other channel present means Motion & Fitness: the altimeter needs
+     it and the accelerometer does not. The prompt is asked at launch; check
+     Settings ▸ Privacy & Security ▸ Motion & Fitness ▸ openWater on the watch.
 7. **Fitness app on the phone.** The session should be there as a workout
    with a map. If it is not, the watch's start screen will show an orange
    notice next time it opens — Health failures land there because they

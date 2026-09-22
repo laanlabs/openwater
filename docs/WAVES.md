@@ -152,8 +152,13 @@ way it pins its glides. test-12, the SUP-foil session, pins its waves
 through the inferred swell (§7). **test-13 (22 September 2026) is the first
 wind-sport recording with a swell set**: a wing at Montauk, 35 waves ·
 10:28 riding · 1 linked under a 108° swell — and the rider says they caught
-"way more" than that. It is a change detector, not a sign-off; the rider's
-own count is still to come, and their questions are in `testdata/test-13.md`.
+"way more" than that: "pretty much every wave in the direction of the swell
+was a wave". Counted that way the track holds 70 legs with the swell and
+36 minutes of riding. What drops half of them is the rise-at-the-catch rule
+in §1: a powered wing turns onto the wave already at speed, so the wave
+gives nothing the speed trace can see. With that gate off the same rules
+read 67 waves · 25:10; the other wind sessions barely move. Not changed
+yet — the measurements are in `testdata/test-13.md`.
 The recipe for more: set a swell direction
 on a real wave session in the app — or tap *Bumps with the wind* on a
 downwinder — export it as `.openwater` into `testdata/`, run

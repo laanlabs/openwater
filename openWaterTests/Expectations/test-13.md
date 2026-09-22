@@ -187,6 +187,14 @@ export's 108° swell it is 35 · 10:28. Neither count is signed off; the
 rider's own count is not yet known. Full notes and the questions for the
 rider are in `testdata/test-13.md`.
 
-- Runs I'd count: _not yet asked — the complaint is about waves_
+The rider's rule, 22 September: "pretty much every wave in the direction
+of the swell was a wave". Counted that way there are 70 legs on the foil
+with the swell, 36:17 of riding; the finder names 36 and 12:48. The
+rise-at-the-catch rule is what drops them — a powered wing arrives on the
+wave already at speed — and with that gate off the same rules read 67
+waves · 25:10 at the rider's swell. Not changed yet; see
+`testdata/test-13.md` for the measurements.
+
+- Runs I'd count: _not asked — the complaint is about waves_
 - Conditions as I remember them: ESE wind, 14 kn; swell SE, about head high
-- What looks wrong: the wave count, far too low
+- What looks wrong: the wave count, about half of what it should be

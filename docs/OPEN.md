@@ -16,7 +16,7 @@ cold without re-deriving the reasoning.
 **Where the recordings are.** They are not in this repository and never will
 be: `testdata/` is gitignored and was removed from the history on 8 August
 (`9616941`). Riders' GPS traces are their home addresses. Keep your own
-files in a local `testdata/` as `test-1` … `test-11`; the
+files in a local `testdata/` as `test-1` … `test-13`; the
 expectations and the pages that describe them are committed, the recordings
 are not.
 

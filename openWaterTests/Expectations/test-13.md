@@ -23,7 +23,7 @@ Wingfoil · 1:34:37 · 30.49 km · 16.4 kn max
 | Falls | 2 |
 | Jumps | 0 |
 | Glides | 49 · 10:56 gliding |
-| Waves | 35 · 10:28 riding · 1 linked |
+| Waves | 79 · 23:05 riding · 11 linked |
 
 ## Runs
 
@@ -190,10 +190,13 @@ rider are in `testdata/test-13.md`.
 The rider's rule, 22 September: "pretty much every wave in the direction
 of the swell was a wave". Counted that way there are 70 legs on the foil
 with the swell, 36:17 of riding; the finder names 36 and 12:48. The
-rise-at-the-catch rule is what drops them — a powered wing arrives on the
-wave already at speed — and with that gate off the same rules read 67
-waves · 25:10 at the rider's swell. Not changed yet; see
-`testdata/test-13.md` for the measurements.
+rise-at-the-catch rule was what dropped them — a powered wing arrives on
+the wave already at speed, and near shore in lighter wind the wave can be
+slower than the wing — and on 22 September it stopped being asked of a
+wing (docs/WAVES.md §9). This record now pins 79 waves · 23:05 under the
+export's 108° swell; at the rider's 136° the same rules read 68 · 26:44
+against their 70 legs. Not yet signed off at the new count; see
+`testdata/test-13.md`.
 
 - Runs I'd count: _not asked — the complaint is about waves_
 - Conditions as I remember them: ESE wind, 14 kn; swell SE, about head high

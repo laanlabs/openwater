@@ -227,11 +227,13 @@ and the downwind/reaching/upwind columns do not apply.
 an hour and a half of lapping just off the beach with a swell direction
 set — the first wind-sport recording in the bed to carry one, so the first
 to pin `waves` for a wing: 35 · 10:28 riding · 1 linked under the export's
-108° swell. The rider says they "caught way more than the 35 waves found",
-and on their phone, with the swell re-set to 136°, it read 36. **Not signed
-off**; the number pinned is what it did, not what is right. The run
-columns above are measured against a NNE wind the rider has since
-corrected to ESE — see `testdata/test-13.md` before reading them.
+108° swell — and the rider said "pretty much every wave in the direction
+of the swell was a wave", seventy legs by that rule. The rise-at-the-catch
+rule was what dropped half of them, and on 22 September it stopped being
+asked of a wing (docs/WAVES.md §9); the count it pins now is in its JSON.
+**Not yet signed off** at the new count. The run columns above are
+measured against a NNE wind the rider has since corrected to ESE — see
+`testdata/test-13.md` before reading them.
 
 **test-12** — *The first surf session.* Montauk, a SUP foil, forty-two
 minutes: paddling around, two long flights and one failed catch. The rider

@@ -148,17 +148,20 @@ Ordered by what I would do next, not by size.
 `openWaterTests/SessionExpectationTests.swift` now carries `waves`,
 `waveTime` and `wavesLinked`, filled when a recording has a swell direction
 and left nil otherwise — so a session with one pins its wave count in CI the
-way it pins its glides. **No wind-sport recording in `testdata/` carries a
-swell direction yet**, so those are still nil; test-12, the SUP-foil session,
-pins its three waves through the inferred swell (§7). The recipe for the
-rest: set a swell direction
+way it pins its glides. test-12, the SUP-foil session, pins its waves
+through the inferred swell (§7). **test-13 (22 September 2026) is the first
+wind-sport recording with a swell set**: a wing at Montauk, 35 waves ·
+10:28 riding · 1 linked under a 108° swell — and the rider says they caught
+"way more" than that. It is a change detector, not a sign-off; the rider's
+own count is still to come, and their questions are in `testdata/test-13.md`.
+The recipe for more: set a swell direction
 on a real wave session in the app — or tap *Bumps with the wind* on a
 downwinder — export it as `.openwater` into `testdata/`, run
-`scripts/record-expectations.sh`, and read the diff. A wave session from the
-rider is the blocking input, not the code.
+`scripts/record-expectations.sh`, and read the diff.
 
-Until then the numbers below are the reference, measured on 4 September 2026
-with the wind as the swell, the way the new button would set it:
+The numbers below were the reference before test-13 arrived, measured on
+4 September 2026 with the wind as the swell, the way the new button would
+set it:
 
 | session | before | after |
 | --- | --- | --- |

@@ -215,12 +215,23 @@ are in `openWaterTests/Expectations/`.
 | test-10 | wingfoil | 1:01:18 | 16.94 | At one spot | 7 | 1 | 19 | 21 | 7 | 91% | 3 | 43 |
 | test-11 | parawing | 45:19 | 10.79 | Downwinder | **2** | 13 | 3 | 0 | 10 | 67% | 1 | 71 |
 | test-12 | SUP foil | 42:20 | 3.51 | At one spot | 2 | — | — | — | 2 | 17% | 0 | 4 |
+| test-13 | wingfoil | 1:34:37 | 30.49 | At one spot | 5 | 21 | 45 | 63 | 7 | 89% | 2 | 150 |
 
 test-12's two rows are **rides** — stays on the foil holding four waves
 between them — not points of sail: `runsWave: 2`, `waves: 4` in its JSON,
 and the downwind/reaching/upwind columns do not apply.
 
 ### What each session is, and what it proves
+
+**test-13** — *The disputed wave count.* Montauk again, a wing this time,
+an hour and a half of lapping just off the beach with a swell direction
+set — the first wind-sport recording in the bed to carry one, so the first
+to pin `waves` for a wing: 35 · 10:28 riding · 1 linked under the export's
+108° swell. The rider says they "caught way more than the 35 waves found",
+and on their phone, with the swell re-set to 136°, it read 36. **Not signed
+off**; the number pinned is what it did, not what is right. The run
+columns above are measured against a NNE wind the rider has since
+corrected to ESE — see `testdata/test-13.md` before reading them.
 
 **test-12** — *The first surf session.* Montauk, a SUP foil, forty-two
 minutes: paddling around, two long flights and one failed catch. The rider

@@ -5,6 +5,13 @@ import Testing
 /// Wave rides are measured against the swell the rider set, not the wind —
 /// see `WaveRideFinder`. These stay synthetic: the shape being tested is
 /// "accelerating with the swell counts, the same speed across it does not".
+///
+/// Most of them build the finder bare, which keeps the catch rule on — the
+/// rule a paddled board is judged by, and the one a rider gets back by
+/// setting a minimum gain. What ships for a wing is `forSport(.wingfoil)`,
+/// where the rider arrives on the wave already at speed and no rise is asked
+/// for; that is tested under *On a wing*, from the first real wing session
+/// with a swell set.
 @Suite("Wave rides")
 struct WaveRideTests {
 
@@ -379,6 +386,88 @@ struct WaveRideTests {
         #expect(rides(track).count == 1, "the rattling wave should have been cut")
         #expect(rides(track) { $0.waveQuietFraction = SportThresholds.waveChopIgnored }.count == 2,
                 "turned all the way off, the accelerometer stops deciding")
+    }
+
+    // MARK: On a wing
+
+    /// The rides as a wing rider gets them: `forSport`, stock rules.
+    private func wing(_ track: Track, _ change: (inout SportThresholds) -> Void = { _ in }) -> WaveRideSummary {
+        var rules = SportThresholds.forSport(.wingfoil)
+        change(&rules)
+        return WaveRideFinder.forSport(.wingfoil, thresholds: rules)
+            .rides(in: track, flights: [], swellFrom: swellFrom)
+    }
+
+    /// The first wing session with a swell set held seventy legs ridden with
+    /// the swell at the same speed the rider had tacked out at, and the
+    /// catch rule named half of them. The rider's rule: every leg with the
+    /// swell was a wave. So on a wing the whole leg is the ride, from the
+    /// turn onto it.
+    @Test("On a wing, a leg with the swell at the speed you arrived at is a wave")
+    func wingArrivesAtSpeed() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6.5, heading: 90, duration: 60),              // out
+            .init(speed: 6.5, heading: 0, duration: 30),               // the wave, no faster
+            .init(speed: 6.5, heading: 180, duration: 60),             // back out
+            .init(speed: 6.5, heading: 10, duration: 30),              // the next
+            .init(speed: 6.5, heading: 90, duration: 60),
+        ]))
+        let summary = wing(track)
+        #expect(summary.count == 2, "found \(summary.rides.map(\.duration))")
+        for ride in summary.rides {
+            #expect(ride.duration >= 28, "the ride should be the whole leg, not \(ride.duration) s of it")
+        }
+        // The bare finder still asks for the rise, for the sports that need it.
+        #expect(rides(track).count == 0)
+    }
+
+    /// Close to shore in lighter wind the wave is slower than the wing.
+    /// Turning onto it is a deceleration, which used to be a reach running
+    /// out of wind: no rise, and the braking gate ended it at the turn.
+    @Test("On a wing, a wave slower than the wing is still a wave")
+    func wingSlowsOntoTheWave() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 8, heading: 90, duration: 60),
+            .init(speed: 6.5, heading: 0, duration: 30, transition: 4), // slower on the wave
+            .init(speed: 8, heading: 90, duration: 60, transition: 4),
+        ]))
+        let summary = wing(track)
+        #expect(summary.count == 1, "found \(summary.rides.map(\.duration))")
+        #expect((summary.rides.first?.duration ?? 0) >= 25)
+    }
+
+    /// Setting the gain is asking for the rule back, at that value.
+    @Test("On a wing, setting a minimum gain brings the rise rule back")
+    func wingAsksForTheRise() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6.5, heading: 90, duration: 60),
+            .init(speed: 6.5, heading: 0, duration: 30),
+            .init(speed: 6.5, heading: 90, duration: 60),
+        ]))
+        #expect(wing(track).count == 1)
+        #expect(wing(track) { $0.waveMinimumGain = 0.12 }.count == 0,
+                "nothing here rose, and the rider asked for a rise")
+        // And the wave day still reads as two waves either way: a real rise
+        // is not penalised by not being asked for.
+        #expect(wing(waveDay()).count == 2)
+        #expect(wing(waveDay()) { $0.waveMinimumGain = 0.12 }.count == 2)
+    }
+
+    /// A wave caught inside the rise window of the one before is linked on
+    /// a wing too, with no rise to measure it by.
+    @Test("On a wing, back-to-back waves are linked")
+    func wingLinks() {
+        let track = builder.build(from: SyntheticTrack.generate(legs: [
+            .init(speed: 6.5, heading: 90, duration: 60),
+            .init(speed: 6.5, heading: 0, duration: 15),
+            .init(speed: 6.5, heading: 150, duration: 3),              // kick out, turn back
+            .init(speed: 6.5, heading: 10, duration: 15),
+            .init(speed: 6.5, heading: 90, duration: 60),
+        ]))
+        let summary = wing(track) { $0.waveBridgeSeconds = 0 }
+        #expect(summary.count == 2, "found \(summary.rides.map(\.duration))")
+        #expect(summary.rides.first?.linked == false)
+        #expect(summary.rides.last?.linked == true)
     }
 
     // MARK: Sports ridden slowly

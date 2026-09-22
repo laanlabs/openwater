@@ -160,15 +160,24 @@ struct WaveRulesSheet: View {
             )
             slider(
                 "The wave has to add",
+                // On a wing the rise is not asked for at all, so the slider
+                // rests at zero and reads as such; moving it off zero is the
+                // rider asking for the rule, at the value they chose. On a
+                // paddled board the rise is the catch and inherits as before.
                 rule(\.waveMinimumGain,
-                     inherited: max(thresholds.glideMinimumGain, WaveRideFinder.minimumGain)),
+                     inherited: finder.ridesArriveAtSpeed
+                        ? 0 : max(thresholds.glideMinimumGain, WaveRideFinder.minimumGain)),
                 range: 0...0.4, step: 0.02,
-                reading: "\(Int((finder.minimumRise * 100).rounded()))%"
+                reading: finder.requiresRise
+                    ? "\(Int((finder.minimumRise * 100).rounded()))%"
+                    : "not asked"
             )
         } header: {
             Text("What the water gave you")
         } footer: {
-            Text("Pace is measured against your own median speed with the swell that day, not an absolute number, so it means the same thing in six knots and in twenty. The second is the rise: a wave gives speed for nothing, and without a gain over the lull before it a stretch is a reach that happens to point at the beach. Lower it if rides are being missed on a small day.")
+            Text(finder.ridesArriveAtSpeed
+                 ? "Pace is measured against your own median speed with the swell that day, not an absolute number, so it means the same thing in six knots and in twenty. The wave is not asked to add speed: you arrive on it already flying, and close to shore in lighter wind a wave can be slower than the wing. Every stretch on the foil, at pace and pointed with the swell is a ride. Move the second slider off zero to ask for a rise over the seconds before the catch — a rider on a downwinder who wants only the bumps that lifted them can set it back to 12%."
+                 : "Pace is measured against your own median speed with the swell that day, not an absolute number, so it means the same thing in six knots and in twenty. The second is the rise: a wave gives speed for nothing, and without a gain over the lull before it a stretch is a reach that happens to point at the beach. Lower it if rides are being missed on a small day.")
         }
     }
 
@@ -189,7 +198,7 @@ struct WaveRulesSheet: View {
         } footer: {
             Text(finder.consultsMotion
                  ? "A ride ends when the accelerometer says the board is being worked rather than carried, measured against this session's own median so it means the same on a watch and in a vest. In short chop the deck is never quiet, and this is the rule most likely to be cutting a ride short while you are still on the wave — drag it right until the ride runs to where you remember it ending. All the way right stops the accelerometer being consulted at all."
-                 : "The accelerometer is not consulted: speed, direction and the rise decide a ride on their own. This is the honest setting for a wing in short chop, where the board rattles the whole way down the line. Drag it back left to have the rattle end a ride again.")
+                 : "The accelerometer is not consulted: speed and direction decide a ride on their own. This is the honest setting for a wing in short chop, where the board rattles the whole way down the line. Drag it back left to have the rattle end a ride again.")
         }
     }
 

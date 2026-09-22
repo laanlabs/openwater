@@ -419,6 +419,44 @@ public struct WaveRideFinder {
     /// wave; it has not been seen in a real recording yet.
     public var bridgesAnyTurn = false
 
+    /// Whether the rider may arrive on the wave already at speed.
+    ///
+    /// The catch rule below asks the wave to have *given* something: the
+    /// seconds after the catch faster than the seconds before it. That is
+    /// what a wave does to a paddled board and to a rider drifting between
+    /// bumps on a downwinder, and it is not what a wave does to a powered
+    /// wing. The first wing session with a swell set — a beach break,
+    /// lapping across the swell in fourteen knots — held seventy legs
+    /// ridden with the swell, at twelve to thirteen knots, and the finder
+    /// named thirty-six of them and cut most of those short. The rider had
+    /// come out of the tack already flying at twelve knots, turned onto
+    /// the wave and ridden it at twelve; the speed over the eight seconds
+    /// before the leg and the eight after read within five per cent on
+    /// nearly every one. Where a rise did show up mid-leg the ride began
+    /// there, so a thirty-seven-second wave read as eight. And close to
+    /// shore, where the wind is lighter, the wave can be *slower* than the
+    /// wing: ten of those legs began with the rider losing speed, and the
+    /// rule read that as a reach running out of wind. The rider's own
+    /// rule, verbatim: "pretty much every wave in the direction of the
+    /// swell was a wave."
+    ///
+    /// Set, a stretch that is flying, at pace and pointed with the swell is
+    /// a wave from its first sample whether or not it rose out of a lull,
+    /// and it is linked if it began inside the rise window of the wave
+    /// before. The rider can ask for the rise back by setting *The wave
+    /// has to add* on the rules sheet — see `requiresRise`.
+    public var ridesArriveAtSpeed = false
+
+    /// Whether a ride has to begin with a rise over the lull before it.
+    ///
+    /// Off only on the sports where `ridesArriveAtSpeed`, and only while
+    /// the rider has not set a minimum gain of their own: a rider who moves
+    /// that slider is asking for the rule, and gets it at the value they
+    /// chose.
+    public var requiresRise: Bool {
+        !ridesArriveAtSpeed || thresholds.waveMinimumGain != nil
+    }
+
     public init(thresholds: SportThresholds = SportThresholds.forSport(.wingfoil)) {
         self.thresholds = thresholds
         self.glides = DownwindAnalyzer(thresholds: thresholds)
@@ -443,7 +481,12 @@ public struct WaveRideFinder {
             // measures and belongs with them.
             finder.minimumRideSpeed = 2.5
         default:
-            break
+            // A powered rider turns onto the wave already at speed, and
+            // sometimes faster than the wave: neither a rise nor a slowing
+            // says anything about whether it was one. Direction, pace and
+            // the foil do. See `ridesArriveAtSpeed`.
+            finder.ridesArriveAtSpeed = true
+            finder.ridesSlowAndRecover = true
         }
         if sport.paddlesIntoWaves {
             // See each flag for what the surf does differently from a wing.
@@ -951,6 +994,19 @@ public struct WaveRideFinder {
                 lull = candidateLull
                 linked = carriedHere
                 break
+            }
+            // See `ridesArriveAtSpeed`: with no rise asked for, the ride is
+            // the whole stretch, and it is linked if it began inside the
+            // rise window of the wave before with no hole between.
+            if caughtAt == nil, !requiresRise {
+                caughtAt = index
+                lull = lullBefore(index, in: track, breaks: breaksRide) ?? track.speed[index]
+                if let previous,
+                   track.elapsed[index] - track.elapsed[previous.endIndex] <= DownwindAnalyzer.riseWindow,
+                   !((previous.endIndex + 1)...index).contains(where: { breaksRide[$0] }) {
+                    linked = true
+                    lull = previous.lull
+                }
             }
             guard let start = caughtAt, start < j else { continue }
             index = start

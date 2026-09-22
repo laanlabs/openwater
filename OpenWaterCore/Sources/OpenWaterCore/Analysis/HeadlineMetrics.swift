@@ -91,7 +91,7 @@ extension Sport {
         // SUP foil's rules were written; it is the same sport lying down.
         case .prone, .supFoil:
             false
-        case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil,
+        case .wingfoil, .wingfoilSurf, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil,
              .sail, .kayak, .efoil, .tow, .other:
             false
         }

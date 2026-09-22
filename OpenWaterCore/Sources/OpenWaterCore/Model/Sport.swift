@@ -6,6 +6,14 @@ import Foundation
 /// pump band) rather than just being a label.
 public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     case wingfoil
+    /// A wing ridden in the surf: tack out through the break, turn onto a
+    /// wave and ride it in, with the wing as the way back out. The same
+    /// board and rig as `wingfoil`; what differs is what a wave is. A
+    /// powered rider arrives on the face already at speed, sometimes
+    /// faster than the wave, so the rules that find waves on a downwinder
+    /// — a rise at the catch, a ride ended by braking or by a rattling
+    /// deck — throw out most of a surf session. See `WaveRideFinder`.
+    case wingfoilSurf
     case parawing
     case windsurf
     case windfoil
@@ -30,6 +38,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     public var displayName: String {
         switch self {
         case .wingfoil: "Wingfoil"
+        case .wingfoilSurf: "Wingfoil Surf"
         case .parawing: "Parawing"
         case .windsurf: "Windsurf"
         case .windfoil: "Windfoil"
@@ -60,6 +69,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         switch self {
         // Wind held in the hands.
         case .wingfoil: "wind"
+        case .wingfoilSurf: "wind.circle"
         case .parawing: "paperplane"
         // Rig on the board.
         case .windsurf: "sailboat"
@@ -86,7 +96,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// meaningful wind angle, polar and tack/gybe structure.
     public var isWindPowered: Bool {
         switch self {
-        case .wingfoil, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil, .sail:
+        case .wingfoil, .wingfoilSurf, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil, .sail:
             true
         case .downwindSUP, .sup, .prone, .supFoil, .kayak, .efoil, .tow, .other:
             false
@@ -96,7 +106,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// Sports ridden on a hydrofoil, where flight detection applies.
     public var isFoiling: Bool {
         switch self {
-        case .wingfoil, .parawing, .windfoil, .kitefoil, .prone, .supFoil, .efoil, .downwindSUP:
+        case .wingfoil, .wingfoilSurf, .parawing, .windfoil, .kitefoil, .prone, .supFoil, .efoil, .downwindSUP:
             true
         case .windsurf, .kitesurf, .sup, .sail, .kayak, .tow, .other:
             false
@@ -106,7 +116,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// Sports where a rhythmic pump or stroke is worth counting.
     public var hasCadence: Bool {
         switch self {
-        case .wingfoil, .parawing, .downwindSUP, .sup, .prone, .supFoil, .kayak: true
+        case .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .sup, .prone, .supFoil, .kayak: true
         default: false
         }
     }
@@ -130,7 +140,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// `allCases` is declaration order, which is not the order anyone wants to
     /// choose from. This is the list every picker uses.
     public static let recordable: [Sport] = [
-        .wingfoil, .parawing, .downwindSUP, .prone, .supFoil,
+        .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .prone, .supFoil,
         .windfoil, .windsurf, .kitefoil, .kitesurf,
         .sail, .sup, .kayak, .efoil, .tow, .other,
     ]
@@ -557,13 +567,13 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             maxPlausibleSpeed: 30            // ~58 kn
         )
         switch sport {
-        case .wingfoil, .parawing:
+        case .wingfoil, .wingfoilSurf, .parawing:
             t.foilTakeoffSpeed = 4.5          // ~8.7 kn
             t.maxPlausibleSpeed = 25
             // A wing carries most of you in the air; a parawing less, being
             // smaller and on a line. Calibrated on one rider's report of
             // their best wing jump — two to three seconds off two metres.
-            t.jumpLiftFraction = sport == .wingfoil ? 0.7 : 0.5
+            t.jumpLiftFraction = sport == .parawing ? 0.5 : 0.7
             // Foiling is where a lost second actually costs something: the runs
             // are short, the accelerations are sharp, and a gap in the fixes
             // lands straight in the 2-second peak. Take everything the receiver
@@ -623,8 +633,8 @@ extension Sport {
     /// at a slightly lower power draw, which matters over a four-hour crossing.
     public var locationProfile: SportThresholds.LocationProfile {
         switch self {
-        case .wingfoil, .parawing, .windfoil, .kitefoil, .downwindSUP, .prone, .supFoil, .efoil, .tow,
-             .windsurf, .kitesurf:
+        case .wingfoil, .wingfoilSurf, .parawing, .windfoil, .kitefoil, .downwindSUP, .prone, .supFoil,
+             .efoil, .tow, .windsurf, .kitesurf:
             SportThresholds.LocationProfile(accuracy: .navigation, activity: .otherNavigation)
         case .sup, .kayak, .sail, .other:
             SportThresholds.LocationProfile(accuracy: .best, activity: .otherNavigation)

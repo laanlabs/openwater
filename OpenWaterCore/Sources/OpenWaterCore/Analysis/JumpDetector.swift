@@ -211,7 +211,7 @@ public struct JumpDetector: Sendable {
             d.maximumAirtime = 12
         case .windsurf:
             d.maximumAirtime = 6
-        case .wingfoil, .parawing:
+        case .wingfoil, .wingfoilSurf, .parawing:
             d.maximumAirtime = 5
         default:
             break

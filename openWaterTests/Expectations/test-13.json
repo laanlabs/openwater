@@ -19,13 +19,13 @@
   "runsReaching" : 45,
   "runsUpwind" : 63,
   "shape" : "aroundASpot",
-  "sport" : "wingfoil",
+  "sport" : "wingfoilSurf",
   "stretches" : 150,
   "timeOnFoil" : 4375,
   "turns" : 137,
-  "waveTime" : 1385,
-  "waves" : 79,
-  "wavesLinked" : 11,
+  "waveTime" : 1586,
+  "waves" : 86,
+  "wavesLinked" : 19,
   "windDirection" : 25.333363422059584,
   "windSource" : "manual"
 }

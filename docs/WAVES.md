@@ -23,8 +23,9 @@ applies them, a sample is *riding* when all of this holds:
    knots and in twenty.
 2. **It is flying,** if the recording has flights at all. A sport with no
    flight phase records none and the test does not apply.
-3. **It is not braking** — on a paddled board only, since 22 September.
-   Smoothed acceleration above the glide detector's own deceleration limit.
+3. **It is not braking** — except on a wing in the surf, or a paddled
+   board. Smoothed acceleration above the glide detector's own
+   deceleration limit.
 4. **It points the way the waves are going.** Course within the cone of the
    swell's travel — the swell's *from* bearing plus 180.
 5. **The board is quiet,** where there is an accelerometer and the rider has
@@ -37,8 +38,8 @@ Contiguous riding samples become a candidate ride. Then:
   the rider stayed flying and never turned properly away.
 - **A ride never spans a gap in the fixes.** Two samples either side of a
   dropout are adjacent in the array and a minute apart on the water.
-- **On a paddled board, the wave has to have given something, and given it
-  at the catch.** Not on a wing — see the next bullet. The
+- **The wave has to have given something, and given it at the catch** —
+  except on a wing in the surf, see the next bullet. The
   candidate is scanned for the moment the typical speed over the next few
   seconds beats the typical speed over the eight seconds before by the rise
   fraction, and the ride *begins there*. The cruise in the cone before the
@@ -49,17 +50,19 @@ Contiguous riding samples become a candidate ride. Then:
   jittery trace sets itself a higher bar. On a trace whose speed was derived
   from positions rather than measured by Doppler, the catch is judged more
   slowly still: the lower quartile over the whole rise window.
-- **On a wing the rider arrives at speed, and the whole leg is the ride.**
-  A powered rider comes out of the tack already flying and turns onto the
-  wave at the pace they had, and close to shore in lighter wind the wave
-  can be *slower* than the wing. Neither a rise nor a slowing says anything
-  about whether it was a wave; the foil, the pace and the direction do. So
-  for the wind sports no rise is asked for, the ride begins where the
-  stretch entered the cone, and rule 3 — not braking — is not applied. The
-  rider's own rule from the first wing session with a swell set: "pretty
-  much every wave in the direction of the swell was a wave." Setting *The
-  wave has to add* on the rules sheet asks for the rise back, at that
-  value (§3, §9).
+- **On a wing in the surf the rider arrives at speed, and the whole leg is
+  the ride.** A powered rider comes out of the tack already flying and
+  turns onto the wave at the pace they had, and close to shore in lighter
+  wind the wave can be *slower* than the wing. Neither a rise nor a slowing
+  says anything about whether it was a wave; the foil, the pace and the
+  direction do. So on `Sport.wingfoilSurf` no rise is asked for, the ride
+  begins where the stretch entered the cone, rule 3 — not braking — is not
+  applied, and rule 5 — the quiet deck — is not consulted. The rider's own
+  rule from the first wing session with a swell set: "pretty much every
+  wave in the direction of the swell was a wave." Plain `wingfoil` — a wing
+  on a downwinder, carried by bumps — keeps every rule above. Setting *The
+  wave has to add* on the rules sheet asks a surf session for the rise
+  back, at that value (§3, §9).
 - **Unless the lull never came.** A wave caught straight off the back of the
   one before — inside the rise window of its kick-out, with no hole in the
   recording between — is measured against the lull the *previous* wave rose
@@ -99,18 +102,17 @@ their own glide tuning included.
 | How far off the wave (cone) | 65° | its own |
 | Carve tolerance | 8 s | its own |
 | Pace to hold | 75 % | `glideSpeedFraction` |
-| The wave has to add | wing: not asked · paddled: 12 % | paddled: the firmer of `glideMinimumGain` and 12 % |
+| The wave has to add | wing surf: not asked · else 12 % | the firmer of `glideMinimumGain` and 12 % |
 | Board may rattle | 1.5× | `pumpEnergyFraction` |
 | Shortest ride | 5 s | `glideMinimumDuration` |
 
 Three of these are worth knowing about:
 
-**On a wing the rise is not asked for, and the slider rests at zero.** A
-wing rider arrives on the wave at speed (§1), so by default no gain over
-the lull is required and the slider reads *not asked*. Moving it off zero
-is asking for the rule, at that value — a downwinder who wants only the
-bumps that lifted them can set it back to 12 %. On the paddled sports it
-inherits as it always did.
+**On a wing in the surf the rise is not asked for, and the slider rests at
+zero.** A wing rider arrives on the wave at speed (§1), so on
+`wingfoilSurf` no gain over the lull is required and the slider reads
+*not asked*. Moving it off zero is asking for the rule, at that value. On
+every other sport it inherits as it always did.
 
 **The pace floor can stop responding.** The speed a stretch must hold is the
 *greater* of the pace fraction and an absolute floor, so below the floor the
@@ -354,7 +356,8 @@ expectation record carries `runsWave`. test-12 pins it: 2 rides, 4 waves,
 
 ## 9. What was fixed on 22 September 2026
 
-- **A wing's waves no longer have to add speed.** The catch rule (§1) asked
+- **A wing in the surf gets its own sport, and its waves no longer have to
+  add speed.** The catch rule (§1) asked
   every ride to rise out of the eight seconds before it by 12 % and four
   speed steps. The first wing session with a swell set — test-13, a beach
   break at Montauk, lapping across the swell in fourteen knots — held
@@ -364,20 +367,28 @@ expectation record carries `runsWave`. test-12 pins it: 2 rides, 4 waves,
   cut most of those short: 12:48 riding on the rider's phone. Measured by
   switching each rule off in turn, the deck, the braking gate, the cone
   and the gain slider each moved the count by a handful; the rise gate
-  alone took it to 67. So for the wind sports `WaveRideFinder.forSport`
-  sets `ridesArriveAtSpeed` and `ridesSlowAndRecover`: no rise is asked
-  for, the ride is the whole stretch in the cone, and slowing does not end
-  it. The paddled sports keep the catch rule — a paddled board reaches
-  riding speed on a wave face and nowhere else, and the rise *is* the
-  catch. The rules-sheet slider now rests at zero for a wing and reads
-  *not asked*; moving it asks for the rise back at that value.
-- **What it moved.** test-13 at the rider's swell: 36 → 67 waves, 12:48 →
-  25:10 riding (the ablation table is in `testdata/test-13.md`). With the
-  wind as the swell — none of these pins a wave count — test-11 25 → 27,
-  test-6 33 → 35, test-9, test-2 and test-1 unchanged; test-8, an upwind
-  session, 4 → 11, which is downwind cruising counted as riding and was
-  never a meaningful reading there. test-12 is a paddled foil and does not
-  change.
+  alone took it to 67; with the braking gate and the quiet deck off as
+  well, 71 against the rider's 70. So there is a new sport,
+  **Wingfoil Surf** (`Sport.wingfoilSurf`), for which
+  `WaveRideFinder.forSport` sets `ridesArriveAtSpeed`,
+  `ridesSlowAndRecover` and `ridesAreRough`: no rise is asked for, the
+  ride is the whole stretch in the cone, slowing does not end it, and the
+  deck is not consulted. It was going to be every wind sport, and the
+  rider asked for a sport instead: a wing on a downwinder is carried by
+  bumps the way a paddled board is, and there the rise still tells a bump
+  from the cruise before it, so plain `wingfoil` keeps every rule it had.
+  Everything else about the new sport — thresholds, jumps, glides,
+  HealthKit, the pickers — is `wingfoil`'s. The paddled sports keep the
+  catch rule too — a paddled board reaches riding speed on a wave face and
+  nowhere else, and the rise *is* the catch. The rules-sheet slider rests
+  at zero on the new sport and reads *not asked*; moving it asks for the
+  rise back at that value.
+- **What it moved.** test-13, reclassified as Wingfoil Surf in the local
+  test bed, at the rider's swell: 36 → 71 waves, 12:48 → 28:52 riding (the
+  ablation table is in `testdata/test-13.md`). No other session changes
+  sport, so no other expectation moves. For the record, the same rules on
+  the other wind sessions with the wind as the swell would read test-11
+  25 → 31, test-6 33 → 35, test-9, test-2 and test-1 unchanged.
 
 ## 8. What was fixed on 4 September 2026
 

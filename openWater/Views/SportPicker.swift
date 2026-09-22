@@ -21,7 +21,7 @@ struct SportPicker: View {
     private let columns = [GridItem(.adaptive(minimum: 104), spacing: 10)]
 
     /// Ordered by how likely a rider of this app is to pick it.
-    private static let primary: [Sport] = [.wingfoil, .parawing, .downwindSUP, .prone, .supFoil]
+    private static let primary: [Sport] = [.wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .prone, .supFoil]
     private static let secondary: [Sport] = [.windfoil, .windsurf, .kitefoil, .kitesurf]
     private static let rest: [Sport] = [.sail, .sup, .kayak, .efoil, .tow, .other]
 

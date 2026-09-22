@@ -425,19 +425,19 @@ public struct WaveRideFinder {
     /// seconds after the catch faster than the seconds before it. That is
     /// what a wave does to a paddled board and to a rider drifting between
     /// bumps on a downwinder, and it is not what a wave does to a powered
-    /// wing. The first wing session with a swell set — a beach break,
-    /// lapping across the swell in fourteen knots — held seventy legs
-    /// ridden with the swell, at twelve to thirteen knots, and the finder
-    /// named thirty-six of them and cut most of those short. The rider had
-    /// come out of the tack already flying at twelve knots, turned onto
-    /// the wave and ridden it at twelve; the speed over the eight seconds
-    /// before the leg and the eight after read within five per cent on
-    /// nearly every one. Where a rise did show up mid-leg the ride began
-    /// there, so a thirty-seven-second wave read as eight. And close to
-    /// shore, where the wind is lighter, the wave can be *slower* than the
-    /// wing: ten of those legs began with the rider losing speed, and the
-    /// rule read that as a reach running out of wind. The rider's own
-    /// rule, verbatim: "pretty much every wave in the direction of the
+    /// wing in the surf. The first wing session with a swell set — a beach
+    /// break, lapping across the swell in fourteen knots — held seventy
+    /// legs ridden with the swell, at twelve to thirteen knots, and the
+    /// finder named thirty-six of them and cut most of those short. The
+    /// rider had come out of the tack already flying at twelve knots,
+    /// turned onto the wave and ridden it at twelve; the speed over the
+    /// eight seconds before the leg and the eight after read within five
+    /// per cent on nearly every one. Where a rise did show up mid-leg the
+    /// ride began there, so a thirty-seven-second wave read as eight. And
+    /// close to shore, where the wind is lighter, the wave can be *slower*
+    /// than the wing: ten of those legs began with the rider losing speed,
+    /// and the rule read that as a reach running out of wind. The rider's
+    /// own rule, verbatim: "pretty much every wave in the direction of the
     /// swell was a wave."
     ///
     /// Set, a stretch that is flying, at pace and pointed with the swell is
@@ -445,6 +445,12 @@ public struct WaveRideFinder {
     /// and it is linked if it began inside the rise window of the wave
     /// before. The rider can ask for the rise back by setting *The wave
     /// has to add* on the rules sheet — see `requiresRise`.
+    ///
+    /// On `Sport.wingfoilSurf`, and not on `wingfoil`: a wing on a
+    /// downwinder is carried by bumps the way a paddled board is, and
+    /// there the rise still tells a bump from the cruise before it. The
+    /// same session read as one sport or the other gives two answers, and
+    /// the wave card says which rules it is under.
     public var ridesArriveAtSpeed = false
 
     /// Whether a ride has to begin with a rise over the lull before it.
@@ -480,13 +486,19 @@ public struct WaveRideFinder {
             // first two; a SUP in the surf is the slowest thing this app
             // measures and belongs with them.
             finder.minimumRideSpeed = 2.5
-        default:
+        case .wingfoilSurf:
             // A powered rider turns onto the wave already at speed, and
             // sometimes faster than the wave: neither a rise nor a slowing
             // says anything about whether it was one. Direction, pace and
-            // the foil do. See `ridesArriveAtSpeed`.
+            // the foil do. See `ridesArriveAtSpeed`. And the deck is not
+            // consulted: a wing in beach-break chop rattles the whole way
+            // down the line, and on the first surf session the quiet rule
+            // was cutting rides the rider was visibly still on.
             finder.ridesArriveAtSpeed = true
             finder.ridesSlowAndRecover = true
+            finder.ridesAreRough = true
+        default:
+            break
         }
         if sport.paddlesIntoWaves {
             // See each flag for what the surf does differently from a wing.

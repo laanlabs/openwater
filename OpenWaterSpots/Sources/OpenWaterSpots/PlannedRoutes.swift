@@ -60,7 +60,7 @@ public struct PlannedRoute: Codable, Identifiable, Hashable, Sendable {
     /// tracks; this one seeds a guess about a run not yet ridden.
     public static func cruiseKn(for sport: Sport?) -> Double {
         switch sport {
-        case .wingfoil: 14
+        case .wingfoil, .wingfoilSurf: 14
         case .parawing: 12
         case .windfoil: 14
         case .windsurf: 12

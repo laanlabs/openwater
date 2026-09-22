@@ -182,7 +182,7 @@ struct SportPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let ordered: [Sport] = [
-        .wingfoil, .parawing, .downwindSUP, .prone, .supFoil,
+        .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .prone, .supFoil,
         .windfoil, .windsurf, .kitefoil, .kitesurf,
         .sail, .sup, .kayak, .efoil, .tow, .other,
     ]

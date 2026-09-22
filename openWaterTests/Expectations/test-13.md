@@ -1,6 +1,6 @@
 # Montauk, NY — 21 September 2026 at 19:48 UTC
 
-Wingfoil · 1:34:37 · 30.49 km · 16.4 kn max
+Wingfoil Surf · 1:34:37 · 30.49 km · 16.4 kn max
 
 ## The session
 
@@ -23,7 +23,7 @@ Wingfoil · 1:34:37 · 30.49 km · 16.4 kn max
 | Falls | 2 |
 | Jumps | 0 |
 | Glides | 49 · 10:56 gliding |
-| Waves | 79 · 23:05 riding · 11 linked |
+| Waves | 86 · 26:26 riding · 19 linked |
 
 ## Runs
 
@@ -192,11 +192,13 @@ of the swell was a wave". Counted that way there are 70 legs on the foil
 with the swell, 36:17 of riding; the finder names 36 and 12:48. The
 rise-at-the-catch rule was what dropped them — a powered wing arrives on
 the wave already at speed, and near shore in lighter wind the wave can be
-slower than the wing — and on 22 September it stopped being asked of a
-wing (docs/WAVES.md §9). This record now pins 79 waves · 23:05 under the
-export's 108° swell; at the rider's 136° the same rules read 68 · 26:44
-against their 70 legs. Not yet signed off at the new count; see
-`testdata/test-13.md`.
+slower than the wing — so on 22 September the session became the first
+**Wingfoil Surf** recording, the sport that asks for no rise, no braking
+gate and no quiet deck (docs/WAVES.md §9); the local recording is
+reclassified. This record now pins 86 waves in 67 rides · 26:26 · 19
+linked under the export's 108° swell; at the rider's 136° the same rules
+read 71 · 28:52 against their 70 legs. Not yet signed off at the new
+count; see `testdata/test-13.md`.
 
 - Runs I'd count: _not asked — the complaint is about waves_
 - Conditions as I remember them: ESE wind, 14 kn; swell SE, about head high

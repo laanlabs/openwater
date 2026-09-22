@@ -7,11 +7,11 @@ import Testing
 /// "accelerating with the swell counts, the same speed across it does not".
 ///
 /// Most of them build the finder bare, which keeps the catch rule on — the
-/// rule a paddled board is judged by, and the one a rider gets back by
-/// setting a minimum gain. What ships for a wing is `forSport(.wingfoil)`,
-/// where the rider arrives on the wave already at speed and no rise is asked
-/// for; that is tested under *On a wing*, from the first real wing session
-/// with a swell set.
+/// rule a wing on a downwinder and a paddled board are judged by, and the
+/// one a rider gets back by setting a minimum gain. A wing in the surf is
+/// `forSport(.wingfoilSurf)`, where the rider arrives on the wave already
+/// at speed and no rise is asked for; that is tested under *On a wing in
+/// the surf*, from the first real wing session with a swell set.
 @Suite("Wave rides")
 struct WaveRideTests {
 
@@ -388,13 +388,13 @@ struct WaveRideTests {
                 "turned all the way off, the accelerometer stops deciding")
     }
 
-    // MARK: On a wing
+    // MARK: On a wing in the surf
 
-    /// The rides as a wing rider gets them: `forSport`, stock rules.
+    /// The rides as a wing rider in the surf gets them: `forSport`, stock rules.
     private func wing(_ track: Track, _ change: (inout SportThresholds) -> Void = { _ in }) -> WaveRideSummary {
-        var rules = SportThresholds.forSport(.wingfoil)
+        var rules = SportThresholds.forSport(.wingfoilSurf)
         change(&rules)
-        return WaveRideFinder.forSport(.wingfoil, thresholds: rules)
+        return WaveRideFinder.forSport(.wingfoilSurf, thresholds: rules)
             .rides(in: track, flights: [], swellFrom: swellFrom)
     }
 
@@ -403,7 +403,7 @@ struct WaveRideTests {
     /// catch rule named half of them. The rider's rule: every leg with the
     /// swell was a wave. So on a wing the whole leg is the ride, from the
     /// turn onto it.
-    @Test("On a wing, a leg with the swell at the speed you arrived at is a wave")
+    @Test("In the surf, a leg with the swell at the speed you arrived at is a wave")
     func wingArrivesAtSpeed() {
         let track = builder.build(from: SyntheticTrack.generate(legs: [
             .init(speed: 6.5, heading: 90, duration: 60),              // out
@@ -417,14 +417,16 @@ struct WaveRideTests {
         for ride in summary.rides {
             #expect(ride.duration >= 28, "the ride should be the whole leg, not \(ride.duration) s of it")
         }
-        // The bare finder still asks for the rise, for the sports that need it.
+        // A wing on a downwinder still asks for the rise: the same track as
+        // plain wingfoil finds nothing, because nothing here rose.
         #expect(rides(track).count == 0)
+        #expect(WaveRideFinder.forSport(.wingfoil).rides(in: track, flights: [], swellFrom: swellFrom).count == 0)
     }
 
     /// Close to shore in lighter wind the wave is slower than the wing.
     /// Turning onto it is a deceleration, which used to be a reach running
     /// out of wind: no rise, and the braking gate ended it at the turn.
-    @Test("On a wing, a wave slower than the wing is still a wave")
+    @Test("In the surf, a wave slower than the wing is still a wave")
     func wingSlowsOntoTheWave() {
         let track = builder.build(from: SyntheticTrack.generate(legs: [
             .init(speed: 8, heading: 90, duration: 60),
@@ -437,7 +439,7 @@ struct WaveRideTests {
     }
 
     /// Setting the gain is asking for the rule back, at that value.
-    @Test("On a wing, setting a minimum gain brings the rise rule back")
+    @Test("In the surf, setting a minimum gain brings the rise rule back")
     func wingAsksForTheRise() {
         let track = builder.build(from: SyntheticTrack.generate(legs: [
             .init(speed: 6.5, heading: 90, duration: 60),
@@ -455,7 +457,7 @@ struct WaveRideTests {
 
     /// A wave caught inside the rise window of the one before is linked on
     /// a wing too, with no rise to measure it by.
-    @Test("On a wing, back-to-back waves are linked")
+    @Test("In the surf, back-to-back waves are linked")
     func wingLinks() {
         let track = builder.build(from: SyntheticTrack.generate(legs: [
             .init(speed: 6.5, heading: 90, duration: 60),

@@ -275,7 +275,7 @@ public struct DownwindAnalyzer: Sendable {
         switch sport {
         case .downwindSUP, .prone, .supFoil:
             a.minimumGlideSpeed = 2.5
-        case .wingfoil, .parawing:
+        case .wingfoil, .wingfoilSurf, .parawing:
             // A wing used to need a fixed 6 m/s, then a stricter fraction than
             // other sports, both on the reasoning that a powered rider is fast
             // anyway. Neither survived contact with real sessions: the fixed

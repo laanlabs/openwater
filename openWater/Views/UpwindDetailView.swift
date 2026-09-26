@@ -371,9 +371,12 @@ struct UpwindDetailView: View {
 
     private var map: some View {
         Map {
-            // The whole session as context, faded.
-            MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
-                .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            // The whole session as context, faded — in pieces, so a hole in
+            // the recording is a hole and not a line across the bay.
+            ForEach(Array(session.track.polylinePieces.enumerated()), id: \.offset) { _, piece in
+                MapPolyline(coordinates: piece)
+                    .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            }
 
             // The wind axis, dashed across the water. This is what makes the
             // zig-zag legible as a *beat*: every leg reads against the line

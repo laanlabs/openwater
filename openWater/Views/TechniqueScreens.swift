@@ -286,8 +286,10 @@ struct AirtimeScreen: View {
             SectionHeader("Where")
 
             Map(initialPosition: .region(region)) {
-                MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
-                    .stroke(.gray.opacity(0.45), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                ForEach(Array(session.track.polylinePieces.enumerated()), id: \.offset) { _, piece in
+                    MapPolyline(coordinates: piece)
+                        .stroke(.gray.opacity(0.45), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                }
 
                 ForEach(jumps) { jump in
                     if let coordinate = coordinate(of: jump) {

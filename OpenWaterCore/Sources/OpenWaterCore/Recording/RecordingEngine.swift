@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The platform-independent half of recording a session.
 ///
@@ -14,6 +15,8 @@ import Foundation
 @MainActor
 @Observable
 public final class RecordingEngine {
+
+    nonisolated private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "Recording")
 
     public enum State: Equatable, Sendable {
         case idle
@@ -34,6 +37,15 @@ public final class RecordingEngine {
 
     /// A previous session that was cut short and can still be recovered.
     public private(set) var recoverable: RecoverableSession?
+
+    /// Every time the clock has been stopped this session, newest last. The
+    /// last one is open while the state is `.paused`.
+    ///
+    /// Recording does not stop for a pause — see `RecordedPause`. The fixes
+    /// keep coming and keep being written; what a pause changes is that they
+    /// are not fed to the live analyzer, so the numbers on the screen hold
+    /// still, and that the stretch is cut from the session when it is built.
+    public private(set) var pauses: [RecordedPause] = []
 
     /// Optional name and spot, set before starting. Both flow into the session
     /// that `finish()` produces, so a rider who labels a session up front does
@@ -72,6 +84,10 @@ public final class RecordingEngine {
     /// Called when auto-pause triggers, so the shell can react.
     public var onAutoPause: (() -> Void)?
 
+    /// Called when an auto-pause ends on its own, because the rider is moving
+    /// again. A pause the rider made is never ended for them.
+    public var onAutoResume: (() -> Void)?
+
     // MARK: Private
 
     private var analyzer: LiveAnalyzer?
@@ -79,6 +95,8 @@ public final class RecordingEngine {
     private var sessionID = UUID()
     private var points: [TrackPoint] = []
     private var stoppedSince: Date?
+    /// While auto-paused: when the fixes started saying "moving" again.
+    private var movingSince: Date?
 
     private let deviceModel: String?
     private let appVersion: String?
@@ -111,7 +129,9 @@ public final class RecordingEngine {
         self.startDate = date
         self.points.removeAll()
         self.recordsHit.removeAll()
+        self.pauses.removeAll()
         self.stoppedSince = nil
+        self.movingSince = nil
 
         let analyzer = LiveAnalyzer(sport: sport, allTimeBests: allTimeBests)
         analyzer.setWind(wind)
@@ -139,16 +159,31 @@ public final class RecordingEngine {
         state = .recording
     }
 
-    public func pause() {
+    /// Stop the clock. The receiver stays on and the fixes keep being kept.
+    ///
+    /// - Parameter cause: who is stopping it. The rider by default, because
+    ///   that is what a button is; the engine passes `.auto` for itself.
+    public func pause(cause: RecordedPause.Cause = .rider, at date: Date = Date()) {
         guard state == .recording else { return }
         state = .paused
-        try? log?.flush()
+        pauses.append(RecordedPause(start: date, cause: cause))
+        movingSince = nil
+        log?.append(TrackLog.Event(.pause, at: date, cause: cause))
+        let elapsed = Int(date.timeIntervalSince(startDate ?? date))
+        Self.logger.notice("paused (\(cause.rawValue, privacy: .public)) at \(elapsed) s, \(self.points.count) fixes so far")
     }
 
-    public func resume() {
+    public func resume(at date: Date = Date()) {
         guard state == .paused else { return }
         state = .recording
         stoppedSince = nil
+        movingSince = nil
+        if let index = pauses.indices.last, pauses[index].end == nil {
+            pauses[index].end = date
+        }
+        log?.append(TrackLog.Event(.resume, at: date))
+        let elapsed = Int(date.timeIntervalSince(startDate ?? date))
+        Self.logger.notice("resumed at \(elapsed) s after \(Int(self.pauses.last?.duration ?? 0)) s paused")
     }
 
     /// Flush pending fixes to disk. Call when the app is about to be suspended.
@@ -185,6 +220,9 @@ public final class RecordingEngine {
     @discardableResult
     public func finish(at date: Date = Date(), save: (Session) -> Bool) async -> Session? {
         guard state == .recording || state == .paused else { return nil }
+        // Ending while paused closes the pause where the session ends, so the
+        // cut it becomes runs to the last fix rather than to nowhere.
+        if state == .paused { resume(at: date) }
         state = .finishing
 
         log?.finish()
@@ -205,6 +243,7 @@ public final class RecordingEngine {
         let (deviceModel, appVersion) = (deviceModel, appVersion)
         let (title, spotName, swellHeight, swellDirection) = (title, spotName, swellHeight, swellDirection)
         let issues: [String]? = recordingIssues.isEmpty ? nil : recordingIssues
+        let pauses = pauses
         recordingIssues = []
         let session = await Task.detached(priority: .userInitiated) {
             Self.buildSession(
@@ -217,6 +256,7 @@ public final class RecordingEngine {
                 deviceModel: deviceModel,
                 appVersion: appVersion,
                 recordingIssues: issues,
+                pauses: pauses,
                 title: title,
                 spotName: spotName,
                 swellHeight: swellHeight,
@@ -242,11 +282,23 @@ public final class RecordingEngine {
     // MARK: - Ingest
 
     /// Feed one fix, with any motion sample already merged onto it.
+    ///
+    /// Taken while paused too. The fix is kept and written down exactly as it
+    /// would be while recording; what it does not do is move the live numbers.
+    /// That is the whole of what a pause means now — see `RecordedPause`.
     public func ingest(_ point: TrackPoint) {
-        guard state == .recording else { return }
+        guard state == .recording || state == .paused else { return }
 
         points.append(point)
         log?.append(point)
+
+        if state == .paused {
+            // The fix that ends an auto-pause is the first one back, and is
+            // fed through like any other; the rest of a pause stops here.
+            guard shouldAutoResume(on: point) else { return }
+            resume(at: point.timestamp)
+            onAutoResume?()
+        }
 
         guard let analyzer else { return }
         for record in analyzer.add(point) {
@@ -268,12 +320,40 @@ public final class RecordingEngine {
             stoppedSince = nil
         } else if let since = stoppedSince {
             if date.timeIntervalSince(since) > 45 {
-                pause()
+                pause(cause: .auto, at: date)
                 onAutoPause?()
             }
         } else {
             stoppedSince = date
         }
+    }
+
+    /// The other half of auto-pause, which it never had.
+    ///
+    /// An auto-pause used to end only when the rider tapped Resume. Nothing
+    /// else could: the fixes that would have shown them moving again were the
+    /// very ones being dropped. A rider who sat for a minute and then rode
+    /// for an hour got a one-minute session. Now the fixes still arrive, so
+    /// the engine can see the speed come back and let the clock go on — with
+    /// a few seconds of hysteresis so a gust across a drifting board does not
+    /// count.
+    ///
+    /// Only for a pause the engine made. One the rider made is theirs to end.
+    private func shouldAutoResume(on point: TrackPoint) -> Bool {
+        guard let current = pauses.last, current.end == nil, current.cause == .auto else {
+            movingSince = nil
+            return false
+        }
+        let moving = point.hasValidSpeed && (point.speed ?? 0) >= sport.thresholds.movingSpeed
+        guard moving else {
+            movingSince = nil
+            return false
+        }
+        guard let since = movingSince else {
+            movingSince = point.timestamp
+            return false
+        }
+        return point.timestamp.timeIntervalSince(since) >= 5
     }
 
     // MARK: - Recovery
@@ -297,7 +377,8 @@ public final class RecordingEngine {
             // into the Record tab.
             let parsed: (header: TrackLog.Header, count: Int, duration: TimeInterval, distance: Double)?
             parsed = await Task.detached(priority: .userInitiated) {
-                guard let (header, points) = try? TrackLog.read(url) else { return nil }
+                guard let log = try? TrackLog.read(url) else { return nil }
+                let (header, points) = (log.header, log.points)
                 let track = TrackBuilder(options: .forSport(header.sport)).build(from: points)
                 return (header, points.count, track.duration, track.totalDistance)
             }.value
@@ -339,7 +420,8 @@ public final class RecordingEngine {
     public func recover(_ candidate: RecoverableSession, save: (Session) -> Bool) async -> Session? {
         let url = candidate.url
         let built: Session? = await Task.detached(priority: .userInitiated) {
-            guard let (header, points) = try? TrackLog.read(url), points.count >= 2 else { return nil }
+            guard let log = try? TrackLog.read(url), log.points.count >= 2 else { return nil }
+            let (header, points) = (log.header, log.points)
             return Self.buildSession(
                 id: header.sessionID,
                 sport: header.sport,
@@ -348,7 +430,8 @@ public final class RecordingEngine {
                 points: points,
                 wind: nil,
                 deviceModel: header.deviceModel,
-                appVersion: header.appVersion
+                appVersion: header.appVersion,
+                pauses: log.pauses
             )
         }.value
         guard let session = built else {
@@ -383,13 +466,21 @@ public final class RecordingEngine {
         appVersion: String?,
         endBattery: Double? = nil,
         recordingIssues: [String]? = nil,
+        pauses: [RecordedPause] = [],
         title: String? = nil,
         spotName: String? = nil,
         swellHeight: Double? = nil,
         swellDirection: Double? = nil,
         timeZone: String? = TimeZone.current.identifier
     ) -> Session {
-        let track = TrackBuilder(options: .forSport(sport)).build(from: points)
+        // A pause is a cut, made the way the rider would make it in Trim:
+        // the paused fixes stay in the archive and come out of the numbers.
+        // Applied here, before the analysis, rather than by building the whole
+        // recording and trimming it after — that is two passes over a
+        // three-hour track for one answer.
+        let trim = pauses.trim(from: points.first?.timestamp) ?? .none
+        let kept = trim.isTrimmed ? trim.apply(to: points) : points
+        let track = TrackBuilder(options: .forSport(sport)).build(from: kept)
         let summary = SessionAnalyzer(
             configuration: .init(sport: sport, categories: SpeedCategory.all, wind: wind)
         ).analyse(track)
@@ -407,6 +498,9 @@ public final class RecordingEngine {
             appVersion: appVersion,
             endBattery: endBattery,
             recordingIssues: recordingIssues,
+            pauses: pauses.isEmpty ? nil : pauses,
+            trim: trim,
+            untrimmedPoints: trim.isTrimmed ? points : nil,
             swellHeight: swellHeight,
             swellDirection: swellDirection,
             timeZone: timeZone,

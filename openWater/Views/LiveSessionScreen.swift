@@ -13,6 +13,11 @@ struct LiveSessionScreen: View {
     /// Called when the rider ends the session. There is no confirmation: the
     /// question "are you sure?" had one answer, and ending is not destructive
     /// now that the session always saves — the debrief opens on top of it.
+    ///
+    /// There is a *hold*, though, on this and on Pause. A hold is not a
+    /// question; it is a tap that a pocket cannot make. A rider's wetsuit
+    /// tapped Pause forty-nine minutes before it tapped Resume, and the
+    /// screen was on the whole time to be tapped.
     var onEnd: () -> Void
 
     @Environment(PhoneRecorder.self) private var recorder
@@ -189,9 +194,8 @@ struct LiveSessionScreen: View {
     private var liveMap: some View {
         Map(position: $camera, interactionModes: []) {
             UserAnnotation()
-            let coordinates = recorder.trackCoordinates
-            if coordinates.count > 1 {
-                MapPolyline(coordinates: coordinates)
+            ForEach(Array(recorder.trackPieces.enumerated()), id: \.offset) { _, piece in
+                MapPolyline(coordinates: piece)
                     .stroke(.tint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
             }
         }
@@ -214,35 +218,86 @@ struct LiveSessionScreen: View {
     private var controls: some View {
         HStack(spacing: 12) {
             if recorder.state == .paused {
-                Button {
+                HoldButton("Resume", systemImage: "play.fill", tint: .green, prominent: true) {
                     recorder.resume()
-                } label: {
-                    Label("Resume", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
             } else {
-                Button {
+                HoldButton("Pause", systemImage: "pause.fill", tint: .orange, prominent: false) {
                     recorder.pause()
-                } label: {
-                    Label("Pause", systemImage: "pause.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
                 }
-                .buttonStyle(.bordered)
-                .tint(.orange)
             }
 
-            Button(action: onEnd) {
-                Label("End", systemImage: "stop.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
+            HoldButton("End", systemImage: "stop.fill", tint: .red, prominent: true, action: onEnd)
         }
         .font(.headline)
+    }
+}
+
+/// A button that fires when held, not when tapped.
+///
+/// The live screen stays on while recording and rides in a pocket, a pouch or
+/// a wetsuit, all of which tap. A tap on Pause costs the rider nothing now —
+/// the fixes are kept and the cut can be undone — but it still stops the
+/// clock they are looking at, and a tap on End stops the session. So each
+/// control asks for the one thing wet neoprene does not do: stay put for
+/// most of a second. The fill shows the hold taking, so a rider who taps and
+/// sees nothing happen knows to hold rather than tap harder.
+private struct HoldButton: View {
+
+    let title: String
+    let systemImage: String
+    let tint: Color
+    let prominent: Bool
+    let action: () -> Void
+
+    /// Long enough that a brush of fabric does not count; short enough that
+    /// nobody with a wing in the other hand is standing there waiting.
+    static let holdDuration: TimeInterval = 0.6
+
+    @State private var pressing = false
+    @State private var fired = false
+
+    init(_ title: String, systemImage: String, tint: Color, prominent: Bool, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tint = tint
+        self.prominent = prominent
+        self.action = action
+    }
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .foregroundStyle(prominent ? Color.white : tint)
+            .background {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(prominent ? tint : tint.opacity(0.18))
+                    // The hold, filling left to right for as long as the
+                    // finger stays. Animated to the full width over the hold
+                    // duration, so it *is* the timer the rider is watching.
+                    GeometryReader { proxy in
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(prominent ? Color.white.opacity(0.35) : tint.opacity(0.35))
+                            .frame(width: pressing ? proxy.size.width : 0)
+                    }
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .onLongPressGesture(minimumDuration: Self.holdDuration, maximumDistance: 30) {
+                fired = true
+                action()
+            } onPressingChanged: { down in
+                if down {
+                    fired = false
+                    withAnimation(.linear(duration: Self.holdDuration)) { pressing = true }
+                } else {
+                    withAnimation(.easeOut(duration: fired ? 0.15 : 0.25)) { pressing = false }
+                }
+            }
+            .accessibilityLabel(title)
+            .accessibilityHint("Hold to \(title.lowercased())")
+            .accessibilityAddTraits(.isButton)
     }
 }

@@ -170,15 +170,32 @@ struct MeasurementNotesView: View {
                 row("Gaps in the recording",
                     "\(quality.dropoutCount) · \(Format.shortDuration(quality.dropoutDuration))")
             }
+            if let pauses = session.pauses, !pauses.isEmpty {
+                row("Paused",
+                    "\(pauses.count) · \(Format.shortDuration(pauses.totalDuration))")
+            }
         } header: {
             Text("Distance")
         } footer: {
             Text("""
             Added up leg by leg between consecutive fixes, along the curve of the earth. It is not the straight line from start to finish, and it is not smoothed.
 
-            Where the recording has a hole longer than 30 seconds, that leg contributes nothing. Drawing a straight line across a gap adds distance nobody sailed and hands the speed windows a leg at a speed nobody did. Apps that bridge gaps report more distance than you covered\(quality.dropoutCount > 0 ? " — on this session there \(quality.dropoutCount == 1 ? "was 1 such gap" : "were \(quality.dropoutCount) such gaps"), totalling \(Format.shortDuration(quality.dropoutDuration))." : ", though this session has none.")
+            Where the recording has a hole, the leg across it counts only if it is short enough and slow enough to be a quiet receiver over a drifting rider rather than a ride nobody recorded — under ten minutes, and at a speed a board can do. The map never draws across a hole longer than 30 seconds.\(quality.dropoutCount > 0 ? " On this session there \(quality.dropoutCount == 1 ? "was 1 such gap" : "were \(quality.dropoutCount) such gaps"), totalling \(Format.shortDuration(quality.dropoutDuration))." : "")\(pauseNote(session))
             """)
         }
+    }
+
+    /// What a pause did to the numbers, and where to undo it.
+    private func pauseNote(_ session: Session) -> String {
+        guard let pauses = session.pauses, !pauses.isEmpty else { return "" }
+        let who: String
+        switch (pauses.contains { $0.cause == .rider }, pauses.contains { $0.cause == .auto }) {
+        case (true, false): who = "you"
+        case (false, true): who = "auto-pause"
+        default: who = "you or auto-pause"
+        }
+        let times = pauses.count == 1 ? "once" : "\(pauses.count) times"
+        return " The recording was paused \(times) by \(who), \(Format.shortDuration(pauses.totalDuration)) in all. The fixes from a pause are kept: they are cut from the session the way a trim is, and if a pause was not meant, deleting its cut in Trim puts that stretch back."
     }
 
     private func fixesSection(session: Session, summary: SessionSummary, quality: TrackQuality) -> some View {

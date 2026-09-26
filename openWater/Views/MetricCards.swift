@@ -1063,6 +1063,9 @@ struct QualityCard: View {
     /// Needed only to know what limit this session was *meant* to be held to,
     /// so a relaxed one can be reported rather than passed off as normal.
     let sport: Sport
+    /// Times the clock was stopped, if any, so a session whose map has a
+    /// stretch missing says which kind of missing it is.
+    var pauses: [RecordedPause]? = nil
 
     private var strictLimit: Double { sport.thresholds.maxHorizontalAccuracy }
 
@@ -1092,6 +1095,11 @@ struct QualityCard: View {
                         Text("\(quality.dropoutCount) signal dropout\(quality.dropoutCount == 1 ? "" : "s"), \(Format.shortDuration(quality.dropoutDuration)) total")
                             .font(.caption2)
                             .foregroundStyle(.orange)
+                    }
+                    if let pauses, !pauses.isEmpty {
+                        Text("Paused \(pauses.count == 1 ? "once" : "\(pauses.count) times"), \(Format.shortDuration(pauses.totalDuration)) — cut from the session, kept in Trim")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

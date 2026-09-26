@@ -516,8 +516,10 @@ struct WaveDetailView: View {
 
     private func map(_ waves: WaveRideSummary) -> some View {
         Map {
-            MapPolyline(coordinates: session.track.points.map(\.clCoordinate))
-                .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            ForEach(Array(session.track.polylinePieces.enumerated()), id: \.offset) { _, piece in
+                MapPolyline(coordinates: piece)
+                    .stroke(.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            }
 
             // Pumping, in its own colour, under the rides: on a paddled foil
             // the stretch back out between two waves is the work of the

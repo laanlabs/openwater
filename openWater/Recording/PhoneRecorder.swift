@@ -40,20 +40,14 @@ final class PhoneRecorder {
     var recordsHit: [LiveRecord] { engine.recordsHit }
     var recoverable: RecordingEngine.RecoverableSession? { engine.recoverable }
 
-    /// The track so far, reduced for drawing.
+    /// The track so far, reduced for drawing, in one piece per stretch the
+    /// receiver was reporting — see `Track.drawableGap`.
     ///
     /// A three-hour session is ten thousand fixes and the live map redraws on
     /// every one of them; at a few hundred points the line looks identical and
     /// the redraw is free. Uniform sampling, because this is about the shape.
-    var trackCoordinates: [CLLocationCoordinate2D] {
-        let points = engine.recordedPoints
-        guard points.count > 1 else { return [] }
-        let step = max(1, points.count / 400)
-        var result = stride(from: 0, to: points.count, by: step)
-            .filter { points[$0].hasValidPosition }
-            .map { points[$0].clCoordinate }
-        if let last = points.last, last.hasValidPosition { result.append(last.clCoordinate) }
-        return result
+    var trackPieces: [[CLLocationCoordinate2D]] {
+        engine.recordedPoints.polylinePieces(budget: 400)
     }
 
     /// Optional name and spot set before starting, carried into the session.
@@ -110,6 +104,9 @@ final class PhoneRecorder {
         engine.onAutoPause = { [weak self] in
             self?.impactHaptics.impactOccurred()
         }
+        engine.onAutoResume = { [weak self] in
+            self?.impactHaptics.impactOccurred()
+        }
     }
 
     // MARK: - Setup
@@ -152,27 +149,38 @@ final class PhoneRecorder {
         // being read, and an always-on screen is the fastest way to end a
         // session early.
         UIApplication.shared.isIdleTimerDisabled = true
+        // And the other half of keeping the screen on: a screen that is on
+        // in a wetsuit pocket is a screen being tapped by the wetsuit. The
+        // proximity sensor is what iOS uses to blank the display against a
+        // cheek on a call, and it does the same against a chest — the screen
+        // goes dark and ignores touches until the phone comes out again. A
+        // rider lost seventy-one minutes of a session to Pause and Resume
+        // taps nobody made.
+        UIDevice.current.isProximityMonitoringEnabled = true
 
         notificationHaptics.prepare()
         impactHaptics.prepare()
         impactHaptics.impactOccurred()
     }
 
+    /// Stop the clock. The receiver and the motion sensors stay on.
+    ///
+    /// They used to stop here, which made a pause the one thing in the app
+    /// that threw fixes away for good. Now the engine keeps every fix that
+    /// arrives while paused and cuts the stretch from the session when it is
+    /// built — see `RecordedPause` — so a pause costs the rider nothing but a
+    /// visit to Trim if it was not meant. The price is the receiver running
+    /// through a break on the beach, which is the price the trim model has
+    /// always been happy to pay.
     func pause() {
         guard engine.state == .recording else { return }
-        engine.pause()
-        location.stop()
-        motion.stop()
-        barometer.stop()
+        engine.pause(cause: .rider)
         impactHaptics.impactOccurred()
     }
 
     func resume() {
         guard engine.state == .paused else { return }
         engine.resume()
-        location.start()
-        motion.start()
-        barometer.start()
         impactHaptics.impactOccurred()
     }
 
@@ -183,10 +191,16 @@ final class PhoneRecorder {
     /// session recoverable rather than gone.
     @discardableResult
     func finish(save: (Session) -> Bool) async -> Session? {
+        if location.silentRestarts > 0 {
+            engine.noteIssue(
+                "The receiver stopped reporting \(location.silentRestarts == 1 ? "once" : "\(location.silentRestarts) times") and was restarted after a minute of silence each time."
+            )
+        }
         location.stop()
         motion.stop()
         barometer.stop()
         UIApplication.shared.isIdleTimerDisabled = false
+        UIDevice.current.isProximityMonitoringEnabled = false
 
         let session = await engine.finish(save: save)
         if session != nil { notificationHaptics.notificationOccurred(.success) }
@@ -198,6 +212,7 @@ final class PhoneRecorder {
         motion.stop()
         barometer.stop()
         UIApplication.shared.isIdleTimerDisabled = false
+        UIDevice.current.isProximityMonitoringEnabled = false
         engine.discard()
     }
 

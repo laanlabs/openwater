@@ -94,7 +94,9 @@ struct TrackMapView: View {
     /// The drawn track, rebuilt only when something that actually changes its
     /// shape changes — never while a trim handle is moving.
     @State private var bands: [SpeedBand] = []
-    @State private var fullTrack: [CLLocationCoordinate2D] = []
+    /// One polyline per stretch the receiver was reporting, never one across
+    /// a hole — see `Track.drawableGap`.
+    @State private var fullTrack: [[CLLocationCoordinate2D]] = []
 
     /// A thinned outline of the track, drawn while the coloured bands build.
     ///
@@ -103,7 +105,7 @@ struct TrackMapView: View {
     /// session — and a blank map reads as a session that failed to load. Every
     /// twentieth fix is enough to show the shape immediately; it costs a few
     /// hundred points and is thrown away the moment the real thing lands.
-    @State private var outline: [CLLocationCoordinate2D] = []
+    @State private var outline: [[CLLocationCoordinate2D]] = []
     @State private var isDrawing = true
 
     private var showsGhostLayer: Bool {
@@ -181,18 +183,22 @@ struct TrackMapView: View {
         Map(position: $camera) {
             // Ghost layer first, so the highlighted content draws over it.
             if showsGhostLayer {
-                MapPolyline(coordinates: fullTrack)
-                    .stroke(
-                        style.isDark ? .white.opacity(0.28) : .gray.opacity(0.22),
-                        lineWidth: 2
-                    )
+                ForEach(Array(fullTrack.enumerated()), id: \.offset) { _, piece in
+                    MapPolyline(coordinates: piece)
+                        .stroke(
+                            style.isDark ? .white.opacity(0.28) : .gray.opacity(0.22),
+                            lineWidth: 2
+                        )
+                }
             }
 
             // The shape, while the colour is still being worked out.
             if isDrawing, !outline.isEmpty {
-                MapPolyline(coordinates: outline)
-                    .stroke(style.isDark ? .white.opacity(0.5) : .gray.opacity(0.45),
-                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                ForEach(Array(outline.enumerated()), id: \.offset) { _, piece in
+                    MapPolyline(coordinates: piece)
+                        .stroke(style.isDark ? .white.opacity(0.5) : .gray.opacity(0.45),
+                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                }
             }
 
             // The base track. Everything about it is cached and none of it
@@ -325,11 +331,7 @@ struct TrackMapView: View {
         .task {
             // Immediately, and once: the outline only depends on the track.
             guard outline.isEmpty else { return }
-            let points = session.track.points
-            let step = max(1, points.count / 400)
-            outline = stride(from: 0, to: points.count, by: step).map {
-                points[$0].clCoordinate
-            }
+            outline = session.track.points.polylinePieces(budget: 400)
         }
         .task(id: bandKey) {
             isDrawing = true
@@ -353,7 +355,7 @@ struct TrackMapView: View {
             speedScale = computed.scale
             peakIndex = computed.peak
             bands = computed.bands
-            if fullTrack.isEmpty { fullTrack = track.points.map(\.clCoordinate) }
+            if fullTrack.isEmpty { fullTrack = track.polylinePieces }
             withAnimation(.easeOut(duration: 0.2)) { isDrawing = false }
         }
         // MapKit puts its compass in the top-right the moment the map is
@@ -493,7 +495,11 @@ struct TrackMapView: View {
             // which is what makes the scrubber reveal the track in order.
             let endIndex = min(segment.endIndex, lastIndex ?? segment.endIndex)
             guard endIndex > segment.startIndex else { continue }
-            let coordinates = track.points[segment.startIndex...endIndex].map(\.clCoordinate)
+            // And in pieces: a segment is a stretch of one state, and a
+            // rider drifting through a forty-minute hole in the recording is
+            // one state — drawn whole, it was a ruler across the bay.
+            for piece in track.contiguousRanges(in: segment.startIndex...endIndex) {
+            let coordinates = track.points[piece].map(\.clCoordinate)
             guard coordinates.count > 1 else { continue }
             let width = lineWidth(for: segment.state)
 
@@ -511,7 +517,7 @@ struct TrackMapView: View {
                 continue
             }
 
-            let start = segment.startIndex
+            let start = piece.lowerBound
             let dimmed = segment.state == .riding
             var runStart = 0
             var runBand = band(forSpeedAt: start, in: speeds, scale: scale)
@@ -544,6 +550,7 @@ struct TrackMapView: View {
                 width: width
             ))
             id += 1
+            }
         }
         return bands
     }

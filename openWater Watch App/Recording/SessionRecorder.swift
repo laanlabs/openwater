@@ -85,6 +85,9 @@ final class SessionRecorder {
         engine.onAutoPause = {
             WKInterfaceDevice.current().play(.stop)
         }
+        engine.onAutoResume = {
+            WKInterfaceDevice.current().play(.start)
+        }
     }
 
     func prepare() async {
@@ -157,11 +160,16 @@ final class SessionRecorder {
         WKInterfaceDevice.current().play(.start)
     }
 
+    /// Stop the clock. The receiver and the motion sensors stay on.
+    ///
+    /// They used to stop here, and every fix that arrived while paused was
+    /// dropped — the one edit in the app that could never be undone. Now the
+    /// engine keeps them and cuts the stretch from the session when it is
+    /// built, see `RecordedPause`; a pause that was not meant is a visit to
+    /// Trim on the phone rather than a lost hour.
     func pause() {
         guard engine.state == .recording else { return }
-        engine.pause()
-        location.stop()
-        motion.stop()
+        engine.pause(cause: .rider)
         // Left running through a pause would be wrong in the other direction:
         // the rider walks up the beach and the baseline moves with them.
         barometer.stop()
@@ -172,8 +180,6 @@ final class SessionRecorder {
     func resume() {
         guard engine.state == .paused else { return }
         engine.resume()
-        location.start()
-        motion.start()
         barometer.start()
         workout.resume()
         WKInterfaceDevice.current().play(.start)

@@ -197,6 +197,17 @@ public struct Session: Sendable, Codable, Identifiable {
     /// sent nothing, and that is reported too.
     public var recordingIssues: [String]?
 
+    /// Every time the clock was stopped while recording, and by whom.
+    ///
+    /// The fixes from a pause are kept — see `RecordedPause` — and the pause
+    /// arrives on the session as a cut in `trim`, so the paused time is out of
+    /// the numbers but never out of the archive. This list is the provenance:
+    /// the debrief can say "paused twice by the rider, 71 minutes" and point
+    /// at Trim, and a cut the rider later deletes is still explained here.
+    /// Nil on sessions recorded before pauses were kept, and on sessions that
+    /// were never paused.
+    public var pauses: [RecordedPause]?
+
     /// Which part of the recording counts as the session.
     ///
     /// Recording never stops for a break — see `SessionTrim`. The boundaries are
@@ -275,6 +286,7 @@ public struct Session: Sendable, Codable, Identifiable {
         startBattery: Double? = nil,
         endBattery: Double? = nil,
         recordingIssues: [String]? = nil,
+        pauses: [RecordedPause]? = nil,
         trim: SessionTrim = .none,
         untrimmedPoints: [TrackPoint]? = nil,
         purpose: String? = nil,
@@ -308,6 +320,7 @@ public struct Session: Sendable, Codable, Identifiable {
         self.startBattery = startBattery
         self.endBattery = endBattery
         self.recordingIssues = recordingIssues
+        self.pauses = pauses
         self.trim = trim
         self.untrimmedPoints = untrimmedPoints
         self.purpose = purpose

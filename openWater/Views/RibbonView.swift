@@ -348,20 +348,24 @@ struct RibbonView: View {
         let step = max(6, track.points.count / 400)
 
         var out: [HeatBand] = []
-        var index = 0
-        while index < track.points.count - 1 {
-            let end = min(index + step, track.points.count - 1)
-            let speeds = track.speed[index...end]
-            let mean = speeds.reduce(0, +) / Double(speeds.count)
-            out.append(HeatBand(
-                id: index,
-                // One sample of overlap, so consecutive chunks meet rather
-                // than leaving a gap at every join.
-                coordinates: track.points[index...end].map(\.clCoordinate),
-                colour: Color(speedRampColour(position: scale.position(of: mean),
-                                              midpoint: scale.midpoint))
-            ))
-            index = end
+        // Chunked within each stretch the receiver was reporting, so a chunk
+        // never spans a hole — see `Track.drawableGap`.
+        for piece in track.contiguousRanges() where piece.count > 1 {
+            var index = piece.lowerBound
+            while index < piece.upperBound {
+                let end = min(index + step, piece.upperBound)
+                let speeds = track.speed[index...end]
+                let mean = speeds.reduce(0, +) / Double(speeds.count)
+                out.append(HeatBand(
+                    id: index,
+                    // One sample of overlap, so consecutive chunks meet rather
+                    // than leaving a gap at every join.
+                    coordinates: track.points[index...end].map(\.clCoordinate),
+                    colour: Color(speedRampColour(position: scale.position(of: mean),
+                                                  midpoint: scale.midpoint))
+                ))
+                index = end
+            }
         }
         return out
     }
@@ -805,9 +809,11 @@ struct RibbonView: View {
                                     style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                     }
                 } else {
-                    MapPolyline(coordinates: track.points.map(\.clCoordinate))
-                        .stroke(.gray.opacity(0.3),
-                                style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    ForEach(Array(track.polylinePieces.enumerated()), id: \.offset) { _, piece in
+                        MapPolyline(coordinates: piece)
+                            .stroke(.gray.opacity(0.3),
+                                    style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    }
                 }
 
                 // The others first, the chosen one last. Map content draws in

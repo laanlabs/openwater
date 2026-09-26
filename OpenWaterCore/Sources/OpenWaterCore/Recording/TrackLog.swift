@@ -13,6 +13,13 @@ import os
 /// written final line is trivially detectable and discardable, whereas a
 /// truncated binary record can be silently misread as valid. Recovering 99.9 %
 /// of a session is the whole point, so the format has to fail cleanly.
+///
+/// Since format 2 the log also carries *events* — a pause, a resume — as lines
+/// of their own between the fixes. A recovered session needs them for the same
+/// reason a finished one does: the fixes from a pause are kept on disk, and
+/// without the events nothing says which of them the rider had stopped the
+/// clock for. A format-1 reader skips them as malformed lines, which is the
+/// right thing for it to do.
 public final class TrackLog {
 
     nonisolated private static let logger = Logger(subsystem: "com.laan.labs.openWater", category: "TrackLog")
@@ -28,7 +35,57 @@ public final class TrackLog {
         public var startDate: Date
         public var deviceModel: String?
         public var appVersion: String?
-        public var formatVersion: Int = 1
+        public var formatVersion: Int = 2
+    }
+
+    /// Something that happened to the recording, as opposed to a fix.
+    ///
+    /// Written on its own line, keyed by `event` so it can never be mistaken
+    /// for a `TrackPoint` — a fix has no such key, and an event has none of a
+    /// fix's required ones.
+    public struct Event: Codable, Sendable, Equatable {
+        public enum Kind: String, Codable, Sendable {
+            case pause, resume
+        }
+        public var event: Kind
+        public var at: Date
+        /// Who did it, for a pause. Absent on a resume.
+        public var cause: RecordedPause.Cause?
+
+        public init(_ event: Kind, at: Date, cause: RecordedPause.Cause? = nil) {
+            self.event = event
+            self.at = at
+            self.cause = cause
+        }
+    }
+
+    /// What a log holds once read back.
+    public struct Contents: Sendable {
+        public var header: Header
+        public var points: [TrackPoint]
+        public var events: [Event]
+
+        /// The events folded into pauses, in order. An unmatched pause — the
+        /// app died while the clock was stopped — is closed just after the
+        /// last fix, which is where the recording ended in every sense that
+        /// matters.
+        public var pauses: [RecordedPause] {
+            var result: [RecordedPause] = []
+            for event in events {
+                switch event.event {
+                case .pause:
+                    guard result.last?.end != nil || result.isEmpty else { continue }
+                    result.append(RecordedPause(start: event.at, cause: event.cause ?? .rider))
+                case .resume:
+                    guard let last = result.last, last.end == nil else { continue }
+                    result[result.count - 1].end = event.at
+                }
+            }
+            if let last = result.last, last.end == nil, let lastFix = points.last?.timestamp {
+                result[result.count - 1].end = max(last.start, lastFix.addingTimeInterval(1))
+            }
+            return result
+        }
     }
 
     public let url: URL
@@ -102,6 +159,22 @@ public final class TrackLog {
         }
     }
 
+    /// Note an event, and put it on disk at once.
+    ///
+    /// Events are rare and each one matters — a pause that reached memory but
+    /// not the file would leave a recovered session counting the paused
+    /// stretch as riding — so unlike fixes they are not batched.
+    public func append(_ event: Event) {
+        do {
+            var line = try encoder.encode(event)
+            line.append(0x0A)
+            buffer.append(line)
+            try flush()
+        } catch {
+            Self.logger.error("failed to write \(event.event.rawValue) event: \(error.localizedDescription)")
+        }
+    }
+
     /// Force everything to disk. Called when the app is about to be suspended,
     /// on low battery, and when the session ends.
     public func flush() throws {
@@ -133,7 +206,7 @@ public final class TrackLog {
     ///
     /// A trailing partial line — the signature of a crash mid-write — is dropped
     /// rather than failing the whole recovery.
-    public static func read(_ url: URL) throws -> (header: Header, points: [TrackPoint]) {
+    public static func read(_ url: URL) throws -> Contents {
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -145,13 +218,19 @@ public final class TrackLog {
 
         var points: [TrackPoint] = []
         points.reserveCapacity(lines.count)
+        var events: [Event] = []
         for line in lines {
-            // A malformed line is almost always the last one, torn by a crash.
-            // Skipping rather than throwing is what makes recovery useful.
-            guard let point = try? decoder.decode(TrackPoint.self, from: Data(line)) else { continue }
-            points.append(point)
+            let data = Data(line)
+            if let point = try? decoder.decode(TrackPoint.self, from: data) {
+                points.append(point)
+            } else if let event = try? decoder.decode(Event.self, from: data) {
+                events.append(event)
+            }
+            // Anything else is a malformed line — almost always the last one,
+            // torn by a crash. Skipping rather than throwing is what makes
+            // recovery useful.
         }
-        return (header, points)
+        return Contents(header: header, points: points, events: events)
     }
 
     public static func delete(_ url: URL) {

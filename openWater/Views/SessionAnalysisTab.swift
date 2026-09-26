@@ -491,7 +491,8 @@ struct SessionAnalysisTab: View {
                 AnalysisDetail(title: "GPS Quality") {
                     QualityCard(quality: summary.quality,
                                 source: summary.speedSource,
-                                sport: session.sport)
+                                sport: session.sport,
+                                pauses: session.pauses)
                         .cardChrome()
                 }
             }

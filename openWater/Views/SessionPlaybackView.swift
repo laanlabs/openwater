@@ -91,25 +91,29 @@ struct SessionPlaybackView: View {
             // The full track, always visible as context. In trail mode it drops
             // to a ghost so the played portion stands out.
             ForEach(summary.segments) { segment in
-                MapPolyline(coordinates: coordinates(for: segment))
-                    .stroke(
-                        trailColour(for: segment),
-                        style: StrokeStyle(
-                            lineWidth: trailOnly ? 2 : lineWidth(for: segment),
-                            lineCap: .round,
-                            lineJoin: .round
+                ForEach(Array(coordinates(for: segment).enumerated()), id: \.offset) { _, piece in
+                    MapPolyline(coordinates: piece)
+                        .stroke(
+                            trailColour(for: segment),
+                            style: StrokeStyle(
+                                lineWidth: trailOnly ? 2 : lineWidth(for: segment),
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
                         )
-                    )
+                }
             }
 
             // The portion played so far, drawn over the top in full colour.
             if trailOnly {
                 ForEach(playedSegments) { segment in
-                    MapPolyline(coordinates: coordinates(for: segment))
-                        .stroke(
-                            speedColour(segment.averageSpeed),
-                            style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
-                        )
+                    ForEach(Array(coordinates(for: segment).enumerated()), id: \.offset) { _, piece in
+                        MapPolyline(coordinates: piece)
+                            .stroke(
+                                speedColour(segment.averageSpeed),
+                                style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                            )
+                    }
                 }
             }
 
@@ -141,28 +145,36 @@ struct SessionPlaybackView: View {
     /// runs with it; rebuilding a coordinate array per segment per frame —
     /// hundreds of segments over thousands of fixes — was most of what a
     /// frame cost.
-    @State private var segmentLines: [Int: [CLLocationCoordinate2D]] = [:]
+    ///
+    /// One line per stretch the receiver was reporting, with the index the
+    /// stretch starts at, so the playhead can clip inside it — see
+    /// `Track.drawableGap` for why a segment across a hole is not one line.
+    @State private var segmentLines: [Int: [(start: Int, line: [CLLocationCoordinate2D])]] = [:]
 
     /// The session's speed sampled evenly, for the strip under the scrubber.
     @State private var stripSpeeds: [Double] = []
 
-    private func coordinates(for segment: StateSegment) -> [CLLocationCoordinate2D] {
-        guard let line = segmentLines[segment.id] else { return [] }
+    private func coordinates(for segment: StateSegment) -> [[CLLocationCoordinate2D]] {
+        guard let pieces = segmentLines[segment.id] else { return [] }
         // Clip the segment the playhead is inside, so the trail ends exactly at
         // the playhead rather than snapping forward a whole segment.
-        guard trailOnly, segment.endElapsed > elapsed else { return line }
+        guard trailOnly, segment.endElapsed > elapsed else { return pieces.map(\.line) }
         let end = session.track.index(atElapsed: elapsed) ?? segment.startIndex
-        let keep = end - segment.startIndex
-        guard keep > 0 else { return [] }
-        return Array(line.prefix(keep + 1))
+        return pieces.compactMap { piece in
+            let keep = end - piece.start
+            guard keep > 0 else { return nil }
+            return Array(piece.line.prefix(keep + 1))
+        }
     }
 
-    private static func makeSegmentLines(track: Track, segments: [StateSegment]) -> [Int: [CLLocationCoordinate2D]] {
-        var out: [Int: [CLLocationCoordinate2D]] = [:]
+    private static func makeSegmentLines(track: Track, segments: [StateSegment]) -> [Int: [(start: Int, line: [CLLocationCoordinate2D])]] {
+        var out: [Int: [(start: Int, line: [CLLocationCoordinate2D])]] = [:]
         for segment in segments {
             guard segment.startIndex >= 0, segment.endIndex < track.count,
                   segment.endIndex > segment.startIndex else { continue }
-            out[segment.id] = track.points[segment.startIndex...segment.endIndex].map(\.clCoordinate)
+            out[segment.id] = track.contiguousRanges(in: segment.startIndex...segment.endIndex)
+                .filter { $0.count > 1 }
+                .map { ($0.lowerBound, track.points[$0].map(\.clCoordinate)) }
         }
         return out
     }

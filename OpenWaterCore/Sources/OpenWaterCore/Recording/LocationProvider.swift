@@ -70,6 +70,26 @@ public final class LocationProvider: NSObject {
     /// until the receiver reports one.
     public private(set) var lastSpeed: Double = -1
 
+    /// Times the watchdog below has kicked the receiver this recording.
+    /// Reset on `start()`, read by the shell when the session ends so the
+    /// session can say it happened.
+    public private(set) var silentRestarts = 0
+
+    /// How long the receiver may say nothing before it is restarted.
+    ///
+    /// A phone with a body between it and the sky reports soft fixes, not no
+    /// fixes; at navigation accuracy with no distance filter CoreLocation
+    /// delivers *something* every second for as long as it has a single
+    /// satellite. Total silence for a minute is the stream itself having
+    /// stalled — the pause callback this class already restarts on is one way
+    /// that happens, and it is not the only one. A session on 2026-09-24 had
+    /// three such silences, of two, four and eight minutes, with the app alive
+    /// and the motion sensors running the whole time.
+    public static let silenceLimit: TimeInterval = 60
+
+    private var lastFixAt: Date?
+    private var watchdog: Task<Void, Never>?
+
     /// Whether the host app declares the `location` background mode.
     nonisolated static let declaresBackgroundLocationMode: Bool = {
         let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
@@ -179,15 +199,41 @@ public final class LocationProvider: NSObject {
         }
         manager.startUpdatingLocation()
         Self.logger.info("location updates started (background: \(self.usesBackgroundUpdates))")
+        silentRestarts = 0
+        armWatchdog()
     }
 
     public func stop() {
         guard isRunning else { return }
         isRunning = false
+        watchdog?.cancel()
+        watchdog = nil
         manager.allowsBackgroundLocationUpdates = false
         usesBackgroundUpdates = false
         manager.stopUpdatingLocation()
         Self.logger.info("location updates stopped")
+    }
+
+    /// Restart the stream if it goes quiet for `silenceLimit`.
+    ///
+    /// Checked every few seconds rather than on a timer per fix, so the cost
+    /// is one comparison, and measured from the last fix *or* the last
+    /// restart — a restart that yields nothing must not be followed by
+    /// another the next tick.
+    private func armWatchdog() {
+        watchdog?.cancel()
+        lastFixAt = Date()
+        watchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard let self, self.isRunning, !Task.isCancelled else { return }
+                let quiet = Date().timeIntervalSince(self.lastFixAt ?? Date())
+                guard quiet >= Self.silenceLimit else { continue }
+                self.silentRestarts += 1
+                Self.logger.error("no fix for \(Int(quiet)) s — restarting the receiver (restart \(self.silentRestarts))")
+                self.restart()
+            }
+        }
     }
 
     /// How long a warm-up runs before giving up on its own.
@@ -241,10 +287,12 @@ public final class LocationProvider: NSObject {
         }
     }
 
-    /// Kick the stream back into life after the system stopped it.
+    /// Kick the stream back into life after the system stopped it, or after
+    /// it stopped on its own.
     func restart() {
         manager.stopUpdatingLocation()
         manager.startUpdatingLocation()
+        lastFixAt = Date()
     }
 }
 
@@ -271,6 +319,7 @@ extension LocationProvider: CLLocationManagerDelegate {
         let points = locations.map(TrackPoint.init(location:))
         let accuracies = locations.map(\.horizontalAccuracy)
         Task { @MainActor in
+            self.lastFixAt = Date()
             if let last = accuracies.last {
                 self.latestAccuracy = last
                 if last >= 0, last < 30 { self.hasFix = true }

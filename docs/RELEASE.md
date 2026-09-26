@@ -35,8 +35,13 @@ Install a Release build on a paired watch and phone. Outdoors, open sky.
    verdict, and step 6 explains it.
 4. **Stand still sixty seconds, then walk.** GPS quality should read
    Excellent on the phone afterwards.
-5. **Stop, and let the watch hand the session over.**
-6. **Phone → the session → Analysis.** Read three rows:
+5. **Pause, walk thirty seconds, resume, walk thirty more.** The clock
+   should stop and start; the Water Lock drop and the heart should survive
+   the resume. Since 2026-09-26 the receiver keeps running through a pause
+   and the fixes are kept, so what gets checked at step 7 is that the
+   paused walk is *cut*, not lost and not counted.
+6. **Stop, and let the watch hand the session over.**
+7. **Phone → the session → Analysis.** Read three rows:
    - **Heart rate** — a number. Any orange text under it is the recorder's
      own account of a fault (`Session.recordingIssues`), and it names the
      API that refused. Do not ship with orange text here.
@@ -47,11 +52,29 @@ Install a Release build on a paired watch and phone. Outdoors, open sky.
      every other channel present means Motion & Fitness: the altimeter needs
      it and the accelerometer does not. The prompt is asked at launch; check
      Settings ▸ Privacy & Security ▸ Motion & Fitness ▸ openWater on the watch.
-7. **Fitness app on the phone.** The session should be there as a workout
-   with a map. If it is not, the watch's start screen will show an orange
-   notice next time it opens — Health failures land there because they
-   happen after the session is already saved.
-8. **Open the watch app again.** No orange notice on the start screen.
+   - **GPS quality → "Paused once"** with the pause's length, and on the
+     Map tab the paused walk drawn as a hole with a cut in Trim behind it.
+     Deleting the cut should put the walk back.
+8. **Fitness app on the phone.** The session should be there as a workout
+   with a map, and the map should stop where the pause began — the paused
+   walk is kept out of the Health route too. If the workout is not there,
+   the watch's start screen will show an orange notice next time it opens —
+   Health failures land there because they happen after the session is
+   already saved.
+9. **Open the watch app again.** No orange notice on the start screen.
+
+## The phone in a pocket, one session
+
+The phone's live screen stays lit while recording, and its Pause, Resume and
+End controls fire on a hold since 2026-09-26, after a wetsuit paused a
+rider's session for seventy-one minutes. Record on the phone alone:
+
+1. **Hold Pause.** The fill should run across the control for most of a
+   second before it fires; a tap should do nothing. Same for Resume and End.
+2. **Pocket it, screen on, and walk.** The proximity sensor should blank
+   the display at once. Take it out after a minute: still recording, not
+   paused, and the walk on the live map.
+3. **End, and open the session.** No "Paused" line under GPS quality.
 
 ## What the app now tells you, so you do not have to guess
 

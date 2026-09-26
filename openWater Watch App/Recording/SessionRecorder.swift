@@ -322,6 +322,13 @@ final class SessionRecorder {
 
         engine.ingest(point)
 
+        // After the engine, not before: a fix that ends an auto-pause comes
+        // in with the state paused and goes out with it recording, and it is
+        // the first one back. The engine keeps every fix from a pause and
+        // cuts the stretch from the session; the Health route gets the same
+        // cut, or the Fitness map would show a walk up the beach that the
+        // session itself does not.
+        guard engine.state == .recording else { return }
         if point.hasValidPosition, point.horizontalAccuracy >= 0, point.horizontalAccuracy < 50 {
             routeLocations.append(CLLocation(
                 coordinate: CLLocationCoordinate2D(

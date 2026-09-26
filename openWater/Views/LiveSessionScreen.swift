@@ -296,8 +296,16 @@ private struct HoldButton: View {
                     withAnimation(.easeOut(duration: fired ? 0.15 : 0.25)) { pressing = false }
                 }
             }
+            // VoiceOver cannot hold. Its double-tap is a tap, and a control
+            // that only answers to a hold would leave a VoiceOver rider with
+            // no way to end a session. So the same action is offered as the
+            // element's default action, which is what a double-tap invokes —
+            // deliberate by construction, since VoiceOver has first named
+            // the control out loud.
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)
-            .accessibilityHint("Hold to \(title.lowercased())")
+            .accessibilityHint("Hold, or double-tap with VoiceOver, to \(title.lowercased())")
             .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
     }
 }

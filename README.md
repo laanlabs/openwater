@@ -4,7 +4,7 @@ An open-source session tracker for wind-powered watersports — wingfoiling,
 parawinging, downwinding, windsurfing, kiting, SUP and sailing. iPhone, Apple
 Watch and Apple TV, no account, no subscription, every feature free.
 
-**[openwaterapp.com](https://openwaterapp.com)** · [Spot guide](https://openwaterapp.com/spots)
+**[openwaterapp.com](https://openwaterapp.com)** · [Spot guide](https://openwaterapp.com/spots) · [Instagram](https://www.instagram.com/openwater.sessions/) · [YouTube](https://www.youtube.com/channel/UCKbFBOHZoDn0ZgdqODeYojA)
 
 | | | |
 |:--:|:--:|:--:|

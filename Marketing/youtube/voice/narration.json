@@ -1,0 +1,14 @@
+[
+ {"id": "00-intro",    "text": "This is openWater. A session tracker for wind-powered watersports: wingfoiling, parawinging, downwinding, windsurfing, kiting, stand-up paddling and sailing. It runs on iPhone, Apple Watch and Apple TV. No account, no subscription, and every feature is free."},
+ {"id": "01-record",   "text": "Start a session in one tap, on your phone or straight from your wrist. The watch app runs on its own. Water Lock engages automatically, and your track is written to disk continuously, so a flat battery costs you seconds, not your session."},
+ {"id": "02-sessions", "text": "Back on the phone, every session is in one list, with its track, distance and best speeds."},
+ {"id": "03-map",      "text": "Open one and the map draws what actually happened. Flights are bold, slow sections fade back, and falls get a marker. Turn the phone, and the map takes the whole screen."},
+ {"id": "04-runs",     "text": "The Runs view drops the map entirely. One lane per run, stacked in time, so forty passes through the same water never overlap."},
+ {"id": "05-playback", "text": "Replay the whole session with a playhead, a speed heatmap and a live readout."},
+ {"id": "06-analysis", "text": "Analysis is one row per topic. Speed in every category riders actually compare: two seconds, ten seconds, five hundred metres, the nautical mile, Alpha 500. Foiling: time on foil, flights and touchdowns. Wind angles, V M G, and every gybe and tack scored. Glides on a downwinder. And jumps, with their airtime."},
+ {"id": "07-spots",    "text": "Spots is a guide to over a thousand launches, with live wind on every pin. The wind wash draws the forecast as one picture you can turn three days ahead. Tides, currents, swell and radar come in the nearest station's own numbers. And the beach cameras are right there."},
+ {"id": "08-tv",       "text": "On Apple TV, the same conditions picture fills the big screen: the wind map, the cameras, and the spots you have starred."},
+ {"id": "09-tools",    "text": "Tools share a pin, plan a downwind shuttle, and run a race countdown you can sync to the committee boat's gun."},
+ {"id": "10-data",     "text": "Your data stays yours. Import GPX, TCX, FIT and CSV. Export everything, in a documented format. Nothing leaves your phone unless you send it. And the whole app is open source."},
+ {"id": "11-outro",    "text": "openWater. Free on the App Store, at openwaterapp dot com."}
+]

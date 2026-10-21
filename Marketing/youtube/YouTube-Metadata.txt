@@ -1,0 +1,66 @@
+openWater — YouTube explainer, upload metadata
+==============================================
+
+Title (100 max)
+    openWater: a free, open-source session tracker for wingfoil, windsurf, kite, SUP and sailing
+
+Description
+    openWater records your session on iPhone or Apple Watch, draws what actually
+    happened on the map, and measures every speed category riders compare — 2 s,
+    10 s, 500 m, the nautical mile, Alpha 500 — plus foiling, gybes, upwind angles,
+    glides and jumps. Spots is a guide to 1000+ launches with live wind on every pin,
+    a wind-wash forecast you can turn three days ahead, tides, currents, swell,
+    radar and beach cameras. The same picture fills the big screen on Apple TV.
+
+    No account. No subscription. Nothing leaves your phone unless you send it.
+    Open source.
+
+    App Store: https://apps.apple.com/app/openwater
+    Website:   https://openwaterapp.com
+    Spot guide: https://openwaterapp.com/spots
+
+    Chapters
+    0:00 openWater
+    0:20 Record on your phone or your wrist
+    0:36 Every session in one list
+    0:43 The map draws what happened
+    0:54 Runs, one lane per pass
+    1:03 Replay
+    1:09 Analysis and personal bests
+    1:33 Spots, forecast, tides, radar and cameras
+    1:50 Apple TV
+    1:58 Tools
+    2:06 Your data stays yours
+    2:20 Free on the App Store
+
+Tags
+    wingfoil, wing foiling, windsurfing, kitesurfing, downwind SUP, parawing,
+    GPS speed, speedsurfing, foil tracker, sailing app, Apple Watch, Apple TV,
+    wind forecast, surf forecast, open source
+
+Notes
+    The narration is Gemini 2.5 Flash TTS (voice "Charon") via Vertex AI, made by
+    voice/gemini_tts.py from voice/narration.json; the brisk read is the one in the
+    cut (voice/gemini_slow/ keeps the slower take). Re-run resolve/assemble.py after
+    replacing any wav. Resolve 21's AI Speech Generator package was not installed on
+    this Mac; the ElevenLabs account was out of free-tier characters until 29 Oct.
+
+
+--------------------------------------------------------------------------
+SHORT (out/openWater-short.mp4, 1080x1920, 31 s)
+--------------------------------------------------------------------------
+
+Title (100 max)
+    Your whole session, every run, every speed. openWater is free. #wingfoil #windsurf #shorts
+
+Description
+    GPS session tracker for wingfoil, windsurf, kite, SUP and sailing. Runs, replay,
+    every speed category, 1000+ spots with live wind, Apple Watch and Apple TV.
+    No account, no subscription, open source. https://openwaterapp.com
+
+Notes
+    Made from the same captures: short/build_shots.sh composites the vertical shots,
+    short/make_assets.py draws the captions and cards, short/make_beat.py is the
+    royalty-free beat, voice/n-s*.wav is Gemini TTS (voice "Puck", no style prefix:
+    with one, the model read the instruction aloud on short lines). Assembled in the
+    Resolve timeline "Short" inside the "openWater explainer" project.

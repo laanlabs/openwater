@@ -1,0 +1,8 @@
+# Generated video pipeline outputs (large); the scripts, art and captions stay tracked.
+*.mov
+*.mp4
+*.wav
+*.aiff
+capture/
+blender/renders/
+out/

@@ -182,6 +182,12 @@ struct SettingsView: View {
                     Link(destination: URL(string: "https://github.com/laanlabs/openwater")!) {
                         Label("Source on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
+                    Link(destination: URL(string: "https://www.instagram.com/openwater.sessions/")!) {
+                        Label("Instagram", systemImage: "camera")
+                    }
+                    Link(destination: URL(string: "https://www.youtube.com/channel/UCKbFBOHZoDn0ZgdqODeYojA")!) {
+                        Label("YouTube", systemImage: "play.rectangle")
+                    }
                 } header: {
                     Text("About")
                 } footer: {

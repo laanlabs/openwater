@@ -1,0 +1,20 @@
+[
+  ["still", "w1", "fl-all.jpg", 0.9, "openwaterapp.com/spots/cams"],
+  ["still", "w2", "fl-south.jpg", 0.7, "openwaterapp.com/spots/cams"],
+  ["still", "w3", "fl-zoom.jpg", 1.4, "Cams in South Florida"],
+  ["still", "w4", "fl-popup.jpg", 1.6, "Pick a pin"],
+  ["still", "w5", "fl-playing.jpg", 2.4, "It plays right there"],
+  ["phone", "map", "cfr/Downwind.mp4", 10.0, 1.8, "Map"],
+  ["phone", "runs", "cfr/Downwind.mp4", 25.4, 2.0, "Runs, one lane per pass"],
+  ["phone", "dw", "cfr/Downwind.mp4", 44.5, 2.0, "Downwind runs"],
+  ["phone", "upwind", "cfr/Upwind.mp4", 27.0, 4.0, "Upwind VMG and angles"],
+  ["phone", "polar", "cfr/Upwind.mp4", 41.0, 3.5, "Polar"],
+  ["phone", "vmg", "cfr/Upwind.mp4", 51.0, 2.5, "Speed and VMG"],
+  ["phone", "sup1", "cfr/Surf.mp4", 23.2, 3.0, "SUP foil surf: 2 rides, 4 waves"],
+  ["phone", "sup2", "cfr/Surf.mp4", 37.0, 3.0, "SUP foil surf: wave rides"],
+  ["phone", "wing1", "cfr/WingSurf.mp4", 14.0, 2.2, "Wing surf, Montauk"],
+  ["phone", "wing2", "cfr/WingSurf.mp4", 43.5, 4.0, "Wing surf: 86 waves, 67 rides"],
+  ["phone", "wash", "cfr/Wash.mp4", 24.0, 2.2, "Spots: live wind, wind wash"],
+  ["phone", "cams", "cfr/CamsList.mp4", 32.2, 2.4, "Cams, nearest first"],
+  ["card", "end", [["openWater", 110], ["free · open source · no account", 52], ["openwaterapp.com", 52]], 2.4]
+]

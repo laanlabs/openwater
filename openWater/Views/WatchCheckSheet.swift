@@ -48,7 +48,7 @@ struct WatchCheckSheet: View {
     private var needsRoom: Bool {
         switch state {
         case .notInstalled: true
-        case .connected: sync.heartRate?.hasSteps == true
+        case .connected: sync.heartRate?.hasSteps == true || sync.motion == .off
         default: false
         }
     }
@@ -98,6 +98,8 @@ struct WatchCheckSheet: View {
                         sessionsRow
                         Divider()
                         heartRateRow
+                        Divider()
+                        motionRow
                     }
 
                     if let error = sync.lastError {
@@ -370,6 +372,56 @@ struct WatchCheckSheet: View {
         }
     }
 
+    // MARK: - Motion & Fitness
+
+    private var isCheckingMotion: Bool { sync.isCheckingMotion || isDwelling }
+
+    /// The altimeter, which is what measures a jump.
+    ///
+    /// Next to heart rate because it fails the same way — a switch refused
+    /// once, on the watch, and never asked about again — and costs more: a
+    /// session with no heartbeat still has its jumps, and one with no
+    /// altimeter on choppy water has none.
+    private var motionRow: some View {
+        CheckRow(title: "Jump height",
+                 isBusy: isCheckingMotion,
+                 symbol: motionSymbol,
+                 tint: motionTint) {
+            Text(motionLine)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !isCheckingMotion, sync.motion == .off {
+                MotionFitnessSteps()
+            }
+        }
+    }
+
+    private var motionLine: String {
+        if isCheckingMotion { return "Asking the watch whether it can read its altimeter…" }
+        guard let state = sync.motion else { return sync.motionMessage ?? "Not checked." }
+        return state.headline
+    }
+
+    private var motionSymbol: String {
+        switch sync.motion {
+        case .on: "checkmark.circle.fill"
+        case .off, .notAsked: "exclamationmark.circle.fill"
+        case .unavailable, .unknown: "minus.circle"
+        case nil: "figure.surfing"
+        }
+    }
+
+    private var motionTint: Color {
+        switch sync.motion {
+        case .on: .green
+        case .off: .orange
+        case .notAsked: .blue
+        case .unavailable, .unknown, nil: .secondary
+        }
+    }
+
     // MARK: - Running them
 
     /// Ask both questions at once, and keep the answer on screen long enough
@@ -387,6 +439,7 @@ struct WatchCheckSheet: View {
         isDwelling = true
         sync.requestSync()
         sync.checkHeartRate()
+        sync.checkMotion()
         try? await Task.sleep(for: Self.dwell)
         isDwelling = false
     }
@@ -461,6 +514,32 @@ struct WatchStep: View {
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Where the Motion & Fitness switch is.
+///
+/// The iPhone first, because a watch app follows the phone's privacy
+/// switches — and Fitness Tracking, the master switch at the top of that
+/// pane, turns the altimeter off for every app at once, which is the one a
+/// rider is least likely to know they flipped. The watch's own pane last,
+/// for the case where it keeps its own.
+struct MotionFitnessSteps: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            WatchStep(1, "On this iPhone, open **Settings** ▸ **Privacy & Security** ▸ **Motion & Fitness**")
+            WatchStep(2, "Turn on **Fitness Tracking** at the top")
+            WatchStep(3, "Turn on **openWater** in the list below it")
+            WatchStep(4, "Still off? On the watch: **Settings** ▸ **Privacy & Security** ▸ **Motion & Fitness** ▸ **openWater**")
+
+            Text("It applies to the next session. Sessions already recorded keep the jumps GPS could find.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

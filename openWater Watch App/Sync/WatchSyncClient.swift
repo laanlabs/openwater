@@ -1,3 +1,4 @@
+import CoreMotion
 import Foundation
 import HealthKit
 import OpenWaterCore
@@ -257,6 +258,14 @@ extension WatchSyncClient: WCSessionDelegate {
                     "canRead": probe.canRead,
                 ])
             }
+        case "motion":
+            // The altimeter's permission, which is this watch's to report:
+            // Motion & Fitness is per device, and the one that matters is
+            // the one on the wrist.
+            replyHandler([
+                "available": CMAltimeter.isRelativeAltitudeAvailable(),
+                "motion": Self.motionStatus,
+            ])
         default:
             replyHandler([:])
         }
@@ -279,6 +288,19 @@ extension WatchSyncClient: WCSessionDelegate {
             if let waterLocked, let waterLockedChangedAt {
                 self.onStartWaterLocked?(waterLocked, waterLockedChangedAt)
             }
+        }
+    }
+}
+
+extension WatchSyncClient {
+    /// `CMAltimeter.authorizationStatus()` as a word the phone can switch on.
+    nonisolated static var motionStatus: String {
+        switch CMAltimeter.authorizationStatus() {
+        case .authorized: "authorized"
+        case .denied: "denied"
+        case .restricted: "restricted"
+        case .notDetermined: "notDetermined"
+        @unknown default: "unknown"
         }
     }
 }

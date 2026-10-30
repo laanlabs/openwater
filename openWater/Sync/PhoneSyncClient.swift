@@ -87,6 +87,11 @@ final class PhoneSyncClient: NSObject {
     private(set) var isTakingReading = false
     private(set) var liveHeartRate: LiveHeartRate?
 
+    /// The altimeter check's own state — see `checkMotion`.
+    private(set) var isCheckingMotion = false
+    private(set) var motion: MotionState?
+    var motionMessage: String?
+
     func requestSync() {
         guard let session, session.activationState == .activated else {
             lastSyncMessage = "The watch is not connected."
@@ -453,5 +458,108 @@ extension PhoneSyncClient: WCSessionDelegate {
         Task { @MainActor in
             replyHandler(["bests": self.library.recordsForWatch()])
         }
+    }
+}
+
+// MARK: - Motion & Fitness
+
+extension PhoneSyncClient {
+
+    /// Ask the watch whether it may read its altimeter.
+    ///
+    /// The one permission whose loss looks like a bug rather than a refusal.
+    /// The accelerometer needs nothing, so a session with Motion & Fitness
+    /// off still arrives full of motion data — and with no jumps, because the
+    /// altimeter is what measures them. Measured on a wingfoil session in
+    /// two-to-three-foot chop whose rider jumped about ten times on video:
+    /// the permission was off, the receiver's height was too noisy to be
+    /// read, and the session said "no jumps recorded". Only the watch can
+    /// answer, because the permission that matters is the watch's.
+    func checkMotion() {
+        guard let session, session.activationState == .activated else {
+            motionMessage = "The watch is not connected."
+            return
+        }
+        guard session.isPaired, session.isWatchAppInstalled else {
+            motionMessage = "openWater is not on your watch yet."
+            return
+        }
+        guard session.isReachable else {
+            motionMessage = "Your watch is out of range. Open openWater on it while it is near your phone."
+            return
+        }
+
+        isCheckingMotion = true
+        motionMessage = nil
+        motion = nil
+        session.sendMessage(["request": "motion"]) { [weak self] reply in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isCheckingMotion = false
+                let state = Self.motionState(from: reply)
+                self.motion = state
+                self.motionMessage = state.message
+            }
+        } errorHandler: { [weak self] error in
+            Task { @MainActor in
+                self?.isCheckingMotion = false
+                self?.motion = nil
+                self?.motionMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// What the watch said about its altimeter.
+    ///
+    /// A watch built before this question existed answers every unknown
+    /// request with an empty dictionary, and that must not read as "off" —
+    /// it would send a rider whose altimeter works hunting for a switch.
+    static func motionState(from reply: [String: Any]) -> MotionState {
+        guard let status = reply["motion"] as? String else { return .unknown }
+        guard reply["available"] as? Bool != false else { return .unavailable }
+        switch status {
+        case "authorized": return .on
+        case "denied", "restricted": return .off
+        case "notDetermined": return .notAsked
+        default: return .unknown
+        }
+    }
+
+    enum MotionState: Equatable, Sendable {
+        /// No barometer on this watch.
+        case unavailable
+        /// The watch app is too old to answer.
+        case unknown
+        /// Never prompted. The watch asks at launch, so opening the app
+        /// on the watch is the whole fix.
+        case notAsked
+        case on
+        /// Refused. The only case with steps.
+        case off
+
+        var message: String {
+            switch self {
+            case .unavailable:
+                "This watch has no altimeter, so jump height comes from GPS."
+            case .unknown:
+                "Your watch is running an older openWater that cannot answer this. Update it from the App Store on the watch."
+            case .notAsked:
+                "openWater has not asked for Motion & Fitness yet. Open openWater on your watch and tap Allow when it asks."
+            case .on:
+                "Motion & Fitness is on — the altimeter can measure your jumps."
+            case .off:
+                "Motion & Fitness is off, so the altimeter cannot be read. Jumps on choppy water will not be found, and heights on flat water come from GPS. On this iPhone: Settings ▸ Privacy & Security ▸ Motion & Fitness — turn on Fitness Tracking and openWater."
+            }
+        }
+
+        /// The finding alone, for a screen that draws the steps beneath it.
+        var headline: String {
+            switch self {
+            case .off: "Motion & Fitness is off. Without the altimeter, jumps on choppy water are not found at all."
+            default: message
+            }
+        }
+
+        var isGood: Bool { self == .on }
     }
 }

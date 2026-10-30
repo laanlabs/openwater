@@ -99,10 +99,43 @@ struct PermissionsView: View {
             }
 
             Section {
-                Label("Motion sensors need no permission", systemImage: "figure.wave")
-                    .foregroundStyle(.secondary)
+                Button {
+                    sync.checkMotion()
+                } label: {
+                    HStack(spacing: 10) {
+                        icon("figure.surfing", tone: motionTone)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Motion & Fitness on the watch")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(sync.isCheckingMotion ? "Asking the watch…" : "Tap to check")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if sync.isCheckingMotion { ProgressView() }
+                    }
+                }
+                .disabled(sync.isCheckingMotion)
+
+                if let state = sync.motion {
+                    Text(state.headline)
+                        .font(.body)
+                        .foregroundStyle(state.isGood ? AnyShapeStyle(.primary)
+                                                      : AnyShapeStyle(Color.orange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if state == .off { MotionFitnessSteps() }
+                } else if let message = sync.motionMessage {
+                    Text(message)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } footer: {
-                Text("Jumps, pumps and time on foil are read from the accelerometer on whichever device is recording. Neither iPhone nor Apple Watch asks for that, so there is nothing here to switch on — and nothing you can have turned off by accident.")
+                // This section used to say motion needed no permission. True
+                // of the accelerometer, false of the altimeter — and the
+                // altimeter is what measures a jump.
+                Text("Pumps and time on foil come from the accelerometer, which needs no permission. Jump height comes from the watch's altimeter, which needs Motion & Fitness — without it, jumps on choppy water are not found at all.")
                     .font(.subheadline)
             }
         }
@@ -147,6 +180,11 @@ struct PermissionsView: View {
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var motionTone: Tone {
+        guard let state = sync.motion else { return .unknown }
+        return state.isGood ? .good : .bad
     }
 
     private var heartTone: Tone {

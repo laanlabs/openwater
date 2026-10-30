@@ -171,7 +171,37 @@ struct WatchStatusView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // The check above asks Health for a permission. This one asks
+                // The altimeter's permission. Off, it costs every jump on
+                // choppy water — see `PhoneSyncClient.checkMotion`.
+                Button {
+                    sync.checkMotion()
+                } label: {
+                    HStack(spacing: 6) {
+                        if sync.isCheckingMotion {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "figure.surfing")
+                        }
+                        Text(sync.isCheckingMotion ? "Asking the watch…" : "Check jump height (Motion & Fitness)")
+                    }
+                    .font(.subheadline)
+                }
+                .disabled(sync.isCheckingMotion)
+
+                if let state = sync.motion, !sync.isCheckingMotion {
+                    Text(state.headline)
+                        .font(.caption)
+                        .foregroundStyle(state.isGood ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if state == .off { MotionFitnessSteps() }
+                } else if let message = sync.motionMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // The heart-rate check asks Health for a permission. This one asks
                 // the watch to collect a beat, which is the only proof that a
                 // session will carry one.
                 Button {

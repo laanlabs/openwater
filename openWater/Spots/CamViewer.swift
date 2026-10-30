@@ -62,6 +62,9 @@ struct CamViewerSheet: View {
                         .toolbar {
                             if let here {
                                 ToolbarItem(placement: .topBarTrailing) {
+                                    CamFavoriteButton(cam: here)
+                                }
+                                ToolbarItem(placement: .topBarTrailing) {
                                     CamCompassButton(origin: here) { stepped = $0 }
                                 }
                             }
@@ -83,6 +86,26 @@ struct CamViewerSheet: View {
         } else {
             CamResolver(name: name, url: url, here: here) { stepped = $0 }
         }
+    }
+}
+
+// MARK: - Saving one
+
+/// The star in the player's bar: save the camera on screen — including one
+/// the compass stepped to — to the favorites.
+struct CamFavoriteButton: View {
+    let cam: SpotGuideStore.GuideResource
+    @Environment(SpotGuideStore.self) private var guide
+
+    var body: some View {
+        let saved = guide.isFavoriteCam(cam)
+        Button {
+            guide.toggleFavoriteCam(cam)
+        } label: {
+            Image(systemName: saved ? "star.fill" : "star")
+                .foregroundStyle(saved ? AnyShapeStyle(.yellow) : AnyShapeStyle(.white))
+        }
+        .accessibilityLabel(saved ? "Remove from favorites" : "Add to favorites")
     }
 }
 
@@ -415,6 +438,9 @@ private struct CamStreamPlayer: View {
                     .toolbarColorScheme(.dark, for: .navigationBar)
                     .toolbar {
                         if let here {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                CamFavoriteButton(cam: here)
+                            }
                             ToolbarItem(placement: .topBarTrailing) {
                                 CamCompassButton(origin: here, onPick: onStep)
                             }

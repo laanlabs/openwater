@@ -2283,14 +2283,14 @@ struct SpotsTabView: View {
     @ViewBuilder
     private var favoritesList: some View {
         let favorites = guide.favorites
-        if favorites.isEmpty && guide.privateSpots.isEmpty {
+        if favorites.isEmpty && guide.privateSpots.isEmpty && guide.favoriteCams.isEmpty {
             VStack(spacing: 6) {
                 Image(systemName: "star")
                     .font(.title2)
                     .foregroundStyle(.secondary)
                 Text("No favorites yet")
                     .font(.subheadline.weight(.medium))
-                Text("Star a spot and it lives here with live wind, so \"is it on?\" is one glance. Private spots you save from the map land here too.")
+                Text("Star a spot and it lives here with live wind, so \"is it on?\" is one glance. Private spots you save from the map, and cams you star, land here too.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -2394,6 +2394,38 @@ struct SpotsTabView: View {
                         } label: {
                             Label("Remove", systemImage: "trash")
                         }
+                    }
+                }
+                Divider().padding(.leading, 54)
+            }
+            favoriteCamsSection
+        }
+    }
+
+    /// Starred cams, under the spots: a camera is something to watch rather
+    /// than a place to fly the map to, so a tap plays it, wherever it is.
+    @ViewBuilder
+    private var favoriteCamsSection: some View {
+        let cams = guide.measuredFavoriteCams(from: recorder.location.lastCoordinate)
+        if !cams.isEmpty {
+            Text("CAMS")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 4)
+            ForEach(cams, id: \.favoriteKey) { cam in
+                Button { watchingCam = cam } label: {
+                    SavedLineRow(icon: "video.fill", name: cam.displayName,
+                                 detail: cam.regionName)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        guide.removeFavoriteCam(key: cam.favoriteKey)
+                    } label: {
+                        Label("Remove from favorites", systemImage: "star.slash")
                     }
                 }
                 Divider().padding(.leading, 54)
@@ -3099,6 +3131,7 @@ struct FavoritesEditor: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
                 ForEach(guide.favoriteItems(routes: routeStore.routes)) { item in
                     editorRow(for: item)
                 }
@@ -3114,6 +3147,28 @@ struct FavoritesEditor: View {
                         case .spot(let spot): guide.removeFavorite(spot.spotId)
                         case .route(let route): routeStore.remove(route.id)
                         case .privateSpot(let spot): guide.removePrivateSpot(spot.id)
+                        }
+                    }
+                }
+                }
+                if !guide.favoriteCams.isEmpty {
+                    Section("Cams") {
+                        ForEach(guide.favoriteCams, id: \.favoriteKey) { cam in
+                            Label {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(cam.displayName).lineLimit(1)
+                                    if let region = cam.regionName {
+                                        Text(region).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            } icon: {
+                                Image(systemName: "video.fill").foregroundStyle(.tint)
+                            }
+                        }
+                        .onMove { guide.moveFavoriteCams(fromOffsets: $0, toOffset: $1) }
+                        .onDelete { offsets in
+                            let keys = offsets.compactMap { guide.favoriteCams[safe: $0]?.favoriteKey }
+                            keys.forEach { guide.removeFavoriteCam(key: $0) }
                         }
                     }
                 }
@@ -3356,10 +3411,12 @@ struct SpotSearchOverlay: View {
     private var cameraMatches: [SpotGuideStore.GuideResource] {
         let needle = query.lowercased()
         guard needle.count >= 2 else { return [] }
+        // A region name matches too: "long island" lists Long Island's cams.
         return resources.filter {
             $0.kind == .camera &&
             ($0.displayName.lowercased().contains(needle) ||
-             $0.name.lowercased().contains(needle))
+             $0.name.lowercased().contains(needle) ||
+             ($0.regionName?.lowercased().contains(needle) ?? false))
         }
     }
 
@@ -3380,7 +3437,7 @@ struct SpotSearchOverlay: View {
         }
         if !cameraMatches.isEmpty {
             section("Cameras") {
-                ForEach(cameraMatches.prefix(8)) { camRow($0) }
+                ForEach(cameraMatches.prefix(12)) { camRow($0) }
             }
         }
         if !placeSearch.completions.isEmpty {
@@ -3461,10 +3518,14 @@ struct SpotSearchOverlay: View {
                     Text(cam.displayName)
                         .font(.body.weight(.semibold)).foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text("\(Format.distance(cam.metres, unit: settings.units.distance)) away\(cam.providerLabel.isEmpty ? "" : " · \(cam.providerLabel)")")
+                    Text("\(Format.distance(cam.metres, unit: settings.units.distance)) away\(cam.regionName.map { " · \($0)" } ?? "")\(cam.providerLabel.isEmpty ? "" : " · \(cam.providerLabel)")")
                         .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                if guide.isFavoriteCam(cam) {
+                    Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
+                }
                 Image(systemName: "play.rectangle").font(.subheadline).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 16).padding(.vertical, 8)

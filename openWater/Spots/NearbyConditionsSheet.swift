@@ -1427,11 +1427,72 @@ struct NearbyConditionsSheet: View {
 
     @ViewBuilder
     private var camsTab: some View {
-        section("CAMS IN THE GUIDE", trailing: {
+        // The rider's own cams first, wherever they are — the radius is a
+        // question about this spot, and a favorite is not.
+        let favorites = guide.measuredFavoriteCams(from: coordinate)
+        if !favorites.isEmpty {
+            section("YOUR CAMS") {
+                card {
+                    ForEach(Array(favorites.enumerated()), id: \.element.favoriteKey) { index, cam in
+                        resourceRow(cam, showsRegion: true)
+                        if index < favorites.count - 1 { Divider().padding(.leading, 14) }
+                    }
+                }
+            }
+        }
+        let cams = within(resources.filter { $0.kind == .camera })
+        let groups = Self.byRegion(cams)
+        section(groups.count == 1 && groups[0].name != nil
+                ? "CAMS IN THE GUIDE · \(groups[0].name!.uppercased())" : "CAMS IN THE GUIDE",
+                trailing: {
             mapLink("Cams", places: camPlaces, search: searchCams)
         }) {
-            list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
+            if cams.isEmpty || groups.count == 1 {
+                list(of: .camera, empty: "No webcams this close in the guide. Widen the search to look further.")
+            } else {
+                // More than one stretch of coast inside the radius: a block
+                // each — Long Island, then New York City — in order of the
+                // nearest camera in each, nearest first inside.
+                ForEach(groups, id: \.key) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(group.name ?? "Elsewhere")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 4)
+                        card {
+                            ForEach(Array(group.cams.enumerated()), id: \.element.id) { index, item in
+                                resourceRow(item)
+                                if index < group.cams.count - 1 { Divider().padding(.leading, 14) }
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    private struct CamGroup {
+        let key: String
+        let name: String?
+        var cams: [SpotGuideStore.GuideResource]
+    }
+
+    /// Nearest-first cams, split by region in order of first appearance —
+    /// which, since the list is already nearest first, is the order of each
+    /// region's nearest camera.
+    private static func byRegion(_ cams: [SpotGuideStore.GuideResource]) -> [CamGroup] {
+        var groups: [CamGroup] = []
+        for cam in cams {
+            let name = cam.regionName
+            let key = name ?? ""
+            if let index = groups.firstIndex(where: { $0.key == key }) {
+                groups[index].cams.append(cam)
+            } else {
+                groups.append(CamGroup(key: key, name: name, cams: [cam]))
+            }
+        }
+        return groups
     }
 
     @ViewBuilder
@@ -1450,7 +1511,48 @@ struct NearbyConditionsSheet: View {
         }
     }
 
-    private func resourceRow(_ resource: SpotGuideStore.GuideResource) -> some View {
+    private func resourceRow(_ resource: SpotGuideStore.GuideResource,
+                             showsRegion: Bool = false) -> some View {
+        HStack(spacing: 0) {
+            resourceButton(resource, showsRegion: showsRegion)
+            if resource.kind == .camera {
+                favoriteButton(resource)
+            }
+        }
+        .contextMenu {
+            if resource.kind == .camera {
+                let saved = guide.isFavoriteCam(resource)
+                Button {
+                    guide.toggleFavoriteCam(resource)
+                } label: {
+                    Label(saved ? "Remove from favorites" : "Add to favorites",
+                          systemImage: saved ? "star.slash" : "star")
+                }
+            }
+        }
+    }
+
+    /// The star beside a cam row — its own target, not part of the row's,
+    /// so saving a camera never also opens it.
+    private func favoriteButton(_ cam: SpotGuideStore.GuideResource) -> some View {
+        let saved = guide.isFavoriteCam(cam)
+        return Button {
+            guide.toggleFavoriteCam(cam)
+        } label: {
+            Image(systemName: saved ? "star.fill" : "star")
+                .font(.subheadline)
+                .foregroundStyle(saved ? AnyShapeStyle(.yellow) : AnyShapeStyle(.tertiary))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(saved ? "Remove \(cam.displayName) from favorites"
+                                  : "Add \(cam.displayName) to favorites")
+        .padding(.trailing, 2)
+    }
+
+    private func resourceButton(_ resource: SpotGuideStore.GuideResource,
+                                showsRegion: Bool) -> some View {
         Button {
             // Cams stay in the app — YouTube embeds play right here, and
             // everything else gets the in-app browser. The rest of the
@@ -1477,7 +1579,9 @@ struct NearbyConditionsSheet: View {
                         // Which way, not only how far. Eleven map links from
                         // one provider all carry the same name; the bank of
                         // the river they point at is what separates them.
-                        Text("\(bearingAndDistance(resource)) · \(resource.providerLabel)")
+                        Text(showsRegion && resource.regionName != nil
+                             ? "\(bearingAndDistance(resource)) · \(resource.regionName!)"
+                             : "\(bearingAndDistance(resource)) · \(resource.providerLabel)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

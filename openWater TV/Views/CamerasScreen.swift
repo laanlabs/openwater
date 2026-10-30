@@ -75,7 +75,7 @@ struct CamerasScreen: View {
             Group {
                 if isSearching || (guide.spots.isEmpty && guide.isLoading) {
                     ProgressView()
-                } else if cams.isEmpty {
+                } else if cams.isEmpty && guide.favoriteCams.isEmpty {
                     // Only a *named* place goes into the sentence. The generic
                     // name a bare fix carries would turn "none near \(place)"
                     // into "none near Nearby".
@@ -160,16 +160,73 @@ struct CamerasScreen: View {
     }
 
     private var grid: some View {
-        ScrollView {
+        let favorites = guide.measuredFavoriteCams(from: location.here)
+        let groups = Self.byRegion(cams)
+        return ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                mapButton
-                LazyVGrid(columns: columns, spacing: 40) {
-                    ForEach(cams) { CamCard(cam: $0) }
+                if !cams.isEmpty { mapButton }
+                // The rider's own cams first, wherever they are: the Montauk
+                // cam is worth a look from a sofa in the city, and the area
+                // search would never have brought it back.
+                if !favorites.isEmpty {
+                    sectionTitle("Your cams", count: favorites.count)
+                    LazyVGrid(columns: columns, spacing: 40) {
+                        ForEach(favorites, id: \.favoriteKey) { CamCard(cam: $0) }
+                    }
+                }
+                // Then the area's cams, a block per stretch of coast — Long
+                // Island, New York City — in order of each one's nearest
+                // camera. One region needs no heading unless favorites
+                // above it have one.
+                ForEach(groups, id: \.key) { group in
+                    if groups.count > 1 || !favorites.isEmpty {
+                        sectionTitle(group.name ?? "Nearby", count: group.cams.count)
+                    }
+                    LazyVGrid(columns: columns, spacing: 40) {
+                        ForEach(group.cams) { CamCard(cam: $0) }
+                    }
                 }
             }
             .padding(.horizontal, 80)
             .padding(.vertical, 40)
         }
+    }
+
+    private func sectionTitle(_ title: String, count: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(title)
+                .font(.system(size: 38, weight: .bold))
+                .foregroundStyle(.white)
+            Text("\(count)")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 12)
+    }
+
+    private struct CamGroup {
+        let key: String
+        let name: String?
+        var cams: [SpotGuideStore.GuideResource]
+        var nearest: Double
+    }
+
+    /// The list split by region, each keeping the list's own order
+    /// (playable first, then distance), and the regions ordered by their
+    /// nearest camera.
+    private static func byRegion(_ cams: [SpotGuideStore.GuideResource]) -> [CamGroup] {
+        var groups: [CamGroup] = []
+        for cam in cams {
+            let name = cam.regionName
+            let key = name ?? ""
+            if let index = groups.firstIndex(where: { $0.key == key }) {
+                groups[index].cams.append(cam)
+                groups[index].nearest = min(groups[index].nearest, cam.metres)
+            } else {
+                groups.append(CamGroup(key: key, name: name, cams: [cam], nearest: cam.metres))
+            }
+        }
+        return groups.sorted { $0.nearest < $1.nearest }
     }
 
     /// The way to the map, said in words.
@@ -207,6 +264,7 @@ struct CamerasScreen: View {
 struct CamCard: View {
 
     @Environment(TVUnits.self) private var units
+    @Environment(SpotGuideStore.self) private var guide
 
     let cam: SpotGuideStore.GuideResource
 
@@ -369,17 +427,39 @@ struct CamCard: View {
             }
             .buttonStyle(.card)
             .focused($isCardFocused)
+            // Press and hold — the remote's only second gesture on a card —
+            // saves the camera, or takes it back off the list.
+            .contextMenu {
+                let saved = guide.isFavoriteCam(cam)
+                Button {
+                    guide.toggleFavoriteCam(cam)
+                } label: {
+                    Label(saved ? "Remove from Your Cams" : "Add to Your Cams",
+                          systemImage: saved ? "star.slash" : "star")
+                }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(cam.displayName)
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    if guide.isFavoriteCam(cam) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.yellow)
+                    }
+                    Text(cam.displayName)
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
                 HStack(spacing: 10) {
                     badge
-                    Text(Format.distance(cam.metres, unit: units.preferences.distance))
+                    // A saved cam measured from nowhere has no distance worth
+                    // printing; where it is says more.
+                    Text([cam.metres > 0 ? Format.distance(cam.metres, unit: units.preferences.distance) : nil,
+                          cam.regionName].compactMap { $0 }.joined(separator: " · "))
                         .font(.system(size: 19))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             .frame(width: 420, alignment: .leading)

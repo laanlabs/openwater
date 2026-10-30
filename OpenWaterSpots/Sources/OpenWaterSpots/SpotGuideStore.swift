@@ -190,6 +190,7 @@ public final class SpotGuideStore {
     public private(set) var privateSpots: [PrivateSpot] = []
 
     private static let favoritesKey = "spotGuide.favorites"
+    private static let favoriteCamsKey = "spotGuide.favoriteCams"
     private static let favoritesOrderKey = "spotGuide.favoritesOrder"
     private static let privateSpotsKey = "spotGuide.privateSpots"
     private static let cacheTTL: TimeInterval = 24 * 3600
@@ -217,6 +218,84 @@ public final class SpotGuideStore {
         if let data = UserDefaults.standard.data(forKey: Self.privateSpotsKey),
            let saved = try? JSONDecoder().decode([PrivateSpot].self, from: data) {
             privateSpots = saved
+        }
+        if let data = UserDefaults.standard.data(forKey: Self.favoriteCamsKey),
+           let saved = try? JSONDecoder().decode([StoredResource].self, from: data) {
+            favoriteCams = saved.compactMap(\.resource)
+        }
+    }
+
+    // MARK: Favorite cams
+
+    /// Cameras the rider starred, in the order they were starred.
+    ///
+    /// Kept as whole rows rather than ids. A favorite is most useful exactly
+    /// when it is *not* near where the app is looking — the Montauk cam
+    /// checked from a desk in the city — and the cameras are only ever
+    /// fetched by country around a point, so an id alone could not be drawn
+    /// until somebody happened to look that way. Each row is refreshed
+    /// whenever a fetch brings the same camera back, so a repaired stream
+    /// link reaches the favorite too.
+    public private(set) var favoriteCams: [GuideResource] = []
+
+    public func isFavoriteCam(_ cam: GuideResource) -> Bool {
+        favoriteCams.contains { $0.favoriteKey == cam.favoriteKey }
+    }
+
+    public func toggleFavoriteCam(_ cam: GuideResource) {
+        if let index = favoriteCams.firstIndex(where: { $0.favoriteKey == cam.favoriteKey }) {
+            favoriteCams.remove(at: index)
+        } else {
+            var saved = cam
+            saved.metres = 0
+            saved.bearing = 0
+            favoriteCams.append(saved)
+        }
+        saveFavoriteCams()
+    }
+
+    public func removeFavoriteCam(key: String) {
+        favoriteCams.removeAll { $0.favoriteKey == key }
+        saveFavoriteCams()
+    }
+
+    public func moveFavoriteCams(fromOffsets: IndexSet, toOffset: Int) {
+        favoriteCams.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        saveFavoriteCams()
+    }
+
+    /// The favorites with distance and bearing from a point, in the rider's
+    /// own order — a list of favorites is not a nearest-first list.
+    public func measuredFavoriteCams(from origin: Geo.Coordinate?) -> [GuideResource] {
+        guard let origin else { return favoriteCams }
+        return favoriteCams.map { cam in
+            var measured = cam
+            measured.metres = Geo.distance(origin, cam.coordinate)
+            measured.bearing = Geo.bearing(from: origin, to: cam.coordinate)
+            return measured
+        }
+    }
+
+    /// Fresh rows replace the saved copies of the same cameras.
+    func refreshFavoriteCams(with fresh: [GuideResource]) {
+        guard !favoriteCams.isEmpty else { return }
+        let byKey = Dictionary(fresh.filter { $0.kind == .camera }.map { ($0.favoriteKey, $0) }) { first, _ in first }
+        var changed = false
+        for index in favoriteCams.indices {
+            guard var update = byKey[favoriteCams[index].favoriteKey] else { continue }
+            update.metres = 0
+            update.bearing = 0
+            if update != favoriteCams[index] {
+                favoriteCams[index] = update
+                changed = true
+            }
+        }
+        if changed { saveFavoriteCams() }
+    }
+
+    private func saveFavoriteCams() {
+        if let data = try? JSONEncoder().encode(favoriteCams.map(StoredResource.init)) {
+            UserDefaults.standard.set(data, forKey: Self.favoriteCamsKey)
         }
     }
 
@@ -720,6 +799,14 @@ public final class SpotGuideStore {
         /// they are read here rather than left in the document.
         public var streamUrl: URL?
         public var stillUrl: URL?
+        /// The registry document's id — what a favorite camera is saved
+        /// under, because a URL is the one thing the repair scripts change.
+        public var docId: String? = nil
+        /// Where the registry files it: `united-states--new-york`, and the
+        /// country. Together with the coordinate these pick the named
+        /// region — see `region`.
+        public var adminRegionId: String? = nil
+        public var countryId: String? = nil
         /// From the spot it was asked about — filled in per query, not stored,
         /// because the same regional cache serves every spot in the region.
         public var metres: Double = 0
@@ -732,6 +819,24 @@ public final class SpotGuideStore {
         public var bearing: Double = 0
 
         public var id: String { url.absoluteString + name }
+
+        /// What a favorite is keyed by: the document id, or the URL for a
+        /// row that came from somewhere without one.
+        public var favoriteKey: String { docId ?? url.absoluteString }
+
+        /// The named stretch of coast — Long Island, South Florida — when
+        /// one claims this row. See `CamRegions`.
+        public var region: CamRegion? {
+            CamRegions.region(latitude: coordinate.latitude, longitude: coordinate.longitude,
+                              adminRegionId: adminRegionId)
+        }
+
+        /// Where it is, as a rider would say it: the named region, else the
+        /// state, else the country.
+        public var regionName: String? {
+            region?.name ?? CamRegions.placeName(fromId: adminRegionId)
+                ?? CamRegions.placeName(fromId: countryId)
+        }
 
         public var providerLabel: String {
             provider ?? url.host?.replacingOccurrences(of: "www.", with: "") ?? ""
@@ -1027,6 +1132,7 @@ public final class SpotGuideStore {
         if let held = Self.storedResources(for: cacheKey),
            held.age < Self.resourceCacheTTL, !held.resources.isEmpty {
             nearbyCache[cacheKey] = held.resources
+            refreshFavoriteCams(with: held.resources)
             return held.resources
         }
 
@@ -1060,7 +1166,10 @@ public final class SpotGuideStore {
                             guestWindVisible: doc.fields["guestWindVisible"]?.booleanValue,
                             providerType: doc.fields["providerType"]?.stringValue,
                             streamUrl: Self.playableStream(in: doc.fields),
-                            stillUrl: Self.playableStill(in: doc.fields)
+                            stillUrl: Self.playableStill(in: doc.fields),
+                            docId: doc.id.isEmpty ? nil : doc.id,
+                            adminRegionId: doc.fields["adminRegionId"]?.stringValue,
+                            countryId: doc.fields["countryId"]?.stringValue
                         )
                     }
                 }
@@ -1081,6 +1190,7 @@ public final class SpotGuideStore {
         }
         Self.storeResources(found, for: cacheKey)
         nearbyCache[cacheKey] = found
+        refreshFavoriteCams(with: found)
         return found
     }
 
@@ -1143,6 +1253,45 @@ public final class SpotGuideStore {
         public var providerType: String?
         public var streamUrl: String?
         public var stillUrl: String?
+        public var docId: String?
+        public var adminRegionId: String?
+        public var countryId: String?
+
+        init(_ resource: GuideResource) {
+            kind = resource.kind.rawValue
+            name = resource.name
+            url = resource.url.absoluteString
+            provider = resource.provider
+            detail = resource.detail
+            latitude = resource.coordinate.latitude
+            longitude = resource.coordinate.longitude
+            accessTier = resource.accessTier
+            requiresSubscription = resource.requiresSubscription
+            guestWindVisible = resource.guestWindVisible
+            providerType = resource.providerType
+            streamUrl = resource.streamUrl?.absoluteString
+            stillUrl = resource.stillUrl?.absoluteString
+            docId = resource.docId
+            adminRegionId = resource.adminRegionId
+            countryId = resource.countryId
+        }
+
+        var resource: GuideResource? {
+            guard let kind = SpotLink.Kind(rawValue: kind),
+                  let url = URL(string: url) else { return nil }
+            return GuideResource(kind: kind, name: name, url: url,
+                                 provider: provider, detail: detail,
+                                 coordinate: Geo.Coordinate(latitude: latitude, longitude: longitude),
+                                 accessTier: accessTier,
+                                 requiresSubscription: requiresSubscription,
+                                 guestWindVisible: guestWindVisible,
+                                 providerType: providerType,
+                                 streamUrl: streamUrl.flatMap(URL.init(string:)),
+                                 stillUrl: stillUrl.flatMap(URL.init(string:)),
+                                 docId: docId,
+                                 adminRegionId: adminRegionId,
+                                 countryId: countryId)
+        }
     }
 
     private static func resourceCacheURL(for key: String) -> URL {
@@ -1155,7 +1304,11 @@ public final class SpotGuideStore {
         // v3 for the same reason again: a v2 file has no stream or still on
         // any row, so a television reading one would say every camera near
         // you is a web page for a week before the file expired.
-        return URL.cachesDirectory.appending(path: "guide-resources-v3-\(String(safe)).json")
+        //
+        // v4: a v3 row has no document id or state, so a camera read from
+        // one could be neither saved as a favorite by id nor placed in a
+        // named region until the week ran out.
+        return URL.cachesDirectory.appending(path: "guide-resources-v4-\(String(safe)).json")
     }
 
     private static func storedResources(for key: String) -> (resources: [GuideResource], age: TimeInterval)? {
@@ -1165,37 +1318,12 @@ public final class SpotGuideStore {
         else { return nil }
         let written = (try? path.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate ?? .distantPast
-        let resources = rows.compactMap { row -> GuideResource? in
-            guard let kind = SpotLink.Kind(rawValue: row.kind),
-                  let url = URL(string: row.url) else { return nil }
-            return GuideResource(kind: kind, name: row.name, url: url,
-                                 provider: row.provider, detail: row.detail,
-                                 coordinate: Geo.Coordinate(latitude: row.latitude,
-                                                            longitude: row.longitude),
-                                 accessTier: row.accessTier,
-                                 requiresSubscription: row.requiresSubscription,
-                                 guestWindVisible: row.guestWindVisible,
-                                 providerType: row.providerType,
-                                 streamUrl: row.streamUrl.flatMap(URL.init(string:)),
-                                 stillUrl: row.stillUrl.flatMap(URL.init(string:)))
-        }
+        let resources = rows.compactMap(\.resource)
         return (resources, Date().timeIntervalSince(written))
     }
 
     private static func storeResources(_ resources: [GuideResource], for key: String) {
-        let rows = resources.map { resource in
-            StoredResource(kind: resource.kind.rawValue, name: resource.name,
-                           url: resource.url.absoluteString,
-                           provider: resource.provider, detail: resource.detail,
-                           latitude: resource.coordinate.latitude,
-                           longitude: resource.coordinate.longitude,
-                           accessTier: resource.accessTier,
-                           requiresSubscription: resource.requiresSubscription,
-                           guestWindVisible: resource.guestWindVisible,
-                           providerType: resource.providerType,
-                           streamUrl: resource.streamUrl?.absoluteString,
-                           stillUrl: resource.stillUrl?.absoluteString)
-        }
+        let rows = resources.map(StoredResource.init)
         if let encoded = try? JSONEncoder().encode(rows) {
             try? encoded.write(to: resourceCacheURL(for: key), options: .atomic)
         }

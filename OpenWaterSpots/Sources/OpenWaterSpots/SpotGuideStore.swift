@@ -1660,6 +1660,7 @@ public final class SpotGuideStore {
         let flags: [(String, String)] = [
             ("wingFoiling", "Wing Foiling"), ("proneFoiling", "Prone Foiling"),
             ("parawinging", "Parawinging"), ("supFoiling", "SUP Foiling"),
+            ("pumpFoiling", "Pump Foiling"),
         ]
         for (key, label) in flags where activities?[key]?.booleanValue == true {
             activityNames.append(label)

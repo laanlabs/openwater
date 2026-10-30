@@ -605,7 +605,7 @@ struct HealthCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("No heart rate in this recording", systemImage: "heart.slash")
                     .font(.headline)
-                if let issues = session.recordingIssues, !issues.isEmpty {
+                if case let issues = session.otherRecordingIssues, !issues.isEmpty {
                     // The watch's own account. Sending a rider to the Health
                     // app for a fault in the workout configuration cost days,
                     // and every switch they found there was already on.

@@ -32,6 +32,18 @@ struct StartView: View {
                     gpsStatus
                         .padding(.top, 2)
 
+                    if let altimeterWarning {
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "arrow.up.and.down.circle")
+                                .foregroundStyle(.orange)
+                            Text(altimeterWarning)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 4)
+                    }
+
                     Button {
                         showingSettings = true
                     } label: {
@@ -130,6 +142,19 @@ struct StartView: View {
             return accuracy >= 0
                 ? String(format: "GPS ±%.0f m", accuracy)
                 : "GPS ready"
+        }
+    }
+
+    /// Said here, on the beach, because the watch asks for Motion & Fitness
+    /// once and a refusal is otherwise only learnt from a session that comes
+    /// back with no jumps in it. Nothing for a watch with no barometer: it
+    /// has no switch to offer.
+    private var altimeterWarning: String? {
+        let barometer = recorder.barometer
+        guard barometer.isAvailable, !barometer.isAuthorized else { return nil }
+        switch barometer.authorizationDescription {
+        case "never asked": return nil   // the prompt is on its way
+        default: return "Jumps off — allow Motion & Fitness for openWater in iPhone Settings ▸ Privacy & Security"
         }
     }
 

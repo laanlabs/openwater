@@ -353,7 +353,8 @@ struct SessionAnalysisTab: View {
                         onEdit: onEdit
                     )
                 }
-                AnalysisRow(symbol: "arrow.up.forward", title: "Airtime", value: airtimeValue) {
+                AnalysisRow(symbol: "arrow.up.forward", title: "Airtime", value: airtimeValue,
+                            warning: airtimeWarning) {
                     AirtimeScreen(session: session, summary: summary, units: settings.units, revision: revision)
                 }
             }
@@ -377,6 +378,20 @@ struct SessionAnalysisTab: View {
         let foil = summary.foil
         guard foil.flightCount > 0 else { return "none found" }
         return "\(Format.shortDuration(foil.timeOnFoil)) · \(Int((foil.foilingFraction * 100).rounded()))%"
+    }
+
+    /// Why the jumps are missing or under-read, when the watch said.
+    ///
+    /// "None found" alone read as a detector that had failed. On a session
+    /// filmed with about ten jumps in it, the watch had recorded the reason —
+    /// Motion & Fitness off, so no altimeter — and no screen showed it.
+    private var airtimeWarning: String? {
+        let issues = session.altimeterIssues
+        guard !issues.isEmpty else { return nil }
+        if session.altimeterWasRefused {
+            return "Motion & Fitness was off on the watch, so the altimeter could not measure jumps. On choppy water GPS cannot see them at all. On your iPhone: Settings ▸ Privacy & Security ▸ Motion & Fitness — turn on Fitness Tracking and openWater. It applies to your next session."
+        }
+        return issues.joined(separator: " ")
     }
 
     private var airtimeValue: String? {
@@ -465,7 +480,8 @@ struct SessionAnalysisTab: View {
     /// does not. "Not given permission" was wrong on a phone with every switch
     /// on, and a wrong reason sends a rider to the wrong screen.
     private var heartRateWarning: String {
-        if let issues = session.recordingIssues, !issues.isEmpty {
+        let issues = session.otherRecordingIssues
+        if !issues.isEmpty {
             return issues.joined(separator: " ")
         }
         return "No heart rate arrived from the watch. Check Health ▸ Privacy ▸ Apps ▸ openWater, or use Check heart rate under Settings ▸ Apple Watch."

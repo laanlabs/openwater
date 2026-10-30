@@ -526,3 +526,36 @@ public struct SessionSummary: Hashable, Sendable, Codable {
         runs.max { $0.averageSpeed < $1.averageSpeed }
     }
 }
+
+extension Session {
+
+    /// The watch's account of an altimeter that recorded nothing.
+    ///
+    /// Issues are sentences rather than codes, and every one the recorder
+    /// writes about the barometer names it — "altimeter" or "barometer".
+    /// Kept apart because the screens that print issues each print them as
+    /// the reason for one missing thing: a heart-rate card that printed
+    /// every issue blamed a missing heartbeat on Motion & Fitness.
+    public var altimeterIssues: [String] {
+        (recordingIssues ?? []).filter(Self.isAltimeterIssue)
+    }
+
+    /// Everything else the recorder said.
+    public var otherRecordingIssues: [String] {
+        (recordingIssues ?? []).filter { !Self.isAltimeterIssue($0) }
+    }
+
+    /// Whether the altimeter was refused for want of Motion & Fitness — the
+    /// one altimeter fault with a switch to go and turn on.
+    public var altimeterWasRefused: Bool {
+        altimeterIssues.contains {
+            $0.contains("Motion & Fitness access is") || $0.contains("altimeter refused")
+        }
+    }
+
+    static func isAltimeterIssue(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("altimeter") || lower.contains("barometer")
+    }
+}
+

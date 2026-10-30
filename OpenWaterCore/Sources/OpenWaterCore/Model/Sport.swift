@@ -27,6 +27,12 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// waves are open-ocean bumps ridden one way with the wind, and not
     /// `sup`, which never leaves the water.
     case supFoil
+    /// Pumping a foil on flat water with no wind and no wave: off a dock or
+    /// a beach, and kept flying by the rider's legs alone until they stop or
+    /// fall in. Every metre on the foil is pumped, so pump rate and run
+    /// length are the session — there is no tack, no glide down a face, and
+    /// no way to reach takeoff speed except by pumping there.
+    case pumpFoil
     case sail
     case kayak
     case efoil
@@ -48,6 +54,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         case .sup: "SUP"
         case .prone: "Prone Foil"
         case .supFoil: "SUP Foil"
+        case .pumpFoil: "Pump Foil"
         case .sail: "Sailing"
         case .kayak: "Kayak"
         case .efoil: "eFoil"
@@ -84,6 +91,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         case .sup: "figure.surfing"
         case .prone: "surfboard"
         case .supFoil: "oar.2.crossed"
+        case .pumpFoil: "arrow.up.and.down.circle"
         case .kayak: "figure.outdoor.rowing"
         // Powered.
         case .efoil: "bolt.horizontal"
@@ -98,7 +106,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
         switch self {
         case .wingfoil, .wingfoilSurf, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil, .sail:
             true
-        case .downwindSUP, .sup, .prone, .supFoil, .kayak, .efoil, .tow, .other:
+        case .downwindSUP, .sup, .prone, .supFoil, .pumpFoil, .kayak, .efoil, .tow, .other:
             false
         }
     }
@@ -106,7 +114,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// Sports ridden on a hydrofoil, where flight detection applies.
     public var isFoiling: Bool {
         switch self {
-        case .wingfoil, .wingfoilSurf, .parawing, .windfoil, .kitefoil, .prone, .supFoil, .efoil, .downwindSUP:
+        case .wingfoil, .wingfoilSurf, .parawing, .windfoil, .kitefoil, .prone, .supFoil, .pumpFoil, .efoil, .downwindSUP:
             true
         case .windsurf, .kitesurf, .sup, .sail, .kayak, .tow, .other:
             false
@@ -116,7 +124,7 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// Sports where a rhythmic pump or stroke is worth counting.
     public var hasCadence: Bool {
         switch self {
-        case .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .sup, .prone, .supFoil, .kayak: true
+        case .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .sup, .prone, .supFoil, .pumpFoil, .kayak: true
         default: false
         }
     }
@@ -140,10 +148,35 @@ public enum Sport: String, CaseIterable, Sendable, Codable, Identifiable {
     /// `allCases` is declaration order, which is not the order anyone wants to
     /// choose from. This is the list every picker uses.
     public static let recordable: [Sport] = [
-        .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .prone, .supFoil,
+        .wingfoil, .wingfoilSurf, .parawing, .downwindSUP, .prone, .supFoil, .pumpFoil,
         .windfoil, .windsurf, .kitefoil, .kitesurf,
         .sail, .sup, .kayak, .efoil, .tow, .other,
     ]
+
+    /// Whether the board can only reach takeoff speed by flying.
+    ///
+    /// True of a foil paddled into waves and of a pump foil, and the reason
+    /// `FoilDetector` lets speed decide on its own for them: the smoothness
+    /// veto guards against a board planing in the water at flying speed,
+    /// and neither of these can plane. On a pump foil the ride is all pump,
+    /// so a veto that waits for a smooth second would never start a flight.
+    public var onlyFliesAtSpeed: Bool {
+        paddlesIntoWaves || self == .pumpFoil
+    }
+}
+
+extension Sport {
+
+    /// A sport this build has never heard of reads as `.other`.
+    ///
+    /// Synthesised decoding throws on an unknown raw value, and a throw here
+    /// takes the whole session with it — so a session recorded in a sport
+    /// added after this build would not open at all. Losing the label is the
+    /// smaller loss.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Sport(rawValue: raw) ?? .other
+    }
 }
 
 /// Per-sport tuning for the detectors. Every value is overridable in Settings —
@@ -610,6 +643,14 @@ public struct SportThresholds: Hashable, Sendable, Codable {
             t.movingSpeed = 0.5
             t.maneuverMaxDuration = 25        // keelboats turn slowly
             t.maxPlausibleSpeed = 20
+        case .pumpFoil:
+            // Pumped flight is slow: about 3–4.5 m/s held by the legs, and
+            // nothing but the foil moves the board that fast. The rider
+            // swims or walks back between runs, which is not moving.
+            t.foilTakeoffSpeed = 2.8
+            t.movingSpeed = 1.0
+            t.maxPlausibleSpeed = 10
+            t.liveAccuracyLimit = 50
         case .efoil, .tow:
             t.foilTakeoffSpeed = 4.0
             t.maxPlausibleSpeed = 20
@@ -634,7 +675,7 @@ extension Sport {
     public var locationProfile: SportThresholds.LocationProfile {
         switch self {
         case .wingfoil, .wingfoilSurf, .parawing, .windfoil, .kitefoil, .downwindSUP, .prone, .supFoil,
-             .efoil, .tow, .windsurf, .kitesurf:
+             .pumpFoil, .efoil, .tow, .windsurf, .kitesurf:
             SportThresholds.LocationProfile(accuracy: .navigation, activity: .otherNavigation)
         case .sup, .kayak, .sail, .other:
             SportThresholds.LocationProfile(accuracy: .best, activity: .otherNavigation)

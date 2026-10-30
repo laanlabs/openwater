@@ -193,6 +193,10 @@ public struct RunSegmenter: Sendable {
         case .sup, .kayak:
             s.splitAngle = 60
             s.minimumDistance = 25
+        case .pumpFoil:
+            // Laps off a dock: short, and turned around at the end.
+            s.splitAngle = 60
+            s.minimumDistance = 25
         case .downwindSUP, .prone, .supFoil:
             // Bumps mean constant small course changes; only a real direction
             // change should count.

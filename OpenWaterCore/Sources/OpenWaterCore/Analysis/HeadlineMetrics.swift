@@ -89,7 +89,7 @@ extension Sport {
         // was ridden, and the glide detector's wind-anchored number would
         // say less than the truth. Prone sat with the downwinders until the
         // SUP foil's rules were written; it is the same sport lying down.
-        case .prone, .supFoil:
+        case .prone, .supFoil, .pumpFoil:
             false
         case .wingfoil, .wingfoilSurf, .parawing, .windsurf, .windfoil, .kitesurf, .kitefoil,
              .sail, .kayak, .efoil, .tow, .other:

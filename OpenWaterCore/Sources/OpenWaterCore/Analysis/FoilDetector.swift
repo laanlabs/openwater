@@ -280,8 +280,9 @@ public struct FoilDetector: Sendable {
             minimumDuration: sport.thresholds.minFlightDuration,
             minimumRecovery: sport.thresholds.foilMinimumRecovery
         )
-        // See `motionVetoesFlight`: in the surf the ride is the rough part.
-        detector.motionVetoesFlight = !sport.paddlesIntoWaves
+        // See `motionVetoesFlight`: in the surf, and on a pump foil, the
+        // ride is the rough part.
+        detector.motionVetoesFlight = !sport.onlyFliesAtSpeed
         return detector
     }
 

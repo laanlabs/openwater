@@ -151,10 +151,13 @@ if [ "$WANT_IOS" = yes ]; then
     # They are other riders' GPS traces. Stripped here, where the archive is
     # already being opened, and then checked for below so a change to this script
     # cannot quietly stop stripping them.
+    # Not SampleSession.gpx: that one is the sample a rider can add from an
+    # empty library, shipped on purpose (see DemoData). The first archive
+    # built for 1.9 lost it to this very line.
     echo "==> Removing test recordings from the archive"
     APP="$IOS_ARCHIVE/Products/Applications/openWater.app"
-    REMOVED=$(find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) | wc -l | tr -d ' ')
-    find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) -delete
+    REMOVED=$(find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) ! -name "SampleSession.gpx" | wc -l | tr -d ' ')
+    find "$APP" \( -name "*.openwater" -o -name "*.gpx" -o -name "*.fit" \) ! -name "SampleSession.gpx" -delete
     echo "    removed $REMOVED"
 
     echo "==> Verifying the archive"
@@ -171,7 +174,8 @@ problems = []
 # stripping above should already have handled it; this is the check that makes
 # the stripping trustworthy rather than assumed.
 strays = [p for p in archive.rglob("*")
-          if p.suffix.lower() in {".openwater", ".gpx", ".fit", ".tcx"}]
+          if p.suffix.lower() in {".openwater", ".gpx", ".fit", ".tcx"}
+          and p.name != "SampleSession.gpx"]
 if strays:
     problems.append("recordings left in the archive: "
                     + ", ".join(sorted(p.name for p in strays)[:5]))

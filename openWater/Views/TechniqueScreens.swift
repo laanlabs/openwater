@@ -202,7 +202,7 @@ struct AirtimeScreen: View {
         var refused = ""
         if reading.barometerRefused, let swing = reading.barometerSwing {
             refused = reading.altimeterOnWrist
-                ? "The watch's altimeter is recorded but not read: a wrist is in the wind, and at twenty knots the pressure on the sensor is worth five metres of height. Here it moved more than \(Format.height(swing, unit: units.distance)) between one fix and the next, one second in ten. "
+                ? "The watch's altimeter is recorded but not read: a wrist is in the wind, and at twenty knots the pressure on the sensor is worth \(Format.height(5, unit: units.distance)) of height. Here it moved more than \(Format.height(swing, unit: units.distance)) between one fix and the next, one second in ten. "
                 : "The altimeter was recorded but not read: one second in ten while you were riding it moved more than \(Format.height(swing, unit: units.distance)) between one fix and the next, which is spray or wind on the sensor rather than height. "
         }
         guard reading.source == .receiver else {

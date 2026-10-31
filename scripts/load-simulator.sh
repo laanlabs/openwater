@@ -26,8 +26,10 @@ xcodebuild test \
 echo "==> Clearing the app so the set is not doubled"
 xcrun simctl uninstall "$UDID" "$BUNDLE" 2>/dev/null || true
 
-APP=$(find ~/Library/Developer/Xcode/DerivedData/openWater-*/Build/Products/Debug-iphonesimulator \
-      -maxdepth 1 -name "openWater.app" | head -1)
+# The newest build, not the first folder `find` happens to list: a checkout
+# that has moved leaves its old DerivedData behind, and the first match was
+# a month-old app from the old path.
+APP=$(ls -dt ~/Library/Developer/Xcode/DerivedData/openWater-*/Build/Products/Debug-iphonesimulator/openWater.app | head -1)
 xcrun simctl install "$UDID" "$APP"
 
 echo "==> Importing"

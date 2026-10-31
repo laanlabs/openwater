@@ -169,9 +169,61 @@ public struct JumpDetector: Sendable {
 
     /// Second-to-second height change, metres, above which the receiver is
     /// refused outright: the water is moving and its height cannot tell a
-    /// trough from a jump. See `detect(in:)` for the three sessions this sits
+    /// trough from a jump. See `detect(in:)` for the four sessions this sits
     /// between.
-    public var maximumReceiverNoise: Double = 0.25
+    public var maximumReceiverNoise: Double = 0.21
+
+    /// The altimeter is on a wrist, and a wrist is in the wind.
+    ///
+    /// A barometer reads pressure, and moving air is pressure: at twenty
+    /// knots of apparent wind the ram pressure on the sensor's port is about
+    /// 65 Pa, which the altimeter reports as five metres of height, and a
+    /// hand on a wing turns into and out of that wind with every stroke.
+    /// Add spray. Two wingfoil sessions on a watch, both with the rider's
+    /// word "no jumps": the first swung −132…+114 m and read 104 jumps, the
+    /// second −33…+47 m and read 42, and the second's swing — 2.3 m one
+    /// second in ten — cleared `maximumBarometerSwing` by so little that a
+    /// slightly drier day would not have. The swing bar is a guard against
+    /// a faulty sensor; a wrist is not faulty, it is in the wind, every
+    /// time, by physics. So on a wrist the altimeter is recorded and never
+    /// read, and the receiver is asked instead.
+    ///
+    /// A phone in a vest pocket is out of the wind and rides the same jump
+    /// the board does. That is what the altimeter path is for, once a
+    /// session on the water has measured it.
+    public var altimeterOnWrist = false
+
+    /// How far the altimeter may move between one fix and the next, one
+    /// second in ten while at speed, metres, before it is refused and the
+    /// receiver asked instead.
+    ///
+    /// The first session on the water to carry the channel said the desk
+    /// test had not. A wingfoil afternoon in fifteen knots, the rider's own
+    /// count "no jumps": the absolute altimeter on the wrist swung between
+    /// −132 m and +114 m, moved a median 1.1 m between fixes while planing
+    /// and over 6.5 m one second in ten, and was already doing it on the
+    /// wade out. The receiver's altitude on the same fixes stayed within
+    /// eight metres all afternoon. Read as it stood, the altimeter produced
+    /// 104 jumps of 15 to 177 ft, and the rise bar — four times the
+    /// session's own noise — could not help, because the fault is not in
+    /// the middle of the distribution but in its tail: the rise above the
+    /// local water was over 31 m one second in a hundred.
+    ///
+    /// Which is why this is a tail and not the median the receiver is held
+    /// to. The altimeter is worth having because it measures the board on
+    /// the sea the receiver filters away, and on a sea the board really
+    /// does move half a metre a second — a median bar at the receiver's
+    /// quarter metre would refuse exactly the water the altimeter exists
+    /// for. But no sea lifts a board two metres in a second, and no session
+    /// jumps every tenth second: a channel doing that is reading pressure,
+    /// not height.
+    ///
+    /// The desk test that earned the altimeter the first read — ±5 cm
+    /// standing, a clean step for an arm raise — was dry and out of the
+    /// wind. A wrist on a wing is neither, and a barometer under spray or
+    /// in a gust is a barometer. A phone in a vest pocket may do better;
+    /// nothing on the water has said so yet.
+    public var maximumBarometerSwing: Double = 2.0
 
     /// On a receiver whose noise is off the floor, the fraction of their
     /// speed a rider has to lose over the landing before a rise is believed.
@@ -197,7 +249,9 @@ public struct JumpDetector: Sendable {
     }
 
     /// The detector for a sport, honouring the rider's own thresholds.
-    public static func forSport(_ sport: Sport, thresholds: SportThresholds? = nil) -> JumpDetector {
+    public static func forSport(
+        _ sport: Sport, thresholds: SportThresholds? = nil, altimeterOnWrist: Bool = false
+    ) -> JumpDetector {
         let t = thresholds ?? sport.thresholds
         var d = JumpDetector(
             minimumRise: t.jumpMinimumRise,
@@ -206,6 +260,7 @@ public struct JumpDetector: Sendable {
         )
         d.minimumAirtime = t.jumpMinimumAirtime
         d.liftFraction = t.jumpLiftFraction
+        d.altimeterOnWrist = altimeterOnWrist
         switch sport {
         case .kitesurf, .kitefoil:
             d.maximumAirtime = 12
@@ -244,17 +299,99 @@ public struct JumpDetector: Sendable {
     /// with the receiver for its absolute frame, and a fix improving mid-run
     /// can step the whole baseline. The witnesses below are the guard — a
     /// re-anchor has no takeoff pop, no landing, and does not stop the rider.
+    ///
+    /// And one thing it does that the desk never showed: on a wrist on the
+    /// water it does not read height at all. See `altimeterOnWrist` and
+    /// `maximumBarometerSwing` — the altimeter is preferred where it is out
+    /// of the wind and holds still, and the receiver is asked otherwise.
     public enum Source: Sendable { case barometer, receiver }
 
-    /// The one line to flip back if a session on the water says otherwise.
-    static let trustsBarometer = true
+    /// The channel `detect` reads on a track, and what it found each one to
+    /// be. The answer is the detector's, not the recording's: a screen that
+    /// says where height came from has to ask here rather than look at which
+    /// fields are filled, because a filled channel can still be refused.
+    public struct Reading: Sendable, Equatable {
 
-    public static func source(for track: Track) -> Source? {
-        if trustsBarometer {
-            let baro = track.points.reduce(into: 0) { $0 += $1.absoluteAltitude == nil ? 0 : 1 }
-            if baro > track.count / 2 { return .barometer }
+        /// What is read. Nil when the track carries no height, or when every
+        /// channel it carries was refused.
+        public let source: Source?
+
+        /// Each channel's typical second-to-second change while at speed,
+        /// metres — nil when the track does not carry the channel, zero when
+        /// it does but there was too little riding to measure it on. This is
+        /// the rise bar's input, and the receiver's refusal.
+        public let barometerNoise: Double?
+        public let receiverNoise: Double?
+
+        /// The altimeter's second-to-second change one second in ten, metres
+        /// — the altimeter's refusal, see `maximumBarometerSwing`.
+        public let barometerSwing: Double?
+
+        /// The altimeter was on a wrist, which is reason enough not to read
+        /// it — see `altimeterOnWrist`. The swing is still measured, so a
+        /// screen can say what the wind did to it.
+        public let altimeterOnWrist: Bool
+
+        /// The altimeter is there and is not read: on a wrist, or swinging
+        /// further than a board can move.
+        public var barometerRefused: Bool {
+            barometerSwing != nil && source != .barometer
         }
-        return track.points.contains(where: { $0.altitude != nil }) ? .receiver : nil
+
+        /// The receiver is there and is not read: the water is moving.
+        /// Only asked when the altimeter is not read either.
+        public var receiverRefused: Bool {
+            receiverNoise != nil && source == nil
+        }
+    }
+
+    /// What this track carries, before anyone asks whether it can be read.
+    ///
+    /// The altimeter counts only when it reached most of the fixes: a
+    /// channel that came and went is the silent-hour fault
+    /// `BarometerProvider` describes, not a height record.
+    static func recorded(in track: Track) -> (barometer: Bool, receiver: Bool) {
+        let baro = track.points.reduce(into: 0) { $0 += $1.absoluteAltitude == nil ? 0 : 1 }
+        return (baro > track.count / 2, track.points.contains(where: { $0.altitude != nil }))
+    }
+
+    /// One channel's heights. A receiver that admits it does not know the
+    /// height is not evidence of a jump, so its poor fixes are left out; the
+    /// barometer has no such caveat.
+    func heights(from source: Source, in track: Track) -> [Double?] {
+        track.points.map {
+            switch source {
+            case .barometer: return $0.absoluteAltitude
+            case .receiver:
+                guard ($0.verticalAccuracy ?? .infinity) <= maximumVerticalAccuracy else { return nil }
+                return $0.altitude
+            }
+        }
+    }
+
+    public func reading(for track: Track) -> Reading {
+        let recorded = Self.recorded(in: track)
+        var barometerNoise: Double?
+        var barometerSwing: Double?
+        if recorded.barometer {
+            let steps = steps(for: track, heights: heights(from: .barometer, in: track))
+            barometerNoise = steps.map { $0[$0.count / 2] } ?? 0
+            barometerSwing = steps.map { $0[$0.count * 9 / 10] } ?? 0
+        }
+        let receiverNoise: Double? = recorded.receiver
+            ? heightNoise(for: track, heights: heights(from: .receiver, in: track)) ?? 0
+            : nil
+
+        let source: Source?
+        if !altimeterOnWrist, let swing = barometerSwing, swing <= maximumBarometerSwing {
+            source = .barometer
+        } else if let noise = receiverNoise, noise <= maximumReceiverNoise {
+            source = .receiver
+        } else {
+            source = nil
+        }
+        return Reading(source: source, barometerNoise: barometerNoise, receiverNoise: receiverNoise,
+                       barometerSwing: barometerSwing, altimeterOnWrist: altimeterOnWrist)
     }
 
     /// Height recovered from the area under the excursion.
@@ -300,9 +437,9 @@ public struct JumpDetector: Sendable {
         return height
     }
 
-    /// The session's own height noise: the median second-to-second change
-    /// while at speed, metres. Nil when there is too little at speed to say.
-    func heightNoise(for track: Track, heights: [Double?]) -> Double? {
+    /// Every second-to-second height change while at speed, metres, sorted.
+    /// Nil when there is too little at speed to say anything from.
+    func steps(for track: Track, heights: [Double?]) -> [Double]? {
         var steps: [Double] = []
         for i in 1..<max(1, track.count) {
             guard let a = heights[i], let b = heights[i - 1],
@@ -310,8 +447,13 @@ public struct JumpDetector: Sendable {
             steps.append(abs(a - b))
         }
         guard steps.count >= 30 else { return nil }
-        steps.sort()
-        return steps[steps.count / 2]
+        return steps.sorted()
+    }
+
+    /// The session's own height noise: the median second-to-second change
+    /// while at speed, metres. Nil when there is too little at speed to say.
+    func heightNoise(for track: Track, heights: [Double?]) -> Double? {
+        steps(for: track, heights: heights).map { $0[$0.count / 2] }
     }
 
     /// The bar a rise has to clear on this track: the floor, or the session's
@@ -322,46 +464,43 @@ public struct JumpDetector: Sendable {
     }
 
     public func detect(in track: Track) -> [Jump] {
-        guard track.count >= 60, let source = Self.source(for: track) else { return [] }
+        guard track.count >= 60 else { return [] }
 
-        let heights: [Double?] = track.points.map {
-            switch source {
-            case .barometer: return $0.absoluteAltitude
-            case .receiver:
-                // A receiver that admits it does not know the height is not
-                // evidence of a jump. The barometer has no such caveat.
-                guard ($0.verticalAccuracy ?? .infinity) <= maximumVerticalAccuracy else { return nil }
-                return $0.altitude
-            }
-        }
-
-        let noise = heightNoise(for: track, heights: heights) ?? 0
-        let bar = riseBar(for: track, heights: heights)
-
-        // **The receiver only gets to speak about flat water.**
+        // **The receiver only gets to speak about flat water, and the
+        // altimeter only when it holds still.**
         //
-        // Its height is a filtered guess, and on a downwinder the guess and a
-        // jump are the same shape: a rider dropping into a two-metre trough
-        // climbs a metre in a second and lands hard at the bottom, which is
-        // every clause below satisfied by the sea. Measured on the parawing
-        // session whose rider said "one single downwind run with no jumps",
-        // this found fourteen of them.
+        // The receiver's height is a filtered guess, and on a downwinder the
+        // guess and a jump are the same shape: a rider dropping into a
+        // two-metre trough climbs a metre in a second and lands hard at the
+        // bottom, which is every clause below satisfied by the sea. Measured
+        // on the parawing session whose rider said "one single downwind run
+        // with no jumps", this found fourteen of them.
         //
         // So when the water is moving too much for the receiver to be read,
         // the honest answer is the one this always gave: nothing. A barometer
         // has no such limit — it measures the board rather than inferring it,
-        // which is the whole reason it is recorded.
+        // which is the whole reason it is recorded. What it has instead is
+        // wind and spray, which move it by metres a second on a wrist — see
+        // `altimeterOnWrist` and `maximumBarometerSwing` — and an altimeter
+        // in either is not read, with the receiver asked in its place.
         //
         // "Too much" used to mean any noise at all above the floor, and that
         // threw away a whole session. A wingfoil session on flat water in
         // fifteen knots, whose rider counted ten or more jumps and whose
         // altimeter had recorded nothing, measured 0.18 m of second-to-second
         // height noise while planing — not the sea, just this wrist's receiver
-        // on this day — and was refused with all its jumps in it. The three
+        // on this day — and was refused with all its jumps in it. The
         // receiver sessions measured so far: a harbour at 0.10 m, that flat
-        // day at 0.18 m, the parawing downwinder at 0.32 m. The refusal sits
-        // between the last two.
-        if source == .receiver, noise > maximumReceiverNoise { return [] }
+        // day at 0.18 m, a wrist in Montauk at 0.24 m on which the strict
+        // rules below still confirmed two rises on an afternoon with no
+        // jumps, and the parawing downwinder at 0.32 m. The refusal sits
+        // between the flat day and the Montauk one.
+        let reading = reading(for: track)
+        guard let source = reading.source else { return [] }
+
+        let heights = heights(from: source, in: track)
+        let noise = (source == .barometer ? reading.barometerNoise : reading.receiverNoise) ?? 0
+        let bar = max(minimumRise, noise * riseNoiseFactor)
 
         // Between the floor and the refusal the receiver is read, but not on
         // one witness. On the flat day, noise alone put some sixty rises over

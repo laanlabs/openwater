@@ -138,7 +138,8 @@ extension Session {
         copy.summary = SessionAnalyzer(
             configuration: .init(
                 sport: sport, categories: categories, wind: effectiveWind,
-                foilTakeoffSpeed: foilTakeoffSpeed, overrides: overrides
+                foilTakeoffSpeed: foilTakeoffSpeed, overrides: overrides,
+                recordedOnWrist: recordedOnWrist
             )
         ).analyse(track)
         copy.startDate = track.startDate ?? startDate

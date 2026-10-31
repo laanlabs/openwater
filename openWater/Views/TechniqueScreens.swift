@@ -193,13 +193,37 @@ struct AirtimeScreen: View {
     /// happen. A caveat pointing the wrong way is worse than none, because a
     /// rider reads it and discounts the number further.
     private var heightCaveat: String {
-        if JumpDetector.source(for: session.track) == .barometer {
+        let reading = reading
+        if reading.source == .barometer {
             return "Height comes from the watch's altimeter, read every second and held at its highest between fixes, so the top of a jump is in the data. Measured against the water a few seconds either side."
         }
+        // The altimeter was there and was not believed. Said first, because
+        // the line under it would otherwise read as the only channel there was.
+        var refused = ""
+        if reading.barometerRefused, let swing = reading.barometerSwing {
+            refused = reading.altimeterOnWrist
+                ? "The watch's altimeter is recorded but not read: a wrist is in the wind, and at twenty knots the pressure on the sensor is worth five metres of height. Here it moved more than \(Format.height(swing, unit: units.distance)) between one fix and the next, one second in ten. "
+                : "The altimeter was recorded but not read: one second in ten while you were riding it moved more than \(Format.height(swing, unit: units.distance)) between one fix and the next, which is spray or wind on the sensor rather than height. "
+        }
+        guard reading.source == .receiver else {
+            if reading.receiverRefused, let noise = reading.receiverNoise {
+                return refused + "GPS height moved \(Format.height(noise, unit: units.distance)) a second as well, which on moving water cannot tell a trough from a jump. No height was read, so no jumps were looked for."
+            }
+            return refused + "No height was recorded, so no jumps were looked for."
+        }
         let foiling = session.sport.isFoiling
-        let base = "Height comes from the receiver's altitude, which is filtered and sampled once a second — so a jump lasting about a second is caught part-way up as often as at the top. Treat these as a floor, not a measurement."
+        let base = refused + "Height comes from the receiver's altitude, which is filtered and sampled once a second — so a jump lasting about a second is caught part-way up as often as at the top. Treat these as a floor, not a measurement."
         guard foiling else { return base }
         return base + " On a foil the mast has to clear the water before you are airborne at all, so anything under about a mast length is under-read."
+    }
+
+    /// The detector's own account of which channel it read, under the
+    /// rider's thresholds — so this screen cannot say "altimeter" over a
+    /// list of jumps the receiver produced, or over none at all.
+    private var reading: JumpDetector.Reading {
+        JumpDetector.forSport(session.sport, thresholds: settings.thresholds(for: session.sport),
+                              altimeterOnWrist: session.recordedOnWrist)
+            .reading(for: session.track)
     }
 
     private var barometerLine: String {
@@ -215,7 +239,13 @@ struct AirtimeScreen: View {
         }
         let relative = describe("Relative barometer", session.track.points.compactMap(\.baroAltitude))
         let absolute = describe("Absolute altimeter", session.track.points.compactMap(\.absoluteAltitude))
-        return relative + " " + absolute + " Recorded for comparison; not yet used for height."
+        let verdict = switch (reading.source, reading.barometerRefused, reading.altimeterOnWrist) {
+        case (.barometer, _, _): "The absolute altimeter held still between fixes, and height is read from it."
+        case (_, true, true): "On a watch the absolute altimeter is in the wind and is not read for height."
+        case (_, true, false): "The absolute altimeter is read for height when it holds still between fixes; this session's did not."
+        default: "The absolute altimeter is read for height when a session carries it."
+        }
+        return relative + " " + absolute + " " + verdict
     }
 
     /// Every jump as a bar, tallest at the top.

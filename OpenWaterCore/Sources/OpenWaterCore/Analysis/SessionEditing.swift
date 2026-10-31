@@ -184,7 +184,8 @@ extension Session {
                 foilTakeoffSpeed: edits.foilTakeoffSpeed,
                 overrides: overrides,
                 courseDirection: result.courseDirection,
-                swellFrom: edits.swellDirection
+                swellFrom: edits.swellDirection,
+                recordedOnWrist: recordedOnWrist
             )
         ).analyse(track)
 

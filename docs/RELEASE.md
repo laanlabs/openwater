@@ -52,6 +52,11 @@ Install a Release build on a paired watch and phone. Outdoors, open sky.
      every other channel present means Motion & Fitness: the altimeter needs
      it and the accelerometer does not. The prompt is asked at launch; check
      Settings ▸ Privacy & Security ▸ Motion & Fitness ▸ openWater on the watch.
+     The line ends with the detector's verdict. From a watch it always says
+     the altimeter *is in the wind and is not read for height*: that is the
+     rule, not a fault (`JumpDetector.altimeterOnWrist`). From a phone in a
+     pocket it should say it *held still and height is read from it*; "this
+     session's did not" means the sensor was wet or in the wind.
    - **GPS quality → "Paused once"** with the pause's length, and on the
      Map tab the paused walk drawn as a hole with a cut in Trim behind it.
      Deleting the cut should put the walk back.

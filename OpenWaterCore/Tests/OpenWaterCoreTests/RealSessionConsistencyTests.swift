@@ -52,7 +52,8 @@ struct RealSessionConsistencyTests {
             let session = try SessionArchive.decode(Data(contentsOf: url)).session
             let summary = SessionAnalyzer(
                 configuration: .init(sport: session.sport, categories: SpeedCategory.all,
-                                     wind: session.wind?.source == .manual ? session.wind : nil)
+                                     wind: session.wind?.source == .manual ? session.wind : nil,
+                                     recordedOnWrist: session.recordedOnWrist)
             ).analyse(session.track)
             return (session.track, summary, session.sport)
         }
@@ -146,9 +147,19 @@ struct RealSessionConsistencyTests {
         #expect(s.downwind.glideTime <= s.movingTime + 2,
                 "\(name): glide time \(Int(s.downwind.glideTime))s exceeds moving time \(Int(s.movingTime))s")
 
-        // A linked glide's whole approach was flown, so a session with no
-        // touchdowns at all cannot have unlinked glides after its first.
-        if s.foil.touchdownCount == 0, listed.count > 1 {
+        // A linked glide's whole approach was flown, so a session whose foil
+        // never left the water cannot have unlinked glides after its first.
+        //
+        // "Never left the water" is the moment-by-moment answer, not the
+        // ride-level one. `touchdownCount` deliberately leaves out the dips
+        // a flight bridges, and a glide's link is deliberately broken by
+        // them — `FoilDetector.flyingMask` subtracts a dip back out for
+        // exactly this reader. A wing session in Amagansett was one
+        // 44-minute flight with nine bridged dips of five to ten seconds,
+        // and six glides rightly not linked across them. So a dip is a
+        // touch of the water here.
+        let touchedDown = s.foil.touchdownCount > 0 || s.flights.contains { !$0.dips.isEmpty }
+        if !touchedDown, listed.count > 1 {
             #expect(listed.dropFirst().filter { !$0.connected }.isEmpty,
                     "\(name): unlinked glides in a session that never touched down")
         }

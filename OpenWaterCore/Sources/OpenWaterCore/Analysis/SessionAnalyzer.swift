@@ -45,6 +45,13 @@ public struct SessionAnalyzer: Sendable {
         /// rides themselves. See `WaveRideFinder.swellFrom(for:)`.
         public var swellFrom: Double?
 
+        /// The recording came off a watch, so its altimeter was on a wrist
+        /// in the wind and is not read for jumps — see
+        /// `JumpDetector.altimeterOnWrist`. `Session.recordedOnWrist` says;
+        /// every place that re-analyses a session has to pass it, or the
+        /// re-analysis reads a channel the recording did not.
+        public var recordedOnWrist: Bool
+
         public init(
             sport: Sport,
             categories: [SpeedCategory] = SpeedCategory.standard,
@@ -53,7 +60,8 @@ public struct SessionAnalyzer: Sendable {
             foilTakeoffSpeed: Double? = nil,
             overrides: SportThresholds.Overrides? = nil,
             courseDirection: Double? = nil,
-            swellFrom: Double? = nil
+            swellFrom: Double? = nil,
+            recordedOnWrist: Bool = false
         ) {
             self.sport = sport
             self.categories = categories
@@ -63,6 +71,7 @@ public struct SessionAnalyzer: Sendable {
             self.overrides = overrides
             self.courseDirection = courseDirection
             self.swellFrom = swellFrom
+            self.recordedOnWrist = recordedOnWrist
         }
     }
 
@@ -134,7 +143,10 @@ public struct SessionAnalyzer: Sendable {
         let maneuverSummary = ManeuverSummary(maneuvers: maneuvers)
 
         // --- Jumps. Silent without motion data, by design.
-        let jumps = configuration.quickMode ? [] : JumpDetector.forSport(sport, thresholds: thresholds).detect(in: track)
+        let jumps = configuration.quickMode
+            ? []
+            : JumpDetector.forSport(sport, thresholds: thresholds,
+                                    altimeterOnWrist: configuration.recordedOnWrist).detect(in: track)
 
         // --- Downwind glides.
         let downwind = configuration.quickMode

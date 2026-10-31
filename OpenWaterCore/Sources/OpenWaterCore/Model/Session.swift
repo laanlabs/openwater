@@ -149,6 +149,17 @@ public struct Session: Sendable, Codable, Identifiable {
     public var deviceModel: String?
     public var appVersion: String?
 
+    /// Whether `deviceModel` is a watch: the one device whose altimeter is on
+    /// a wrist in the wind. See `JumpDetector.altimeterOnWrist`.
+    public var recordedOnWrist: Bool { Self.isWrist(deviceModel: deviceModel) }
+
+    /// `WKInterfaceDevice.model` says "Apple Watch"; `UIDevice.model` says
+    /// "iPhone" or "iPad". An import from another app says nothing, and
+    /// carries no altimeter to be wrong about.
+    public static func isWrist(deviceModel: String?) -> Bool {
+        deviceModel?.localizedCaseInsensitiveContains("watch") ?? false
+    }
+
     /// Which ingest filter built `track`, so a rebuild uses the same one.
     ///
     /// An imported file is built leniently — a GPX carries whatever accuracy
@@ -381,7 +392,14 @@ public struct SessionSummary: Hashable, Sendable, Codable {
     /// needs the whole landing: the slam and the speed it cost.
     /// 22: airtime allows for the wing or kite carrying the rider
     /// (`jumpLiftFraction`), so a wing jump is no longer timed as a stone.
-    public static let currentVersion = 22
+    /// 23: the altimeter on a watch is not read for jumps — a wrist is in
+    /// the wind, and two sessions carrying it read 104 and 42 jumps on
+    /// afternoons with none (`JumpDetector.altimeterOnWrist`); elsewhere it
+    /// is refused when it moves further between fixes than any sea moves a
+    /// board (`maximumBarometerSwing`). The receiver's refusal comes down
+    /// to 0.21 m, the second of those sessions having confirmed two rises
+    /// at 0.24.
+    public static let currentVersion = 23
 
     public let analysisVersion: Int
 

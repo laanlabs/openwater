@@ -253,10 +253,11 @@ final class PhoneRecorder {
             point.cadence = motion.latest.cadence
         }
         // Same as the watch: the highest reading since the last fix, so a
-        // jump's apex between fixes is kept. Recorded for the comparison that
-        // will decide whether the barometer is trusted; not yet read by the
-        // detector — see `JumpDetector.trustsBarometer`. A phone in a vest
-        // pocket rides the same jump the board does.
+        // jump's apex between fixes is kept. The detector reads it when it
+        // holds still between fixes and refuses it when it does not — see
+        // `JumpDetector.maximumBarometerSwing`. A wrist on the water did
+        // not; a phone in a vest pocket, out of the spray and riding the
+        // same jump the board does, has not been measured yet.
         point.baroAltitude = barometer.takePeak()
         point.absoluteAltitude = barometer.takeAbsolutePeak()
         engine.ingest(point)

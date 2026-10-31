@@ -293,8 +293,112 @@ struct JumpDetectorTests {
         }
         let track = builder.build(from: raw)
 
-        #expect(JumpDetector.source(for: track) == .barometer)
+        let reading = JumpDetector.forSport(.wingfoil).reading(for: track)
+        #expect(reading.source == .barometer)
+        #expect(!reading.barometerRefused)
         #expect(JumpDetector.forSport(.wingfoil).detect(in: track).count == 1)
+    }
+
+    /// A wrist on the water, as the first session to carry the altimeter
+    /// recorded it: metres between one fix and the next, in no shape at all,
+    /// over whatever the board was doing. Deterministic, so the fixture is
+    /// the same every run.
+    static func spray(_ i: Int) -> Double {
+        let phase = Double((i * 7919) % 97) / 97
+        return (phase - 0.5) * 6
+    }
+
+    @Test("An altimeter that cannot hold still is refused, and the receiver is read")
+    func noisyAltimeterIsRefusedForTheReceiver() {
+        // The reported session: 104 jumps of 15 to 177 ft on an afternoon
+        // with none, every one of them the barometer under spray or wind. The
+        // receiver's altitude on the same fixes was fine, so it is the one
+        // that gets read — and the jump it holds is still found.
+        var raw = SyntheticTrack.generate(legs: [.init(speed: 9, heading: 90, duration: 240)])
+        let profile = Self.parabola(height: 2.4)
+        for i in raw.indices {
+            let jump = profile.indices.contains(i - 100) ? profile[i - 100] : 0
+            raw[i].altitude = jump
+            raw[i].verticalAccuracy = 1.5
+            raw[i].absoluteAltitude = jump + Self.spray(i)
+            raw[i].verticalAccelPeak = i == 100 + profile.count - 1 ? 20 : 4
+        }
+        let track = builder.build(from: raw)
+        let detector = JumpDetector.forSport(.wingfoil)
+        let reading = detector.reading(for: track)
+
+        #expect((reading.barometerSwing ?? 0) > detector.maximumBarometerSwing,
+                "the fixture has to swing further than the bar to test anything")
+        #expect(reading.barometerRefused)
+        #expect(reading.source == .receiver)
+        #expect(!reading.receiverRefused)
+        #expect(detector.detect(in: track).count == 1, "the receiver still had the jump in it")
+    }
+
+    @Test("On a wrist the altimeter is not read, however still it holds")
+    func wristAltimeterIsNotRead() {
+        // The second watch session: an altimeter swinging only 2.3 m one
+        // second in ten — over the bar by a hair — and 42 jumps on an
+        // afternoon with none. A wrist is in the wind by physics, not by
+        // luck, so it does not get to pass the bar on a drier day.
+        var raw = SyntheticTrack.generate(legs: [.init(speed: 9, heading: 90, duration: 240)])
+        let profile = Self.parabola(height: 2.4)
+        for i in raw.indices {
+            let jump = profile.indices.contains(i - 100) ? profile[i - 100] : 0
+            raw[i].altitude = jump
+            raw[i].verticalAccuracy = 1.5
+            raw[i].absoluteAltitude = jump
+            raw[i].verticalAccelPeak = i == 100 + profile.count - 1 ? 20 : 4
+        }
+        let track = builder.build(from: raw)
+
+        let desk = JumpDetector.forSport(.wingfoil).reading(for: track)
+        #expect(desk.source == .barometer, "off a wrist a still altimeter is read")
+
+        let wrist = JumpDetector.forSport(.wingfoil, altimeterOnWrist: true).reading(for: track)
+        #expect(wrist.source == .receiver)
+        #expect(wrist.barometerRefused)
+        #expect(wrist.altimeterOnWrist)
+        #expect(wrist.barometerSwing != nil, "the swing is still measured, for the screen")
+        #expect(JumpDetector.forSport(.wingfoil, altimeterOnWrist: true).detect(in: track).count == 1,
+                "the receiver still had the jump in it")
+    }
+
+    @Test("A receiver at a quarter metre of noise is refused")
+    func receiverAtAQuarterMetreIsRefused() {
+        // The Montauk wrist: 0.24 m of second-to-second noise, and the
+        // strict rules — slam and speed loss together — still confirmed
+        // two rises on an afternoon with no jumps. The flat day with
+        // thirteen real ones was at 0.18, and the refusal sits between.
+        let track = ride(heights: [1.6], slowsAfter: true, noise: 0.24)
+        let detector = JumpDetector.forSport(.wingfoil)
+        #expect(detector.reading(for: track).receiverRefused)
+        #expect(detector.detect(in: track).isEmpty)
+    }
+
+    @Test("A refused altimeter on moving water claims nothing")
+    func noisyAltimeterOnASwellClaimsNothing() {
+        // The reported session exactly: the altimeter under spray, and the
+        // receiver's height over the bar the sea sets for it. No channel is
+        // left to read, and the rider's word was "no jumps" — so none.
+        var raw = SyntheticTrack.generate(legs: [.init(speed: 9, heading: 90, duration: 240)])
+        let trough = [1.4, 2.6, 1.0]
+        for i in raw.indices {
+            let wobble = i % 3 == 0 ? 0.45 : (i % 3 == 1 ? -0.45 : 0)
+            let height = trough.indices.contains(i - 100) ? trough[i - 100] : wobble
+            raw[i].altitude = height
+            raw[i].verticalAccuracy = 1.5
+            raw[i].absoluteAltitude = height + Self.spray(i)
+            raw[i].verticalAccelPeak = i == 102 ? 20 : 4
+        }
+        let track = builder.build(from: raw)
+        let detector = JumpDetector.forSport(.parawing)
+        let reading = detector.reading(for: track)
+
+        #expect(reading.source == nil)
+        #expect(reading.barometerRefused)
+        #expect(reading.receiverRefused)
+        #expect(detector.detect(in: track).isEmpty)
     }
 
     @Test("The altimeter is read on the water the receiver is refused on")
@@ -312,7 +416,7 @@ struct JumpDetectorTests {
         // comparison and must not become a height channel by accident.
         var raw = SyntheticTrack.generate(legs: [.init(speed: 9, heading: 90, duration: 240)])
         for i in raw.indices { raw[i].altitude = nil; raw[i].baroAltitude = 1.0; raw[i].absoluteAltitude = nil }
-        #expect(JumpDetector.source(for: builder.build(from: raw)) == nil)
+        #expect(JumpDetector.forSport(.wingfoil).reading(for: builder.build(from: raw)).source == nil)
     }
 
     @Test("The barometer survives the round trip to disk and back")

@@ -387,11 +387,29 @@ struct SessionAnalysisTab: View {
     /// Motion & Fitness off, so no altimeter — and no screen showed it.
     private var airtimeWarning: String? {
         let issues = session.altimeterIssues
-        guard !issues.isEmpty else { return nil }
+        guard !issues.isEmpty else { return detectorWarning }
         if session.altimeterWasRefused {
             return "Motion & Fitness was off on the watch, so the altimeter could not measure jumps. On choppy water GPS cannot see them at all. On your iPhone: Settings ▸ Privacy & Security ▸ Motion & Fitness — turn on Fitness Tracking and openWater. It applies to your next session."
         }
         return issues.joined(separator: " ")
+    }
+
+    /// The watch had nothing to say and the detector did: the altimeter
+    /// arrived and was refused. Only when nothing was found — a list of
+    /// jumps the receiver produced explains itself on the Airtime screen.
+    private var detectorWarning: String? {
+        guard summary.jumpSummary.count == 0 else { return nil }
+        let reading = JumpDetector.forSport(session.sport, thresholds: settings.thresholds(for: session.sport),
+                                            altimeterOnWrist: session.recordedOnWrist)
+            .reading(for: session.track)
+        guard reading.barometerRefused else { return nil }
+        let why = reading.altimeterOnWrist
+            ? "The watch's altimeter is not read for jumps: a wrist is in the wind, and the pressure of twenty knots on the sensor is worth metres of height."
+            : "The altimeter could not be read: it moved metres between fixes while you were riding, which is spray or wind on the sensor rather than height."
+        if reading.source == nil {
+            return why + " The water was too rough for GPS to see a jump either, so none were looked for."
+        }
+        return why + " Jumps were looked for in GPS height, which under-reads them."
     }
 
     private var airtimeValue: String? {

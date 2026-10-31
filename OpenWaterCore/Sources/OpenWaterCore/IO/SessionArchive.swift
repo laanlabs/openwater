@@ -95,7 +95,8 @@ public struct SessionArchive: Sendable, Codable {
                     categories: SpeedCategory.all,
                     wind: session.wind,
                     foilTakeoffSpeed: session.foilTakeoffSpeed,
-                    overrides: overrides
+                    overrides: overrides,
+                    recordedOnWrist: session.recordedOnWrist
                 )
             ).analyse(track)
         }

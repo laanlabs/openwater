@@ -129,7 +129,8 @@ public struct PrivacySettings: Hashable, Sendable, Codable {
             configuration: .init(
                 sport: session.sport,
                 categories: SpeedCategory.all,
-                wind: session.wind
+                wind: session.wind,
+                recordedOnWrist: session.recordedOnWrist
             )
         ).analyse(track)
 

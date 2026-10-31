@@ -482,7 +482,8 @@ public final class RecordingEngine {
         let kept = trim.isTrimmed ? trim.apply(to: points) : points
         let track = TrackBuilder(options: .forSport(sport)).build(from: kept)
         let summary = SessionAnalyzer(
-            configuration: .init(sport: sport, categories: SpeedCategory.all, wind: wind)
+            configuration: .init(sport: sport, categories: SpeedCategory.all, wind: wind,
+                                 recordedOnWrist: Session.isWrist(deviceModel: deviceModel))
         ).analyse(track)
 
         return Session(

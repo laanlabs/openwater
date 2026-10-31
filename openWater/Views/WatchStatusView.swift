@@ -74,7 +74,7 @@ struct WatchStatusView: View {
             case .noWatch:
                 "openWater records perfectly well on the iPhone alone. Pair an Apple Watch if you would rather leave the phone on the beach."
             case .notInstalled:
-                "Your watch is paired but does not have openWater on it yet. Only you can install it — no app is allowed to do that for you."
+                "Your watch is paired but does not have openWater on it yet. Only you can install it — no app is allowed to do that for you. If the Watch app does not list it, the reasons it can leave an app out are below."
             case .installedNotReachable:
                 "Not connected this second, which is normal — the watch only talks to the phone when they are near each other. Sessions you record on the watch transfer as soon as it is back in range."
             case .connected:
@@ -281,6 +281,11 @@ struct WatchStatusView: View {
         guard sync.isPaired else { return "This iPhone has no watch paired with it" }
         var parts = ["Paired"]
         parts.append(sync.isWatchAppInstalled ? "app installed" : "app not installed")
+        // What this build has to offer, for the rider checking against the
+        // watch's own About screen.
+        if !sync.isWatchAppInstalled, let app = WatchInstallDiagnosis.current.embedded {
+            parts.append("this copy carries watch app \(app.version) for \(app.requiredWatchOS) or later")
+        }
         if sync.isWatchAppInstalled { parts.append(sync.isReachable ? "in range" : "out of range") }
         if let last = sync.lastReceived {
             parts.append("last session \(last.formatted(date: .abbreviated, time: .shortened))")

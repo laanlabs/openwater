@@ -549,19 +549,110 @@ struct MotionFitnessSteps: View {
 /// This is the state no app can fix for itself: iOS gives an app no way to
 /// install its own watch companion, so the screen's whole job is to say the
 /// right words rather than to offer a button that cannot exist.
+///
+/// And when the Watch app does not list it at all — the first report, from
+/// a rider who had scrolled to the bottom and found nothing — the reasons,
+/// with what this build can say for itself about each. See
+/// `WatchInstallDiagnosis`.
 struct WatchInstallSteps: View {
+
+    var diagnosis: WatchInstallDiagnosis = .current
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            WatchStep(1, "Open the **Watch** app on this iPhone")
-            WatchStep(2, "Tap **My Watch**, then scroll to **Available Apps**")
-            WatchStep(3, "Find **openWater** and tap **Install**")
+            if let app = diagnosis.embedded {
+                WatchStep(1, "Open the **Watch** app on this iPhone")
+                WatchStep(2, "Tap **My Watch**, then scroll to **Available Apps**")
+                WatchStep(3, "Find **openWater** and tap **Install**")
 
-            Text("Already installed? Give it a moment — the watch reports in when it next connects.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                if app.runsIndependently {
+                    Text("Or on the watch itself: open the **App Store** there, search for openWater, and install it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text("Already installed? Give it a moment — the watch reports in when it next connects.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Divider().padding(.vertical, 2)
+
+                WatchInstallTroubles(app: app, channel: diagnosis.channel)
+            } else {
+                // A build fault, not a rider's. Said in red because every
+                // step above would be a wild goose chase.
+                Label {
+                    Text("This copy of openWater has no watch app inside it, so there is nothing for the Watch app to install. Reinstall openWater from the App Store; if this line is still here afterwards, send feedback from the Settings tab.")
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.red)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// Why openWater is missing from the Watch app's list, when it is.
+///
+/// The Watch app leaves out an app the paired watch cannot take and does not
+/// say so, and the phone cannot see why either. So this is the list, in the
+/// order the reports have come in, with the one number the build can supply
+/// — the watchOS it needs — read off the embedded watch app.
+struct WatchInstallTroubles: View {
+
+    let app: WatchInstallDiagnosis.EmbeddedApp
+    let channel: WatchInstallDiagnosis.Channel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Not in the list?")
+                .font(.subheadline.weight(.semibold))
+            Text("The Watch app leaves out an app the watch cannot take, without saying so, and this iPhone cannot see why. These are the reasons, likeliest first.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            trouble("applewatch", olderWatchOS)
+            trouble("applewatch.and.arrow.forward",
+                    "**The Watch app is showing a different watch.** It lists apps for the watch named at the top of My Watch; with two watches, switch to the one on your wrist.")
+            switch channel {
+            case .testFlight:
+                trouble("airplane",
+                        "**This copy came from TestFlight.** TestFlight installs the watch app itself: open TestFlight on this iPhone, choose openWater, and accept the watch app — or open TestFlight on the watch.")
+            case .xcode:
+                trouble("hammer",
+                        "**This copy came from Xcode.** The watch app installs with a build of the openWater scheme to the phone, with Developer Mode on in the watch's own Settings.")
+            case .appStore:
+                EmptyView()
+            }
+            trouble("battery.25percent",
+                    "**An install stalled.** watchOS declines to install below about half battery unless the watch is charging. On the watch, open App Store ▸ Account ▸ Installed Apps, delete any openWater entry sitting there, restart both, and try again.")
+        }
+    }
+
+    /// The likeliest one, with the build's own number in it.
+    private var olderWatchOS: String {
+        var text = "**The watch is on an older watchOS.** This copy carries watch app \(app.version), which needs \(app.requiredWatchOS) or later."
+        if let left = app.watchesLeftBehind { text += " " + left }
+        text += " On the watch: Settings ▸ General ▸ About ▸ Version."
+        return text
+    }
+
+    private func trouble(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(.init(text))
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

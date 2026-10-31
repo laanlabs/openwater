@@ -407,6 +407,24 @@ extension PhoneSyncClient: WCSessionDelegate {
         Task { @MainActor in self.isReachable = reachable }
     }
 
+    /// The watch app was installed or removed, or the watch paired or
+    /// unpaired, while this app was open.
+    ///
+    /// Without this the two booleans were read once, at activation, so a
+    /// rider who installed the watch app with the phone app open kept
+    /// reading "install it" until the next launch — which is the one thing
+    /// the install screen had promised would not happen.
+    nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+        let paired = session.isPaired
+        let installed = session.isWatchAppInstalled
+        let reachable = session.isReachable
+        Task { @MainActor in
+            self.isPaired = paired
+            self.isWatchAppInstalled = installed
+            self.isReachable = reachable
+        }
+    }
+
     /// A session arriving from the watch.
     ///
     /// The file lands in a temporary location that is deleted the moment this
